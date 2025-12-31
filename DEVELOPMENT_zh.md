@@ -1,6 +1,6 @@
 # HiFiShifter 开发手册
 
-HiFiShifter 是一个基于深度学习神经声码器（NSF-HiFiGAN）的图形化人声编辑与合成工具。本文档面向开发者，介绍项目结构、关键模块、今天重构引入的抽象，以及常见扩展/调试方式。
+HiFiShifter 是一个基于深度学习神经声码器（NSF-HiFiGAN）的图形化人声编辑与合成工具。本文档面向开发者，介绍项目结构、关键模块、近期 GUI 重构引入的划分方式，以及常见扩展/调试建议。
 
 ## 0. 快速开发启动
 
@@ -35,7 +35,22 @@ HiFiShifter/
 │   │   ├── hifigan_infer.py      # NSF-HiFiGAN 推理
 │   │   ├── tension_fx.py         # 张力后处理（post-FX）
 │   │   └── _bootstrap.py         # 启动上下文兼容（sys.path 注入）
-│   ├── main_window.py            # 主窗口与核心交互逻辑
+│   ├── gui/                      # GUI 子包（按职责拆分）
+│   │   ├── window.py             # `HifiShifterGUI` 主窗口（组合各 mixins）
+│   │   ├── layout.py             # 主布局与控件搭建
+│   │   ├── menu.py               # 菜单栏/主题/语言
+│   │   ├── editor.py             # 编辑/选区/交互
+│   │   ├── plotting.py           # 曲线绘制与刷新
+│   │   ├── params.py             # 参数抽象与轴语义
+│   │   ├── project_io.py         # 工程打开/保存/dirty 提示
+│   │   ├── tracks.py             # 轨道/导入与管理
+│   │   ├── synthesis.py          # 增量合成调度
+│   │   ├── mixdown.py            # 混音与轨道取音频
+│   │   ├── playback.py           # 实时播放（OutputStream）
+│   │   ├── exporter.py           # 导出 WAV
+│   │   ├── background.py         # 后台任务/线程封装
+│   │   └── vocalshifter.py       # VocalShifter 导入
+│   ├── main_window.py            # 兼容入口（re-export `HifiShifterGUI`）
 │   ├── timeline.py               # 时间轴面板、多轨管理（UI 层）
 │   ├── track.py                  # 音轨数据结构与缓存/撤销
 │   ├── widgets.py                # 自定义 PyQtGraph 组件（轴/网格/ViewBox 等）
@@ -53,7 +68,7 @@ HiFiShifter/
 
 ### 1.2 核心数据流（高层）
 
-- **UI 交互**（`main_window.py`）
+- **UI 交互**（`hifi_shifter/gui/`；兼容入口为 `hifi_shifter/main_window.py`）
   - 接收鼠标/键盘事件 → 修改当前音轨的参数数组（如 `f0_edited`、`tension_edited`）
   - 对音高编辑：标记受影响分段为 dirty → 触发增量合成
   - 对张力编辑：属于 post-FX 逻辑，通常不需要重跑声码器（依实现而定）
@@ -63,17 +78,27 @@ HiFiShifter/
 
 ## 2. 关键模块说明
 
-### 2.1 主窗口与交互（`hifi_shifter/main_window.py`）
+### 2.1 GUI 主窗口与交互（`hifi_shifter/gui/`）
 
-`MainWindow` 负责：
-- 菜单栏/控制栏/编辑区的 UI 组织
-- 当前轨道与播放状态管理
-- 编辑模式（Edit）与选区模式（Select）交互
-- 参数切换（音高/张力）与所有 UI 同步
+历史上 GUI 大量逻辑集中在 `hifi_shifter/main_window.py`，阅读和维护成本较高。当前已按职责拆分到 `hifi_shifter/gui/` 子包中：
+
+- **主窗口类**：`HifiShifterGUI` 位于 `gui/window.py`，负责把各个职责模块（mixins）组合成一个可运行的主窗口。
+- **兼容性**：`hifi_shifter/main_window.py` 现在仅作为兼容入口，re-export `HifiShifterGUI`，避免外部导入路径变更。
+
+`HifiShifterGUI` 的职责概览：
+- UI 组装：菜单/顶部控制栏/编辑区/时间轴（对应 `gui/menu.py`、`gui/layout.py`）
+- 工程 IO：打开/保存/dirty 标记与退出提示（`gui/project_io.py`）
+- 轨道与导入：音频载入、轨道创建/选择/状态维护（`gui/tracks.py`，以及部分 `timeline.py`）
+- 编辑交互：Edit/Select 模式、选区、拖拽、撤销重做（`gui/editor.py`）
+- 参数系统：参数抽象、轴语义、切参联动（`gui/params.py`）
+- 绘图刷新：曲线项维护与高亮渲染（`gui/plotting.py`）
+- 合成/任务：dirty segments、增量合成调度、后台线程（`gui/synthesis.py`、`gui/background.py`）
+- 播放与混音：实时播放回调、轨道混音与 post-FX（`gui/playback.py`、`gui/mixdown.py`）
+- 导出：导出 WAV（`gui/exporter.py`）
 
 #### 实时播放（流式混音，推子/静音/独奏播放中生效）
 
-为保证播放时调音量推子、静音、独奏能即时生效，播放链路已从“一次性离线混音 + `sd.play()`”改为 **`sounddevice.OutputStream` 回调式实时混音**。
+为保证播放时调音量推子、静音、独奏能即时生效，播放链路已从“一次性离线混音 + `sd.play()`”改为 **`sounddevice.OutputStream` 回调式实时混音**（实现集中在 `gui/playback.py`/`gui/mixdown.py`）。
 
 实现要点：
 - **回调线程不触碰 Qt**：音频回调运行在 sounddevice 的音频线程，仅读取 `Track` 的 `volume`/`muted`/`solo` 等状态并生成输出块。
@@ -81,16 +106,17 @@ HiFiShifter/
 - **独奏优先级**：任意轨道 `solo=True` 时，仅混入独奏轨道；否则混入所有未静音轨道。
 - **生效时延**：参数变化会在“下一块音频”生效（通常为几十毫秒量级，取决于设备缓冲）。
 
-
-#### 参数编辑系统（今日抽象的核心）
+#### 参数编辑系统（参数抽象 + 轴语义）
 
 - 当前编辑参数：`edit_param`（目前支持 `pitch` / `tension`）
 - 顶部栏参数选择与编辑区参数按钮：保持同步（切换参数统一走 `set_edit_param()`）
-- 未来新增参数时，建议按“参数抽象接口”补齐：
-  - **数据访问**：取/写参数数组（例如从 `Track` 取 `xxx_edited`）
-  - **曲线渲染**：将参数数值映射到绘图区 Y 值（尤其是非音高参数）
-  - **拖拽/绘制**：实现该参数的笔刷编辑与选区拖拽偏移
-  - **轴语义**：定义该参数的轴类型（音名 `note` 或数值 `linear`）与格式化
+- 参数抽象与轴语义主要位于 `gui/params.py`；交互写入/选区拖拽等位于 `gui/editor.py`；曲线绘制刷新位于 `gui/plotting.py`。
+
+未来新增参数时，建议按“参数抽象接口”补齐：
+- **数据访问**：取/写参数数组（例如从 `Track` 取 `xxx_edited`）
+- **曲线渲染**：将参数数值映射到绘图区 Y 值（尤其是非音高参数）
+- **拖拽/绘制**：实现该参数的笔刷编辑与选区拖拽偏移
+- **轴语义**：定义该参数的轴类型（音名 `note` 或数值 `linear`）与格式化
 
 ### 2.2 选区系统与选中高亮（通用化）
 
@@ -105,12 +131,12 @@ HiFiShifter/
 ### 2.3 轴系统：刻度与左侧标题随参数切换
 
 - `widgets.py` 的 `PianoRollAxis` 不再硬编码“音高/张力模式”。
-- 它会向 `MainWindow` 询问：
+- 它会向 GUI 主类（`HifiShifterGUI`）询问：
   - 当前轴对应的参数（通常是 `edit_param`）
   - 轴类型：`note`（音名）或 `linear`（数值）
   - 数值 ↔ 绘图区 Y 的映射、以及刻度字符串格式化
 
-同时，`MainWindow` 会在切参时更新：
+同时，GUI 主类会在切参时更新：
 - 左侧 **竖向标题**（例如“音高 (Note)”/“张力 (Tension)”）
 - 左侧刻度显示（音名 vs 数值）
 
@@ -128,7 +154,7 @@ HiFiShifter/
 - 语言文件：`assets/lang/zh_CN.json`、`assets/lang/en_US.json`
 - 使用方式：
   - 在代码中使用 `from utils.i18n import i18n`，再通过 `i18n.get("key")` 获取文本
-- 本次新增/调整常用键：
+- 常用键：
   - `label.edit_param`（顶部栏“编辑”标签）
   - `param.pitch` / `param.tension`（参数名）
   - `status.tool.edit` / `status.tool.select`（状态栏提示模板）
@@ -138,9 +164,9 @@ HiFiShifter/
 ## 4. 调试建议
 
 - **建议断点**：
-  - 参数切换：`MainWindow.set_edit_param()`
-  - 选区更新：`set_selection()` / `update_selection_highlight()`
-  - 合成触发：自动合成/分段 dirty 标记相关逻辑
+  - 参数切换：`HifiShifterGUI.set_edit_param()`（实现通常位于 `gui/params.py` 相关 mixin）
+  - 选区更新：`set_selection()` / `update_selection_highlight()`（主要在 `gui/editor.py` / `gui/plotting.py`）
+  - 合成触发：dirty 标记与自动合成调度（`gui/synthesis.py`）
   - 推理阶段：`audio_processing/hifigan_infer.py` 的推理入口
 - **性能关注点**：
   - 特征提取与推理应避免阻塞 UI 主线程（如后续引入线程/任务队列）
@@ -151,12 +177,12 @@ HiFiShifter/
 ### 5.1 新增一个可编辑参数（推荐流程）
 
 1. **`Track` 增加数据字段**：例如 `xxx_original` / `xxx_edited` / undo 栈等。
-2. **`MainWindow` 增加参数实现**：
-   - 让 `get_param_array()` / `get_param_curve_y()` 能返回该参数
-   - 实现绘制写入与选区拖拽偏移（如 `apply_param_drag_delta()`）
-   - 定义轴类型与映射（`get_param_axis_kind()`、`plot_y_to_param_value()`、`param_value_to_plot_y()`、`format_param_axis_value()`、`get_param_axis_label()`）
-3. **UI 接入**：
-   - 顶部栏与编辑区参数按钮（添加一个按钮/项，并与 `set_edit_param()` 联动）
+2. **补齐参数抽象与轴语义**：优先在 `hifi_shifter/gui/params.py` 中加入该参数的访问、映射、格式化等实现。
+3. **补齐交互与渲染**：
+   - 交互写入/选区拖拽偏移：通常在 `hifi_shifter/gui/editor.py`
+   - 曲线绘制与刷新：通常在 `hifi_shifter/gui/plotting.py`
+4. **UI 接入**：
+   - 顶部栏与编辑区参数按钮（添加按钮/项，并与 `set_edit_param()` 联动）
    - 补齐 i18n 键（`param.xxx`、`label.xxx` 等）
 
 ### 5.2 新增一个音频处理阶段
@@ -169,4 +195,3 @@ HiFiShifter/
 - 播放期间推子/静音/独奏通常会在下一块音频生效（可能有轻微时延）
 - 导入超长音频时，初始特征提取可能导致界面短暂无响应
 - 多轨/高采样率会显著增加内存占用
-
