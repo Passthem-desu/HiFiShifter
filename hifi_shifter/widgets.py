@@ -298,34 +298,106 @@ class CustomViewBox(pg.ViewBox):
         super().mouseReleaseEvent(ev)
 
 class PianoRollAxis(pg.AxisItem):
-    def __init__(self, orientation='left', **kwargs):
+    def __init__(self, parent_gui=None, orientation='left', **kwargs):
         super().__init__(orientation, **kwargs)
+        self.parent_gui = parent_gui
+
+    def _axis_param(self) -> str:
+        if self.parent_gui is None:
+            return 'pitch'
+        if hasattr(self.parent_gui, 'get_axis_param'):
+            try:
+                return self.parent_gui.get_axis_param()
+            except Exception:
+                pass
+        return getattr(self.parent_gui, 'edit_param', 'pitch')
+
+    def _axis_kind(self, param: str) -> str:
+        if self.parent_gui is not None and hasattr(self.parent_gui, 'get_param_axis_kind'):
+            try:
+                return self.parent_gui.get_param_axis_kind(param)
+            except Exception:
+                pass
+        # Backward-compatible fallback
+        return 'linear' if param == 'tension' else 'note'
+
+    def _plot_y_to_value(self, y: float, param: str) -> float:
+        if self.parent_gui is not None and hasattr(self.parent_gui, 'plot_y_to_param_value'):
+            try:
+                return float(self.parent_gui.plot_y_to_param_value(y, param))
+            except Exception:
+                pass
+        # Fallback: assume identity
+        return float(y)
+
+    def _value_to_plot_y(self, value: float, param: str) -> float:
+        if self.parent_gui is not None and hasattr(self.parent_gui, 'param_value_to_plot_y'):
+            try:
+                return float(self.parent_gui.param_value_to_plot_y(value, param))
+            except Exception:
+                pass
+        return float(value)
+
+    def _format_value(self, value: float, param: str) -> str:
+        if self.parent_gui is not None and hasattr(self.parent_gui, 'format_param_axis_value'):
+            try:
+                return str(self.parent_gui.format_param_axis_value(value, param))
+            except Exception:
+                pass
+        return f"{float(value):.0f}"
 
     def tickStrings(self, values, scale, spacing):
+        param = self._axis_param()
+        kind = self._axis_kind(param)
+
+        if kind == 'linear':
+            return [self._format_value(self._plot_y_to_value(v, param), param) for v in values]
+
+        # kind == 'note'
         strings = []
         note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
         for v in values:
-            # Only label if close to integer
             if abs(v - round(v)) > 0.1:
                 strings.append("")
                 continue
-            
             try:
-                # v is MIDI note number
                 note_idx = int(round(v))
                 octave = note_idx // 12 - 1
                 name = note_names[note_idx % 12]
                 strings.append(f"{name}{octave}")
-            except:
+            except Exception:
                 strings.append("")
         return strings
-    
+
     def tickValues(self, minVal, maxVal, size):
-        # Force integer ticks
+        param = self._axis_param()
+        kind = self._axis_kind(param)
+
+        if kind == 'linear':
+            v_min = self._plot_y_to_value(minVal, param)
+            v_max = self._plot_y_to_value(maxVal, param)
+            if v_max < v_min:
+                v_min, v_max = v_max, v_min
+
+            v_range = max(1e-6, v_max - v_min)
+            # Aim for <= 8 major labels
+            step_candidates = [1.0, 2.0, 5.0, 10.0, 20.0, 25.0, 50.0, 100.0]
+            desired = v_range / 8.0
+            step = next((s for s in step_candidates if s >= desired), step_candidates[-1])
+
+            start = np.floor(v_min / step) * step
+            end = np.ceil(v_max / step) * step
+            ticks_v = np.arange(start, end + 0.5 * step, step)
+            ticks_y = [self._value_to_plot_y(v, param) for v in ticks_v]
+            return [(1.0, ticks_y)]
+
+        # kind == 'note': force integer ticks for pitch
         min_idx = int(np.ceil(minVal))
         max_idx = int(np.floor(maxVal))
         values = list(range(min_idx, max_idx + 1))
         return [(1.0, values)]
+
+
 
 class BPMAxis(pg.AxisItem):
     def __init__(self, parent_gui, orientation='top', **kwargs):

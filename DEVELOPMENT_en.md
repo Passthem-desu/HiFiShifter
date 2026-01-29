@@ -1,108 +1,172 @@
-# HifiShifter Development Manual
+# HiFiShifter Development Manual
 
-HifiShifter is a graphical pitch correction tool based on deep learning neural vocoders (NSF-HiFiGAN). This document aims to provide developers with an overview of the project architecture, module descriptions, and extension guides.
+HiFiShifter is a GUI-based vocal editing and synthesis tool built on neural vocoders (NSF-HiFiGAN). This document provides developers with an updated architecture overview, module notes, and practical extension/debugging guidance (including today’s refactor).
 
-## 1. Project Overview
+## 0. Quick Dev Start
 
-### 1.1 Directory Structure
+- **Python**: recommended 3.10+
+- **Install deps**:
 
-```text
-HifiShifter/
-├── assets/                 # Resource files
-│   └── lang/               # Language packs (zh_CN.json, en_US.json)
-├── configs/                # Model configuration files (.yaml)
-├── hifi_shifter/           # Core source package
-│   ├── __init__.py
-│   ├── audio_processor.py  # Audio processing & model inference core
-│   ├── config_manager.py   # Configuration & i18n management
-│   ├── main_window.py      # Main Window GUI logic
-│   ├── theme.py            # UI theme definition & style management
-│   ├── timeline.py         # Timeline & Track management
-│   ├── track.py            # Track data model
-│   └── widgets.py          # Custom UI widgets (PyQtGraph)
-├── models/                 # Predefined model structures (NSF-HiFiGAN, UnivNet, etc.)
-├── modules/                # Neural network basic modules
-├── utils/                  # Utility functions (Audio processing, Config utils)
-├── run_gui.py              # Application entry point
-├── requirements.txt        # Dependency list
-└── ...
-```
-
-### 1.2 Core Architecture
-
-HifiShifter adopts a variant of the Model-View-Controller (MVC) architecture, achieving separation of data, view, and logic:
-
-*   **Model (Data Layer)**: The `Track` class encapsulates audio waveforms, F0 curves, Mel spectrograms, and user edit states (e.g., mute, solo, volume).
-*   **View (View Layer)**: `MainWindow` and `Timeline` use `PyQt6` to build the interface framework and utilize `pyqtgraph` for high-performance waveform and piano roll rendering.
-*   **Controller (Control Layer)**: `AudioProcessor` handles business logic (feature extraction, model inference, audio synthesis), while `MainWindow` coordinates user interaction and background processing.
-
-## 2. Core Modules Detail
-
-### 2.1 Audio Processing (`audio_processor.py`)
-This is the core engine of the system, responsible for all tasks related to PyTorch models and signal processing.
-*   **Model Loading**: Parses `.yaml` configuration files, instantiates the corresponding generator model based on the config, and loads `.ckpt` weights.
-*   **Feature Extraction**:
-    *   **F0 (Fundamental Frequency)**: Uses `Parselmouth` (based on Praat algorithm) to extract high-precision F0 curves.
-    *   **Mel Spectrogram**: Uses STFT to convert waveforms into Mel spectrograms as the acoustic representation of content.
-*   **Smart Segmentation**:
-    *   To optimize performance and enable real-time editing, long audio is automatically split into multiple `Segments` based on silence thresholds.
-    *   **Incremental Synthesis**: When the user modifies pitch, the system only re-synthesizes the affected segments rather than the entire song, achieving millisecond-level editing feedback.
-
-### 2.2 Track Management (`track.py` & `timeline.py`)
-*   **Track Object**: Each track is an independent object storing Raw Data and Edited Data. It also maintains an Undo/Redo Stack.
-*   **Timeline**: Manages multi-track mixing logic. It controls the Mute, Solo states, and Volume gain of all tracks, and calculates the final mixed audio output.
-*   **View Synchronization**: The Timeline Widget and the main editor window (Piano Roll) are synchronized via signal mechanisms, supporting drag-and-drop track alignment.
-
-### 2.3 Internationalization (`config_manager.py`)
-The project has built-in lightweight internationalization (i18n) support.
-*   **Language Files**: Located in the `assets/lang/` directory, stored as JSON key-value pairs.
-*   **Loading Mechanism**: `ConfigManager` reads the configuration at startup and loads the corresponding language pack.
-*   **Usage**: Retrieve localized text in code via `self.cfg.get_text("key_name")`.
-*   **Adding New Languages**:
-    1. Create a new `xx_XX.json` in `assets/lang/`.
-    2. Copy the content of `en_US.json` and translate all Values.
-    3. Restart the software and select the new language in Settings.
-
-### 2.4 UI Theme System (`theme.py`)
-The project implements a dual-theme system (Dark/Light mode) based on `QPalette` and `QSS` (Qt Style Sheets).
-*   **Theme Definition**: The `THEMES` dictionary in `theme.py` defines color schemes for different modes, including window background, text color, highlight color, etc.
-*   **Style Sheets (QSS)**: Customized CSS-like appearance for widgets such as `QComboBox`, `QSpinBox`, and `QMenu`, removing native borders and unifying visual styles.
-*   **Drawing Styles**: `PyQtGraph` drawing elements (e.g., F0 curves, grid lines, selection boxes) use independent Pen/Brush configurations to ensure good contrast on both dark and light backgrounds.
-*   **Dynamic Switching**: `MainWindow` listens for theme switching signals and updates `QApplication`'s Palette and all drawing component color configurations in real-time.
-
-## 3. Development Guide
-
-### 3.1 Environment Setup
-Python 3.10+ environment is recommended.
 ```bash
-git clone https://github.com/ARounder-183/HiFiShifter.git
-cd HifiShifter
 pip install -r requirements.txt
 ```
 
-### 3.2 Run & Debug
+- **Run GUI (recommended from repo root)**:
+
 ```bash
 python run_gui.py
 ```
-**Debugging Suggestions**:
-*   Use VS Code or PyCharm.
-*   Key Breakpoints:
-    *   `MainWindow.synthesize_audio`: Check synthesis trigger logic.
-    *   `AudioProcessor.process_segment`: Check model inference input/output.
-    *   `Timeline.paint`: Check custom drawing logic.
 
-### 3.3 Common Extension Tasks
-*   **Adding New Vocoder Support**:
-    1. Add new model definition files in the `models/` directory.
-    2. Modify the `load_model` method in `audio_processor.py` to add initialization logic for the new model.
-    3. Ensure the new model's input (Mel + F0) and output (Waveform) formats are compatible with the existing pipeline.
-*   **Modifying UI Interaction**:
-    *   Main interaction logic (mouse clicks, dragging) is located in the event handling functions of `main_window.py`.
-    *   If you need to modify drawing styles (e.g., colors, line thickness), check `widgets.py`.
+> Note: Some inference/training-related code lives at the repo top level (e.g. `training/`). Running from the repo root is recommended. The audio submodules also include launch-context compatibility via `hifi_shifter/audio_processing/_bootstrap.py`.
 
-## 4. Known Issues
+## 1. Project Overview
 
-*   **Volume Adjustment Latency**: Adjusting track volume in real-time during playback may not take effect immediately or may have a slight delay.
-*   **Long Audio Freezing**: When importing very long audio files (e.g., over 10 minutes), the initial feature extraction (F0 and Mel calculation) may cause the interface to become unresponsive (freeze) for a long time. It is recommended to pre-cut long audio into shorter segments.
-*   **Memory Usage**: Loading multiple high-sample-rate tracks will consume a large amount of memory because each track stores complete floating-point waveform data and spectrograms.
+### 1.1 Directory Structure (updated)
+
+```text
+HiFiShifter/
+├── assets/
+│   └── lang/                    # Language packs (zh_CN.json, en_US.json)
+├── configs/                     # Model configs (.yaml)
+├── hifi_shifter/
+│   ├── audio_processor.py        # Orchestrator (public entry used by GUI)
+│   ├── audio_processing/         # Submodules (readable, debuggable stages)
+│   │   ├── features.py           # Audio loading / features / segmentation
+│   │   ├── hifigan_infer.py      # NSF-HiFiGAN inference
+│   │   ├── tension_fx.py         # Tension post-FX
+│   │   └── _bootstrap.py         # Launch-context sys.path helper
+│   ├── main_window.py            # Main window & core interaction logic
+│   ├── timeline.py               # Timeline panel (UI layer)
+│   ├── track.py                  # Track model & caches/undo
+│   ├── widgets.py                # Custom PyQtGraph widgets (axis/grid/ViewBox)
+│   ├── theme.py                  # Themes & QSS
+│   └── ...
+├── models/                       # Model structures
+├── modules/                      # NN building blocks
+├── training/                     # Some top-level training/inference dependencies
+├── utils/
+│   ├── i18n.py                    # i18n manager (`i18n.get(key)`)
+│   └── ...
+├── run_gui.py                    # Entry point
+└── ...
+```
+
+### 1.2 High-level Data Flow
+
+- **UI** (`main_window.py`)
+  - Handles mouse/keyboard → updates the active track’s parameter arrays (e.g. `f0_edited`, `tension_edited`)
+  - Pitch edits mark impacted segments as dirty → triggers incremental re-synthesis
+  - Tension edits are treated as post-FX (typically no vocoder re-run, depending on implementation)
+
+- **Audio pipeline** (`audio_processor.py` + `audio_processing/*`)
+  - Load model → feature extraction → segmentation → infer dirty segments → update track caches
+
+## 2. Key Modules
+
+### 2.1 Main window & interaction (`hifi_shifter/main_window.py`)
+
+`MainWindow` is responsible for:
+- UI composition (menus, top controls, editor)
+- Track selection & playback state
+- Edit Mode vs Select Mode interactions
+- Parameter switching (Pitch/Tension) with UI synchronization
+
+#### Real-time playback (streamed mixing; fader/mute/solo apply during playback)
+
+To make volume faders, mute, and solo changes take effect while playing, the playback path was changed from “offline mix once + `sd.play()`” to **callback-based mixing via `sounddevice.OutputStream`**.
+
+Key points:
+- **No Qt calls in the audio callback**: the callback runs on the sounddevice audio thread and only reads track states (`volume`/`muted`/`solo`) to generate each output block.
+- **Minimal shared state**: `self._playback_lock` protects a small shared state like `_playback_sample_pos`; the GUI timer reads sample position to drive the play cursor.
+- **Solo priority**: if any track is soloed, only solo tracks are mixed; otherwise all non-muted tracks are mixed.
+- **Latency**: changes apply on the next audio block (typically tens of milliseconds, device/buffer dependent).
+
+
+#### Parameter editing system (core abstraction introduced today)
+
+- Active parameter: `edit_param` (currently `pitch` / `tension`)
+- Top-bar combo and in-editor buttons are kept in sync via `set_edit_param()`
+- To add a new parameter, implement the “parameter abstraction interface”:
+  - **Data access**: get/set the parameter array on `Track`
+  - **Rendering**: map parameter value → plot Y (especially for non-pitch params)
+  - **Editing**: brush writing + selection-drag offset behavior
+  - **Axis semantics**: axis kind (`note` vs `linear`) + value formatting
+
+### 2.2 Selection system & generic highlight
+
+Key state:
+- `selection_mask`: boolean array for selected samples
+- `selection_param`: binds the selection to a parameter to avoid cross-parameter interference
+
+Highlight rendering:
+- A dedicated curve item (`selected_param_curve_item`) draws only selected points.
+- Non-selected points are set to `NaN` and rendered with `connect="finite"` so only selected segments are visible.
+
+### 2.3 Axis system: ticks and axis title change with parameter
+
+- `widgets.py` `PianoRollAxis` no longer hardcodes Pitch/Tension behavior.
+- It queries `MainWindow` for:
+  - active axis parameter (usually `edit_param`)
+  - axis kind: `note` (note names) or `linear` (numeric)
+  - value ↔ plot-Y mapping and string formatting
+
+Additionally, `MainWindow` updates:
+- the left vertical **axis label** (e.g. “Pitch (Note)” vs “Tension”)
+- the tick style (note names vs numeric)
+
+### 2.4 Audio pipeline orchestrator + submodules
+
+- `audio_processor.py`: public entry used by the GUI; orchestrates the pipeline and keeps a stable API.
+- `audio_processing/`: split processing stages:
+  - `features.py`: audio loading, feature extraction (mel/f0), segmentation helpers
+  - `hifigan_infer.py`: NSF-HiFiGAN model loading/inference
+  - `tension_fx.py`: tension post-processing utilities
+  - `_bootstrap.py`: ensures repo root is on `sys.path` to avoid import errors in different launch contexts
+
+## 3. Internationalization (i18n)
+
+- Language files: `assets/lang/zh_CN.json`, `assets/lang/en_US.json`
+- Usage:
+  - `from utils.i18n import i18n` then `i18n.get("key")`
+- Newly used keys in the recent UI polish:
+  - `label.edit_param` (top-bar “Edit” label)
+  - `param.pitch` / `param.tension` (parameter names)
+  - `status.tool.edit` / `status.tool.select` (status bar templates)
+
+> Templates use `str.format`, e.g. `i18n.get("status.tool.edit").format("Pitch")`.
+
+## 4. Debugging Tips
+
+- **Good breakpoints**:
+  - Parameter switching: `MainWindow.set_edit_param()`
+  - Selection updates: `set_selection()` / `update_selection_highlight()`
+  - Dirty segment marking + auto synthesis trigger
+  - Inference entry: `audio_processing/hifigan_infer.py`
+- **Performance watch-outs**:
+  - Avoid blocking the UI thread with heavy feature extraction/inference (consider threading/task queue if you extend it)
+  - Prefer short audio clips for UI iteration; long audio imports can be expensive
+
+## 5. Common Extension Tasks
+
+### 5.1 Add a new editable parameter (recommended steps)
+
+1. **Extend `Track`**: add `xxx_original` / `xxx_edited` and undo/redo stacks if needed.
+2. **Implement in `MainWindow`**:
+   - make `get_param_array()` / `get_param_curve_y()` return the param
+   - implement brush editing + selection drag offset (e.g. `apply_param_drag_delta()`)
+   - define axis behavior (`get_param_axis_kind()`, `plot_y_to_param_value()`, `param_value_to_plot_y()`, `format_param_axis_value()`, `get_param_axis_label()`)
+3. **Wire the UI**:
+   - add to top combo / editor buttons and route switching through `set_edit_param()`
+   - add i18n keys (`param.xxx`, `label.xxx`, etc.)
+
+### 5.2 Add a new audio processing stage
+
+- Prefer adding a new module under `hifi_shifter/audio_processing/` and orchestrating it from `audio_processor.py`.
+- For “post-FX” style processing (like tension), design it to be cacheable and fast to recompute.
+
+## 6. Known Issues
+
+- Fader/mute/solo changes during playback apply on the next audio block (small latency may be noticeable)
+- Very long audio imports can freeze due to initial feature extraction
+- Multi-track / high sample rate content increases memory usage significantly
 

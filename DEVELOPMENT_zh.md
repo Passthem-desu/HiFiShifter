@@ -1,108 +1,172 @@
-# HifiShifter 开发手册
+# HiFiShifter 开发手册
 
-HifiShifter 是一个基于深度学习神经声码器（NSF-HiFiGAN）的图形化音高修正工具。本文档旨在为开发者提供项目的架构概览、模块说明以及扩展指南。
+HiFiShifter 是一个基于深度学习神经声码器（NSF-HiFiGAN）的图形化人声编辑与合成工具。本文档面向开发者，介绍项目结构、关键模块、今天重构引入的抽象，以及常见扩展/调试方式。
 
-## 1. 项目概览
+## 0. 快速开发启动
 
-### 1.1 目录结构
+- **Python**：建议 Python 3.10+
+- **安装依赖**：
 
-```text
-HifiShifter/
-├── assets/                 # 资源文件
-│   └── lang/               # 语言包 (zh_CN.json, en_US.json)
-├── configs/                # 模型配置文件 (.yaml)
-├── hifi_shifter/           # 核心源码包
-│   ├── __init__.py
-│   ├── audio_processor.py  # 音频处理与模型推理核心
-│   ├── config_manager.py   # 配置与国际化管理
-│   ├── main_window.py      # 主窗口 GUI 逻辑
-│   ├── theme.py            # UI 主题定义与样式管理
-│   ├── timeline.py         # 时间轴与轨道管理
-│   ├── track.py            # 音轨数据模型
-│   └── widgets.py          # 自定义 UI 组件 (PyQtGraph)
-├── models/                 # 预定义模型结构 (NSF-HiFiGAN, UnivNet 等)
-├── modules/                # 神经网络基础模块
-├── utils/                  # 工具函数 (音频处理, 配置文件)
-├── run_gui.py              # 程序启动入口
-├── requirements.txt        # 项目依赖列表
-└── ...
-```
-
-### 1.2 核心架构
-
-HifiShifter 采用 Model-View-Controller (MVC) 的变体架构，实现了数据、视图与逻辑的分离：
-
-*   **Model (数据层)**: `Track` 类封装了音频波形、F0 曲线、Mel 频谱以及用户的编辑状态（如静音、独奏、音量）。
-*   **View (视图层)**: `MainWindow` 和 `Timeline` 使用 `PyQt6` 构建界面框架，利用 `pyqtgraph` 进行高性能的波形和钢琴卷帘渲染。
-*   **Controller (控制层)**: `AudioProcessor` 负责业务逻辑（特征提取、模型推理、音频合成），`MainWindow` 负责协调用户交互与后台处理。
-
-## 2. 核心模块详解
-
-### 2.1 音频处理 (`audio_processor.py`)
-这是系统的核心引擎，负责所有与 PyTorch 模型和信号处理相关的任务。
-*   **模型加载**: 解析 `.yaml` 配置文件，根据配置实例化对应的生成器模型，并加载 `.ckpt` 权重。
-*   **特征提取**:
-    *   **F0 (基频)**: 使用 `Parselmouth` (基于 Praat 算法) 提取高精度的 F0 曲线。
-    *   **Mel 频谱**: 使用 STFT 将波形转换为 Mel 频谱，作为内容的声学表征。
-*   **智能分段 (Segmentation)**:
-    *   为了优化性能和实现实时编辑，长音频会被基于静音阈值自动切分为多个 `Segment`。
-    *   **增量合成**: 当用户修改音高时，系统仅重合成受影响的片段，而非整首歌曲，从而实现毫秒级的编辑反馈。
-
-### 2.2 轨道管理 (`track.py` & `timeline.py`)
-*   **Track 对象**: 每个音轨是一个独立的对象，存储了原始数据（Raw Data）和编辑数据（Edited Data）。它还维护了撤销/重做栈（Undo/Redo Stack）。
-*   **Timeline**: 负责多轨混音逻辑。它管理所有音轨的静音（Mute）、独奏（Solo）状态和音量增益，并计算最终的混合音频输出。
-*   **视图同步**: 时间轴面板（Timeline Widget）与主编辑窗口（Piano Roll）通过信号机制保持同步，支持拖拽对齐音轨时间。
-
-### 2.3 国际化 (`config_manager.py`)
-项目内置了轻量级的国际化（i18n）支持。
-*   **语言文件**: 位于 `assets/lang/` 目录，采用 JSON 格式存储键值对。
-*   **加载机制**: `ConfigManager` 在启动时读取配置文件，加载对应的语言包。
-*   **使用方法**: 在代码中通过 `self.cfg.get_text("key_name")` 获取当前语言的文本。
-*   **添加新语言**:
-    1. 在 `assets/lang/` 下新建 `xx_XX.json`。
-    2. 复制 `en_US.json` 的内容并翻译所有 Value。
-    3. 重启软件并在设置中选择新语言。
-
-### 2.4 UI 主题系统 (`theme.py`)
-项目实现了基于 `QPalette` 和 `QSS` (Qt Style Sheets) 的双主题系统（深色/浅色模式）。
-*   **主题定义**: `theme.py` 中的 `THEMES` 字典定义了不同模式下的颜色方案，包括窗口背景、文本颜色、高亮色等。
-*   **样式表 (QSS)**: 针对 `QComboBox`、`QSpinBox`、`QMenu` 等控件定制了 CSS 样式的外观，去除了原生边框并统一了视觉风格。
-*   **绘图样式**: `PyQtGraph` 的绘图元素（如 F0 曲线、网格线、选择框）使用独立的 Pen/Brush 配置，确保在深色和浅色背景下均有良好的对比度。
-*   **动态切换**: `MainWindow` 监听主题切换信号，实时更新 `QApplication` 的 Palette 和所有绘图组件的颜色配置。
-
-## 3. 开发指南
-
-### 3.1 环境搭建
-建议使用 Python 3.10+ 环境。
 ```bash
-git clone https://github.com/ARounder-183/HiFiShifter.git
-cd HifiShifter
 pip install -r requirements.txt
 ```
 
-### 3.2 运行与调试
+- **启动 GUI（推荐从仓库根目录启动）**：
+
 ```bash
 python run_gui.py
 ```
-**调试建议**:
-*   使用 VS Code 或 PyCharm。
-*   关键断点位置：
-    *   `MainWindow.synthesize_audio`: 检查合成触发逻辑。
-    *   `AudioProcessor.process_segment`: 检查模型推理输入输出。
-    *   `Timeline.paint`: 检查自定义绘图逻辑。
 
-### 3.3 常见扩展任务
-*   **添加新声码器支持**:
-    1. 在 `models/` 目录下添加新的模型定义文件。
-    2. 修改 `audio_processor.py` 中的 `load_model` 方法，添加新模型的初始化逻辑。
-    3. 确保新模型的输入（Mel + F0）和输出（Waveform）格式与现有管线兼容。
-*   **修改 UI 交互**:
-    *   主要交互逻辑（鼠标点击、拖拽）位于 `main_window.py` 的事件处理函数中。
-    *   如果需要修改绘图样式（如颜色、线条粗细），请查看 `widgets.py`。
+> 说明：部分推理/训练相关代码位于仓库根目录（如 `training/`），因此推荐始终在仓库根目录运行；同时，音频处理子模块中也做了启动上下文兼容（见 `hifi_shifter/audio_processing/_bootstrap.py`）。
 
-## 4. 已知问题 (Known Issues)
+## 1. 项目概览
 
-*   **音量调节延迟**: 在播放过程中实时调节音轨音量，可能不会立即生效，或者存在轻微的延迟。
-*   **长音频卡死**: 导入非常长的音频文件（例如超过 10 分钟）时，初始的特征提取（F0 和 Mel 计算）可能会导致界面长时间无响应（假死）。建议预先将长音频切割为较短的片段。
-*   **内存占用**: 加载多个高采样率音轨会消耗大量内存，因为每个音轨都保存了完整的浮点波形数据和频谱图。
+### 1.1 目录结构（更新版）
+
+```text
+HiFiShifter/
+├── assets/
+│   └── lang/                    # 语言包（zh_CN.json, en_US.json）
+├── configs/                     # 模型配置文件（.yaml）
+├── hifi_shifter/
+│   ├── audio_processor.py        # 音频处理编排入口（GUI 调用的“对外 API”）
+│   ├── audio_processing/         # 子处理模块（更易读、更易调试）
+│   │   ├── features.py           # 音频加载/特征提取/分段
+│   │   ├── hifigan_infer.py      # NSF-HiFiGAN 推理
+│   │   ├── tension_fx.py         # 张力后处理（post-FX）
+│   │   └── _bootstrap.py         # 启动上下文兼容（sys.path 注入）
+│   ├── main_window.py            # 主窗口与核心交互逻辑
+│   ├── timeline.py               # 时间轴面板、多轨管理（UI 层）
+│   ├── track.py                  # 音轨数据结构与缓存/撤销
+│   ├── widgets.py                # 自定义 PyQtGraph 组件（轴/网格/ViewBox 等）
+│   ├── theme.py                  # 主题与 QSS
+│   └── ...
+├── models/                       # 模型结构定义
+├── modules/                      # 神经网络基础模块
+├── training/                     # 训练/推理依赖的部分实现（顶层包）
+├── utils/
+│   ├── i18n.py                    # i18n 管理器（`i18n.get(key)`）
+│   └── ...
+├── run_gui.py                    # 程序入口
+└── ...
+```
+
+### 1.2 核心数据流（高层）
+
+- **UI 交互**（`main_window.py`）
+  - 接收鼠标/键盘事件 → 修改当前音轨的参数数组（如 `f0_edited`、`tension_edited`）
+  - 对音高编辑：标记受影响分段为 dirty → 触发增量合成
+  - 对张力编辑：属于 post-FX 逻辑，通常不需要重跑声码器（依实现而定）
+
+- **音频处理**（`audio_processor.py` + `audio_processing/*`）
+  - 加载模型 → 特征提取 → 分段 → 对脏片段推理合成 → 回写音轨缓存
+
+## 2. 关键模块说明
+
+### 2.1 主窗口与交互（`hifi_shifter/main_window.py`）
+
+`MainWindow` 负责：
+- 菜单栏/控制栏/编辑区的 UI 组织
+- 当前轨道与播放状态管理
+- 编辑模式（Edit）与选区模式（Select）交互
+- 参数切换（音高/张力）与所有 UI 同步
+
+#### 实时播放（流式混音，推子/静音/独奏播放中生效）
+
+为保证播放时调音量推子、静音、独奏能即时生效，播放链路已从“一次性离线混音 + `sd.play()`”改为 **`sounddevice.OutputStream` 回调式实时混音**。
+
+实现要点：
+- **回调线程不触碰 Qt**：音频回调运行在 sounddevice 的音频线程，仅读取 `Track` 的 `volume`/`muted`/`solo` 等状态并生成输出块。
+- **最小共享状态**：通过 `self._playback_lock` 保护 `_playback_sample_pos` 等少量共享变量；GUI 用定时器读取采样位置驱动播放光标。
+- **独奏优先级**：任意轨道 `solo=True` 时，仅混入独奏轨道；否则混入所有未静音轨道。
+- **生效时延**：参数变化会在“下一块音频”生效（通常为几十毫秒量级，取决于设备缓冲）。
+
+
+#### 参数编辑系统（今日抽象的核心）
+
+- 当前编辑参数：`edit_param`（目前支持 `pitch` / `tension`）
+- 顶部栏参数选择与编辑区参数按钮：保持同步（切换参数统一走 `set_edit_param()`）
+- 未来新增参数时，建议按“参数抽象接口”补齐：
+  - **数据访问**：取/写参数数组（例如从 `Track` 取 `xxx_edited`）
+  - **曲线渲染**：将参数数值映射到绘图区 Y 值（尤其是非音高参数）
+  - **拖拽/绘制**：实现该参数的笔刷编辑与选区拖拽偏移
+  - **轴语义**：定义该参数的轴类型（音名 `note` 或数值 `linear`）与格式化
+
+### 2.2 选区系统与选中高亮（通用化）
+
+选区相关关键状态：
+- `selection_mask`：bool 数组，标记当前选中的采样点
+- `selection_param`：记录该选区属于哪个参数，避免切参后误用
+
+高亮实现策略：
+- 使用独立曲线项（`selected_param_curve_item`）渲染“仅选中部分”的曲线
+- 通过把未选中点置为 `NaN` 并设置 `connect="finite"`，只绘制连续的选中段
+
+### 2.3 轴系统：刻度与左侧标题随参数切换
+
+- `widgets.py` 的 `PianoRollAxis` 不再硬编码“音高/张力模式”。
+- 它会向 `MainWindow` 询问：
+  - 当前轴对应的参数（通常是 `edit_param`）
+  - 轴类型：`note`（音名）或 `linear`（数值）
+  - 数值 ↔ 绘图区 Y 的映射、以及刻度字符串格式化
+
+同时，`MainWindow` 会在切参时更新：
+- 左侧 **竖向标题**（例如“音高 (Note)”/“张力 (Tension)”）
+- 左侧刻度显示（音名 vs 数值）
+
+### 2.4 音频处理编排与子模块（`audio_processor.py` / `audio_processing/`）
+
+- `audio_processor.py`：对 GUI 保持稳定的入口与 API（负责调度流程）。
+- `audio_processing/`：分离可独立调试的处理阶段：
+  - `features.py`：音频加载、特征提取（如 mel/f0）、分段工具
+  - `hifigan_infer.py`：NSF-HiFiGAN 模型加载与推理
+  - `tension_fx.py`：张力 post-FX（不必重跑声码器即可改变听感的部分）
+  - `_bootstrap.py`：确保仓库根目录在 `sys.path`，避免运行上下文不同导致导入失败
+
+## 3. 国际化（i18n）
+
+- 语言文件：`assets/lang/zh_CN.json`、`assets/lang/en_US.json`
+- 使用方式：
+  - 在代码中使用 `from utils.i18n import i18n`，再通过 `i18n.get("key")` 获取文本
+- 本次新增/调整常用键：
+  - `label.edit_param`（顶部栏“编辑”标签）
+  - `param.pitch` / `param.tension`（参数名）
+  - `status.tool.edit` / `status.tool.select`（状态栏提示模板）
+
+> 注意：带参数的模板使用 `str.format`，例如 `i18n.get("status.tool.edit").format("音高")`。
+
+## 4. 调试建议
+
+- **建议断点**：
+  - 参数切换：`MainWindow.set_edit_param()`
+  - 选区更新：`set_selection()` / `update_selection_highlight()`
+  - 合成触发：自动合成/分段 dirty 标记相关逻辑
+  - 推理阶段：`audio_processing/hifigan_infer.py` 的推理入口
+- **性能关注点**：
+  - 特征提取与推理应避免阻塞 UI 主线程（如后续引入线程/任务队列）
+  - 长音频导入时的初始特征提取开销较大，建议开发时使用短音频验证交互
+
+## 5. 常见扩展任务（建议路径）
+
+### 5.1 新增一个可编辑参数（推荐流程）
+
+1. **`Track` 增加数据字段**：例如 `xxx_original` / `xxx_edited` / undo 栈等。
+2. **`MainWindow` 增加参数实现**：
+   - 让 `get_param_array()` / `get_param_curve_y()` 能返回该参数
+   - 实现绘制写入与选区拖拽偏移（如 `apply_param_drag_delta()`）
+   - 定义轴类型与映射（`get_param_axis_kind()`、`plot_y_to_param_value()`、`param_value_to_plot_y()`、`format_param_axis_value()`、`get_param_axis_label()`）
+3. **UI 接入**：
+   - 顶部栏与编辑区参数按钮（添加一个按钮/项，并与 `set_edit_param()` 联动）
+   - 补齐 i18n 键（`param.xxx`、`label.xxx` 等）
+
+### 5.2 新增一个音频处理阶段
+
+- 优先在 `hifi_shifter/audio_processing/` 下新增模块，并由 `audio_processor.py` 编排调用。
+- 若阶段属于“后处理且不依赖声码器推理结果”（类似张力 post-FX），尽量做成可缓存、可快速重算的函数。
+
+## 6. 已知问题
+
+- 播放期间推子/静音/独奏通常会在下一块音频生效（可能有轻微时延）
+- 导入超长音频时，初始特征提取可能导致界面短暂无响应
+- 多轨/高采样率会显著增加内存占用
 

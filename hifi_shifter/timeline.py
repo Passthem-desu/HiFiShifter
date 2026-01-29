@@ -764,14 +764,22 @@ class TimelinePanel(QWidget):
             row.control.mute_toggled.connect(self.parent_gui.update_plot) # Just trigger update
             row.control.solo_toggled.connect(self.parent_gui.update_plot)
             row.control.volume_changed.connect(self.parent_gui.update_plot)
+
+            # Mark project dirty when mix settings change (saved in project file)
+            row.control.mute_toggled.connect(self.parent_gui.on_track_mix_settings_changed)
+            row.control.solo_toggled.connect(self.parent_gui.on_track_mix_settings_changed)
+            row.control.volume_changed.connect(self.parent_gui.on_track_mix_settings_changed)
+
             row.control.bgm_toggled.connect(lambda c, t=track: self.on_bgm_toggled(t, c))
+
             
             row.control.delete_requested.connect(lambda idx=i: self.parent_gui.delete_track(idx))
             row.control.copy_pitch_requested.connect(lambda idx=i: self.parent_gui.copy_pitch(idx))
             row.control.paste_pitch_requested.connect(lambda idx=i: self.parent_gui.paste_pitch(idx))
             
             row.item.sigClicked.connect(lambda item, idx=i: self.select_track(idx))
-            row.item.sigPositionChanged.connect(lambda item: self.parent_gui.update_plot())
+            row.item.sigPositionChanged.connect(lambda item: (self.parent_gui.on_track_mix_settings_changed(), self.parent_gui.update_plot()))
+
             
             # Link View
             row.lane.setXLink(self.ruler_plot)
