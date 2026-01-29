@@ -2916,12 +2916,29 @@ class HifiShifterGUI(QMainWindow):
         
         # 构建文件路径
         temp_dir = os.path.join(tempfile.gettempdir(), 'vocalshifter_tmp')
-        file_path = os.path.join(temp_dir, 'vocalshifter_id.clb')
+        file_path_1 = os.path.join(temp_dir, 'vocalshifter_id.clb')
+        file_path_2 = os.path.join(temp_dir, 'vocalshifter_le_id.clb')
         
-        if not os.path.exists(file_path):
+        # 检查两个文件是否存在
+        exists_1 = os.path.exists(file_path_1)
+        exists_2 = os.path.exists(file_path_2)
+        
+        if not exists_1 and not exists_2:
+            # 两个都不存在，报错
             QMessageBox.warning(self, i18n.get("msg.warning"), 
-                            i18n.get("msg.vocalshifter_file_not_found") + f": {file_path}")
+                            i18n.get("msg.vocalshifter_file_not_found") + f": {file_path_1} or {file_path_2}")
             return
+        elif exists_1 and not exists_2:
+            # 只有第一个存在
+            file_path = file_path_1
+        elif not exists_1 and exists_2:
+            # 只有第二个存在
+            file_path = file_path_2
+        else:
+            # 两个都存在，选择修改时间最晚的
+            mtime_1 = os.path.getmtime(file_path_1)
+            mtime_2 = os.path.getmtime(file_path_2)
+            file_path = file_path_1 if mtime_1 >= mtime_2 else file_path_2
         
         try:
             self.status_label.setText(i18n.get("status.loading_vocalshifter_clipboard_data"))
