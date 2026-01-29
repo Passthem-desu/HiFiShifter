@@ -10,7 +10,6 @@
     "menu.edit": "Edit",
     "menu.edit.undo": "Undo",
     "menu.edit.redo": "Redo",
-    "menu.edit.paste_vocalshifter": "Paste VocalShifter Data",
     "menu.view": "View",
     "menu.view.toggle_theme": "Toggle Theme",
     "menu.playback": "Playback",
