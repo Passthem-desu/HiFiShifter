@@ -2,6 +2,7 @@ import pathlib
 from typing import Tuple
 
 import numpy as np
+import onnxruntime as ort
 import torch
 
 # Prefer relative import (normal package usage). Fall back only for direct execution.
@@ -21,7 +22,6 @@ except ImportError:  # pragma: no cover
 ensure_project_root_on_sys_path()
 
 
-from training.nsf_HiFigan_task import nsf_HiFigan
 from utils.wav2mel import PitchAdjustableMelSpectrogram
 
 
@@ -29,26 +29,14 @@ from utils.wav2mel import PitchAdjustableMelSpectrogram
 
 def build_model_and_mel_transform(
     config: dict,
-    ckpt_path: str | pathlib.Path,
+    model_dir: str | pathlib.Path,
     device: str,
-) -> Tuple[torch.nn.Module, PitchAdjustableMelSpectrogram]:
-    """Build HiFiGAN model + mel transform and load checkpoint."""
-    ckpt_path = pathlib.Path(ckpt_path)
+) -> Tuple[ort.InferenceSession, PitchAdjustableMelSpectrogram]:
+    """Build ONNX session + mel transform for inference."""
+    model_dir = pathlib.Path(model_dir)
 
-    model = nsf_HiFigan(config)
-    model.build_model()
-
-    checkpoint = torch.load(ckpt_path, map_location='cpu')
-    state_dict = checkpoint.get('state_dict', checkpoint)
-
-    # Handle nested generator checkpoint
-    if 'generator' in state_dict and isinstance(state_dict['generator'], dict) and len(state_dict) == 1:
-        model.generator.load_state_dict(state_dict['generator'])
-    else:
-        model.load_state_dict(state_dict, strict=False)
-
-    model.to(device)
-    model.eval()
+    onnx_path = _find_onnx_model(model_dir)
+    session = _build_onnx_session(onnx_path, device)
 
     mel_transform = PitchAdjustableMelSpectrogram(
         sample_rate=config['audio_sample_rate'],
@@ -60,7 +48,33 @@ def build_model_and_mel_transform(
         n_mels=config['audio_num_mel_bins'],
     )
 
-    return model, mel_transform
+    return session, mel_transform
+
+
+def _find_onnx_model(model_dir: pathlib.Path) -> pathlib.Path:
+    preferred = [
+        model_dir / 'pc_nsf_hifigan.onnx',
+        model_dir / 'generator.onnx',
+        model_dir / 'model.onnx',
+    ]
+    for p in preferred:
+        if p.exists():
+            return p
+
+    all_onnx = sorted(model_dir.glob('*.onnx'))
+    if len(all_onnx) == 1:
+        return all_onnx[0]
+    if len(all_onnx) > 1:
+        return all_onnx[0]
+
+    raise FileNotFoundError(f'未在目录中找到 ONNX 文件: {model_dir}')
+
+
+def _build_onnx_session(onnx_path: pathlib.Path, device: str) -> ort.InferenceSession:
+    providers = ['CPUExecutionProvider']
+    if device == 'cuda':
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+    return ort.InferenceSession(str(onnx_path), providers=providers)
 
 
 def _midi_to_hz(f0_midi: np.ndarray) -> np.ndarray:
@@ -73,28 +87,28 @@ def _midi_to_hz(f0_midi: np.ndarray) -> np.ndarray:
 
 
 def synthesize_full(
-    model: torch.nn.Module,
+    model: ort.InferenceSession,
     mel: torch.Tensor,
     f0_midi: np.ndarray,
     *,
     device: str,
 ) -> np.ndarray:
-    """Synthesize full audio from mel + MIDI f0."""
-    mel_tensor = mel.to(device)
+    """Synthesize full audio from mel + MIDI f0 using ONNXRuntime."""
+    del device
+    mel_np = _to_mel_numpy(mel)
     f0_hz = _midi_to_hz(f0_midi)
-    f0_tensor = torch.from_numpy(f0_hz).float().unsqueeze(0).to(device)
+    f0_np = np.asarray(f0_hz, dtype=np.float32).reshape(1, -1)
 
-    with torch.no_grad():
-        output = model.Gforward(sample={'mel': mel_tensor, 'f0': f0_tensor})['audio']
+    output = model.run(None, {'mel': mel_np, 'f0': f0_np})[0]
 
-    synthesized_audio = output[0].cpu().numpy()
+    synthesized_audio = output[0]
     if synthesized_audio.ndim == 2 and synthesized_audio.shape[0] == 1:
         synthesized_audio = synthesized_audio.squeeze(0)
     return synthesized_audio
 
 
 def synthesize_segment_with_padding(
-    model: torch.nn.Module,
+    model: ort.InferenceSession,
     mel: torch.Tensor,
     segment: tuple[int, int],
     f0_midi_segment: np.ndarray,
@@ -104,13 +118,14 @@ def synthesize_segment_with_padding(
     pad_frames: int = 64,
 ) -> np.ndarray:
     """Synthesize a segment with context padding to reduce boundary artifacts."""
+    del device
     start, end = segment
 
     # Calculate padded range
     p_start = max(0, start - pad_frames)
     p_end = min(mel.shape[2], end + pad_frames)
 
-    mel_slice = mel[:, :, p_start:p_end].to(device)
+    mel_slice = _to_mel_numpy(mel[:, :, p_start:p_end])
 
     pre_pad = start - p_start
     post_pad = p_end - end
@@ -128,12 +143,11 @@ def synthesize_segment_with_padding(
 
     f0_padded = np.pad(f0_midi_segment, (pre_pad, post_pad), constant_values=np.nan)
     f0_hz = _midi_to_hz(f0_padded)
-    f0_tensor = torch.from_numpy(f0_hz).float().unsqueeze(0).to(device)
+    f0_np = np.asarray(f0_hz, dtype=np.float32).reshape(1, -1)
 
-    with torch.no_grad():
-        output = model.Gforward(sample={'mel': mel_slice, 'f0': f0_tensor})['audio']
+    output = model.run(None, {'mel': mel_slice, 'f0': f0_np})[0]
 
-    audio_padded = output[0].cpu().numpy()
+    audio_padded = output[0]
     if audio_padded.ndim == 2:
         audio_padded = audio_padded.squeeze(0)
 
@@ -144,3 +158,11 @@ def synthesize_segment_with_padding(
         return audio_padded
 
     return audio_padded[trim_start:trim_end]
+
+
+def _to_mel_numpy(mel: torch.Tensor | np.ndarray) -> np.ndarray:
+    if isinstance(mel, torch.Tensor):
+        arr = mel.detach().cpu().numpy()
+    else:
+        arr = np.asarray(mel)
+    return arr.astype(np.float32, copy=False)

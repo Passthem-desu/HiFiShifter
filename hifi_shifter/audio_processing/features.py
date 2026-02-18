@@ -21,8 +21,11 @@ except ImportError:  # pragma: no cover
 ensure_project_root_on_sys_path()
 
 
-from training.nsf_HiFigan_task import dynamic_range_compression_torch
 from utils.wav2F0 import get_pitch
+
+
+def dynamic_range_compression_torch(x, C=1, clip_val=1e-9):
+    return torch.log(torch.clamp(x, min=clip_val) * C)
 
 
 

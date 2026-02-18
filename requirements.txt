@@ -18,3 +18,4 @@ pyworld
 lightning
 torchcodec
 ffmpeg
+onnxruntime
