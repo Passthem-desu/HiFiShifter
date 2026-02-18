@@ -55,18 +55,9 @@ class AudioProcessor:
         # Patch config
         self._patch_config()
 
-        # Check for checkpoint
-        ckpt_path = folder_path / 'model.ckpt'
-        if not ckpt_path.exists():
-            ckpts = list(folder_path.glob('*.ckpt'))
-            if ckpts:
-                ckpt_path = ckpts[0]
-            else:
-                raise FileNotFoundError("目录中未找到 .ckpt 文件。")
-
         self.model, self.mel_transform = build_model_and_mel_transform(
             self.config,
-            ckpt_path,
+            folder_path,
             self.device,
         )
 
