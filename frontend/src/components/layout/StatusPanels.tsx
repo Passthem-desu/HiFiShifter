@@ -39,7 +39,9 @@ export function StatusPanels() {
                     {t("status_playing")}: {playbackTargetLabel}
                 </span>
                 <span className="text-zinc-400">
-                    {t("status_position")}: {s.runtime.playbackPositionSec.toFixed(2)} / {s.runtime.playbackDurationSec.toFixed(2)}s
+                    {t("status_position")}:{" "}
+                    {s.runtime.playbackPositionSec.toFixed(2)} /{" "}
+                    {s.runtime.playbackDurationSec.toFixed(2)}s
                 </span>
                 <span className="ml-auto text-zinc-500">
                     BPM {s.bpm} · Grid {s.grid} · Playhead{" "}

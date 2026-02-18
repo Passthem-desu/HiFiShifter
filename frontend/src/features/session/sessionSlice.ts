@@ -384,9 +384,12 @@ const initialState: SessionState = {
     status: "Ready",
 };
 
-export const fetchTimeline = createAsyncThunk("session/fetchTimeline", async () => {
-    return webApi.getTimelineState();
-});
+export const fetchTimeline = createAsyncThunk(
+    "session/fetchTimeline",
+    async () => {
+        return webApi.getTimelineState();
+    },
+);
 
 export const seekPlayhead = createAsyncThunk(
     "session/seekPlayhead",
@@ -445,7 +448,9 @@ export const fetchSelectedTrackSummary = createAsyncThunk(
     "session/fetchSelectedTrackSummary",
     async (_, { getState }) => {
         const state = getState() as { session: SessionState };
-        return webApi.getTrackSummary(state.session.selectedTrackId ?? undefined);
+        return webApi.getTrackSummary(
+            state.session.selectedTrackId ?? undefined,
+        );
     },
 );
 
@@ -465,7 +470,11 @@ export const removeClipRemote = createAsyncThunk(
 
 export const moveClipRemote = createAsyncThunk(
     "session/moveClipRemote",
-    async (payload: { clipId: string; startBeat: number; trackId?: string }) => {
+    async (payload: {
+        clipId: string;
+        startBeat: number;
+        trackId?: string;
+    }) => {
         return webApi.moveClip(payload);
     },
 );
@@ -706,7 +715,8 @@ const sessionSlice = createSlice({
                 const selectedClip = state.clips.find(
                     (clip) => clip.id === action.payload,
                 );
-                state.selectedTrackId = selectedClip?.trackId ?? state.selectedTrackId;
+                state.selectedTrackId =
+                    selectedClip?.trackId ?? state.selectedTrackId;
                 ensureClipAutomation(state, action.payload);
             }
         },
@@ -1021,7 +1031,8 @@ const sessionSlice = createSlice({
                     } else {
                         upsertImportedClip(state, payload.path, {
                             durationSec: payload.processed?.audio?.duration_sec,
-                            waveform: payload.processed?.feature?.waveform_preview,
+                            waveform:
+                                payload.processed?.feature?.waveform_preview,
                             pitchRange: payload.processed?.feature?.pitch_range,
                         });
                     }
@@ -1057,7 +1068,8 @@ const sessionSlice = createSlice({
                     } else {
                         upsertImportedClip(state, payload.path, {
                             durationSec: payload.processed?.audio?.duration_sec,
-                            waveform: payload.processed?.feature?.waveform_preview,
+                            waveform:
+                                payload.processed?.feature?.waveform_preview,
                             pitchRange: payload.processed?.feature?.pitch_range,
                         });
                     }
@@ -1216,7 +1228,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(fetchTimeline.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1224,7 +1238,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(addClipOnTrack.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1232,7 +1248,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(removeClipRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1240,7 +1258,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(removeSelectedClipRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1248,7 +1268,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(moveClipRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1256,7 +1278,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(setClipStateRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1264,7 +1288,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(selectClipRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1272,7 +1298,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(setTrackStateRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1280,7 +1308,10 @@ const sessionSlice = createSlice({
             })
 
             .addCase(updateTransportBpm.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean; bpm?: number };
+                const payload = action.payload as {
+                    ok?: boolean;
+                    bpm?: number;
+                };
                 if (!payload.ok) {
                     return;
                 }
@@ -1302,7 +1333,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(addTrackRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1310,7 +1343,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(removeTrackRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1318,7 +1353,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(moveTrackRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1326,7 +1363,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(selectTrackRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1334,7 +1373,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(setProjectLengthRemote.fulfilled, (state, action) => {
-                const payload = action.payload as { ok?: boolean } & TimelineState;
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
@@ -1342,7 +1383,9 @@ const sessionSlice = createSlice({
             })
 
             .addCase(fetchSelectedTrackSummary.fulfilled, (state, action) => {
-                const payload = action.payload as TrackSummaryResult | { ok?: false };
+                const payload = action.payload as
+                    | TrackSummaryResult
+                    | { ok?: false };
                 if (!payload.ok) {
                     return;
                 }

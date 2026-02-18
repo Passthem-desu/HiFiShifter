@@ -79,7 +79,8 @@ export function TopControlsBar() {
                             value={s.bpm}
                             onChange={(e) =>
                                 (() => {
-                                    const nextBpm = Number(e.target.value) || 120;
+                                    const nextBpm =
+                                        Number(e.target.value) || 120;
                                     dispatch(setBpm(nextBpm));
                                     void dispatch(updateTransportBpm(nextBpm));
                                 })()

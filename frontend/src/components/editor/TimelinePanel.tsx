@@ -1,4 +1,9 @@
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+    useEffect,
+    useMemo,
+    useState,
+    type MouseEvent as ReactMouseEvent,
+} from "react";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import {
     addTrackRemote,
@@ -80,7 +85,9 @@ export function TimelinePanel() {
     const { t } = useI18n();
 
     const [dragState, setDragState] = useState<DragState | null>(null);
-    const [trackDragState, setTrackDragState] = useState<TrackDragState | null>(null);
+    const [trackDragState, setTrackDragState] = useState<TrackDragState | null>(
+        null,
+    );
 
     const totalBeats = Math.max(beats * 2, Math.ceil(projectBeats));
     const bodyWidth = totalBeats * BEAT_WIDTH;
@@ -118,8 +125,13 @@ export function TimelinePanel() {
     );
 
     const siblingIndex = (trackId: string, parentId?: string | null) => {
-        const siblings = tracks.filter((track) => (track.parentId ?? null) === (parentId ?? null));
-        return Math.max(0, siblings.findIndex((track) => track.id === trackId));
+        const siblings = tracks.filter(
+            (track) => (track.parentId ?? null) === (parentId ?? null),
+        );
+        return Math.max(
+            0,
+            siblings.findIndex((track) => track.id === trackId),
+        );
     };
 
     useEffect(() => {
@@ -180,7 +192,8 @@ export function TimelinePanel() {
                 return;
             }
 
-            const clipEnd = dragState.initialBeat + dragState.initialLengthBeats;
+            const clipEnd =
+                dragState.initialBeat + dragState.initialLengthBeats;
             const candidateStart = Math.max(
                 0,
                 event.altKey ? rawBeat : Math.round(rawBeat / step) * step,
@@ -384,7 +397,8 @@ export function TimelinePanel() {
                             Mute Item
                         </button>
                         <span className="text-zinc-500">
-                            Start {selectedClip.startBeat.toFixed(2)} · Len {selectedClip.lengthBeats.toFixed(2)}
+                            Start {selectedClip.startBeat.toFixed(2)} · Len{" "}
+                            {selectedClip.lengthBeats.toFixed(2)}
                         </span>
                     </div>
                 </div>
@@ -407,7 +421,9 @@ export function TimelinePanel() {
                             <button
                                 type="button"
                                 className="rounded border border-zinc-600 px-1.5 py-0.5 hover:bg-zinc-700"
-                                onClick={() => void dispatch(addTrackRemote({}))}
+                                onClick={() =>
+                                    void dispatch(addTrackRemote({}))
+                                }
                             >
                                 +Track
                             </button>
@@ -416,7 +432,9 @@ export function TimelinePanel() {
                                     type="button"
                                     className="rounded border border-zinc-600 px-1.5 py-0.5 text-zinc-200 hover:bg-zinc-700"
                                     onClick={() =>
-                                        void dispatch(removeTrackRemote(selectedTrackId))
+                                        void dispatch(
+                                            removeTrackRemote(selectedTrackId),
+                                        )
                                     }
                                 >
                                     -Track
@@ -463,7 +481,7 @@ export function TimelinePanel() {
                     <div className="relative">
                         {lanes.map((lane) => {
                             return (
-                                    <div
+                                <div
                                     key={lane.track.id}
                                     className="flex border-b border-zinc-700"
                                     style={{ height: TRACK_HEIGHT }}
@@ -473,16 +491,26 @@ export function TimelinePanel() {
                                         style={{ width: HEADER_WIDTH }}
                                         draggable
                                         onDragStart={() =>
-                                            setTrackDragState({ trackId: lane.track.id })
+                                            setTrackDragState({
+                                                trackId: lane.track.id,
+                                            })
                                         }
-                                        onDragOver={(event) => event.preventDefault()}
+                                        onDragOver={(event) =>
+                                            event.preventDefault()
+                                        }
                                         onDrop={(event) => {
                                             event.preventDefault();
-                                            const draggingTrackId = trackDragState?.trackId;
-                                            if (!draggingTrackId || draggingTrackId === lane.track.id) {
+                                            const draggingTrackId =
+                                                trackDragState?.trackId;
+                                            if (
+                                                !draggingTrackId ||
+                                                draggingTrackId ===
+                                                    lane.track.id
+                                            ) {
                                                 return;
                                             }
-                                            const parentTrackId = lane.track.parentId ?? null;
+                                            const parentTrackId =
+                                                lane.track.parentId ?? null;
                                             const targetIndex = siblingIndex(
                                                 lane.track.id,
                                                 parentTrackId,
@@ -501,9 +529,15 @@ export function TimelinePanel() {
                                             <button
                                                 type="button"
                                                 className={`truncate text-left text-xs ${selectedTrackId === lane.track.id ? "text-cyan-300" : "text-zinc-200"}`}
-                                                style={{ paddingLeft: `${(lane.track.depth ?? 0) * 10}px` }}
+                                                style={{
+                                                    paddingLeft: `${(lane.track.depth ?? 0) * 10}px`,
+                                                }}
                                                 onClick={() =>
-                                                    void dispatch(selectTrackRemote(lane.track.id))
+                                                    void dispatch(
+                                                        selectTrackRemote(
+                                                            lane.track.id,
+                                                        ),
+                                                    )
                                                 }
                                             >
                                                 {lane.track.name}
@@ -516,7 +550,8 @@ export function TimelinePanel() {
                                                         void dispatch(
                                                             addClipOnTrack({
                                                                 trackId:
-                                                                    lane.track.id,
+                                                                    lane.track
+                                                                        .id,
                                                             }),
                                                         )
                                                     }
@@ -530,7 +565,8 @@ export function TimelinePanel() {
                                                         void dispatch(
                                                             addTrackRemote({
                                                                 parentTrackId:
-                                                                    lane.track.id,
+                                                                    lane.track
+                                                                        .id,
                                                             }),
                                                         )
                                                     }
@@ -616,22 +652,31 @@ export function TimelinePanel() {
                                             />
                                             <div
                                                 className="rounded border border-zinc-600 px-1 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700"
-                                                onDragOver={(event) => event.preventDefault()}
+                                                onDragOver={(event) =>
+                                                    event.preventDefault()
+                                                }
                                                 onDrop={(event) => {
                                                     event.preventDefault();
-                                                    const draggingTrackId = trackDragState?.trackId;
-                                                    if (!draggingTrackId || draggingTrackId === lane.track.id) {
+                                                    const draggingTrackId =
+                                                        trackDragState?.trackId;
+                                                    if (
+                                                        !draggingTrackId ||
+                                                        draggingTrackId ===
+                                                            lane.track.id
+                                                    ) {
                                                         return;
                                                     }
                                                     void dispatch(
                                                         moveTrackRemote({
-                                                            trackId: draggingTrackId,
+                                                            trackId:
+                                                                draggingTrackId,
                                                             parentTrackId:
                                                                 lane.track.id,
                                                             targetIndex:
                                                                 lane.track
                                                                     .childTrackIds
-                                                                    ?.length ?? 0,
+                                                                    ?.length ??
+                                                                0,
                                                         }),
                                                     );
                                                     setTrackDragState(null);
@@ -714,11 +759,13 @@ export function TimelinePanel() {
                                                                 clip.id,
                                                             ),
                                                         );
-                                                        const laneIndex = lanes.findIndex(
-                                                            (item) =>
-                                                                item.track.id ===
-                                                                clip.trackId,
-                                                        );
+                                                        const laneIndex =
+                                                            lanes.findIndex(
+                                                                (item) =>
+                                                                    item.track
+                                                                        .id ===
+                                                                    clip.trackId,
+                                                            );
                                                         setDragState({
                                                             clipId: clip.id,
                                                             startX: event.clientX,
@@ -737,15 +784,19 @@ export function TimelinePanel() {
                                                 >
                                                     <span
                                                         className="absolute bottom-0 left-0 top-0 w-1.5 cursor-ew-resize rounded-l border-r border-white/20 bg-white/10"
-                                                        onPointerDown={(event) => {
+                                                        onPointerDown={(
+                                                            event,
+                                                        ) => {
                                                             event.preventDefault();
                                                             event.stopPropagation();
-                                                            const laneIndex = lanes.findIndex(
-                                                                (item) =>
-                                                                    item.track
-                                                                        .id ===
-                                                                    clip.trackId,
-                                                            );
+                                                            const laneIndex =
+                                                                lanes.findIndex(
+                                                                    (item) =>
+                                                                        item
+                                                                            .track
+                                                                            .id ===
+                                                                        clip.trackId,
+                                                                );
                                                             setDragState({
                                                                 clipId: clip.id,
                                                                 startX: event.clientX,
@@ -765,15 +816,19 @@ export function TimelinePanel() {
                                                     />
                                                     <span
                                                         className="absolute bottom-0 right-0 top-0 w-1.5 cursor-ew-resize rounded-r border-l border-white/20 bg-white/10"
-                                                        onPointerDown={(event) => {
+                                                        onPointerDown={(
+                                                            event,
+                                                        ) => {
                                                             event.preventDefault();
                                                             event.stopPropagation();
-                                                            const laneIndex = lanes.findIndex(
-                                                                (item) =>
-                                                                    item.track
-                                                                        .id ===
-                                                                    clip.trackId,
-                                                            );
+                                                            const laneIndex =
+                                                                lanes.findIndex(
+                                                                    (item) =>
+                                                                        item
+                                                                            .track
+                                                                            .id ===
+                                                                        clip.trackId,
+                                                                );
                                                             setDragState({
                                                                 clipId: clip.id,
                                                                 startX: event.clientX,
@@ -842,9 +897,14 @@ export function TimelinePanel() {
                                                     </div>
                                                     {playing && (
                                                         <div className="absolute right-1 top-1 rounded bg-cyan-200/80 px-1 text-[9px] font-semibold text-cyan-950">
-                                                            {runtime.playbackTarget === "synthesized"
-                                                                ? t("status_target_synthesized")
-                                                                : t("status_target_original")}
+                                                            {runtime.playbackTarget ===
+                                                            "synthesized"
+                                                                ? t(
+                                                                      "status_target_synthesized",
+                                                                  )
+                                                                : t(
+                                                                      "status_target_original",
+                                                                  )}
                                                         </div>
                                                     )}
                                                 </button>
@@ -905,7 +965,9 @@ export function TimelinePanel() {
                             <button
                                 type="button"
                                 className="absolute right-2 top-2 z-30 rounded border border-rose-300/35 bg-rose-500/20 px-2 py-1 text-[10px] text-rose-100 hover:bg-rose-500/35"
-                                onClick={() => void dispatch(removeSelectedClipRemote())}
+                                onClick={() =>
+                                    void dispatch(removeSelectedClipRemote())
+                                }
                             >
                                 {t("delete_clip")}
                             </button>

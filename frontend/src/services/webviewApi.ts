@@ -125,7 +125,8 @@ export const webApi = {
             payload.lengthBeats,
             payload.sourcePath,
         ),
-    removeClip: (clipId: string) => invoke<TimelineResult>("remove_clip", clipId),
+    removeClip: (clipId: string) =>
+        invoke<TimelineResult>("remove_clip", clipId),
     moveClip: (payload: {
         clipId: string;
         startBeat: number;

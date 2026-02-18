@@ -14,7 +14,9 @@ type TopMenu = "file" | "edit" | "view" | "track" | "help";
 
 export function MenuBar() {
     const dispatch = useAppDispatch();
-    const { busy, outputPath, selectedTrackId } = useAppSelector((state) => state.session);
+    const { busy, outputPath, selectedTrackId } = useAppSelector(
+        (state) => state.session,
+    );
     const { locale, setLocale, t } = useI18n();
     const menus = useMemo(
         () => [
@@ -193,7 +195,9 @@ export function MenuBar() {
                                         setOpenMenu(null);
                                         if (selectedTrackId) {
                                             void dispatch(
-                                                removeTrackRemote(selectedTrackId),
+                                                removeTrackRemote(
+                                                    selectedTrackId,
+                                                ),
                                             );
                                         }
                                     }}

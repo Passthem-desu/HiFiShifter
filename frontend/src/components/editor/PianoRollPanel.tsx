@@ -174,28 +174,32 @@ export function PianoRollPanel() {
 
             <div className="mb-2 rounded border border-zinc-700 bg-zinc-900/70 p-2 text-[11px] text-zinc-300">
                 <div>
-                    Track: {selectedTrackSummary.trackId ?? "-"} · Clips: {selectedTrackSummary.clipCount}
+                    Track: {selectedTrackSummary.trackId ?? "-"} · Clips:{" "}
+                    {selectedTrackSummary.clipCount}
                 </div>
                 <div>
-                    Pitch: {selectedTrackSummary.pitchRange.min.toFixed(1)} ~ {selectedTrackSummary.pitchRange.max.toFixed(1)}
+                    Pitch: {selectedTrackSummary.pitchRange.min.toFixed(1)} ~{" "}
+                    {selectedTrackSummary.pitchRange.max.toFixed(1)}
                 </div>
                 <div className="mt-1 h-6 overflow-hidden rounded bg-zinc-800/70">
                     <div className="flex h-full items-end gap-[1px]">
-                        {selectedTrackSummary.waveformPreview.slice(0, 180).map((value, idx) => {
-                            const height = Math.max(
-                                1,
-                                Math.round(
-                                    Math.min(1, Math.max(0, value)) * 100,
-                                ),
-                            );
-                            return (
-                                <span
-                                    key={`track_wf_${idx}`}
-                                    className="w-[1px] bg-zinc-200/80"
-                                    style={{ height: `${height}%` }}
-                                />
-                            );
-                        })}
+                        {selectedTrackSummary.waveformPreview
+                            .slice(0, 180)
+                            .map((value, idx) => {
+                                const height = Math.max(
+                                    1,
+                                    Math.round(
+                                        Math.min(1, Math.max(0, value)) * 100,
+                                    ),
+                                );
+                                return (
+                                    <span
+                                        key={`track_wf_${idx}`}
+                                        className="w-[1px] bg-zinc-200/80"
+                                        style={{ height: `${height}%` }}
+                                    />
+                                );
+                            })}
                     </div>
                 </div>
             </div>

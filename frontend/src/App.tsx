@@ -188,10 +188,15 @@ function App() {
             <ActionBar />
 
             <div className="min-h-0 flex-1 px-2 pb-2 pt-1.5">
-                <div ref={editorRef} className="flex h-full min-h-0 flex-col gap-0">
+                <div
+                    ref={editorRef}
+                    className="flex h-full min-h-0 flex-col gap-0"
+                >
                     <div
                         className="min-h-0"
-                        style={{ flexBasis: `${Math.max(30, Math.min(80, timelineRatio * 100))}%` }}
+                        style={{
+                            flexBasis: `${Math.max(30, Math.min(80, timelineRatio * 100))}%`,
+                        }}
                     >
                         <TimelinePanel />
                     </div>
@@ -203,12 +208,16 @@ function App() {
                             const startRatio = timelineRatio;
                             const container = editorRef.current;
                             if (!container) return;
-                            const totalHeight = container.getBoundingClientRect().height;
+                            const totalHeight =
+                                container.getBoundingClientRect().height;
 
                             const onMove = (moveEvent: MouseEvent) => {
                                 const dy = moveEvent.clientY - startY;
-                                const next = startRatio + dy / Math.max(1, totalHeight);
-                                setTimelineRatio(Math.max(0.3, Math.min(0.8, next)));
+                                const next =
+                                    startRatio + dy / Math.max(1, totalHeight);
+                                setTimelineRatio(
+                                    Math.max(0.3, Math.min(0.8, next)),
+                                );
                             };
                             const onUp = () => {
                                 window.removeEventListener("mousemove", onMove);

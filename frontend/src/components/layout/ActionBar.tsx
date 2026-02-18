@@ -19,8 +19,8 @@ import { useI18n } from "../../i18n/I18nProvider";
 
 function btnClass(primary = false) {
     return primary
-    ? "rounded border border-zinc-500 bg-zinc-600 px-2.5 py-1 text-xs font-semibold text-zinc-100 hover:bg-zinc-500 disabled:opacity-50"
-    : "rounded border border-zinc-600 bg-zinc-700 px-2.5 py-1 text-xs font-semibold text-zinc-100 hover:bg-zinc-600 disabled:opacity-50";
+        ? "rounded border border-zinc-500 bg-zinc-600 px-2.5 py-1 text-xs font-semibold text-zinc-100 hover:bg-zinc-500 disabled:opacity-50"
+        : "rounded border border-zinc-600 bg-zinc-700 px-2.5 py-1 text-xs font-semibold text-zinc-100 hover:bg-zinc-600 disabled:opacity-50";
 }
 
 export function ActionBar() {
