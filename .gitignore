@@ -164,3 +164,4 @@ cython_debug/
 /pretrained/
 
 run_gui.bat
+build_and_run.bat
