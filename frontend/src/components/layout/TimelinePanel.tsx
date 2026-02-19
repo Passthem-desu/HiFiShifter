@@ -57,20 +57,14 @@ function waveformAreaPath(
     let top = `M 0 ${mid.toFixed(2)}`;
     for (let i = 0; i < samples.length; i++) {
         const x = i * step;
-        const amp = Math.max(
-            0,
-            Math.min(1, Math.abs(samples[i] ?? 0) * s),
-        );
+        const amp = Math.max(0, Math.min(1, Math.abs(samples[i] ?? 0) * s));
         const y = mid - amp * scale;
         top += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
     }
     let bottom = "";
     for (let i = samples.length - 1; i >= 0; i--) {
         const x = i * step;
-        const amp = Math.max(
-            0,
-            Math.min(1, Math.abs(samples[i] ?? 0) * s),
-        );
+        const amp = Math.max(0, Math.min(1, Math.abs(samples[i] ?? 0) * s));
         const y = mid + amp * scale;
         bottom += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
     }
@@ -177,14 +171,11 @@ export const TimelinePanel: React.FC = () => {
         [multiSelectedClipIds],
     );
 
-    const [contextMenu, setContextMenu] = useState<
-        | {
-              x: number;
-              y: number;
-              clipId: string;
-          }
-        | null
-    >(null);
+    const [contextMenu, setContextMenu] = useState<{
+        x: number;
+        y: number;
+        clipId: string;
+    } | null>(null);
 
     const selectionDragRef = useRef<{
         pointerId: number;
@@ -193,38 +184,27 @@ export const TimelinePanel: React.FC = () => {
         curX: number;
         curY: number;
     } | null>(null);
-    const [selectionRect, setSelectionRect] = useState<
-        | {
-              x1: number;
-              y1: number;
-              x2: number;
-              y2: number;
-          }
-        | null
-    >(null);
+    const [selectionRect, setSelectionRect] = useState<{
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+    } | null>(null);
 
-    const editDragRef = useRef<
-        | {
-              type:
-                  | "trim_left"
-                  | "trim_right"
-                  | "fade_in"
-                  | "fade_out"
-                  | "gain";
-              pointerId: number;
-              clipId: string;
-              baseStartBeat: number;
-              baseLengthBeats: number;
-              baseTrimStartBeat: number;
-              baseTrimEndBeat: number;
-              baseFadeInBeats: number;
-              baseFadeOutBeats: number;
-              baseGain: number;
-              sourceBeats: number | null;
-              rightEdgeBeat: number;
-          }
-        | null
-    >(null);
+    const editDragRef = useRef<{
+        type: "trim_left" | "trim_right" | "fade_in" | "fade_out" | "gain";
+        pointerId: number;
+        clipId: string;
+        baseStartBeat: number;
+        baseLengthBeats: number;
+        baseTrimStartBeat: number;
+        baseTrimEndBeat: number;
+        baseFadeInBeats: number;
+        baseFadeOutBeats: number;
+        baseGain: number;
+        sourceBeats: number | null;
+        rightEdgeBeat: number;
+    } | null>(null);
 
     const contentWidth = useMemo(() => {
         const beats = Math.max(8, Math.ceil(s.projectBeats));
@@ -483,13 +463,17 @@ export const TimelinePanel: React.FC = () => {
             if (drag.type === "fade_in") {
                 const raw = beat - drag.baseStartBeat;
                 const next = clamp(raw, 0, Math.max(0, drag.baseLengthBeats));
-                dispatch(setClipFades({ clipId: drag.clipId, fadeInBeats: next }));
+                dispatch(
+                    setClipFades({ clipId: drag.clipId, fadeInBeats: next }),
+                );
                 return;
             }
             if (drag.type === "fade_out") {
                 const raw = drag.rightEdgeBeat - beat;
                 const next = clamp(raw, 0, Math.max(0, drag.baseLengthBeats));
-                dispatch(setClipFades({ clipId: drag.clipId, fadeOutBeats: next }));
+                dispatch(
+                    setClipFades({ clipId: drag.clipId, fadeOutBeats: next }),
+                );
                 return;
             }
             if (drag.type === "gain") {
@@ -503,7 +487,11 @@ export const TimelinePanel: React.FC = () => {
             }
 
             if (drag.type === "trim_left") {
-                const desiredStart = clamp(beat, 0, drag.rightEdgeBeat - minLen);
+                const desiredStart = clamp(
+                    beat,
+                    0,
+                    drag.rightEdgeBeat - minLen,
+                );
                 const desiredDelta = desiredStart - drag.baseStartBeat;
 
                 let nextTrimStart = drag.baseTrimStartBeat + desiredDelta;
@@ -511,7 +499,10 @@ export const TimelinePanel: React.FC = () => {
                     nextTrimStart = clamp(
                         nextTrimStart,
                         0,
-                        Math.max(0, sourceBeats - drag.baseTrimEndBeat - minLen),
+                        Math.max(
+                            0,
+                            sourceBeats - drag.baseTrimEndBeat - minLen,
+                        ),
                     );
                 } else {
                     nextTrimStart = Math.max(0, nextTrimStart);
@@ -524,9 +515,24 @@ export const TimelinePanel: React.FC = () => {
                     10_000,
                 );
 
-                dispatch(moveClipStart({ clipId: drag.clipId, startBeat: nextStart }));
-                dispatch(setClipLength({ clipId: drag.clipId, lengthBeats: nextLen }));
-                dispatch(setClipTrim({ clipId: drag.clipId, trimStartBeat: nextTrimStart }));
+                dispatch(
+                    moveClipStart({
+                        clipId: drag.clipId,
+                        startBeat: nextStart,
+                    }),
+                );
+                dispatch(
+                    setClipLength({
+                        clipId: drag.clipId,
+                        lengthBeats: nextLen,
+                    }),
+                );
+                dispatch(
+                    setClipTrim({
+                        clipId: drag.clipId,
+                        trimStartBeat: nextTrimStart,
+                    }),
+                );
                 return;
             }
 
@@ -543,16 +549,33 @@ export const TimelinePanel: React.FC = () => {
                     nextTrimEnd = clamp(
                         nextTrimEnd,
                         0,
-                        Math.max(0, sourceBeats - drag.baseTrimStartBeat - minLen),
+                        Math.max(
+                            0,
+                            sourceBeats - drag.baseTrimStartBeat - minLen,
+                        ),
                     );
                 } else {
                     nextTrimEnd = Math.max(0, nextTrimEnd);
                 }
                 const actualDelta = drag.baseTrimEndBeat - nextTrimEnd;
-                const nextLen = clamp(drag.baseLengthBeats + actualDelta, minLen, 10_000);
+                const nextLen = clamp(
+                    drag.baseLengthBeats + actualDelta,
+                    minLen,
+                    10_000,
+                );
 
-                dispatch(setClipLength({ clipId: drag.clipId, lengthBeats: nextLen }));
-                dispatch(setClipTrim({ clipId: drag.clipId, trimEndBeat: nextTrimEnd }));
+                dispatch(
+                    setClipLength({
+                        clipId: drag.clipId,
+                        lengthBeats: nextLen,
+                    }),
+                );
+                dispatch(
+                    setClipTrim({
+                        clipId: drag.clipId,
+                        trimEndBeat: nextTrimEnd,
+                    }),
+                );
             }
         }
 
@@ -631,7 +654,8 @@ export const TimelinePanel: React.FC = () => {
         if (!Number.isFinite(durationSec) || durationSec <= 0) return samples;
         const bpm = Math.max(1e-6, Number(s.bpm) || 120);
         const sourceBeats = (durationSec * bpm) / 60;
-        if (!Number.isFinite(sourceBeats) || sourceBeats <= 1e-6) return samples;
+        if (!Number.isFinite(sourceBeats) || sourceBeats <= 1e-6)
+            return samples;
 
         const trimStart = Math.max(0, Number(clip.trimStartBeat ?? 0) || 0);
         const trimEnd = Math.max(0, Number(clip.trimEndBeat ?? 0) || 0);
@@ -651,7 +675,11 @@ export const TimelinePanel: React.FC = () => {
         function onKeyDown(e: KeyboardEvent) {
             if (e.repeat) return;
             if (e.ctrlKey || e.metaKey || e.altKey) return;
-            if (isEditableTarget(document.activeElement) || isEditableTarget(e.target)) return;
+            if (
+                isEditableTarget(document.activeElement) ||
+                isEditableTarget(e.target)
+            )
+                return;
 
             if (e.key.toLowerCase() === "s") {
                 const clipId = s.selectedClipId;
@@ -678,7 +706,8 @@ export const TimelinePanel: React.FC = () => {
             setContextMenu(null);
         }
         window.addEventListener("pointerdown", onAnyPointerDown, true);
-        return () => window.removeEventListener("pointerdown", onAnyPointerDown, true);
+        return () =>
+            window.removeEventListener("pointerdown", onAnyPointerDown, true);
     }, [contextMenu]);
 
     function startClipDrag(
@@ -703,8 +732,10 @@ export const TimelinePanel: React.FC = () => {
                 ? [...multiSelectedClipIds]
                 : [clipId];
 
-        const initialById: Record<string, { startBeat: number; trackId: string }> =
-            {};
+        const initialById: Record<
+            string,
+            { startBeat: number; trackId: string }
+        > = {};
         let minStartBeat = Number.POSITIVE_INFINITY;
         let allowTrackMove = true;
         let baseTrackId: string | null = null;
@@ -753,7 +784,7 @@ export const TimelinePanel: React.FC = () => {
             drag.lastDeltaBeat = deltaBeat;
 
             const nextTrackId = drag.allowTrackMove
-                ? trackIdFromClientY(ev.clientY) ?? drag.lastTrackId
+                ? (trackIdFromClientY(ev.clientY) ?? drag.lastTrackId)
                 : drag.initialAnchorTrackId;
             if (drag.allowTrackMove && nextTrackId !== drag.lastTrackId) {
                 drag.lastTrackId = nextTrackId;
@@ -769,7 +800,9 @@ export const TimelinePanel: React.FC = () => {
                     }),
                 );
                 if (drag.allowTrackMove) {
-                    dispatch(moveClipTrack({ clipId: id, trackId: nextTrackId }));
+                    dispatch(
+                        moveClipTrack({ clipId: id, trackId: nextTrackId }),
+                    );
                 }
             }
         }
@@ -1064,7 +1097,12 @@ export const TimelinePanel: React.FC = () => {
                         function onMove(ev: PointerEvent) {
                             const drag = selectionDragRef.current;
                             const current = scrollRef.current;
-                            if (!drag || drag.pointerId !== e.pointerId || !current) return;
+                            if (
+                                !drag ||
+                                drag.pointerId !== e.pointerId ||
+                                !current
+                            )
+                                return;
                             const b = current.getBoundingClientRect();
                             const cx = ev.clientX - b.left + current.scrollLeft;
                             const cy = ev.clientY - b.top + current.scrollTop;
@@ -1098,7 +1136,9 @@ export const TimelinePanel: React.FC = () => {
                                 );
                                 if (trackIdx < 0) continue;
                                 const cx1 = clip.startBeat * pxPerBeat;
-                                const cx2 = (clip.startBeat + clip.lengthBeats) * pxPerBeat;
+                                const cx2 =
+                                    (clip.startBeat + clip.lengthBeats) *
+                                    pxPerBeat;
                                 const cy1 = trackIdx * rowHeight;
                                 const cy2 = cy1 + rowHeight;
                                 const hit =
@@ -1332,7 +1372,11 @@ export const TimelinePanel: React.FC = () => {
                                         );
                                         const waveformAmpScale = clip.muted
                                             ? 0
-                                            : clamp(Number(clip.gain ?? 1), 0, 4);
+                                            : clamp(
+                                                  Number(clip.gain ?? 1),
+                                                  0,
+                                                  4,
+                                              );
                                         const waveform =
                                             s.clipWaveforms[clip.id];
                                         const stereo =
@@ -1359,10 +1403,20 @@ export const TimelinePanel: React.FC = () => {
                                                 onContextMenu={(e) => {
                                                     e.preventDefault();
                                                     e.stopPropagation();
-                                                    if (!multiSelectedSet.has(clip.id)) {
-                                                        setMultiSelectedClipIds([clip.id]);
+                                                    if (
+                                                        !multiSelectedSet.has(
+                                                            clip.id,
+                                                        )
+                                                    ) {
+                                                        setMultiSelectedClipIds(
+                                                            [clip.id],
+                                                        );
                                                     }
-                                                    void dispatch(selectClipRemote(clip.id));
+                                                    void dispatch(
+                                                        selectClipRemote(
+                                                            clip.id,
+                                                        ),
+                                                    );
                                                     setContextMenu({
                                                         x: e.clientX,
                                                         y: e.clientY,
@@ -1383,11 +1437,19 @@ export const TimelinePanel: React.FC = () => {
                                                     if (
                                                         multiSelectedClipIds.length ===
                                                             0 ||
-                                                        !multiSelectedSet.has(clip.id)
+                                                        !multiSelectedSet.has(
+                                                            clip.id,
+                                                        )
                                                     ) {
-                                                        setMultiSelectedClipIds([clip.id]);
+                                                        setMultiSelectedClipIds(
+                                                            [clip.id],
+                                                        );
                                                     }
-                                                    void dispatch(selectClipRemote(clip.id));
+                                                    void dispatch(
+                                                        selectClipRemote(
+                                                            clip.id,
+                                                        ),
+                                                    );
                                                     startClipDrag(
                                                         e,
                                                         clip.id,
@@ -1401,18 +1463,28 @@ export const TimelinePanel: React.FC = () => {
                                                 {/* Trim handles */}
                                                 <div
                                                     className="absolute left-0 top-0 bottom-0 w-[6px] z-40"
-                                                    style={{ cursor: "ew-resize" }}
+                                                    style={{
+                                                        cursor: "ew-resize",
+                                                    }}
                                                     onPointerDown={(e) => {
                                                         e.preventDefault();
                                                         e.stopPropagation();
                                                         if (
                                                             multiSelectedClipIds.length ===
                                                                 0 ||
-                                                            !multiSelectedSet.has(clip.id)
+                                                            !multiSelectedSet.has(
+                                                                clip.id,
+                                                            )
                                                         ) {
-                                                            setMultiSelectedClipIds([clip.id]);
+                                                            setMultiSelectedClipIds(
+                                                                [clip.id],
+                                                            );
                                                         }
-                                                        void dispatch(selectClipRemote(clip.id));
+                                                        void dispatch(
+                                                            selectClipRemote(
+                                                                clip.id,
+                                                            ),
+                                                        );
                                                         startEditDrag(
                                                             e,
                                                             clip.id,
@@ -1422,18 +1494,28 @@ export const TimelinePanel: React.FC = () => {
                                                 />
                                                 <div
                                                     className="absolute right-0 top-0 bottom-0 w-[6px] z-40"
-                                                    style={{ cursor: "ew-resize" }}
+                                                    style={{
+                                                        cursor: "ew-resize",
+                                                    }}
                                                     onPointerDown={(e) => {
                                                         e.preventDefault();
                                                         e.stopPropagation();
                                                         if (
                                                             multiSelectedClipIds.length ===
                                                                 0 ||
-                                                            !multiSelectedSet.has(clip.id)
+                                                            !multiSelectedSet.has(
+                                                                clip.id,
+                                                            )
                                                         ) {
-                                                            setMultiSelectedClipIds([clip.id]);
+                                                            setMultiSelectedClipIds(
+                                                                [clip.id],
+                                                            );
                                                         }
-                                                        void dispatch(selectClipRemote(clip.id));
+                                                        void dispatch(
+                                                            selectClipRemote(
+                                                                clip.id,
+                                                            ),
+                                                        );
                                                         startEditDrag(
                                                             e,
                                                             clip.id,
@@ -1445,18 +1527,28 @@ export const TimelinePanel: React.FC = () => {
                                                 {/* Fade handles (top corners) */}
                                                 <div
                                                     className="absolute left-0 top-0 w-[14px] h-[14px] z-50"
-                                                    style={{ cursor: "nwse-resize" }}
+                                                    style={{
+                                                        cursor: "nwse-resize",
+                                                    }}
                                                     onPointerDown={(e) => {
                                                         e.preventDefault();
                                                         e.stopPropagation();
                                                         if (
                                                             multiSelectedClipIds.length ===
                                                                 0 ||
-                                                            !multiSelectedSet.has(clip.id)
+                                                            !multiSelectedSet.has(
+                                                                clip.id,
+                                                            )
                                                         ) {
-                                                            setMultiSelectedClipIds([clip.id]);
+                                                            setMultiSelectedClipIds(
+                                                                [clip.id],
+                                                            );
                                                         }
-                                                        void dispatch(selectClipRemote(clip.id));
+                                                        void dispatch(
+                                                            selectClipRemote(
+                                                                clip.id,
+                                                            ),
+                                                        );
                                                         startEditDrag(
                                                             e,
                                                             clip.id,
@@ -1466,18 +1558,28 @@ export const TimelinePanel: React.FC = () => {
                                                 />
                                                 <div
                                                     className="absolute right-0 top-0 w-[14px] h-[14px] z-50"
-                                                    style={{ cursor: "nesw-resize" }}
+                                                    style={{
+                                                        cursor: "nesw-resize",
+                                                    }}
                                                     onPointerDown={(e) => {
                                                         e.preventDefault();
                                                         e.stopPropagation();
                                                         if (
                                                             multiSelectedClipIds.length ===
                                                                 0 ||
-                                                            !multiSelectedSet.has(clip.id)
+                                                            !multiSelectedSet.has(
+                                                                clip.id,
+                                                            )
                                                         ) {
-                                                            setMultiSelectedClipIds([clip.id]);
+                                                            setMultiSelectedClipIds(
+                                                                [clip.id],
+                                                            );
                                                         }
-                                                        void dispatch(selectClipRemote(clip.id));
+                                                        void dispatch(
+                                                            selectClipRemote(
+                                                                clip.id,
+                                                            ),
+                                                        );
                                                         startEditDrag(
                                                             e,
                                                             clip.id,
@@ -1490,14 +1592,19 @@ export const TimelinePanel: React.FC = () => {
                                                 <div
                                                     className="absolute left-1 right-1 flex items-center gap-1 z-50"
                                                     style={{
-                                                        top: -CLIP_HEADER_HEIGHT + 1,
+                                                        top:
+                                                            -CLIP_HEADER_HEIGHT +
+                                                            1,
                                                         height: CLIP_HEADER_HEIGHT,
                                                         pointerEvents: "none",
                                                     }}
                                                 >
                                                     <button
                                                         className={`w-5 h-4 rounded text-[10px] border transition-all ${clip.muted ? "bg-red-900 text-red-200 border-red-500" : "bg-qt-button text-gray-300 border-transparent hover:border-red-500 hover:bg-red-900 hover:text-red-200"}`}
-                                                        style={{ pointerEvents: "auto" }}
+                                                        style={{
+                                                            pointerEvents:
+                                                                "auto",
+                                                        }}
                                                         onPointerDown={(e) => {
                                                             e.preventDefault();
                                                             e.stopPropagation();
@@ -1505,7 +1612,10 @@ export const TimelinePanel: React.FC = () => {
                                                         onClick={(e) => {
                                                             e.preventDefault();
                                                             e.stopPropagation();
-                                                            const next = !Boolean(clip.muted);
+                                                            const next =
+                                                                !Boolean(
+                                                                    clip.muted,
+                                                                );
                                                             dispatch(
                                                                 setClipMuted({
                                                                     clipId: clip.id,
@@ -1513,13 +1623,19 @@ export const TimelinePanel: React.FC = () => {
                                                                 }),
                                                             );
                                                             void dispatch(
-                                                                setClipStateRemote({
-                                                                    clipId: clip.id,
-                                                                    muted: next,
-                                                                }),
+                                                                setClipStateRemote(
+                                                                    {
+                                                                        clipId: clip.id,
+                                                                        muted: next,
+                                                                    },
+                                                                ),
                                                             );
                                                         }}
-                                                        title={clip.muted ? "Unmute" : "Mute"}
+                                                        title={
+                                                            clip.muted
+                                                                ? "Unmute"
+                                                                : "Mute"
+                                                        }
                                                     >
                                                         M
                                                     </button>
@@ -1528,7 +1644,8 @@ export const TimelinePanel: React.FC = () => {
                                                         title={`${gainToDb(clip.gain).toFixed(1)} dB`}
                                                         style={{
                                                             cursor: "ns-resize",
-                                                            pointerEvents: "auto",
+                                                            pointerEvents:
+                                                                "auto",
                                                         }}
                                                         onPointerDown={(e) => {
                                                             e.preventDefault();
@@ -1536,11 +1653,19 @@ export const TimelinePanel: React.FC = () => {
                                                             if (
                                                                 multiSelectedClipIds.length ===
                                                                     0 ||
-                                                                !multiSelectedSet.has(clip.id)
+                                                                !multiSelectedSet.has(
+                                                                    clip.id,
+                                                                )
                                                             ) {
-                                                                setMultiSelectedClipIds([clip.id]);
+                                                                setMultiSelectedClipIds(
+                                                                    [clip.id],
+                                                                );
                                                             }
-                                                            void dispatch(selectClipRemote(clip.id));
+                                                            void dispatch(
+                                                                selectClipRemote(
+                                                                    clip.id,
+                                                                ),
+                                                            );
                                                             startEditDrag(
                                                                 e,
                                                                 clip.id,
@@ -1558,10 +1683,13 @@ export const TimelinePanel: React.FC = () => {
                                                     </div>
 
                                                     <div className="text-[10px] text-white/80 drop-shadow-md pointer-events-none">
-                                                        {gainToDb(clip.gain) >= 0
+                                                        {gainToDb(clip.gain) >=
+                                                        0
                                                             ? "+"
                                                             : ""}
-                                                        {gainToDb(clip.gain).toFixed(1)}
+                                                        {gainToDb(
+                                                            clip.gain,
+                                                        ).toFixed(1)}
                                                         dB
                                                     </div>
                                                 </div>
@@ -1651,117 +1779,127 @@ export const TimelinePanel: React.FC = () => {
                                                 </div>
 
                                                 <div className="absolute inset-x-0 inset-y-1 opacity-50">
-                                                    {stereo ? (
-                                                        (() => {
-                                                            const w = Math.max(
-                                                                1,
-                                                                Math.floor(
-                                                                    width,
-                                                                ),
-                                                            );
-                                                            const h = 22;
-                                                            const wf =
-                                                                waveform as {
-                                                                    l: number[];
-                                                                    r: number[];
-                                                                };
-                                                            const leftSamples = sliceWaveformSamples(
-                                                                wf.l ?? [],
-                                                                clip,
-                                                            );
-                                                            const rightSamples = sliceWaveformSamples(
-                                                                wf.r ?? [],
-                                                                clip,
-                                                            );
-                                                            return (
-                                                                <svg
-                                                                    viewBox={`0 0 ${w} ${h}`}
-                                                                    preserveAspectRatio="none"
-                                                                    className="w-full h-full"
-                                                                >
-                                                                    <path
-                                                                        d={waveformAreaPath(
-                                                                            leftSamples,
-                                                                            w,
-                                                                            h /
-                                                                                2,
-                                                                            waveformAmpScale,
-                                                                        )}
-                                                                        transform={`translate(0,0)`}
-                                                                        fill="rgba(255,255,255,0.55)"
-                                                                        stroke="rgba(255,255,255,0.25)"
-                                                                        strokeWidth="1"
-                                                                        vectorEffect="non-scaling-stroke"
-                                                                    />
-                                                                    <path
-                                                                        d={waveformAreaPath(
-                                                                            rightSamples,
-                                                                            w,
-                                                                            h /
-                                                                                2,
-                                                                            waveformAmpScale,
-                                                                        )}
-                                                                        transform={`translate(0,${h / 2})`}
-                                                                        fill="rgba(255,255,255,0.55)"
-                                                                        stroke="rgba(255,255,255,0.25)"
-                                                                        strokeWidth="1"
-                                                                        vectorEffect="non-scaling-stroke"
-                                                                    />
-                                                                    <line
-                                                                        x1="0"
-                                                                        x2={w}
-                                                                        y1={
-                                                                            h /
-                                                                            2
-                                                                        }
-                                                                        y2={
-                                                                            h /
-                                                                            2
-                                                                        }
-                                                                        stroke="rgba(255,255,255,0.15)"
-                                                                        strokeWidth="1"
-                                                                        vectorEffect="non-scaling-stroke"
-                                                                    />
-                                                                </svg>
-                                                            );
-                                                        })()
-                                                    ) : Array.isArray(
-                                                          waveform,
-                                                      ) &&
-                                                      waveform.length > 0 ? (
-                                                        (() => {
-                                                            const mono = sliceWaveformSamples(
+                                                    {stereo
+                                                        ? (() => {
+                                                              const w =
+                                                                  Math.max(
+                                                                      1,
+                                                                      Math.floor(
+                                                                          width,
+                                                                      ),
+                                                                  );
+                                                              const h = 22;
+                                                              const wf =
+                                                                  waveform as {
+                                                                      l: number[];
+                                                                      r: number[];
+                                                                  };
+                                                              const leftSamples =
+                                                                  sliceWaveformSamples(
+                                                                      wf.l ??
+                                                                          [],
+                                                                      clip,
+                                                                  );
+                                                              const rightSamples =
+                                                                  sliceWaveformSamples(
+                                                                      wf.r ??
+                                                                          [],
+                                                                      clip,
+                                                                  );
+                                                              return (
+                                                                  <svg
+                                                                      viewBox={`0 0 ${w} ${h}`}
+                                                                      preserveAspectRatio="none"
+                                                                      className="w-full h-full"
+                                                                  >
+                                                                      <path
+                                                                          d={waveformAreaPath(
+                                                                              leftSamples,
+                                                                              w,
+                                                                              h /
+                                                                                  2,
+                                                                              waveformAmpScale,
+                                                                          )}
+                                                                          transform={`translate(0,0)`}
+                                                                          fill="rgba(255,255,255,0.55)"
+                                                                          stroke="rgba(255,255,255,0.25)"
+                                                                          strokeWidth="1"
+                                                                          vectorEffect="non-scaling-stroke"
+                                                                      />
+                                                                      <path
+                                                                          d={waveformAreaPath(
+                                                                              rightSamples,
+                                                                              w,
+                                                                              h /
+                                                                                  2,
+                                                                              waveformAmpScale,
+                                                                          )}
+                                                                          transform={`translate(0,${h / 2})`}
+                                                                          fill="rgba(255,255,255,0.55)"
+                                                                          stroke="rgba(255,255,255,0.25)"
+                                                                          strokeWidth="1"
+                                                                          vectorEffect="non-scaling-stroke"
+                                                                      />
+                                                                      <line
+                                                                          x1="0"
+                                                                          x2={w}
+                                                                          y1={
+                                                                              h /
+                                                                              2
+                                                                          }
+                                                                          y2={
+                                                                              h /
+                                                                              2
+                                                                          }
+                                                                          stroke="rgba(255,255,255,0.15)"
+                                                                          strokeWidth="1"
+                                                                          vectorEffect="non-scaling-stroke"
+                                                                      />
+                                                                  </svg>
+                                                              );
+                                                          })()
+                                                        : Array.isArray(
                                                                 waveform,
-                                                                clip,
-                                                            );
-                                                            if (mono.length < 2) return null;
-                                                            return (
-                                                        <svg
-                                                            viewBox={`0 0 ${Math.max(1, Math.floor(width))} 20`}
-                                                            preserveAspectRatio="none"
-                                                            className="w-full h-full"
-                                                        >
-                                                            <path
-                                                                d={waveformAreaPath(
-                                                                    mono,
-                                                                    Math.max(
-                                                                        1,
-                                                                        Math.floor(
-                                                                            width,
-                                                                        ),
-                                                                    ),
-                                                                    20,
-                                                                    waveformAmpScale,
-                                                                )}
-                                                                fill="rgba(255,255,255,0.55)"
-                                                                stroke="rgba(255,255,255,0.25)"
-                                                                strokeWidth="1"
-                                                                vectorEffect="non-scaling-stroke"
-                                                            />
-                                                        </svg>
-                                                            );
-                                                        })()
-                                                    ) : null}
+                                                            ) &&
+                                                            waveform.length > 0
+                                                          ? (() => {
+                                                                const mono =
+                                                                    sliceWaveformSamples(
+                                                                        waveform,
+                                                                        clip,
+                                                                    );
+                                                                if (
+                                                                    mono.length <
+                                                                    2
+                                                                )
+                                                                    return null;
+                                                                return (
+                                                                    <svg
+                                                                        viewBox={`0 0 ${Math.max(1, Math.floor(width))} 20`}
+                                                                        preserveAspectRatio="none"
+                                                                        className="w-full h-full"
+                                                                    >
+                                                                        <path
+                                                                            d={waveformAreaPath(
+                                                                                mono,
+                                                                                Math.max(
+                                                                                    1,
+                                                                                    Math.floor(
+                                                                                        width,
+                                                                                    ),
+                                                                                ),
+                                                                                20,
+                                                                                waveformAmpScale,
+                                                                            )}
+                                                                            fill="rgba(255,255,255,0.55)"
+                                                                            stroke="rgba(255,255,255,0.25)"
+                                                                            strokeWidth="1"
+                                                                            vectorEffect="non-scaling-stroke"
+                                                                        />
+                                                                    </svg>
+                                                                );
+                                                            })()
+                                                          : null}
                                                 </div>
                                             </div>
                                         );
@@ -1891,7 +2029,10 @@ export const TimelinePanel: React.FC = () => {
                                 );
                                 if (clips.length !== ids.length) return true;
                                 const trackId = clips[0]?.trackId;
-                                return !trackId || clips.some((c) => c.trackId !== trackId);
+                                return (
+                                    !trackId ||
+                                    clips.some((c) => c.trackId !== trackId)
+                                );
                             })()}
                             onClick={() => {
                                 const ids =

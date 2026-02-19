@@ -21,7 +21,9 @@ type PyWebviewApi = Record<string, (...args: any[]) => Promise<any>>;
 
 let pywebviewAvailability: "unknown" | "available" | "unavailable" = "unknown";
 
-async function waitForPyWebviewApi(timeoutMs: number): Promise<PyWebviewApi | null> {
+async function waitForPyWebviewApi(
+    timeoutMs: number,
+): Promise<PyWebviewApi | null> {
     const already = window.pywebview?.api;
     if (already) {
         pywebviewAvailability = "available";
@@ -54,12 +56,19 @@ async function waitForPyWebviewApi(timeoutMs: number): Promise<PyWebviewApi | nu
             if (window.pywebview?.api) finish();
         }, 25);
 
-        const timeoutId = window.setTimeout(() => {
-            finish();
-        }, Math.max(0, timeoutMs));
+        const timeoutId = window.setTimeout(
+            () => {
+                finish();
+            },
+            Math.max(0, timeoutMs),
+        );
 
-        window.addEventListener("pywebviewready", onReady as any, { once: true });
-        document.addEventListener("pywebviewready", onReady as any, { once: true });
+        window.addEventListener("pywebviewready", onReady as any, {
+            once: true,
+        });
+        document.addEventListener("pywebviewready", onReady as any, {
+            once: true,
+        });
     });
 
     const api = window.pywebview?.api as PyWebviewApi | undefined;

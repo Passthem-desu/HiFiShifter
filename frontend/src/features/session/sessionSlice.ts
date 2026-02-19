@@ -704,7 +704,9 @@ export const importAudioFileAtPosition = createAsyncThunk(
             };
         } catch (err) {
             return rejectWithValue(
-                err instanceof Error ? err.message : "import_audio_bytes_failed",
+                err instanceof Error
+                    ? err.message
+                    : "import_audio_bytes_failed",
             );
         }
     },
