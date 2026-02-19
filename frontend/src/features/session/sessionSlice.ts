@@ -11,7 +11,7 @@ import type {
 } from "../../types/api";
 
 export type ToolMode = "draw" | "select";
-export type EditParam = "pitch" | "tension";
+export type EditParam = "pitch" | "tension" | "breath";
 export type GridSize = "1/4" | "1/8" | "1/16" | "1/32";
 
 export interface TrackInfo {
@@ -33,11 +33,14 @@ export interface ClipInfo {
     lengthBeats: number;
     color: "blue" | "violet" | "emerald" | "amber";
     sourcePath?: string;
+    durationSec?: number;
     gain: number;
     muted: boolean;
     trimStartBeat: number;
     trimEndBeat: number;
     playbackRate: number;
+    fadeInBeats: number;
+    fadeOutBeats: number;
 }
 
 type ClipColor = ClipInfo["color"];
@@ -47,6 +50,8 @@ export interface AutomationPoint {
     beat: number;
     value: number;
 }
+
+type WaveformPreview = number[] | { l: number[]; r: number[] };
 
 interface SessionState {
     toolMode: ToolMode;
@@ -66,10 +71,11 @@ interface SessionState {
         {
             pitch: AutomationPoint[];
             tension: AutomationPoint[];
+            breath: AutomationPoint[];
         }
     >;
     selectedPointId: string | null;
-    clipWaveforms: Record<string, number[]>;
+    clipWaveforms: Record<string, WaveformPreview>;
     clipPitchRanges: Record<string, { min: number; max: number }>;
 
     modelDir: string;
@@ -113,7 +119,7 @@ interface StateSnapshot {
     selectedClipId: string | null;
     selectedPointId: string | null;
     playheadBeat: number;
-    clipWaveforms: Record<string, number[]>;
+    clipWaveforms: Record<string, WaveformPreview>;
     clipPitchRanges: Record<string, { min: number; max: number }>;
 }
 
@@ -138,6 +144,12 @@ function createDefaultAutomation() {
             { id: createId("pt_t"), beat: 4, value: 0.72 },
             { id: createId("pt_t"), beat: 8, value: 0.42 },
             { id: createId("pt_t"), beat: 12, value: 0.6 },
+        ],
+        breath: [
+            { id: createId("pt_b"), beat: 0, value: 0.1 },
+            { id: createId("pt_b"), beat: 4, value: 0.18 },
+            { id: createId("pt_b"), beat: 8, value: 0.12 },
+            { id: createId("pt_b"), beat: 12, value: 0.2 },
         ],
     };
 }
@@ -164,7 +176,7 @@ function createSnapshot(state: SessionState): StateSnapshot {
         playheadBeat: state.playheadBeat,
         clipWaveforms: JSON.parse(
             JSON.stringify(state.clipWaveforms),
-        ) as Record<string, number[]>,
+        ) as Record<string, WaveformPreview>,
         clipPitchRanges: JSON.parse(
             JSON.stringify(state.clipPitchRanges),
         ) as Record<string, { min: number; max: number }>,
@@ -182,7 +194,7 @@ function applySnapshot(state: SessionState, snapshot: StateSnapshot) {
     state.playheadBeat = snapshot.playheadBeat;
     state.clipWaveforms = JSON.parse(
         JSON.stringify(snapshot.clipWaveforms),
-    ) as Record<string, number[]>;
+    ) as Record<string, WaveformPreview>;
     state.clipPitchRanges = JSON.parse(
         JSON.stringify(snapshot.clipPitchRanges),
     ) as Record<string, { min: number; max: number }>;
@@ -220,14 +232,17 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         trackId: clip.track_id,
         name: clip.name,
         startBeat: Number(clip.start_beat ?? 0),
-        lengthBeats: Math.max(0.25, Number(clip.length_beats ?? 1)),
+        lengthBeats: Math.max(0.0, Number(clip.length_beats ?? 1)),
         color: normalizeClipColor(clip.color),
         sourcePath: clip.source_path,
+        durationSec: Number(clip.duration_sec ?? 0) || undefined,
         gain: clamp(Number(clip.gain ?? 1), 0, 2),
         muted: Boolean(clip.muted),
         trimStartBeat: Math.max(0, Number(clip.trim_start_beat ?? 0)),
         trimEndBeat: Math.max(0, Number(clip.trim_end_beat ?? 0)),
         playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.25, 4),
+        fadeInBeats: Math.max(0, Number(clip.fade_in_beats ?? 0)),
+        fadeOutBeats: Math.max(0, Number(clip.fade_out_beats ?? 0)),
     }));
 
     state.selectedTrackId = timeline.selected_track_id;
@@ -246,11 +261,12 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         }
     }
 
-    const nextWaveforms: Record<string, number[]> = {};
+    const nextWaveforms: Record<string, WaveformPreview> = {};
     const nextPitchRanges: Record<string, { min: number; max: number }> = {};
     for (const clip of timeline.clips) {
         const clipId = clip.id;
-        nextWaveforms[clipId] = clip.waveform_preview ?? [];
+        nextWaveforms[clipId] = (clip.waveform_preview ??
+            []) as WaveformPreview;
         nextPitchRanges[clipId] = clip.pitch_range ?? { min: -24, max: 24 };
         ensureClipAutomation(state, clipId);
     }
@@ -309,11 +325,14 @@ function upsertImportedClip(
         lengthBeats,
         color: "emerald",
         sourcePath: audioPath,
+        durationSec: meta?.durationSec,
         gain: 1,
         muted: false,
         trimStartBeat: 0,
         trimEndBeat: 0,
         playbackRate: 1,
+        fadeInBeats: 0,
+        fadeOutBeats: 0,
     });
     state.selectedClipId = newClipId;
     state.playheadBeat = startBeat;
@@ -489,8 +508,24 @@ export const setClipStateRemote = createAsyncThunk(
         trimStartBeat?: number;
         trimEndBeat?: number;
         playbackRate?: number;
+        fadeInBeats?: number;
+        fadeOutBeats?: number;
     }) => {
         return webApi.setClipState(payload);
+    },
+);
+
+export const splitClipRemote = createAsyncThunk(
+    "session/splitClipRemote",
+    async (payload: { clipId: string; splitBeat: number }) => {
+        return webApi.splitClip(payload.clipId, payload.splitBeat);
+    },
+);
+
+export const glueClipsRemote = createAsyncThunk(
+    "session/glueClipsRemote",
+    async (clipIds: string[]) => {
+        return webApi.glueClips(clipIds);
     },
 );
 
@@ -572,18 +607,18 @@ export const importAudioFromDialog = createAsyncThunk(
         }
 
         dispatch(setAudioPath(picked.path));
-        const processed = await webApi.processAudio(picked.path);
-        if (!processed.ok) {
+        const imported = await webApi.importAudioItem(picked.path);
+        if (!(imported as { ok?: boolean }).ok) {
             return rejectWithValue(
-                (processed as { error?: { message?: string } }).error
-                    ?.message ?? "process_audio_failed",
+                (imported as { error?: { message?: string } }).error?.message ??
+                    "import_audio_item_failed",
             );
         }
         return {
             ok: true,
             canceled: false,
             path: picked.path,
-            processed,
+            imported,
         };
     },
 );
@@ -592,18 +627,86 @@ export const importAudioFromPath = createAsyncThunk(
     "session/importAudioFromPath",
     async (audioPath: string, { dispatch, rejectWithValue }) => {
         dispatch(setAudioPath(audioPath));
-        const processed = await webApi.processAudio(audioPath);
-        if (!processed.ok) {
+        const imported = await webApi.importAudioItem(audioPath);
+        if (!(imported as { ok?: boolean }).ok) {
             return rejectWithValue(
-                (processed as { error?: { message?: string } }).error
-                    ?.message ?? "process_audio_failed",
+                (imported as { error?: { message?: string } }).error?.message ??
+                    "import_audio_item_failed",
             );
         }
         return {
             ok: true,
             path: audioPath,
-            processed,
+            imported,
         };
+    },
+);
+
+export const importAudioAtPosition = createAsyncThunk(
+    "session/importAudioAtPosition",
+    async (
+        payload: { audioPath: string; trackId?: string; startBeat?: number },
+        { dispatch, rejectWithValue },
+    ) => {
+        dispatch(setAudioPath(payload.audioPath));
+        const imported = await webApi.importAudioItem(
+            payload.audioPath,
+            payload.trackId,
+            payload.startBeat,
+        );
+        if (!(imported as { ok?: boolean }).ok) {
+            return rejectWithValue(
+                (imported as { error?: { message?: string } }).error?.message ??
+                    "import_audio_item_failed",
+            );
+        }
+        return {
+            ok: true,
+            imported,
+        };
+    },
+);
+
+export const importAudioFileAtPosition = createAsyncThunk(
+    "session/importAudioFileAtPosition",
+    async (
+        payload: { file: File; trackId?: string; startBeat?: number },
+        { rejectWithValue },
+    ) => {
+        try {
+            const fileName = String(payload.file.name ?? "dropped-audio");
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onerror = () => reject(new Error("read_failed"));
+                reader.onload = () => resolve(String(reader.result ?? ""));
+                reader.readAsDataURL(payload.file);
+            });
+
+            const base64 = dataUrl.includes(",")
+                ? dataUrl.split(",").slice(1).join(",")
+                : dataUrl;
+
+            const imported = await webApi.importAudioBytes(
+                fileName,
+                base64,
+                payload.trackId,
+                payload.startBeat,
+            );
+            if (!(imported as { ok?: boolean }).ok) {
+                return rejectWithValue(
+                    (imported as { error?: { message?: string } }).error
+                        ?.message ?? "import_audio_bytes_failed",
+                );
+            }
+            return {
+                ok: true,
+                imported,
+            };
+        } catch (err) {
+            return rejectWithValue(
+                err instanceof Error ? err.message : "import_audio_bytes_failed",
+            );
+        }
     },
 );
 
@@ -641,24 +744,28 @@ export const exportAudio = createAsyncThunk(
 
 export const playOriginal = createAsyncThunk(
     "session/playOriginal",
-    async () => {
+    async (_, { getState }) => {
+        const state = getState() as { session: SessionState };
+        const anchorBeat = state.session.playheadBeat;
         const result = await webApi.playOriginal(0);
         return {
             ...result,
             clipId: null,
-            anchorBeat: 0,
+            anchorBeat,
         };
     },
 );
 
 export const playSynthesized = createAsyncThunk(
     "session/playSynthesized",
-    async () => {
+    async (_, { getState }) => {
+        const state = getState() as { session: SessionState };
+        const anchorBeat = state.session.playheadBeat;
         const result = await webApi.playSynthesized(0);
         return {
             ...result,
             clipId: null,
-            anchorBeat: 0,
+            anchorBeat,
         };
     },
 );
@@ -731,6 +838,17 @@ const sessionSlice = createSlice({
                 clip.startBeat = Math.max(0, action.payload.startBeat);
             }
         },
+        moveClipTrack(
+            state,
+            action: PayloadAction<{ clipId: string; trackId: string }>,
+        ) {
+            const clip = state.clips.find(
+                (entry) => entry.id === action.payload.clipId,
+            );
+            if (clip) {
+                clip.trackId = action.payload.trackId;
+            }
+        },
         setClipLength(
             state,
             action: PayloadAction<{ clipId: string; lengthBeats: number }>,
@@ -739,8 +857,66 @@ const sessionSlice = createSlice({
                 (entry) => entry.id === action.payload.clipId,
             );
             if (clip) {
-                clip.lengthBeats = Math.max(0.5, action.payload.lengthBeats);
+                clip.lengthBeats = Math.max(0.0, action.payload.lengthBeats);
             }
+        },
+        setClipTrim(
+            state,
+            action: PayloadAction<{
+                clipId: string;
+                trimStartBeat?: number;
+                trimEndBeat?: number;
+            }>,
+        ) {
+            const clip = state.clips.find(
+                (entry) => entry.id === action.payload.clipId,
+            );
+            if (!clip) return;
+            if (action.payload.trimStartBeat !== undefined) {
+                clip.trimStartBeat = Math.max(0, action.payload.trimStartBeat);
+            }
+            if (action.payload.trimEndBeat !== undefined) {
+                clip.trimEndBeat = Math.max(0, action.payload.trimEndBeat);
+            }
+        },
+        setClipFades(
+            state,
+            action: PayloadAction<{
+                clipId: string;
+                fadeInBeats?: number;
+                fadeOutBeats?: number;
+            }>,
+        ) {
+            const clip = state.clips.find(
+                (entry) => entry.id === action.payload.clipId,
+            );
+            if (!clip) return;
+            if (action.payload.fadeInBeats !== undefined) {
+                clip.fadeInBeats = Math.max(0, action.payload.fadeInBeats);
+            }
+            if (action.payload.fadeOutBeats !== undefined) {
+                clip.fadeOutBeats = Math.max(0, action.payload.fadeOutBeats);
+            }
+        },
+        setClipGain(
+            state,
+            action: PayloadAction<{ clipId: string; gain: number }>,
+        ) {
+            const clip = state.clips.find(
+                (entry) => entry.id === action.payload.clipId,
+            );
+            if (!clip) return;
+            clip.gain = clamp(Number(action.payload.gain), 0, 2);
+        },
+        setClipMuted(
+            state,
+            action: PayloadAction<{ clipId: string; muted: boolean }>,
+        ) {
+            const clip = state.clips.find(
+                (entry) => entry.id === action.payload.clipId,
+            );
+            if (!clip) return;
+            clip.muted = Boolean(action.payload.muted);
         },
         addClip(state, action: PayloadAction<{ trackId: string }>) {
             pushHistory(state);
@@ -757,6 +933,8 @@ const sessionSlice = createSlice({
                 trimStartBeat: 0,
                 trimEndBeat: 0,
                 playbackRate: 1,
+                fadeInBeats: 0,
+                fadeOutBeats: 0,
             });
             state.selectedClipId = newClipId;
             state.selectedTrackId = action.payload.trackId;
@@ -1010,15 +1188,7 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     canceled?: boolean;
                     path?: string;
-                    processed?: {
-                        ok?: boolean;
-                        audio?: { duration_sec?: number };
-                        feature?: {
-                            waveform_preview?: number[];
-                            pitch_range?: { min: number; max: number };
-                        };
-                        timeline?: TimelineState;
-                    };
+                    imported?: { ok?: boolean } & TimelineState;
                 };
                 if (payload.canceled) {
                     state.status = "Import canceled";
@@ -1026,18 +1196,11 @@ const sessionSlice = createSlice({
                 }
                 if (payload.path) {
                     state.audioPath = payload.path;
-                    if (payload.processed?.timeline) {
-                        applyTimelineState(state, payload.processed.timeline);
-                    } else {
-                        upsertImportedClip(state, payload.path, {
-                            durationSec: payload.processed?.audio?.duration_sec,
-                            waveform:
-                                payload.processed?.feature?.waveform_preview,
-                            pitchRange: payload.processed?.feature?.pitch_range,
-                        });
+                    if (payload.imported?.ok) {
+                        applyTimelineState(state, payload.imported);
                     }
                 }
-                state.status = payload.processed?.ok
+                state.status = payload.imported?.ok
                     ? "Audio imported"
                     : "Import audio failed";
             })
@@ -1051,34 +1214,63 @@ const sessionSlice = createSlice({
                 state.lastResult = action.payload;
                 const payload = action.payload as {
                     path?: string;
-                    processed?: {
-                        ok?: boolean;
-                        audio?: { duration_sec?: number };
-                        feature?: {
-                            waveform_preview?: number[];
-                            pitch_range?: { min: number; max: number };
-                        };
-                        timeline?: TimelineState;
-                    };
+                    imported?: { ok?: boolean } & TimelineState;
                 };
                 if (payload.path) {
                     state.audioPath = payload.path;
-                    if (payload.processed?.timeline) {
-                        applyTimelineState(state, payload.processed.timeline);
-                    } else {
-                        upsertImportedClip(state, payload.path, {
-                            durationSec: payload.processed?.audio?.duration_sec,
-                            waveform:
-                                payload.processed?.feature?.waveform_preview,
-                            pitchRange: payload.processed?.feature?.pitch_range,
-                        });
+                    if (payload.imported?.ok) {
+                        applyTimelineState(state, payload.imported);
                     }
                 }
-                state.status = payload.processed?.ok
+                state.status = payload.imported?.ok
                     ? "Dropped audio imported"
                     : "Import audio failed";
             })
             .addCase(importAudioFromPath.rejected, setRejected)
+
+            .addCase(importAudioAtPosition.pending, (state) =>
+                setPending(state, "Importing audio..."),
+            )
+            .addCase(importAudioAtPosition.fulfilled, (state, action) => {
+                state.busy = false;
+                state.lastResult = action.payload;
+                const payload = action.payload as {
+                    ok?: boolean;
+                    imported?: TimelineState;
+                };
+                const ok = Boolean(payload.ok);
+                state.status = ok ? "Import done" : "Import failed";
+                if (
+                    ok &&
+                    payload.imported &&
+                    (payload.imported as any).tracks
+                ) {
+                    applyTimelineState(state, payload.imported as any);
+                }
+            })
+            .addCase(importAudioAtPosition.rejected, setRejected)
+
+            .addCase(importAudioFileAtPosition.pending, (state) =>
+                setPending(state, "Importing audio..."),
+            )
+            .addCase(importAudioFileAtPosition.fulfilled, (state, action) => {
+                state.busy = false;
+                state.lastResult = action.payload;
+                const payload = action.payload as {
+                    ok?: boolean;
+                    imported?: TimelineState;
+                };
+                const ok = Boolean(payload.ok);
+                state.status = ok ? "Import done" : "Import failed";
+                if (
+                    ok &&
+                    payload.imported &&
+                    (payload.imported as any).tracks
+                ) {
+                    applyTimelineState(state, payload.imported as any);
+                }
+            })
+            .addCase(importAudioFileAtPosition.rejected, setRejected)
 
             .addCase(pickOutputPath.pending, (state) =>
                 setPending(state, "Selecting output path..."),
@@ -1277,6 +1469,27 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload);
             })
 
+            .addCase(splitClipRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
+            })
+
+            .addCase(glueClipsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
+                state.status = "Glue done";
+            })
+
             .addCase(setClipStateRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -1311,18 +1524,21 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     ok?: boolean;
                     bpm?: number;
-                };
+                } & Partial<TimelineState>;
                 if (!payload.ok) {
                     return;
                 }
                 state.bpm = clamp(Number(payload.bpm ?? state.bpm), 10, 300);
+                if (payload.tracks && payload.clips) {
+                    applyTimelineState(state, payload as TimelineState);
+                }
             })
 
             .addCase(seekPlayhead.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                     playhead_beat?: number;
-                };
+                } & Partial<TimelineState>;
                 if (!payload.ok) {
                     return;
                 }
@@ -1330,6 +1546,12 @@ const sessionSlice = createSlice({
                     0,
                     Number(payload.playhead_beat ?? state.playheadBeat),
                 );
+                if (state.runtime.isPlaying) {
+                    state.playbackAnchorBeat = state.playheadBeat;
+                }
+                if (payload.tracks && payload.clips) {
+                    applyTimelineState(state, payload as TimelineState);
+                }
             })
 
             .addCase(addTrackRemote.fulfilled, (state, action) => {
@@ -1412,7 +1634,12 @@ export const {
     setPitchShift,
     setSelectedClip,
     moveClipStart,
+    moveClipTrack,
     setClipLength,
+    setClipTrim,
+    setClipFades,
+    setClipGain,
+    setClipMuted,
     addClip,
     removeSelectedClip,
     toggleTrackMute,

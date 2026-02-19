@@ -2,7 +2,6 @@ import json
 import pathlib
 
 import numpy as np
-import torch
 
 from .audio_processing._bootstrap import ensure_project_root_on_sys_path
 
@@ -11,11 +10,6 @@ ensure_project_root_on_sys_path()
 from utils.config_utils import read_full_config
 
 from .audio_processing.features import load_audio_mono_resample, extract_mel_f0_segments
-from .audio_processing.hifigan_infer import (
-    build_model_and_mel_transform,
-    synthesize_full,
-    synthesize_segment_with_padding,
-)
 from .audio_processing.tension_fx import apply_tension_tilt_pd
 
 
@@ -28,7 +22,24 @@ class AudioProcessor:
     """
 
     def __init__(self):
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self._onnxruntime_error: str | None = None
+        self._ort = None
+
+        # Check if CUDA is available for ONNX Runtime (optional).
+        try:
+            import onnxruntime as ort  # type: ignore
+
+            self._ort = ort
+            self.device = (
+                'cuda'
+                if 'CUDAExecutionProvider' in ort.get_available_providers()
+                else 'cpu'
+            )
+        except Exception as exc:
+            # Keep app usable (timeline/UI) even when ORT cannot be imported.
+            self._onnxruntime_error = f"{type(exc).__name__}: {exc}"
+            self.device = 'cpu'
+
         self.model = None
         self.config: dict = {}
         self.mel_transform = None
@@ -36,6 +47,12 @@ class AudioProcessor:
     def load_model(self, folder_path):
         """Load model and configuration from the specified folder."""
         folder_path = pathlib.Path(folder_path)
+
+        if self._onnxruntime_error is not None:
+            raise RuntimeError(
+                'ONNXRuntime 无法加载（通常是 DLL/环境问题），无法加载模型。'
+                f' 详细信息: {self._onnxruntime_error}'
+            )
 
         # Check for config
         config_path = folder_path / 'config.yaml'
@@ -54,6 +71,9 @@ class AudioProcessor:
 
         # Patch config
         self._patch_config()
+
+        # Lazy import to avoid crashing app startup if onnxruntime is broken.
+        from .audio_processing.hifigan_infer import build_model_and_mel_transform
 
         self.model, self.mel_transform = build_model_and_mel_transform(
             self.config,
@@ -128,6 +148,8 @@ class AudioProcessor:
             raise RuntimeError("模型未加载")
 
         hop_size = int(self.config['hop_size'])
+        from .audio_processing.hifigan_infer import synthesize_segment_with_padding
+
         return synthesize_segment_with_padding(
             self.model,
             mel,
@@ -142,6 +164,8 @@ class AudioProcessor:
         """Synthesize full audio using the modified F0."""
         if self.model is None:
             raise RuntimeError("模型未加载")
+
+        from .audio_processing.hifigan_infer import synthesize_full
 
         return synthesize_full(
             self.model,

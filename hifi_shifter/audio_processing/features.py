@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-import torch
-import torchaudio
+import librosa
+import soundfile as sf
 
 # Prefer relative import (normal package usage). Fall back only for direct execution.
 try:
@@ -25,38 +25,63 @@ from utils.wav2F0 import get_pitch
 
 
 def dynamic_range_compression_torch(x, C=1, clip_val=1e-9):
-    return torch.log(torch.clamp(x, min=clip_val) * C)
+    """Apply dynamic range compression using numpy."""
+    return np.log(np.clip(x, a_min=clip_val, a_max=None) * C)
 
 
 
 
-def load_audio_mono_resample(file_path: str, target_sr: int) -> tuple[torch.Tensor, int]:
-    """Load audio as mono tensor [1, T] and resample to target_sr."""
-    audio, sr = torchaudio.load(file_path)
-    if audio.shape[0] > 1:
-        audio = torch.mean(audio, dim=0, keepdim=True)
-
+def load_audio_mono_resample(file_path: str, target_sr: int) -> tuple[np.ndarray, int]:
+    """Load audio as mono numpy array and resample to target_sr.
+    
+    Returns:
+        audio: numpy array of shape (n_samples,)
+        sr: sample rate
+    """
+    try:
+        # Try soundfile first (faster)
+        audio, sr = sf.read(file_path, dtype='float32')
+    except:
+        # Fallback to librosa
+        audio, sr = librosa.load(file_path, sr=None, mono=False, dtype=np.float32)
+    
+    # Convert to mono if stereo
+    if audio.ndim > 1:
+        audio = np.mean(audio, axis=-1 if audio.shape[-1] <= 2 else 0)
+    
+    # Resample if needed
     if sr != target_sr:
-        resampler = torchaudio.transforms.Resample(sr, target_sr)
-        audio = resampler(audio)
+        audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
         sr = target_sr
-
+    
     return audio, sr
 
 
 def extract_mel_f0_segments(
-    audio: torch.Tensor,
+    audio: np.ndarray,
     *,
     config: dict,
     mel_transform,
     key_shift: float = 0.0,
-) -> tuple[torch.Tensor, np.ndarray, list[tuple[int, int]]]:
-    """Extract mel, f0 (MIDI, NaN for unvoiced), and speech segments."""
+) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int]]]:
+    """Extract mel, f0 (MIDI, NaN for unvoiced), and speech segments.
+    
+    Args:
+        audio: numpy array of audio samples, shape (n_samples,)
+        config: configuration dict
+        mel_transform: PitchAdjustableMelSpectrogram instance
+        key_shift: pitch shift in semitones
+        
+    Returns:
+        mel: mel spectrogram, shape (1, n_mels, n_frames)
+        f0_midi: f0 in MIDI notes, shape (n_frames,)
+        segments: list of (start_frame, end_frame) tuples
+    """
     mel = dynamic_range_compression_torch(mel_transform(audio, key_shift=key_shift))
 
     f0_np, _uv = get_pitch(
         'parselmouth',
-        audio[0].numpy(),
+        audio if audio.ndim == 1 else audio[0],
         hparams=config,
         speed=1,
         interp_uv=True,
@@ -74,12 +99,12 @@ def extract_mel_f0_segments(
 
 
 def segment_audio_by_mel_energy(
-    mel: torch.Tensor,
+    mel: np.ndarray,
     threshold_db: float = -60,
     min_silence_frames: int = 100,
 ) -> list[tuple[int, int]]:
     """Segment audio based on mel energy; returns list of (start_frame, end_frame)."""
-    mel_np = mel.squeeze().cpu().numpy()
+    mel_np = mel.squeeze()  # mel is already numpy array
     energy = np.mean(mel_np, axis=0)
 
     energy_db = 20 * np.log10(np.maximum(energy, 1e-5))

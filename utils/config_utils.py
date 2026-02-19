@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pathlib
 
-import lightning.pytorch.utilities
+# Removed lightning import - using ONNX Runtime now
+# import lightning.pytorch.utilities
 import yaml
 
 loaded_config_files = {}
@@ -41,8 +42,10 @@ def read_full_config(config_path: pathlib.Path) -> dict:
     return squashed_config
 
 
-@lightning.pytorch.utilities.rank_zero.rank_zero_only
+# Commented out - was only used for distributed training
+# @lightning.pytorch.utilities.rank_zero.rank_zero_only
 def print_config(config: dict):
+    """Print configuration (simplified version without distributed training support)"""
     for i, (k, v) in enumerate(sorted(config.items())):
         print(f"\033[0;33m{k}\033[0m: {v}", end='')
         if i < len(config) - 1:

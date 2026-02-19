@@ -2,9 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Qt-like design tokens as CSS variables.
+  - Dark uses the legacy Qt hex colors.
+  - Light derives from Radix Theme tokens to avoid inventing a new palette.
+*/
+
+.qt-theme.dark {
+  --qt-window: #353535;
+  --qt-base: #303030;
+  --qt-text: #cccccc;
+  --qt-highlight: #2a82da;
+  --qt-button: #303030;
+  --qt-button-hover: #404040;
+  --qt-border: #444444;
+  --qt-graph-bg: #1e1e1e;
+  --qt-graph-grid-strong: #2d2d2d;
+  --qt-graph-grid-weak: #252525;
+}
+
+.qt-theme.light {
+  --qt-window: var(--gray-2);
+  --qt-base: var(--gray-3);
+  --qt-text: var(--gray-12);
+  --qt-highlight: var(--accent-9);
+  --qt-button: var(--gray-3);
+  --qt-button-hover: var(--gray-4);
+  --qt-border: var(--gray-6);
+  --qt-graph-bg: var(--gray-2);
+  --qt-graph-grid-strong: var(--gray-6);
+  --qt-graph-grid-weak: var(--gray-5);
+}
+
 :root {
-  font-family: Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+:root[data-theme='dark'] {
   color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
 }
 
 html,
@@ -13,11 +52,12 @@ body,
   margin: 0;
   width: 100%;
   height: 100%;
+  overflow: hidden; /* Prevent scrolling on body */
 }
 
 body {
-  background: #2c2f34;
-  color: #e5e7eb;
+  background: var(--qt-window, #353535);
+  color: var(--qt-text, #cccccc);
 }
 
 * {
@@ -28,23 +68,43 @@ button,
 input,
 select,
 textarea {
-  font: inherit;
+  font-family: inherit;
 }
 
+/* Qt/DAW-style scrollbars */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
+::-webkit-scrollbar-corner {
+  background: var(--qt-base, #303030);
+}
+
 ::-webkit-scrollbar-track {
-  background: #2a2d31;
+  background: var(--qt-base, #303030);
+  border-left: 1px solid var(--qt-border, #444444);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 6px;
+  background: #555555;
+  border-radius: 2px;
+  border: 2px solid var(--qt-base, #303030);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+    background: #777777;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #71717a 0%, #52525b 100%);
+}
+
+::-webkit-scrollbar-corner {
+  background: #1a1a1d;
 }

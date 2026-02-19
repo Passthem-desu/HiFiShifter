@@ -3,7 +3,6 @@ from typing import Tuple
 
 import numpy as np
 import onnxruntime as ort
-import torch
 
 # Prefer relative import (normal package usage). Fall back only for direct execution.
 try:
@@ -88,7 +87,7 @@ def _midi_to_hz(f0_midi: np.ndarray) -> np.ndarray:
 
 def synthesize_full(
     model: ort.InferenceSession,
-    mel: torch.Tensor,
+    mel: np.ndarray,
     f0_midi: np.ndarray,
     *,
     device: str,
@@ -109,7 +108,7 @@ def synthesize_full(
 
 def synthesize_segment_with_padding(
     model: ort.InferenceSession,
-    mel: torch.Tensor,
+    mel: np.ndarray,
     segment: tuple[int, int],
     f0_midi_segment: np.ndarray,
     *,
@@ -160,9 +159,6 @@ def synthesize_segment_with_padding(
     return audio_padded[trim_start:trim_end]
 
 
-def _to_mel_numpy(mel: torch.Tensor | np.ndarray) -> np.ndarray:
-    if isinstance(mel, torch.Tensor):
-        arr = mel.detach().cpu().numpy()
-    else:
-        arr = np.asarray(mel)
-    return arr.astype(np.float32, copy=False)
+def _to_mel_numpy(mel: np.ndarray) -> np.ndarray:
+    """Ensure mel is a numpy array with float32 dtype."""
+    return np.asarray(mel, dtype=np.float32)

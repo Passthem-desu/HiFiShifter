@@ -6,9 +6,10 @@ import types
 from collections import OrderedDict
 
 import numpy as np
-import torch
 
-from utils.training_utils import get_latest_checkpoint_path
+# Removed torch and training_utils imports - using ONNX Runtime now
+# import torch
+# from utils.training_utils import get_latest_checkpoint_path
 
 
 def tensors_to_scalars(metrics):

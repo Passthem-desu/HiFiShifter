@@ -78,6 +78,29 @@ HiFiShifter/
 
 ## 2. 关键模块说明
 
+## 近期改动（pywebview 前端时间轴/播放）
+
+### 拖拽导入（Drag & Drop Import）
+
+- 前端时间轴轨道区域支持拖拽导入本地音频文件。
+- 路径解析策略：优先使用 `dataTransfer.files[0].path`（pywebview 环境常见），若不可用则尝试 `text/uri-list` 解析 `file:///...`，最后尝试 `text/plain`。
+- 当拖拽落点不在任何轨道上时，后端 `import_audio_item(audio_path, track_id=None, start_beat=...)` 会创建新轨道并放置 item。
+- 当 WebView 无法提供本地路径时，前端会走 bytes/base64 兜底导入（`import_audio_bytes(file_name, base64_data, ...)`），后端会保留原始 `file_name` 用于剪辑显示名（避免 temp 文件名污染 UI）。
+
+### 无音频也可播放（Virtual Playback）
+
+- 后端新增“虚拟播放”模式：当当前时间点之后无可播放音频片段时，不报错，改为启动一个静默的播放时钟（不调用声卡输出），让前端播放头依然能推进。
+
+### 播放中跳转（Seek While Playing）
+
+- 后端 `set_transport(playhead_beat=...)` 在检测到正在播放时，会重启播放到新的 playhead 位置（对齐 DAW 的点击跳播行为）。
+- 前端在 `seekPlayhead.fulfilled` 且 `isPlaying` 时更新 `playbackAnchorBeat`，保证 `position_sec`（从 0 计时）到 beat 的换算正确。
+
+### 工程边界与网格裁剪
+
+- 时间轴 BPM 网格绘制被限制在工程内容宽度（`projectBeats`）内；边界外保持纯底色。
+- 在工程末尾绘制明显边界线，提示工程时长终点。
+
 ### 2.1 GUI 主窗口与交互（`hifi_shifter/gui/`）
 
 历史上 GUI 大量逻辑集中在 `hifi_shifter/main_window.py`，阅读和维护成本较高。当前已按职责拆分到 `hifi_shifter/gui/` 子包中：
@@ -148,7 +171,107 @@ HiFiShifter/
   - `hifigan_infer.py`：NSF-HiFiGAN 模型加载与推理
   - `tension_fx.py`：张力 post-FX（不必重跑声码器即可改变听感的部分）
   - `_bootstrap.py`：确保仓库根目录在 `sys.path`，避免运行上下文不同导致导入失败
+### 前端界面架构（pywebview + React）
 
+为实现更现代化的用户界面，项目采用了混合架构：
+- **后端**：Python 处理所有业务逻辑（音频处理、模型推理、状态管理）
+- **前端**：React + TypeScript + Tailwind CSS 负责 UI 渲染和交互
+- **通信**：通过 pywebview 的 JS API 进行前后端通信
+
+#### 前端项目结构
+
+```text
+frontend/
+├── src/
+│   ├── components/
+│   │   ├── editor/          # 编辑器相关组件
+│   │   │   ├── TimelinePanel.tsx   # 时间线面板（轨道、剪辑）
+│   │   │   └── PianoRollPanel.tsx  # 钢琴卷帘（参数编辑）
+│   │   └── layout/          # 布局组件
+│   │       ├── MenuBar.tsx      # 菜单栏
+│   │       └── ActionBar.tsx    # 操作栏
+│   ├── features/
+│   │   └── session/         # Redux 状态管理
+│   │       └── sessionSlice.ts  # 会话状态切片
+│   ├── services/
+│   │   └── webviewApi.ts    # Python API 调用封装
+│   └── types/
+│       └── api.ts           # API 类型定义
+└── ...
+```
+
+#### 音频编辑功能实现
+
+项目实现了类似 Reaper 的音频编辑功能：
+
+1. **音频切片（Split Clip）**
+   - **实现位置**：`web_api.py::split_clip()` + `sessionSlice.ts::splitClipRemote`
+   - **功能**：在播放头位置分割选中的音频剪辑为两个独立剪辑
+   - **快捷键**：S 键（在选中剪辑时按下）
+   - **实现细节**：
+     - 在指定位置创建新剪辑
+     - 自动调整原剪辑和新剪辑的长度和裁剪参数
+     - 保留原剪辑的所有属性（增益、静音状态等）
+
+2. **淡入淡出（Fade In/Out）**
+   - **数据结构**：`ClipState.fade_in_beats` / `ClipState.fade_out_beats`
+   - **UI 控制**：
+     - 剪辑属性面板中的 Fade In/Out 输入框
+     - 时间线剪辑左上角/右上角手柄直接拖拽（MVP）
+   - **视觉效果**：剪辑上显示淡入/淡出斜线，直观展示范围
+   - **实现细节**：
+     - 使用 SVG 绘制淡入淡出覆盖层
+     - 淡入淡出长度限制为不超过剪辑长度
+     - 支持即时预览淡入淡出效果
+
+3. **时间拉伸（Playback Rate）**
+   - **数据结构**：`ClipState.playback_rate`（范围 0.25 - 4.0）
+   - **UI 控制**：剪辑属性面板中的 Rate 输入框
+   - **功能**：调整剪辑播放速度，实现时间拉伸和缩短效果
+   - **应用场景**：变速播放、匹配节奏、创意效果
+
+4. **音频裁剪（Trim）**
+   - **数据结构**：`ClipState.trim_start_beat` / `ClipState.trim_end_beat`
+   - **UI 控制**：
+     - 剪辑属性面板中的 Trim In/Out 输入框
+     - 时间线剪辑左右边界拖拽（MVP）
+   - **功能**：精确控制剪辑的起始和结束位置，不改变源文件
+   - **实现细节**：
+     - 裁剪参数以拍（beat）为单位
+     - 支持独立调整起点和终点
+
+5. **剪辑静音（Clip Mute）**
+  - **数据结构**：`ClipState.muted`
+  - **UI 控制**：时间线剪辑左上角 `M` 按钮
+  - **行为**：
+    - `muted=true` 时剪辑整体变灰（仅 UI 表现）
+    - 混音/播放时会跳过该剪辑（后端 `_mix_project_audio` 会过滤 `clip.muted`）
+
+6. **多选组移动（Group Move）**
+  - **UI 控制**：右键框选多个剪辑后，拖拽任意一个选中剪辑
+  - **行为**：所有选中剪辑按同一时间偏移一起移动（并做边界约束，避免移动到负时间）
+
+7. **轨道纵向缩放（Track Vertical Zoom）**
+  - **UI 控制**：时间线区域 `Alt + 鼠标滚轮`
+  - **行为**：调整轨道 lane 高度（影响左侧轨道列表与右侧时间线轨道区域），并持久化到 localStorage
+     - 剪辑拖拽调整大小时自动更新裁剪参数
+     - 若能获得源音频时长（`duration_sec`），拖拽会自动 clamp，避免超过源范围
+
+5. **多选与胶合（Glue）**
+   - **实现位置**：`web_api.py::glue_clips()` + `sessionSlice.ts::glueClipsRemote`
+   - **交互**：
+     - 在时间线空白处按住鼠标右键拖拽可框选多个剪辑
+     - 右键剪辑弹出菜单执行“胶合”（要求同轨且至少 2 个剪辑）
+
+#### 界面优化
+
+- **现代化 DAW 风格**：参考现代 DAW 软件（如 Reaper、Ableton Live）的设计语言
+- **暗色主题**：使用深色背景和高对比度配色，减少视觉疲劳
+- **视觉层次**：通过阴影、渐变、边框等元素增强界面层次感
+- **交互反馈**：
+  - 剪辑悬停/选中状态有明显的视觉反馈
+  - 淡入淡出效果在剪辑上直观显示
+  - 平滑的动画过渡效果
 ## 3. 国际化（i18n）
 
 - 语言文件：`assets/lang/zh_CN.json`、`assets/lang/en_US.json`

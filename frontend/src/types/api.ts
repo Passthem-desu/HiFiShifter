@@ -36,7 +36,7 @@ export interface TimelineClip {
     color: string;
     source_path?: string;
     duration_sec?: number;
-    waveform_preview?: number[];
+    waveform_preview?: number[] | { l: number[]; r: number[] };
     pitch_range?: {
         min: number;
         max: number;
@@ -46,6 +46,8 @@ export interface TimelineClip {
     trim_start_beat?: number;
     trim_end_beat?: number;
     playback_rate?: number;
+    fade_in_beats?: number;
+    fade_out_beats?: number;
 }
 
 export interface TimelineState {

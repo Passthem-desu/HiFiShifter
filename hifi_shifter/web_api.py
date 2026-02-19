@@ -1,6 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import pathlib
+import base64
+import tempfile
+import uuid
 import traceback
 import time
 from dataclasses import dataclass, field, asdict
@@ -8,8 +11,10 @@ from itertools import count
 
 import numpy as np
 import sounddevice as sd
+import soundfile as sf
 import webview
 from scipy.io import wavfile
+import math
 
 from .audio_processor import AudioProcessor
 
@@ -66,6 +71,8 @@ class ClipState:
     trim_start_beat: float = 0.0
     trim_end_beat: float = 0.0
     playback_rate: float = 1.0
+    fade_in_beats: float = 0.0
+    fade_out_beats: float = 0.0
 
 
 class HifiShifterWebAPI:
@@ -208,6 +215,8 @@ class HifiShifterWebAPI:
                 'trim_start_beat': clip.trim_start_beat,
                 'trim_end_beat': clip.trim_end_beat,
                 'playback_rate': clip.playback_rate,
+                'fade_in_beats': clip.fade_in_beats,
+                'fade_out_beats': clip.fade_out_beats,
             })
 
         clips.sort(key=lambda item: (item['track_id'], item['start_beat']))
@@ -419,10 +428,21 @@ class HifiShifterWebAPI:
                 id=clip_id,
                 track_id=target_track_id,
                 name=(name or '').strip() or 'New Clip.wav',
-                start_beat=max(0.0, float(start_beat if start_beat is not None else self.state.playhead_beat)),
-                length_beats=max(0.25, float(length_beats if length_beats is not None else 2.0)),
+                start_beat=max(
+                    0.0,
+                    float(
+                        start_beat
+                        if start_beat is not None
+                        else self.state.playhead_beat
+                    ),
+                ),
+                length_beats=max(
+                    0.0,
+                    float(length_beats if length_beats is not None else 2.0),
+                ),
                 source_path=source_path,
             )
+
             self.state.clips[clip_id] = clip
             self.state.tracks[target_track_id].clip_ids.append(clip_id)
             self.state.selected_clip_id = clip_id
@@ -495,6 +515,8 @@ class HifiShifterWebAPI:
         trim_start_beat: float | None = None,
         trim_end_beat: float | None = None,
         playback_rate: float | None = None,
+        fade_in_beats: float | None = None,
+        fade_out_beats: float | None = None,
     ):
         try:
             clip = self.state.clips.get(clip_id)
@@ -502,7 +524,8 @@ class HifiShifterWebAPI:
                 raise RuntimeError('音频块不存在。')
 
             if length_beats is not None:
-                clip.length_beats = max(0.1, float(length_beats))
+                # Allow shrinking to a line in UI; treat <= 0 as "no audible segment".
+                clip.length_beats = max(0.0, float(length_beats))
             if gain is not None:
                 clip.gain = float(np.clip(gain, 0.0, 2.0))
             if muted is not None:
@@ -513,6 +536,10 @@ class HifiShifterWebAPI:
                 clip.trim_end_beat = max(0.0, float(trim_end_beat))
             if playback_rate is not None:
                 clip.playback_rate = float(np.clip(playback_rate, 0.25, 4.0))
+            if fade_in_beats is not None:
+                clip.fade_in_beats = max(0.0, float(fade_in_beats))
+            if fade_out_beats is not None:
+                clip.fade_out_beats = max(0.0, float(fade_out_beats))
 
             self._update_project_beats_from_clips()
 
@@ -523,6 +550,246 @@ class HifiShifterWebAPI:
             }
         except Exception as exc:
             return self._error('set_clip_state_failed', exc)
+
+    def split_clip(self, clip_id: str, split_beat: float):
+        """Split a clip into two clips at split_beat.
+
+        The split beat is in project/timeline beats (same coordinate as ClipState.start_beat).
+        """
+        try:
+            clip = self.state.clips.get(clip_id)
+            if not clip:
+                raise RuntimeError('音频块不存在。')
+
+            split_beat_f = float(split_beat)
+            if not (clip.start_beat < split_beat_f < clip.start_beat + clip.length_beats):
+                raise RuntimeError('分割点必须位于音频块内部。')
+
+            track = self.state.tracks.get(clip.track_id)
+            if not track:
+                raise RuntimeError('轨道不存在。')
+
+            left_len = split_beat_f - clip.start_beat
+            right_len = (clip.start_beat + clip.length_beats) - split_beat_f
+
+            # Trim semantics: trim_start_beat/trim_end_beat are in source-beat units
+            # (beats mapped to seconds by BPM), trimming from source start/end.
+            # Splitting keeps the same source, but changes which region is used.
+
+            new_clip_id = self._new_clip_id()
+            wp = clip.waveform_preview
+            if isinstance(wp, dict):
+                waveform_preview = {
+                    'l': list(wp.get('l', []) or []),
+                    'r': list(wp.get('r', []) or []),
+                }
+            else:
+                waveform_preview = list(wp) if isinstance(wp, list) else []
+            new_clip = ClipState(
+                id=new_clip_id,
+                track_id=clip.track_id,
+                name=f"{clip.name} (split)",
+                start_beat=split_beat_f,
+                length_beats=max(0.0, float(right_len)),
+                color=clip.color,
+                source_path=clip.source_path,
+                duration_sec=clip.duration_sec,
+                waveform_preview=waveform_preview,
+                pitch_range=dict(clip.pitch_range),
+                gain=clip.gain,
+                muted=clip.muted,
+                trim_start_beat=max(0.0, float(clip.trim_start_beat + left_len)),
+                trim_end_beat=max(0.0, float(clip.trim_end_beat)),
+                playback_rate=clip.playback_rate,
+                fade_in_beats=0.0,
+                fade_out_beats=clip.fade_out_beats,
+            )
+
+            # Adjust original clip to be the left part.
+            clip.length_beats = max(0.0, float(left_len))
+            clip.trim_end_beat = max(0.0, float(clip.trim_end_beat + right_len))
+            clip.fade_out_beats = 0.0
+
+            # Keep order: insert right clip right after left clip.
+            if clip_id in track.clip_ids:
+                idx = track.clip_ids.index(clip_id)
+                track.clip_ids.insert(idx + 1, new_clip_id)
+            else:
+                track.clip_ids.append(new_clip_id)
+
+            self.state.clips[new_clip_id] = new_clip
+            self.state.selected_clip_id = new_clip_id
+
+            self._update_project_beats_from_clips()
+
+            return {
+                'ok': True,
+                'clip': asdict(clip),
+                'new_clip': asdict(new_clip),
+                **self._serialize_timeline(),
+            }
+        except Exception as exc:
+            return self._error('split_clip_failed', exc)
+
+    def glue_clips(self, clip_ids: list[str]):
+        """Glue multiple clips on the same track into a new rendered clip."""
+        try:
+            if not isinstance(clip_ids, (list, tuple)):
+                raise RuntimeError('参数 clip_ids 必须为数组。')
+            ids = [str(x) for x in clip_ids if str(x).strip()]
+            ids = list(dict.fromkeys(ids))
+            if len(ids) < 2:
+                raise RuntimeError('请至少选择 2 个音频块进行胶合。')
+
+            clips: list[ClipState] = []
+            for cid in ids:
+                clip = self.state.clips.get(cid)
+                if not clip:
+                    raise RuntimeError(f'音频块不存在: {cid}')
+                clips.append(clip)
+
+            track_id = clips[0].track_id
+            if any(c.track_id != track_id for c in clips):
+                raise RuntimeError('胶合仅支持同一轨道内的音频块。')
+            track = self.state.tracks.get(track_id)
+            if not track:
+                raise RuntimeError('轨道不存在。')
+
+            bpm = max(1.0, float(self.state.bpm))
+            glue_start_beat = min(float(c.start_beat) for c in clips)
+            glue_end_beat = max(float(c.start_beat) + float(c.length_beats) for c in clips)
+            glue_start_sec = max(0.0, glue_start_beat * 60.0 / bpm)
+            glue_end_sec = max(glue_start_sec, glue_end_beat * 60.0 / bpm)
+
+            sample_rate = int(self.state.sample_rate or self.processor.config.get('audio_sample_rate', 44100))
+            total_len = int(round((glue_end_sec - glue_start_sec) * sample_rate))
+            if total_len <= 0:
+                raise RuntimeError('胶合长度无效。')
+
+            def _fade_in_curve(n: int) -> np.ndarray:
+                if n <= 1:
+                    return np.ones(max(0, n), dtype=np.float32)
+                t = np.linspace(0.0, 1.0, num=n, endpoint=True, dtype=np.float32)
+                return np.sin(t * (math.pi / 2.0)).astype(np.float32)
+
+            def _fade_out_curve(n: int) -> np.ndarray:
+                if n <= 1:
+                    return np.ones(max(0, n), dtype=np.float32)
+                t = np.linspace(0.0, 1.0, num=n, endpoint=True, dtype=np.float32)
+                return np.cos(t * (math.pi / 2.0)).astype(np.float32)
+
+            mix = np.zeros(total_len, dtype=np.float32)
+            for clip in clips:
+                resolved = self._resolve_clip_audio(clip, 'original')
+                if not resolved:
+                    continue
+                src_sr, src_audio = resolved
+                clip_audio = self._resample_linear(src_audio, src_sr, sample_rate)
+                clip_audio = self._time_stretch_linear(clip_audio, clip.playback_rate)
+
+                src_total_sec = float(clip_audio.size) / float(sample_rate) if sample_rate > 0 else 0.0
+                trim_start_sec = max(0.0, float(clip.trim_start_beat) * 60.0 / bpm)
+                trim_end_sec = max(0.0, float(clip.trim_end_beat) * 60.0 / bpm)
+                available_sec = max(0.0, src_total_sec - trim_start_sec - trim_end_sec)
+                desired_sec = max(0.0, float(clip.length_beats) * 60.0 / bpm)
+                render_sec = min(desired_sec, available_sec)
+                if render_sec <= 1e-6:
+                    continue
+
+                start_idx_in_src = int(round(trim_start_sec * sample_rate))
+                end_idx_in_src = min(
+                    clip_audio.size,
+                    start_idx_in_src + int(round(render_sec * sample_rate)),
+                )
+                if end_idx_in_src <= start_idx_in_src:
+                    continue
+                segment = clip_audio[start_idx_in_src:end_idx_in_src]
+                segment = segment * float(np.clip(float(clip.gain), 0.0, 2.0))
+
+                fade_in_sec = max(0.0, float(getattr(clip, 'fade_in_beats', 0.0)) * 60.0 / bpm)
+                fade_out_sec = max(0.0, float(getattr(clip, 'fade_out_beats', 0.0)) * 60.0 / bpm)
+                if segment.size > 1:
+                    if fade_in_sec > 1e-6:
+                        n = int(round(fade_in_sec * sample_rate))
+                        n = max(0, min(n, segment.size))
+                        if n > 1:
+                            segment[:n] *= _fade_in_curve(n)
+                    if fade_out_sec > 1e-6:
+                        n = int(round(fade_out_sec * sample_rate))
+                        n = max(0, min(n, segment.size))
+                        if n > 1:
+                            segment[-n:] *= _fade_out_curve(n)
+
+                clip_start_sec = max(0.0, float(clip.start_beat) * 60.0 / bpm)
+                dst_start = int(round((clip_start_sec - glue_start_sec) * sample_rate))
+                if dst_start < 0:
+                    trim = -dst_start
+                    if trim >= segment.size:
+                        continue
+                    segment = segment[trim:]
+                    dst_start = 0
+                dst_end = min(mix.size, dst_start + segment.size)
+                if dst_end <= dst_start:
+                    continue
+                mix[dst_start:dst_end] += segment[: dst_end - dst_start]
+
+            mix = np.clip(mix, -1.0, 1.0)
+
+            out_dir = pathlib.Path(tempfile.gettempdir()) / 'hifishifter_glue'
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / f'glue_{uuid.uuid4().hex}.wav'
+            sf.write(str(out_path), mix, sample_rate)
+
+            # Remove old clips
+            for cid in ids:
+                if cid in self.state.clips:
+                    del self.state.clips[cid]
+            track.clip_ids = [cid for cid in track.clip_ids if cid not in set(ids)]
+
+            # Create new glued clip
+            sr, channels = self._load_audio_for_preview(str(out_path))
+            duration_sec = float(channels[0].size / sr) if sr > 0 and channels else 0.0
+            if len(channels) >= 2:
+                waveform_preview = {
+                    'l': self._compute_waveform_preview(channels[0]),
+                    'r': self._compute_waveform_preview(channels[1]),
+                }
+            else:
+                waveform_preview = self._compute_waveform_preview(channels[0] if channels else np.zeros(0, dtype=np.float32))
+
+            new_clip_id = self._new_clip_id()
+            new_clip = ClipState(
+                id=new_clip_id,
+                track_id=track_id,
+                name='Glued.wav',
+                start_beat=float(glue_start_beat),
+                length_beats=max(0.25, float(duration_sec * bpm / 60.0) if duration_sec > 0 else float(glue_end_beat - glue_start_beat)),
+                color='emerald',
+                source_path=str(out_path),
+                duration_sec=duration_sec,
+                waveform_preview=waveform_preview,
+                pitch_range={'min': -24.0, 'max': 24.0},
+                gain=1.0,
+                muted=False,
+                trim_start_beat=0.0,
+                trim_end_beat=0.0,
+                playback_rate=1.0,
+                fade_in_beats=0.0,
+                fade_out_beats=0.0,
+            )
+            self.state.clips[new_clip_id] = new_clip
+            track.clip_ids.append(new_clip_id)
+            self.state.selected_clip_id = new_clip_id
+
+            self._update_project_beats_from_clips()
+
+            return {
+                'ok': True,
+                'clip': asdict(new_clip),
+                **self._serialize_timeline(),
+            }
+        except Exception as exc:
+            return self._error('glue_clips_failed', exc)
 
     def get_track_summary(self, track_id: str | None = None):
         try:
@@ -592,14 +859,48 @@ class HifiShifterWebAPI:
 
     def set_transport(self, playhead_beat: float | None = None, bpm: float | None = None):
         try:
+            should_restart_playback = False
             if bpm is not None:
-                self.state.bpm = float(np.clip(bpm, 10.0, 300.0))
+                prev_bpm = float(self.state.bpm or 120.0)
+                next_bpm = float(np.clip(bpm, 10.0, 300.0))
+                if prev_bpm <= 0:
+                    prev_bpm = 120.0
+                ratio = next_bpm / prev_bpm
+
+                # Keep absolute seconds stable by scaling beats-based timeline.
+                self.state.bpm = next_bpm
+                self.state.playhead_beat = max(0.0, float(self.state.playhead_beat) * ratio)
+
+                for clip in self.state.clips.values():
+                    clip.start_beat = max(0.0, float(clip.start_beat) * ratio)
+                    clip.length_beats = max(0.1, float(clip.length_beats) * ratio)
+                    clip.trim_start_beat = max(0.0, float(clip.trim_start_beat) * ratio)
+                    clip.trim_end_beat = max(0.0, float(clip.trim_end_beat) * ratio)
+                    clip.fade_in_beats = max(0.0, float(clip.fade_in_beats) * ratio)
+                    clip.fade_out_beats = max(0.0, float(clip.fade_out_beats) * ratio)
+
+                self.state.project_beats = max(4.0, float(self.state.project_beats) * ratio)
+                self._update_project_beats_from_clips()
             if playhead_beat is not None:
                 self.state.playhead_beat = max(0.0, float(playhead_beat))
+                if self.state.playback_target and self.state.playback_started_at is not None:
+                    should_restart_playback = True
+
+            if should_restart_playback:
+                target = self.state.playback_target
+                if target:
+                    playhead = float(self.state.playhead_beat)
+                    sample_rate, mixed = self._mix_project_audio(target, playhead)
+                    if mixed.size == 0:
+                        duration_sec = self._project_duration_sec_from_beat(playhead)
+                        self._start_virtual_playback(target, duration_sec, 0.0)
+                    else:
+                        self._start_playback(target, mixed, sample_rate, 0.0)
             return {
                 'ok': True,
                 'playhead_beat': self.state.playhead_beat,
                 'bpm': self.state.bpm,
+                **self._serialize_timeline(),
             }
         except Exception as exc:
             return self._error('set_transport_failed', exc)
@@ -764,22 +1065,217 @@ class HifiShifterWebAPI:
         if cached is not None:
             return cached
 
-        sample_rate, data = wavfile.read(source_path)
-        audio = np.asarray(data)
-        if audio.ndim == 2:
-            audio = np.mean(audio.astype(np.float32), axis=1)
+        audio: np.ndarray
+        sample_rate: int
+        load_error: Exception | None = None
 
-        if np.issubdtype(audio.dtype, np.integer):
-            max_val = float(np.iinfo(audio.dtype).max)
-            if max_val > 0:
-                audio = audio.astype(np.float32) / max_val
-            else:
-                audio = audio.astype(np.float32)
-        else:
-            audio = audio.astype(np.float32)
+        # Prefer soundfile for wav/flac/ogg etc.
+        try:
+            data, sr = sf.read(source_path, always_2d=True)
+            sample_rate = int(sr)
+            audio = np.mean(np.asarray(data, dtype=np.float32), axis=1)
+        except Exception as exc:
+            load_error = exc
+            # Fallback to librosa (handles more formats if backend is available).
+            try:
+                import librosa  # local import to keep startup lightweight
+
+                audio, sr = librosa.load(source_path, sr=None, mono=True)
+                sample_rate = int(sr)
+                audio = np.asarray(audio, dtype=np.float32)
+                load_error = None
+            except Exception:
+                # Final fallback to scipy wavfile for plain WAV.
+                sample_rate, data = wavfile.read(source_path)
+                audio = np.asarray(data)
+                if audio.ndim == 2:
+                    audio = np.mean(audio.astype(np.float32), axis=1)
+
+                if np.issubdtype(audio.dtype, np.integer):
+                    max_val = float(np.iinfo(audio.dtype).max)
+                    if max_val > 0:
+                        audio = audio.astype(np.float32) / max_val
+                    else:
+                        audio = audio.astype(np.float32)
+                else:
+                    audio = audio.astype(np.float32)
+
+        if load_error is not None:
+            # If we reached here, both sf + librosa failed and wavfile succeeded or raised.
+            # Keep original error context for debugging in caller.
+            pass
 
         self._audio_cache[source_path] = (int(sample_rate), audio)
         return int(sample_rate), audio
+
+    def _compute_waveform_preview(self, audio: np.ndarray, bins: int = 1024) -> list[float]:
+        audio = np.asarray(audio, dtype=np.float32)
+        if audio.size == 0:
+            return []
+        bins = int(max(16, bins))
+        chunk = max(1, int(np.ceil(audio.size / bins)))
+        waveform_preview: list[float] = []
+        for idx in range(0, audio.size, chunk):
+            part = audio[idx : idx + chunk]
+            if part.size == 0:
+                continue
+            waveform_preview.append(float(np.max(np.abs(part))))
+        return waveform_preview
+
+    def _load_audio_for_preview(self, source_path: str):
+        """Load audio for waveform preview.
+
+        Returns: (sample_rate, channels)
+        - channels: list of 1 or 2 mono float32 arrays.
+        """
+        # soundfile first (fast for wav/flac/ogg)
+        try:
+            data, sr = sf.read(source_path, always_2d=True)
+            sr = int(sr)
+            data = np.asarray(data, dtype=np.float32)
+            if data.shape[1] <= 1:
+                return sr, [data[:, 0]]
+            return sr, [data[:, 0], data[:, 1]]
+        except Exception:
+            pass
+
+        # librosa fallback (can decode more formats depending on backend)
+        try:
+            import librosa
+
+            y, sr = librosa.load(source_path, sr=None, mono=False)
+            sr = int(sr)
+            y = np.asarray(y, dtype=np.float32)
+            if y.ndim == 1:
+                return sr, [y]
+            if y.shape[0] >= 2:
+                return sr, [y[0], y[1]]
+            return sr, [y[0]]
+        except Exception:
+            # last resort: mono loader
+            sr, mono = self._load_audio_file_mono(source_path)
+            return int(sr), [np.asarray(mono, dtype=np.float32)]
+
+    def import_audio_item(self, audio_path: str, track_id: str | None = None, start_beat: float | None = None):
+        """Import an audio file into the timeline.
+
+        - If track_id is provided, place the item onto that track.
+        - If track_id is None, create a new track.
+        - If start_beat is provided, place the item at that beat (clamped to >= 0).
+
+        This is a lightweight path: it does NOT run analysis (mel/f0) or require model.
+        """
+        try:
+            audio_path = str(audio_path)
+            source_path = str(pathlib.Path(audio_path))
+            if not pathlib.Path(source_path).exists():
+                raise FileNotFoundError(f'音频文件不存在: {source_path}')
+
+            sr, channels = self._load_audio_for_preview(source_path)
+            duration_sec = float(channels[0].size / sr) if sr > 0 and channels else 0.0
+            if len(channels) >= 2:
+                waveform_preview = {
+                    'l': self._compute_waveform_preview(channels[0]),
+                    'r': self._compute_waveform_preview(channels[1]),
+                }
+            else:
+                waveform_preview = self._compute_waveform_preview(channels[0] if channels else np.zeros(0, dtype=np.float32))
+
+            if track_id is not None:
+                track_id = str(track_id).strip() or None
+
+            if track_id is None:
+                stem = pathlib.Path(source_path).stem.strip() or 'Imported'
+                target_track_id = self._new_track_id()
+                self.state.tracks[target_track_id] = TrackState(
+                    id=target_track_id,
+                    name=stem,
+                    parent_id=None,
+                    muted=False,
+                    solo=False,
+                    volume=0.9,
+                )
+                self.state.track_order.append(target_track_id)
+            else:
+                if track_id not in self.state.tracks:
+                    raise RuntimeError('目标轨道不存在。')
+                target_track_id = track_id
+
+            self.state.selected_track_id = target_track_id
+
+            clip_id = self._new_clip_id()
+            start_beat_value = 0.0
+            if start_beat is not None:
+                start_beat_value = max(0.0, float(start_beat))
+            clip = ClipState(
+                id=clip_id,
+                track_id=target_track_id,
+                name=pathlib.Path(source_path).name,
+                start_beat=start_beat_value,
+                length_beats=max(0.25, float(duration_sec * self.state.bpm / 60.0) if duration_sec > 0 else 2.0),
+                color='emerald',
+                source_path=source_path,
+                duration_sec=duration_sec,
+                waveform_preview=waveform_preview,
+                pitch_range={'min': -24.0, 'max': 24.0},
+            )
+            self.state.clips[clip_id] = clip
+            self.state.tracks[target_track_id].clip_ids.append(clip_id)
+            self.state.selected_clip_id = clip_id
+
+            self._update_project_beats_from_clips()
+
+            return {
+                'ok': True,
+                'track': asdict(self.state.tracks[target_track_id]),
+                'clip': asdict(clip),
+                **self._serialize_timeline(),
+            }
+        except Exception as exc:
+            return self._error('import_audio_item_failed', exc)
+
+    def import_audio_bytes(self, file_name: str, base64_data: str, track_id: str | None = None, start_beat: float | None = None):
+        """Import audio from bytes when the WebView cannot provide a local path.
+
+        The frontend passes a base64 payload (DataURL body). We persist it to a
+        temp file and reuse the existing import_audio_item pipeline.
+        """
+        try:
+            name = (file_name or '').strip() or 'dropped-audio'
+            suffix = pathlib.Path(name).suffix or '.bin'
+            drop_dir = pathlib.Path(tempfile.gettempdir()) / 'hifishifter_drops'
+            drop_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path = drop_dir / f'{uuid.uuid4().hex}{suffix}'
+
+            raw = base64.b64decode(base64_data, validate=False)
+            tmp_path.write_bytes(raw)
+
+            res = self.import_audio_item(str(tmp_path), track_id=track_id, start_beat=start_beat)
+            if not isinstance(res, dict) or not res.get('ok'):
+                return res
+
+            # Preserve the original imported file name for UI display.
+            # import_audio_item uses the persisted temp path's basename; override it.
+            display_name = pathlib.Path(name).name.strip() or 'Imported'
+            clip_id = (res.get('clip') or {}).get('id')
+            if clip_id and clip_id in self.state.clips:
+                self.state.clips[clip_id].name = display_name
+
+            # If a new track was auto-created (track_id is None), keep the original stem.
+            created_track_id = (res.get('track') or {}).get('id')
+            if track_id is None and created_track_id and created_track_id in self.state.tracks:
+                stem = pathlib.Path(display_name).stem.strip() or 'Imported'
+                self.state.tracks[created_track_id].name = stem
+
+            # Return a fresh serialization so frontend gets updated names.
+            out: dict = {'ok': True, **self._serialize_timeline()}
+            if created_track_id and created_track_id in self.state.tracks:
+                out['track'] = asdict(self.state.tracks[created_track_id])
+            if clip_id and clip_id in self.state.clips:
+                out['clip'] = asdict(self.state.clips[clip_id])
+            return out
+        except Exception as exc:
+            return self._error('import_audio_bytes_failed', exc)
 
     def _resample_linear(self, audio: np.ndarray, from_sr: int, to_sr: int):
         if from_sr == to_sr or audio.size <= 1:
@@ -821,34 +1317,56 @@ class HifiShifterWebAPI:
 
         has_any_solo = any(track.solo for track in self.state.tracks.values())
 
-        active_clips: list[tuple[ClipState, float]] = []
+        def _fade_in_curve(n: int) -> np.ndarray:
+            if n <= 1:
+                return np.ones(max(0, n), dtype=np.float32)
+            t = np.linspace(0.0, 1.0, num=n, endpoint=True, dtype=np.float32)
+            return np.sin(t * (math.pi / 2.0)).astype(np.float32)
+
+        def _fade_out_curve(n: int) -> np.ndarray:
+            if n <= 1:
+                return np.ones(max(0, n), dtype=np.float32)
+            t = np.linspace(0.0, 1.0, num=n, endpoint=True, dtype=np.float32)
+            return np.cos(t * (math.pi / 2.0)).astype(np.float32)
+
+        active_clips: list[tuple[ClipState, float, float]] = []
         max_end_sec = start_sec
         for clip in self.state.clips.values():
             if clip.muted:
                 continue
-            if clip.track_id not in self.state.tracks:
+            track = self.state.tracks.get(clip.track_id)
+            if not track:
                 continue
-            if not self._is_track_audible_under_solo(clip.track_id, has_any_solo):
+            if track.muted:
                 continue
-            track_gain, track_muted = self._effective_track_gain_and_mute(clip.track_id)
-            if track_muted or track_gain <= 0.0:
-                continue
-
-            clip_start_sec = max(0.0, clip.start_beat * 60.0 / bpm)
-            clip_length_sec = max(0.0, clip.length_beats * 60.0 / bpm)
-            if clip_start_sec + clip_length_sec <= start_sec:
+            if has_any_solo and not track.solo:
                 continue
 
-            active_clips.append((clip, track_gain))
-            max_end_sec = max(max_end_sec, clip_start_sec + clip_length_sec)
+            track_gain = float(np.clip(getattr(track, 'volume', 1.0), 0.0, 2.0))
+
+            desired_sec = max(0.0, float(clip.length_beats) * 60.0 / bpm)
+            if desired_sec <= 1e-6:
+                continue
+
+            clip_start_sec = max(0.0, float(clip.start_beat) * 60.0 / bpm)
+
+            # Buffer sizing: assume the clip occupies its timeline duration.
+            # Actual audio is cropped to available source region later.
+            clip_end_sec = clip_start_sec + desired_sec
+
+            active_clips.append((clip, track_gain, desired_sec))
+            max_end_sec = max(max_end_sec, clip_end_sec)
 
         if not active_clips:
             return sample_rate, np.zeros(0, dtype=np.float32)
 
-        total_len = max(1, int(np.ceil((max_end_sec - start_sec) * sample_rate)))
+        total_len = int(round(max(0.0, max_end_sec - start_sec) * sample_rate))
+        if total_len <= 0:
+            return sample_rate, np.zeros(0, dtype=np.float32)
+
         mix = np.zeros(total_len, dtype=np.float32)
 
-        for clip, track_gain in active_clips:
+        for clip, track_gain, desired_sec in active_clips:
             resolved = self._resolve_clip_audio(clip, target)
             if not resolved:
                 continue
@@ -856,23 +1374,41 @@ class HifiShifterWebAPI:
             clip_audio = self._resample_linear(src_audio, src_sr, sample_rate)
             clip_audio = self._time_stretch_linear(clip_audio, clip.playback_rate)
 
-            clip_total_sec = max(clip.length_beats * 60.0 / bpm, 1e-4)
-            trim_start_sec = max(0.0, clip.trim_start_beat * 60.0 / bpm)
-            trim_end_sec = max(0.0, clip.trim_end_beat * 60.0 / bpm)
-
-            clip_available_sec = max(0.0, clip_total_sec - trim_start_sec - trim_end_sec)
-            if clip_available_sec <= 1e-5:
+            src_total_sec = float(clip_audio.size) / float(sample_rate) if sample_rate > 0 else 0.0
+            trim_start_sec = max(0.0, float(clip.trim_start_beat) * 60.0 / bpm)
+            trim_end_sec = max(0.0, float(clip.trim_end_beat) * 60.0 / bpm)
+            available_sec = max(0.0, src_total_sec - trim_start_sec - trim_end_sec)
+            render_sec = min(max(0.0, desired_sec), available_sec)
+            if render_sec <= 1e-6:
                 continue
 
             start_idx_in_src = int(round(trim_start_sec * sample_rate))
-            end_idx_in_src = min(clip_audio.size, start_idx_in_src + int(round(clip_available_sec * sample_rate)))
+            end_idx_in_src = min(
+                clip_audio.size,
+                start_idx_in_src + int(round(render_sec * sample_rate)),
+            )
             if end_idx_in_src <= start_idx_in_src:
                 continue
 
             segment = clip_audio[start_idx_in_src:end_idx_in_src]
-            segment = segment * float(np.clip(track_gain * clip.gain, 0.0, 2.0))
+            segment = segment * float(np.clip(track_gain * float(clip.gain), 0.0, 2.0))
 
-            clip_start_sec = max(0.0, clip.start_beat * 60.0 / bpm)
+            # Apply clip fades (curved), after trims and gain.
+            fade_in_sec = max(0.0, float(getattr(clip, 'fade_in_beats', 0.0)) * 60.0 / bpm)
+            fade_out_sec = max(0.0, float(getattr(clip, 'fade_out_beats', 0.0)) * 60.0 / bpm)
+            if segment.size > 1:
+                if fade_in_sec > 1e-6:
+                    n = int(round(fade_in_sec * sample_rate))
+                    n = max(0, min(n, segment.size))
+                    if n > 1:
+                        segment[:n] *= _fade_in_curve(n)
+                if fade_out_sec > 1e-6:
+                    n = int(round(fade_out_sec * sample_rate))
+                    n = max(0, min(n, segment.size))
+                    if n > 1:
+                        segment[-n:] *= _fade_out_curve(n)
+
+            clip_start_sec = max(0.0, float(clip.start_beat) * 60.0 / bpm)
             dst_start = int(round((clip_start_sec - start_sec) * sample_rate))
             if dst_start < 0:
                 trim = -dst_start
@@ -894,7 +1430,8 @@ class HifiShifterWebAPI:
             playhead_beat = self.state.playhead_beat
             sample_rate, mixed = self._mix_project_audio('original', playhead_beat)
             if mixed.size == 0:
-                raise RuntimeError('当前时间点之后没有可播放的音频块。')
+                duration_sec = self._project_duration_sec_from_beat(playhead_beat)
+                return self._start_virtual_playback('original', duration_sec, 0.0)
             return self._start_playback('original', mixed, sample_rate, 0.0)
         except Exception as exc:
             return self._error('play_original_failed', exc)
@@ -904,7 +1441,8 @@ class HifiShifterWebAPI:
             playhead_beat = self.state.playhead_beat
             sample_rate, mixed = self._mix_project_audio('synthesized', playhead_beat)
             if mixed.size == 0:
-                raise RuntimeError('当前时间点之后没有可播放的音频块。')
+                duration_sec = self._project_duration_sec_from_beat(playhead_beat)
+                return self._start_virtual_playback('synthesized', duration_sec, 0.0)
             return self._start_playback('synthesized', mixed, sample_rate, 0.0)
         except Exception as exc:
             return self._error('play_synthesized_failed', exc)
@@ -949,10 +1487,15 @@ class HifiShifterWebAPI:
             if not result:
                 return {'ok': True, 'canceled': True}
 
+            if isinstance(result, (list, tuple)):
+                audio_path = str(result[0])
+            else:
+                audio_path = str(result)
+
             return {
                 'ok': True,
                 'canceled': False,
-                'path': str(result[0]),
+                'path': audio_path,
             }
         except Exception as exc:
             return self._error('open_audio_dialog_failed', exc)
@@ -1022,7 +1565,17 @@ class HifiShifterWebAPI:
                 'is_playing': False,
             }
 
-        sd.play(chunk, sample_rate)
+        # Try lower-latency playback; fall back to default on unsupported backends.
+        try:
+            sd.play(
+                chunk,
+                sample_rate,
+                blocking=False,
+                latency='low',
+                blocksize=512,
+            )
+        except Exception:
+            sd.play(chunk, sample_rate)
         self.state.playback_target = target
         self.state.playback_started_at = time.monotonic()
         self.state.playback_start_sec = start_sec
@@ -1033,6 +1586,36 @@ class HifiShifterWebAPI:
             'playing': target,
             'start_sec': start_sec,
             'duration_sec': self.state.playback_duration_sec,
+            'is_playing': True,
+        }
+
+    def _project_duration_sec_from_beat(self, start_beat: float) -> float:
+        bpm = max(1.0, float(self.state.bpm or 120.0))
+        start_beat = max(0.0, float(start_beat))
+        project_beats = max(0.0, float(self.state.project_beats or 0.0))
+        remaining_beats = max(0.0, project_beats - start_beat)
+        # Ensure transport can move even when project length is 0.
+        return max(1.0, remaining_beats * 60.0 / bpm)
+
+    def _start_virtual_playback(self, target: str, duration_sec: float, start_sec: float):
+        """Start a silent playback clock without audio output.
+
+        This keeps the transport moving even when there's no audio to play.
+        """
+        duration_sec = max(0.0, float(duration_sec))
+        start_sec = max(0.0, float(start_sec))
+
+        sd.stop()
+        self.state.playback_target = target
+        self.state.playback_started_at = time.monotonic()
+        self.state.playback_start_sec = start_sec
+        self.state.playback_duration_sec = duration_sec
+
+        return {
+            'ok': True,
+            'playing': target,
+            'start_sec': start_sec,
+            'duration_sec': duration_sec,
             'is_playing': True,
         }
 

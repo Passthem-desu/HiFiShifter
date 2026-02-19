@@ -17,8 +17,67 @@ declare global {
     }
 }
 
+type PyWebviewApi = Record<string, (...args: any[]) => Promise<any>>;
+
+let pywebviewAvailability: "unknown" | "available" | "unavailable" = "unknown";
+
+async function waitForPyWebviewApi(timeoutMs: number): Promise<PyWebviewApi | null> {
+    const already = window.pywebview?.api;
+    if (already) {
+        pywebviewAvailability = "available";
+        return already as PyWebviewApi;
+    }
+
+    if (pywebviewAvailability === "unavailable") {
+        return null;
+    }
+
+    const startedAt = performance.now();
+    await new Promise<void>((resolve) => {
+        let done = false;
+
+        function finish() {
+            if (done) return;
+            done = true;
+            window.removeEventListener("pywebviewready", onReady as any);
+            document.removeEventListener("pywebviewready", onReady as any);
+            clearInterval(pollId);
+            clearTimeout(timeoutId);
+            resolve();
+        }
+
+        function onReady() {
+            finish();
+        }
+
+        const pollId = window.setInterval(() => {
+            if (window.pywebview?.api) finish();
+        }, 25);
+
+        const timeoutId = window.setTimeout(() => {
+            finish();
+        }, Math.max(0, timeoutMs));
+
+        window.addEventListener("pywebviewready", onReady as any, { once: true });
+        document.addEventListener("pywebviewready", onReady as any, { once: true });
+    });
+
+    const api = window.pywebview?.api as PyWebviewApi | undefined;
+    if (api) {
+        pywebviewAvailability = "available";
+        return api;
+    }
+
+    // If pywebview didn't appear after a meaningful wait, treat it as unavailable
+    // to avoid stalling every call in browser/dev mode.
+    if (performance.now() - startedAt >= 750) {
+        pywebviewAvailability = "unavailable";
+    }
+    return null;
+}
+
 async function invoke<T>(method: string, ...args: unknown[]): Promise<T> {
-    const api = window.pywebview?.api;
+    const api = (await waitForPyWebviewApi(1500)) ?? null;
     if (!api || typeof api[method] !== "function") {
         throw new Error(`Python API not available: ${method}`);
     }
@@ -43,6 +102,30 @@ export const webApi = {
         invoke<ModelConfigResult>("load_model", modelDir),
     processAudio: (audioPath: string) =>
         invoke<ProcessAudioResult>("process_audio", audioPath),
+    importAudioItem: (
+        audioPath: string,
+        trackId?: string,
+        startBeat?: number,
+    ) =>
+        invoke<TimelineResult>(
+            "import_audio_item",
+            audioPath,
+            trackId,
+            startBeat,
+        ),
+    importAudioBytes: (
+        fileName: string,
+        base64Data: string,
+        trackId?: string,
+        startBeat?: number,
+    ) =>
+        invoke<TimelineResult>(
+            "import_audio_bytes",
+            fileName,
+            base64Data,
+            trackId,
+            startBeat,
+        ),
     setPitchShift: (semitones: number) =>
         invoke<{ ok: boolean; pitch_shift?: number; frames?: number }>(
             "set_pitch_shift",
@@ -146,6 +229,8 @@ export const webApi = {
         trimStartBeat?: number;
         trimEndBeat?: number;
         playbackRate?: number;
+        fadeInBeats?: number;
+        fadeOutBeats?: number;
     }) =>
         invoke<TimelineResult>(
             "set_clip_state",
@@ -156,7 +241,13 @@ export const webApi = {
             payload.trimStartBeat,
             payload.trimEndBeat,
             payload.playbackRate,
+            payload.fadeInBeats,
+            payload.fadeOutBeats,
         ),
+    splitClip: (clipId: string, splitBeat: number) =>
+        invoke<TimelineResult>("split_clip", clipId, splitBeat),
+    glueClips: (clipIds: string[]) =>
+        invoke<TimelineResult>("glue_clips", clipIds),
     selectClip: (clipId: string | null) =>
         invoke<TimelineResult>("select_clip", clipId),
     setTransport: (payload: { playheadBeat?: number; bpm?: number }) =>
@@ -167,4 +258,99 @@ export const webApi = {
         }>("set_transport", payload.playheadBeat, payload.bpm),
     setProjectLength: (projectBeats: number) =>
         invoke<TimelineResult>("set_project_length", projectBeats),
+
+    // ========================================
+    // 新的 ProjectManager API
+    // ========================================
+
+    // 工程管理
+    createNewProject: (name = "Untitled Project") =>
+        invoke<{ ok: boolean; project: any }>("create_new_project", name),
+
+    getProjectState: () =>
+        invoke<{ ok: boolean; project: any }>("get_project_state"),
+
+    saveProjectToFile: (filePath: string) =>
+        invoke<{ ok: boolean; file_path: string }>(
+            "save_project_to_file",
+            filePath,
+        ),
+
+    loadProjectFromFile: (filePath: string) =>
+        invoke<{ ok: boolean; project: any }>(
+            "load_project_from_file",
+            filePath,
+        ),
+
+    // 轨道管理
+    pmAddTrack: (name: string, parentId?: string) =>
+        invoke<{ ok: boolean; track: any; project: any }>(
+            "pm_add_track",
+            name,
+            parentId,
+        ),
+
+    pmDeleteTrack: (trackId: string) =>
+        invoke<{ ok: boolean; project: any }>("pm_delete_track", trackId),
+
+    pmUpdateTrack: (trackId: string, params: Record<string, any>) =>
+        invoke<{ ok: boolean; track: any; project: any }>(
+            "pm_update_track",
+            trackId,
+            params,
+        ),
+
+    pmMoveTrack: (trackId: string, newOrder: number, newParentId?: string) =>
+        invoke<{ ok: boolean; project: any }>(
+            "pm_move_track",
+            trackId,
+            newOrder,
+            newParentId,
+        ),
+
+    // 音频块管理
+    pmImportAudio: (filePath: string, trackId: string, startTime = 0.0) =>
+        invoke<{ ok: boolean; clip: any; project: any }>(
+            "pm_import_audio",
+            filePath,
+            trackId,
+            startTime,
+        ),
+
+    pmDeleteClip: (clipId: string) =>
+        invoke<{ ok: boolean; project: any }>("pm_delete_clip", clipId),
+
+    pmUpdateClip: (clipId: string, params: Record<string, any>) =>
+        invoke<{ ok: boolean; clip: any; project: any }>(
+            "pm_update_clip",
+            clipId,
+            params,
+        ),
+
+    pmGetClipFeatures: (clipId: string) =>
+        invoke<{ ok: boolean; features: any }>("pm_get_clip_features", clipId),
+
+    pmUpdateClipF0: (clipId: string, f0Data: number[]) =>
+        invoke<{ ok: boolean; clip: any }>("pm_update_clip_f0", clipId, f0Data),
+
+    // 播放和导出
+    pmExportAudio: (filePath: string, startTime = 0.0, endTime?: number) =>
+        invoke<{ ok: boolean; file_path: string }>(
+            "pm_export_audio",
+            filePath,
+            startTime,
+            endTime,
+        ),
+
+    pmSetCursorPosition: (position: number) =>
+        invoke<{ ok: boolean; cursor_position: number }>(
+            "pm_set_cursor_position",
+            position,
+        ),
+
+    pmSetSelectedTrack: (trackId: string | null) =>
+        invoke<{ ok: boolean; selected_track_id: string | null }>(
+            "pm_set_selected_track",
+            trackId,
+        ),
 };

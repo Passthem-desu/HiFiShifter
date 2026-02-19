@@ -1,149 +1,264 @@
+import { useEffect, useRef, useState } from "react";
+import {
+    Flex,
+    Select,
+    TextField,
+    Button,
+    Separator,
+    Text,
+} from "@radix-ui/themes";
+import {
+    PlayIcon,
+    StopIcon,
+    LightningBoltIcon,
+    MagnifyingGlassIcon,
+} from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
+import { useI18n } from "../../i18n/I18nProvider";
 import {
-    applyPitchShift,
-    exportAudio,
     loadModel,
     playOriginal,
     playSynthesized,
     processAudio,
-    refreshRuntime,
-    seekPlayhead,
-    setBpm,
-    setProjectLengthRemote,
     stopAudioPlayback,
     synthesizeAudio,
+    setBpm,
     updateTransportBpm,
+    setBeats,
+    setToolMode,
+    setEditParam,
+    setGrid,
+    importAudioFromDialog,
 } from "../../features/session/sessionSlice";
-import { useI18n } from "../../i18n/I18nProvider";
-
-function btnClass(primary = false) {
-    return primary
-        ? "rounded border border-zinc-500 bg-zinc-600 px-2.5 py-1 text-xs font-semibold text-zinc-100 hover:bg-zinc-500 disabled:opacity-50"
-        : "rounded border border-zinc-600 bg-zinc-700 px-2.5 py-1 text-xs font-semibold text-zinc-100 hover:bg-zinc-600 disabled:opacity-50";
-}
 
 export function ActionBar() {
     const dispatch = useAppDispatch();
     const s = useAppSelector((state: RootState) => state.session);
     const { t } = useI18n();
 
+    const [bpmText, setBpmText] = useState(() =>
+        String(Math.round(s.bpm || 120)),
+    );
+    const bpmDirtyRef = useRef(false);
+
+    useEffect(() => {
+        if (!bpmDirtyRef.current) {
+            setBpmText(String(Math.round(s.bpm || 120)));
+        }
+    }, [s.bpm]);
+
+    function commitBpm(nextText?: string) {
+        const raw = (nextText ?? bpmText).trim();
+        const next = Number(raw);
+        bpmDirtyRef.current = false;
+        if (!Number.isFinite(next)) {
+            setBpmText(String(Math.round(s.bpm || 120)));
+            return;
+        }
+        dispatch(setBpm(next));
+        void dispatch(updateTransportBpm(next));
+        setBpmText(String(Math.round(next)));
+    }
+
+    // Custom styles for Radix components to match Qt look
+    // Note: Radix Themes handles a lot, but we might need overrides for exact pixel matching if needed.
+    // For now, we use standard Radix "gray" theme which fits well.
+
     return (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-zinc-700 bg-zinc-800 px-2 py-1.5">
-            <button
-                className={btnClass(true)}
-                disabled={s.busy}
-                onClick={() => dispatch(loadModel(s.modelDir))}
-            >
-                {t("action_load_model")}
-            </button>
-            <button
-                className={btnClass()}
-                disabled={s.busy}
-                onClick={() => dispatch(processAudio(s.audioPath))}
-            >
-                {t("action_analyze_audio")}
-            </button>
-            <button
-                className={btnClass()}
-                disabled={s.busy}
-                onClick={() => dispatch(applyPitchShift(s.pitchShift))}
-            >
-                {t("action_apply_pitch")}
-            </button>
-            <button
-                className={btnClass(true)}
-                disabled={s.busy}
-                onClick={() => dispatch(synthesizeAudio())}
-            >
-                {t("action_synthesize")}
-            </button>
-            <button
-                className={btnClass()}
-                disabled={s.busy}
-                onClick={() => dispatch(exportAudio(s.outputPath))}
-            >
-                {t("action_export_wav")}
-            </button>
+        <Flex
+            align="center"
+            gap="3"
+            className="h-10 bg-qt-window border-b border-qt-border px-2 text-qt-text flex-nowrap overflow-x-auto overflow-y-hidden min-w-0 custom-scrollbar"
+        >
+            {/* Mode & Param Group */}
+            <Flex align="center" gap="2" className="shrink-0">
+                <Text size="1" color="gray">
+                    {t("tool_mode")}:
+                </Text>
+                <Select.Root
+                    value={s.toolMode}
+                    size="1"
+                    onValueChange={(v) =>
+                        dispatch(setToolMode(v as typeof s.toolMode))
+                    }
+                >
+                    <Select.Trigger style={{ backgroundColor: "#303030" }} />
+                    <Select.Content>
+                        <Select.Item value="select">{t("select")}</Select.Item>
+                        <Select.Item value="draw">{t("draw")}</Select.Item>
+                    </Select.Content>
+                </Select.Root>
+            </Flex>
 
-            <div className="mx-1 h-5 w-px bg-zinc-600" />
+            <Flex align="center" gap="2" className="shrink-0">
+                <Text size="1" color="gray">
+                    {t("edit_param")}:
+                </Text>
+                <Select.Root
+                    value={s.editParam}
+                    size="1"
+                    onValueChange={(v) =>
+                        dispatch(setEditParam(v as typeof s.editParam))
+                    }
+                >
+                    <Select.Trigger style={{ backgroundColor: "#303030" }} />
+                    <Select.Content>
+                        <Select.Item value="pitch">{t("pitch")}</Select.Item>
+                        <Select.Item value="tension">
+                            {t("tension")}
+                        </Select.Item>
+                        <Select.Item value="breath">{t("breath")}</Select.Item>
+                    </Select.Content>
+                </Select.Root>
+            </Flex>
 
-            <button
-                className={btnClass()}
-                disabled={s.busy}
-                onClick={() => dispatch(playOriginal())}
-            >
-                {t("action_play_src")}
-            </button>
-            <button
-                className={btnClass()}
-                disabled={s.busy}
-                onClick={() => dispatch(playSynthesized())}
-            >
-                {t("action_play_out")}
-            </button>
-            <button
-                className={btnClass()}
-                disabled={s.busy}
-                onClick={() => dispatch(stopAudioPlayback())}
-            >
-                {t("action_stop")}
-            </button>
+            <Separator orientation="vertical" size="2" />
 
-            <div className="mx-1 h-5 w-px bg-zinc-600" />
+            {/* BPM & Time */}
+            <Flex align="center" gap="2" className="shrink-0">
+                <Text size="1" color="gray">
+                    BPM:
+                </Text>
+                <TextField.Root
+                    size="1"
+                    value={bpmText}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        bpmDirtyRef.current = true;
+                        setBpmText(e.target.value);
+                    }}
+                    onBlur={() => commitBpm()}
+                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                        if (e.key === "Enter") {
+                            e.preventDefault();
+                            commitBpm();
+                            (e.currentTarget as HTMLInputElement).blur();
+                        } else if (e.key === "Escape") {
+                            e.preventDefault();
+                            bpmDirtyRef.current = false;
+                            setBpmText(String(Math.round(s.bpm || 120)));
+                            (e.currentTarget as HTMLInputElement).blur();
+                        }
+                    }}
+                    style={{
+                        width: 60,
+                        textAlign: "right",
+                        backgroundColor: "var(--qt-base)",
+                    }}
+                />
+                <Text size="1" color="gray">
+                    {t("beats_per_bar")}:
+                </Text>
+                <Flex align="center" gap="1">
+                    <TextField.Root
+                        size="1"
+                        type="number"
+                        value={
+                            Number.isFinite(s.beats)
+                                ? Math.round(s.beats).toString()
+                                : "4"
+                        }
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                            const v = Number(e.target.value);
+                            if (!Number.isFinite(v)) return;
+                            dispatch(setBeats(v));
+                        }}
+                        style={{
+                            width: 42,
+                            textAlign: "center",
+                            backgroundColor: "var(--qt-base)",
+                        }}
+                    />
+                    <Text size="1" color="gray">
+                        / 4
+                    </Text>
+                </Flex>
 
-            <label className="text-[11px] text-zinc-300">{t("playhead")}</label>
-            <input
-                className="h-1.5 w-40 cursor-pointer accent-cyan-500"
-                type="range"
-                min={0}
-                max={Math.max(4, Math.ceil(s.projectBeats))}
-                step={0.25}
-                value={s.playheadBeat}
-                onChange={(event) =>
-                    void dispatch(seekPlayhead(Number(event.target.value)))
-                }
-            />
-            <div className="w-12 text-right text-xs text-zinc-200">
-                {s.playheadBeat.toFixed(2)}b
-            </div>
+                <Text size="1" color="gray">
+                    {t("grid")}:
+                </Text>
+                <Select.Root
+                    value={s.grid}
+                    size="1"
+                    onValueChange={(v) => dispatch(setGrid(v as typeof s.grid))}
+                >
+                    <Select.Trigger
+                        style={{ backgroundColor: "var(--qt-base)" }}
+                    />
+                    <Select.Content>
+                        <Select.Item value="1/4">1/4</Select.Item>
+                        <Select.Item value="1/8">1/8</Select.Item>
+                        <Select.Item value="1/16">1/16</Select.Item>
+                        <Select.Item value="1/32">1/32</Select.Item>
+                    </Select.Content>
+                </Select.Root>
+            </Flex>
 
-            <label className="text-[11px] text-zinc-300">BPM</label>
-            <input
-                className="w-16 rounded border border-zinc-600 bg-zinc-700 px-1.5 py-0.5 text-xs text-zinc-100"
-                type="number"
-                min={10}
-                max={300}
-                step={1}
-                value={Math.round(s.bpm)}
-                onChange={(event) => {
-                    const bpm = Number(event.target.value) || s.bpm;
-                    dispatch(setBpm(bpm));
-                    void dispatch(updateTransportBpm(bpm));
-                }}
-            />
+            <Separator orientation="vertical" size="2" />
 
-            <label className="text-[11px] text-zinc-300">Len</label>
-            <input
-                className="w-16 rounded border border-zinc-600 bg-zinc-700 px-1.5 py-0.5 text-xs text-zinc-100"
-                type="number"
-                min={4}
-                max={2048}
-                step={1}
-                value={Math.round(s.projectBeats)}
-                onChange={(event) => {
-                    const beats = Number(event.target.value) || s.projectBeats;
-                    void dispatch(setProjectLengthRemote(beats));
-                }}
-            />
+            {/* Transport */}
+            <Flex gap="1" className="shrink-0">
+                <Button
+                    variant="soft"
+                    color="gray"
+                    size="1"
+                    onClick={() => dispatch(stopAudioPlayback())}
+                    title={t("action_stop")}
+                >
+                    <StopIcon />
+                </Button>
+                <Button
+                    variant="soft"
+                    color="gray"
+                    size="1"
+                    onClick={() => dispatch(playOriginal())}
+                    title={t("action_play_src")}
+                >
+                    <PlayIcon /> {t("action_play_src")}
+                </Button>
+                <Button
+                    variant="solid"
+                    size="1"
+                    onClick={() => dispatch(playSynthesized())}
+                    title={t("action_play_out")}
+                >
+                    <PlayIcon /> {t("action_play_out")}
+                </Button>
+            </Flex>
 
-            <button
-                className={btnClass()}
-                disabled={s.busy}
-                onClick={() => dispatch(refreshRuntime())}
-            >
-                {t("action_refresh")}
-            </button>
-        </div>
+            <Separator orientation="vertical" size="2" />
+
+            {/* Actions */}
+            <Flex gap="1" className="shrink-0">
+                <Button
+                    variant="surface"
+                    color="gray"
+                    size="1"
+                    onClick={() => dispatch(loadModel(s.modelDir))}
+                >
+                    {t("action_load_model")}
+                </Button>
+                <Button
+                    variant="surface"
+                    color="gray"
+                    size="1"
+                    onClick={() =>
+                        s.audioPath
+                            ? dispatch(processAudio(s.audioPath))
+                            : dispatch(importAudioFromDialog())
+                    }
+                >
+                    <MagnifyingGlassIcon /> {t("action_analyze_audio")}
+                </Button>
+                <Button
+                    variant="classic"
+                    highContrast
+                    size="1"
+                    onClick={() => dispatch(synthesizeAudio())}
+                >
+                    <LightningBoltIcon /> {t("action_synthesize")}
+                </Button>
+            </Flex>
+        </Flex>
     );
 }

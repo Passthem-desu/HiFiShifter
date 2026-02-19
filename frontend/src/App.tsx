@@ -1,242 +1,246 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
-import { useAppDispatch, useAppSelector } from "./app/hooks";
-import {
-    fetchTimeline,
-    importAudioFromPath,
-    loadDefaultModel,
-    playOriginal,
-    redo,
-    refreshRuntime,
-    removeSelectedClipRemote,
-    setToolMode,
-    stopAudioPlayback,
-    syncPlaybackState,
-    undo,
-} from "./features/session/sessionSlice";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Flex, Box, Text, Separator } from "@radix-ui/themes";
 import { MenuBar } from "./components/layout/MenuBar";
 import { ActionBar } from "./components/layout/ActionBar";
-import { TimelinePanel } from "./components/editor/TimelinePanel";
-import { PianoRollPanel } from "./components/editor/PianoRollPanel";
-import { StatusPanels } from "./components/layout/StatusPanels";
+import { TimelinePanel } from "./components/layout/TimelinePanel";
+import { PianoRollPanel } from "./components/layout/PianoRollPanel";
+import { useAppDispatch, useAppSelector } from "./app/hooks";
+import type { RootState } from "./app/store";
+import {
+    fetchTimeline,
+    refreshRuntime,
+    syncPlaybackState,
+    stopAudioPlayback,
+    playSynthesized,
+    playOriginal,
+} from "./features/session/sessionSlice";
 import { useI18n } from "./i18n/I18nProvider";
 
 function App() {
     const dispatch = useAppDispatch();
-    const session = useAppSelector((state) => state.session);
+    const s = useAppSelector((state: RootState) => state.session);
     const { t } = useI18n();
-    const [dragActive, setDragActive] = useState(false);
-    const defaultModelAttemptedRef = useRef(false);
-    const editorRef = useRef<HTMLDivElement | null>(null);
-    const [timelineRatio, setTimelineRatio] = useState(0.56);
 
-    const parseDroppedPath = (
-        event: DragEvent<HTMLDivElement>,
-    ): string | null => {
-        const droppedFile = event.dataTransfer.files?.[0] as File & {
-            path?: string;
-        };
-        if (droppedFile?.path) {
-            return droppedFile.path;
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const dragRef = useRef<{ pointerId: number } | null>(null);
+    const [splitRatio, setSplitRatio] = useState(() => {
+        const stored = Number(localStorage.getItem("hifishifter.splitRatio"));
+        return Number.isFinite(stored)
+            ? Math.min(0.85, Math.max(0.15, stored))
+            : 0.6;
+    });
+    const splitRatioRef = useRef(splitRatio);
+    const [isDragging, setIsDragging] = useState(false);
+
+    const splitter = useMemo(() => {
+        const minTopPx = 200;
+        const minBottomPx = 150;
+        const handlePx = 8;
+
+        function clamp(v: number, minV: number, maxV: number) {
+            return Math.min(maxV, Math.max(minV, v));
         }
 
-        const uriList = event.dataTransfer.getData("text/uri-list");
-        if (uriList && uriList.startsWith("file://")) {
-            try {
-                const url = new URL(uriList.trim());
-                return decodeURIComponent(url.pathname).replace(/^\//, "");
-            } catch {
-                return null;
+        function setFromClientY(clientY: number) {
+            const el = containerRef.current;
+            if (!el) return;
+            const rect = el.getBoundingClientRect();
+            const total = rect.height;
+            if (
+                !Number.isFinite(total) ||
+                total <= minTopPx + minBottomPx + handlePx
+            ) {
+                return;
             }
+            const y = clientY - rect.top;
+            const maxTop = total - handlePx - minBottomPx;
+            const nextTop = clamp(y, minTopPx, maxTop);
+            const nextRatio = clamp(nextTop / total, 0.15, 0.85);
+            setSplitRatio(nextRatio);
         }
 
-        const plainText = event.dataTransfer.getData("text/plain");
-        if (plainText && /\.(wav|flac|mp3|ogg|m4a)$/i.test(plainText.trim())) {
-            return plainText.trim();
+        function onPointerMove(e: PointerEvent) {
+            if (!dragRef.current) return;
+            setFromClientY(e.clientY);
         }
 
-        return null;
+        function endDrag() {
+            if (!dragRef.current) return;
+            dragRef.current = null;
+            setIsDragging(false);
+            localStorage.setItem(
+                "hifishifter.splitRatio",
+                String(splitRatioRef.current),
+            );
+            window.removeEventListener("pointermove", onPointerMove);
+            window.removeEventListener("pointerup", endDrag);
+            window.removeEventListener("pointercancel", endDrag);
+        }
+
+        function startDrag(e: React.PointerEvent<HTMLDivElement>) {
+            if (e.button !== 0) return;
+            dragRef.current = { pointerId: e.pointerId };
+            setIsDragging(true);
+            (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+            setFromClientY(e.clientY);
+            window.addEventListener("pointermove", onPointerMove);
+            window.addEventListener("pointerup", endDrag);
+            window.addEventListener("pointercancel", endDrag);
+        }
+
+        return { startDrag };
+    }, [splitRatio]);
+
+    const statusKey: Record<string, string> = {
+        Ready: "status_ready",
+        Failed: "status_failed",
+        "Runtime updated": "status_runtime_updated",
+        "Runtime update failed": "status_runtime_update_failed",
+        "Import canceled": "status_import_canceled",
+        "Pick output canceled": "status_pick_output_canceled",
+        "Output path selected": "status_output_path_selected",
     };
 
+    const statusText = statusKey[s.status]
+        ? t(statusKey[s.status] as any)
+        : s.status;
+
+    const runtimeRef = useRef({
+        isPlaying: false,
+        hasSynthesized: false,
+    });
+
     useEffect(() => {
-        dispatch(refreshRuntime());
         void dispatch(fetchTimeline());
+        void dispatch(refreshRuntime());
     }, [dispatch]);
 
     useEffect(() => {
-        if (session.runtime.modelLoaded || defaultModelAttemptedRef.current) {
-            return;
-        }
-        defaultModelAttemptedRef.current = true;
-        void dispatch(loadDefaultModel());
-    }, [dispatch, session.runtime.modelLoaded]);
+        runtimeRef.current = {
+            isPlaying: Boolean(s.runtime.isPlaying),
+            hasSynthesized: Boolean(s.runtime.hasSynthesized),
+        };
+    }, [s.runtime.isPlaying, s.runtime.hasSynthesized]);
 
     useEffect(() => {
-        if (!session.runtime.isPlaying) {
-            return;
+        function isEditableTarget(target: EventTarget | null): boolean {
+            const el = target as HTMLElement | null;
+            if (!el) return false;
+            const tag = (el.tagName ?? "").toLowerCase();
+            if (tag === "input" || tag === "textarea" || tag === "select") {
+                return true;
+            }
+            if (el.isContentEditable) return true;
+            // Radix/other components may put focus on nested elements.
+            if (el.closest?.('input,textarea,select,[contenteditable="true"]'))
+                return true;
+            return false;
         }
-        const timer = window.setInterval(() => {
-            void dispatch(syncPlaybackState());
-        }, 60);
-        return () => {
-            window.clearInterval(timer);
-        };
-    }, [dispatch, session.runtime.isPlaying]);
 
-    useEffect(() => {
-        const isEditable = (target: EventTarget | null): boolean => {
-            const element = target as HTMLElement | null;
-            if (!element) return false;
-            const tagName = element.tagName.toLowerCase();
-            return (
-                tagName === "input" ||
-                tagName === "textarea" ||
-                tagName === "select" ||
-                element.isContentEditable
-            );
-        };
+        function onKeyDown(e: KeyboardEvent) {
+            if (e.key !== " " && e.code !== "Space") return;
+            if (e.repeat) return;
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
 
-        const onKeyDown = (event: KeyboardEvent) => {
-            if (isEditable(event.target)) {
-                return;
-            }
+            const active = document.activeElement as HTMLElement | null;
+            if (isEditableTarget(active) || isEditableTarget(e.target)) return;
+            e.preventDefault();
+            e.stopPropagation();
 
-            if (event.code === "Space") {
-                event.preventDefault();
-                if (session.runtime.isPlaying) {
-                    void dispatch(stopAudioPlayback());
-                } else {
-                    void dispatch(playOriginal());
-                }
-                return;
-            }
-
-            if (event.key === "Tab") {
-                event.preventDefault();
-                dispatch(
-                    setToolMode(
-                        session.toolMode === "draw" ? "select" : "draw",
-                    ),
+            if (runtimeRef.current.isPlaying) {
+                void dispatch(stopAudioPlayback());
+            } else {
+                void dispatch(
+                    runtimeRef.current.hasSynthesized
+                        ? playSynthesized()
+                        : playOriginal(),
                 );
-                return;
             }
+        }
 
-            if (event.ctrlKey && event.key.toLowerCase() === "z") {
-                event.preventDefault();
-                dispatch(undo());
-                return;
-            }
+        window.addEventListener("keydown", onKeyDown, true);
+        return () => window.removeEventListener("keydown", onKeyDown, true);
+    }, [dispatch]);
 
-            if (event.ctrlKey && event.key.toLowerCase() === "y") {
-                event.preventDefault();
-                dispatch(redo());
-                return;
-            }
+    useEffect(() => {
+        if (!s.runtime.isPlaying) return;
+        // Keep playhead following backend audio clock.
+        const id = window.setInterval(() => {
+            void dispatch(syncPlaybackState());
+        }, 50);
+        return () => window.clearInterval(id);
+    }, [dispatch, s.runtime.isPlaying]);
 
-            if (event.key === "Delete" && session.selectedClipId) {
-                event.preventDefault();
-                void dispatch(removeSelectedClipRemote());
-            }
-        };
+    useEffect(() => {
+        splitRatioRef.current = splitRatio;
+    }, [splitRatio]);
 
-        window.addEventListener("keydown", onKeyDown);
+    useEffect(() => {
+        if (!isDragging) return;
+        const prevCursor = document.body.style.cursor;
+        const prevSelect = document.body.style.userSelect;
+        document.body.style.cursor = "ns-resize";
+        document.body.style.userSelect = "none";
         return () => {
-            window.removeEventListener("keydown", onKeyDown);
+            document.body.style.cursor = prevCursor;
+            document.body.style.userSelect = prevSelect;
         };
-    }, [
-        dispatch,
-        session.runtime.isPlaying,
-        session.selectedClipId,
-        session.toolMode,
-    ]);
+    }, [isDragging]);
 
     return (
-        <div
-            className="relative flex h-screen min-h-screen flex-col bg-zinc-800 text-zinc-100"
-            onDragEnter={(event) => {
-                event.preventDefault();
-                setDragActive(true);
-            }}
-            onDragOver={(event) => {
-                event.preventDefault();
-                setDragActive(true);
-            }}
-            onDragLeave={(event) => {
-                event.preventDefault();
-                const nextTarget = event.relatedTarget as Node | null;
-                if (!event.currentTarget.contains(nextTarget)) {
-                    setDragActive(false);
-                }
-            }}
-            onDrop={(event) => {
-                event.preventDefault();
-                setDragActive(false);
-                const droppedPath = parseDroppedPath(event);
-                if (droppedPath) {
-                    void dispatch(importAudioFromPath(droppedPath));
-                }
-            }}
+        <Flex
+            direction="column"
+            className="h-screen w-screen bg-qt-window text-qt-text overflow-hidden font-sans text-sm selection:bg-qt-highlight selection:text-white"
         >
-            {dragActive && (
-                <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-zinc-900/70">
-                    <div className="rounded border border-zinc-500 bg-zinc-800 px-6 py-4 text-sm text-zinc-100 shadow-lg">
-                        {t("hint_drop_audio")}
-                    </div>
-                </div>
-            )}
-
             <MenuBar />
+            <Separator size="4" color="gray" />
             <ActionBar />
 
-            <div className="min-h-0 flex-1 px-2 pb-2 pt-1.5">
-                <div
-                    ref={editorRef}
-                    className="flex h-full min-h-0 flex-col gap-0"
+            {/* Main Splitter Area */}
+            <div ref={containerRef} className="flex-1 min-h-0 flex flex-col">
+                {/* Top: Timeline / Tracks */}
+                <Box
+                    className="min-h-[200px] border-b border-qt-border relative bg-qt-base"
+                    style={{ flexGrow: splitRatio, flexBasis: 0 }}
                 >
-                    <div
-                        className="min-h-0"
-                        style={{
-                            flexBasis: `${Math.max(30, Math.min(80, timelineRatio * 100))}%`,
-                        }}
-                    >
-                        <TimelinePanel />
-                    </div>
-                    <div
-                        className="group relative h-1.5 cursor-row-resize"
-                        onMouseDown={(event) => {
-                            event.preventDefault();
-                            const startY = event.clientY;
-                            const startRatio = timelineRatio;
-                            const container = editorRef.current;
-                            if (!container) return;
-                            const totalHeight =
-                                container.getBoundingClientRect().height;
+                    <TimelinePanel />
+                </Box>
 
-                            const onMove = (moveEvent: MouseEvent) => {
-                                const dy = moveEvent.clientY - startY;
-                                const next =
-                                    startRatio + dy / Math.max(1, totalHeight);
-                                setTimelineRatio(
-                                    Math.max(0.3, Math.min(0.8, next)),
-                                );
-                            };
-                            const onUp = () => {
-                                window.removeEventListener("mousemove", onMove);
-                                window.removeEventListener("mouseup", onUp);
-                            };
-                            window.addEventListener("mousemove", onMove);
-                            window.addEventListener("mouseup", onUp);
-                        }}
-                    >
-                        <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-zinc-600 group-hover:bg-zinc-400" />
-                    </div>
-                    <div className="min-h-0 flex-1">
-                        <PianoRollPanel />
-                    </div>
-                </div>
+                {/* Splitter */}
+                <div
+                    className="h-2 bg-qt-window border-y border-qt-border cursor-ns-resize shrink-0"
+                    onPointerDown={splitter.startDrag}
+                    role="separator"
+                    aria-orientation="horizontal"
+                    aria-label="Resize panels"
+                />
+
+                {/* Bottom: Parameter / Piano Roll */}
+                <Box
+                    className="min-h-[150px] relative bg-qt-base"
+                    style={{ flexGrow: 1 - splitRatio, flexBasis: 0 }}
+                >
+                    <PianoRollPanel />
+                </Box>
             </div>
 
-            <StatusPanels />
-        </div>
+            {/* Status Bar */}
+            <Flex
+                align="center"
+                justify="between"
+                className="h-6 bg-qt-window border-t border-qt-border px-2 select-none"
+            >
+                <Text size="1" color={s.error ? "red" : "gray"}>
+                    {s.error ? `Error: ${s.error}` : statusText}
+                </Text>
+                <Text size="1" color="gray">
+                    {t("status_device")}: {s.runtime.device} |{" "}
+                    {t("status_model")}: {s.runtime.modelLoaded ? "OK" : "—"} |{" "}
+                    {t("status_audio")}: {s.runtime.audioLoaded ? "OK" : "—"} |{" "}
+                    {t("status_synth")}: {s.runtime.hasSynthesized ? "OK" : "—"}
+                </Text>
+            </Flex>
+        </Flex>
     );
 }
 
