@@ -816,8 +816,8 @@ export const ClipItem: React.FC<{
 
                 const alt = Boolean(
                     altPressed ||
-                        e.altKey ||
-                        (e.nativeEvent as any)?.getModifierState?.("Alt"),
+                    e.altKey ||
+                    (e.nativeEvent as any)?.getModifierState?.("Alt"),
                 );
 
                 // Seek should happen on click, not on drag.

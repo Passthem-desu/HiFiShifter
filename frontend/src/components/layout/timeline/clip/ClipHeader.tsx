@@ -7,7 +7,11 @@ export const ClipHeader: React.FC<{
     clip: ClipInfo;
     ensureSelected: (clipId: string) => void;
     selectClipRemote: (clipId: string) => void;
-    startEditDrag: (e: React.PointerEvent, clipId: string, type: "gain") => void;
+    startEditDrag: (
+        e: React.PointerEvent,
+        clipId: string,
+        type: "gain",
+    ) => void;
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
     isInMultiSelectedSet: boolean;
     multiSelectedCount: number;

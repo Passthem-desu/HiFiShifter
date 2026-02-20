@@ -980,8 +980,8 @@ export const TimelinePanel: React.FC = () => {
         // This mode is continuous (no snap).
         const alt = Boolean(
             altPressedHint ||
-                e.altKey ||
-                (e.nativeEvent as any)?.getModifierState?.("Alt"),
+            e.altKey ||
+            (e.nativeEvent as any)?.getModifierState?.("Alt"),
         );
         if (alt) {
             startSlipDrag(e, clipId);
@@ -1122,17 +1122,23 @@ export const TimelinePanel: React.FC = () => {
                 drag.allowTrackMove && drag.lastTrackId == null;
 
             async function createNewTrackForDrop(): Promise<string | null> {
-                const before = new Set(sessionRef.current.tracks.map((t) => t.id));
+                const before = new Set(
+                    sessionRef.current.tracks.map((t) => t.id),
+                );
                 const res: any = await dispatch(
                     addTrackRemote({ name: undefined, parentTrackId: null }),
                 ).unwrap();
                 const nextTracks: any[] = Array.isArray(res?.tracks)
                     ? res.tracks
                     : [];
-                const created = nextTracks.find((t) => !before.has(String(t?.id)));
+                const created = nextTracks.find(
+                    (t) => !before.has(String(t?.id)),
+                );
                 return (
                     (created && String(created.id)) ||
-                    (res?.selected_track_id ? String(res.selected_track_id) : null)
+                    (res?.selected_track_id
+                        ? String(res.selected_track_id)
+                        : null)
                 );
             }
 

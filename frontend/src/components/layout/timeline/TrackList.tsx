@@ -108,28 +108,43 @@ export const TrackList: React.FC<{
         draggingTrackId: string,
         clientX: number,
         clientY: number,
-    ): { parentTrackId: string | null; targetIndex: number; mode: "reorder" | "nest" } {
+    ): {
+        parentTrackId: string | null;
+        targetIndex: number;
+        mode: "reorder" | "nest";
+    } {
         const el = listRef.current;
         const bounds = el?.getBoundingClientRect();
         const { track: over, yInRow } = trackAtClientY(clientY);
 
         // Dropping outside -> append as root.
         if (!over) {
-            const roots = siblingsOf(null).filter((id) => id !== draggingTrackId);
-            return { parentTrackId: null, targetIndex: roots.length, mode: "reorder" };
+            const roots = siblingsOf(null).filter(
+                (id) => id !== draggingTrackId,
+            );
+            return {
+                parentTrackId: null,
+                targetIndex: roots.length,
+                mode: "reorder",
+            };
         }
 
         const overIndent = Math.max(0, (over.depth ?? 0) * 16);
         const localX = bounds ? clientX - bounds.left : clientX;
         const nest =
-            over.id !== draggingTrackId &&
-            localX > 24 + overIndent + 40;
+            over.id !== draggingTrackId && localX > 24 + overIndent + 40;
 
         if (nest) {
             const parentTrackId = over.id;
             if (wouldCreateCycle(draggingTrackId, parentTrackId)) {
-                const roots = siblingsOf(null).filter((id) => id !== draggingTrackId);
-                return { parentTrackId: null, targetIndex: roots.length, mode: "reorder" };
+                const roots = siblingsOf(null).filter(
+                    (id) => id !== draggingTrackId,
+                );
+                return {
+                    parentTrackId: null,
+                    targetIndex: roots.length,
+                    mode: "reorder",
+                };
             }
             const children = siblingsOf(parentTrackId).filter(
                 (id) => id !== draggingTrackId,
@@ -148,7 +163,10 @@ export const TrackList: React.FC<{
 
         if (over.id === draggingTrackId) {
             const siblingsIncl = siblingsOf(parentTrackId);
-            const indexSelf = Math.max(0, siblingsIncl.indexOf(draggingTrackId));
+            const indexSelf = Math.max(
+                0,
+                siblingsIncl.indexOf(draggingTrackId),
+            );
             return { parentTrackId, targetIndex: indexSelf, mode: "reorder" };
         }
 
@@ -157,7 +175,10 @@ export const TrackList: React.FC<{
         );
         const baseIndex = Math.max(0, siblings.indexOf(over.id));
         const insertAfter = yInRow > rowHeight / 2;
-        const targetIndex = Math.min(siblings.length, baseIndex + (insertAfter ? 1 : 0));
+        const targetIndex = Math.min(
+            siblings.length,
+            baseIndex + (insertAfter ? 1 : 0),
+        );
         return { parentTrackId, targetIndex, mode: "reorder" };
     }
 
@@ -201,7 +222,8 @@ export const TrackList: React.FC<{
                         ? uiOverride
                         : backendVolume;
 
-                    const guideLines = depth > 0 ? Array.from({ length: depth }) : [];
+                    const guideLines =
+                        depth > 0 ? Array.from({ length: depth }) : [];
 
                     return (
                         <div
@@ -221,7 +243,9 @@ export const TrackList: React.FC<{
                                     return;
                                 }
 
-                                const overSiblings = siblingsOf(track.parentId ?? null);
+                                const overSiblings = siblingsOf(
+                                    track.parentId ?? null,
+                                );
                                 const originalIndexSelf = Math.max(
                                     0,
                                     overSiblings.indexOf(track.id),
@@ -241,15 +265,19 @@ export const TrackList: React.FC<{
                                 el.setPointerCapture(e.pointerId);
 
                                 const prevCursor = document.body.style.cursor;
-                                const prevSelect = document.body.style.userSelect;
+                                const prevSelect =
+                                    document.body.style.userSelect;
 
                                 function onMove(ev: PointerEvent) {
                                     const drag = dragRef.current;
-                                    if (!drag || drag.pointerId !== e.pointerId) return;
+                                    if (!drag || drag.pointerId !== e.pointerId)
+                                        return;
 
                                     if (!drag.hasMoved) {
-                                        const dx = ev.clientX - drag.startClientX;
-                                        const dy = ev.clientY - drag.startClientY;
+                                        const dx =
+                                            ev.clientX - drag.startClientX;
+                                        const dy =
+                                            ev.clientY - drag.startClientY;
                                         if (dx * dx + dy * dy < 9) {
                                             return;
                                         }
@@ -272,7 +300,8 @@ export const TrackList: React.FC<{
                                         if (!Number.isFinite(idx)) {
                                             indicatorY = null;
                                         } else if (!over) {
-                                            indicatorY = tracks.length * rowHeight;
+                                            indicatorY =
+                                                tracks.length * rowHeight;
                                         } else {
                                             const insertAfter =
                                                 overInfo.yInRow > rowHeight / 2;
@@ -292,12 +321,22 @@ export const TrackList: React.FC<{
 
                                 function end(ev: PointerEvent) {
                                     const drag = dragRef.current;
-                                    if (!drag || drag.pointerId !== e.pointerId) return;
+                                    if (!drag || drag.pointerId !== e.pointerId)
+                                        return;
                                     dragRef.current = null;
 
-                                    window.removeEventListener("pointermove", onMove);
-                                    window.removeEventListener("pointerup", end);
-                                    window.removeEventListener("pointercancel", end);
+                                    window.removeEventListener(
+                                        "pointermove",
+                                        onMove,
+                                    );
+                                    window.removeEventListener(
+                                        "pointerup",
+                                        end,
+                                    );
+                                    window.removeEventListener(
+                                        "pointercancel",
+                                        end,
+                                    );
 
                                     document.body.style.cursor = prevCursor;
                                     document.body.style.userSelect = prevSelect;
@@ -317,8 +356,10 @@ export const TrackList: React.FC<{
                                     );
 
                                     if (
-                                        spec.parentTrackId === drag.originalParentId &&
-                                        spec.targetIndex === drag.originalIndexSelf
+                                        spec.parentTrackId ===
+                                            drag.originalParentId &&
+                                        spec.targetIndex ===
+                                            drag.originalIndexSelf
                                     ) {
                                         return;
                                     }
@@ -406,7 +447,9 @@ export const TrackList: React.FC<{
                                             color="gray"
                                             className="opacity-0 group-hover:opacity-100"
                                             disabled={tracks.length <= 1}
-                                            onPointerDown={(e) => e.stopPropagation()}
+                                            onPointerDown={(e) =>
+                                                e.stopPropagation()
+                                            }
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 onRemoveTrack(track.id);
@@ -416,61 +459,67 @@ export const TrackList: React.FC<{
                                         </IconButton>
                                     </Flex>
 
-                                <Flex gap="2" align="center">
-                                    <button
-                                        className={`w-6 h-5 rounded text-[10px] border transition-all ${muted ? "bg-red-900 text-red-200 border-red-500" : "bg-qt-button text-gray-300 border-transparent hover:border-red-500 hover:bg-red-900 hover:text-red-200"}`}
-                                        onPointerDown={(e) => e.stopPropagation()}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onToggleMute(track.id, !muted);
-                                        }}
-                                    >
-                                        M
-                                    </button>
-                                    <button
-                                        className={`w-6 h-5 rounded text-[10px] border transition-all ${solo ? "bg-yellow-900 text-yellow-200 border-yellow-500" : "bg-qt-button text-gray-300 border-transparent hover:border-yellow-500 hover:bg-yellow-900 hover:text-yellow-200"}`}
-                                        onPointerDown={(e) => e.stopPropagation()}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onToggleSolo(track.id, !solo);
-                                        }}
-                                    >
-                                        S
-                                    </button>
-                                    <Box flexGrow="1" />
-                                    <Text size="1" color="gray">
-                                        {Math.round(volume * 100)}%
-                                    </Text>
-                                </Flex>
+                                    <Flex gap="2" align="center">
+                                        <button
+                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${muted ? "bg-red-900 text-red-200 border-red-500" : "bg-qt-button text-gray-300 border-transparent hover:border-red-500 hover:bg-red-900 hover:text-red-200"}`}
+                                            onPointerDown={(e) =>
+                                                e.stopPropagation()
+                                            }
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onToggleMute(track.id, !muted);
+                                            }}
+                                        >
+                                            M
+                                        </button>
+                                        <button
+                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${solo ? "bg-yellow-900 text-yellow-200 border-yellow-500" : "bg-qt-button text-gray-300 border-transparent hover:border-yellow-500 hover:bg-yellow-900 hover:text-yellow-200"}`}
+                                            onPointerDown={(e) =>
+                                                e.stopPropagation()
+                                            }
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onToggleSolo(track.id, !solo);
+                                            }}
+                                        >
+                                            S
+                                        </button>
+                                        <Box flexGrow="1" />
+                                        <Text size="1" color="gray">
+                                            {Math.round(volume * 100)}%
+                                        </Text>
+                                    </Flex>
 
-                                <Slider
-                                    value={[Math.round(volume * 100)]}
-                                    size="1"
-                                    className="w-full"
-                                    onValueChange={(v) => {
-                                        const next =
-                                            Math.max(
-                                                0,
-                                                Math.min(
-                                                    100,
-                                                    Number(v[0] ?? 0),
-                                                ),
-                                            ) / 100;
-                                        onVolumeUiChange(track.id, next);
-                                    }}
-                                    onValueCommit={(v) => {
-                                        const next =
-                                            Math.max(
-                                                0,
-                                                Math.min(
-                                                    100,
-                                                    Number(v[0] ?? 0),
-                                                ),
-                                            ) / 100;
-                                        onVolumeCommit(track.id, next);
-                                    }}
-                                    onPointerDown={(e) => e.stopPropagation()}
-                                />
+                                    <Slider
+                                        value={[Math.round(volume * 100)]}
+                                        size="1"
+                                        className="w-full"
+                                        onValueChange={(v) => {
+                                            const next =
+                                                Math.max(
+                                                    0,
+                                                    Math.min(
+                                                        100,
+                                                        Number(v[0] ?? 0),
+                                                    ),
+                                                ) / 100;
+                                            onVolumeUiChange(track.id, next);
+                                        }}
+                                        onValueCommit={(v) => {
+                                            const next =
+                                                Math.max(
+                                                    0,
+                                                    Math.min(
+                                                        100,
+                                                        Number(v[0] ?? 0),
+                                                    ),
+                                                ) / 100;
+                                            onVolumeCommit(track.id, next);
+                                        }}
+                                        onPointerDown={(e) =>
+                                            e.stopPropagation()
+                                        }
+                                    />
                                 </Flex>
                             </Box>
                         </div>
