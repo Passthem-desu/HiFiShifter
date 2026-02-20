@@ -6,6 +6,7 @@ import tempfile
 import uuid
 import traceback
 import time
+import threading
 from dataclasses import dataclass, field, asdict
 from itertools import count
 
@@ -17,6 +18,19 @@ from scipy.io import wavfile
 import math
 
 from .audio_processor import AudioProcessor
+
+
+@dataclass
+class _PlaybackClipPlan:
+    clip_id: str
+    dst_start: int
+    render_len: int
+    src_audio: np.ndarray
+    src_start: int
+    gain: float
+    fade_in: np.ndarray | None
+    fade_out: np.ndarray | None
+    fade_out_start: int
 
 
 @dataclass
@@ -87,6 +101,10 @@ class HifiShifterWebAPI:
         self._track_seq = count(1)
         self._clip_seq = count(1)
         self._audio_cache: dict[str, tuple[int, np.ndarray]] = {}
+        self._render_cache: dict[tuple, np.ndarray] = {}
+        self._playback_stream: sd.OutputStream | None = None
+        self._playback_plan: dict[str, object] | None = None
+        self._playback_lock = threading.Lock()
         self._init_default_timeline()
         self._try_load_default_model()
 
@@ -889,13 +907,8 @@ class HifiShifterWebAPI:
             if should_restart_playback:
                 target = self.state.playback_target
                 if target:
-                    playhead = float(self.state.playhead_beat)
-                    sample_rate, mixed = self._mix_project_audio(target, playhead)
-                    if mixed.size == 0:
-                        duration_sec = self._project_duration_sec_from_beat(playhead)
-                        self._start_virtual_playback(target, duration_sec, 0.0)
-                    else:
-                        self._start_playback(target, mixed, sample_rate, 0.0)
+                    # Keep seek responsive by restarting playback using the low-latency stream path.
+                    self._start_stream_playback(target, float(self.state.playhead_beat))
             return {
                 'ok': True,
                 'playhead_beat': self.state.playhead_beat,
@@ -1428,32 +1441,351 @@ class HifiShifterWebAPI:
     def play_original(self, start_sec: float = 0.0):
         try:
             playhead_beat = self.state.playhead_beat
-            sample_rate, mixed = self._mix_project_audio('original', playhead_beat)
-            if mixed.size == 0:
-                duration_sec = self._project_duration_sec_from_beat(playhead_beat)
-                return self._start_virtual_playback('original', duration_sec, 0.0)
-            return self._start_playback('original', mixed, sample_rate, 0.0)
+            return self._start_stream_playback('original', playhead_beat)
         except Exception as exc:
             return self._error('play_original_failed', exc)
 
     def play_synthesized(self, start_sec: float = 0.0):
         try:
             playhead_beat = self.state.playhead_beat
-            sample_rate, mixed = self._mix_project_audio('synthesized', playhead_beat)
-            if mixed.size == 0:
-                duration_sec = self._project_duration_sec_from_beat(playhead_beat)
-                return self._start_virtual_playback('synthesized', duration_sec, 0.0)
-            return self._start_playback('synthesized', mixed, sample_rate, 0.0)
+            return self._start_stream_playback('synthesized', playhead_beat)
         except Exception as exc:
             return self._error('play_synthesized_failed', exc)
 
     def stop_audio(self):
         try:
+            self._stop_playback_stream()
             sd.stop()
             self._clear_playback_state()
             return {'ok': True}
         except Exception as exc:
             return self._error('stop_audio_failed', exc)
+
+    def _stop_playback_stream(self):
+        with self._playback_lock:
+            stream = self._playback_stream
+            self._playback_stream = None
+            self._playback_plan = None
+        if stream is None:
+            return
+        try:
+            stream.stop()
+        except Exception:
+            pass
+        try:
+            stream.close()
+        except Exception:
+            pass
+
+    def _get_cached_clip_audio(self, clip: ClipState, target: str, sample_rate: int) -> np.ndarray | None:
+        resolved = self._resolve_clip_audio(clip, target)
+        if not resolved:
+            return None
+        src_sr, src_audio = resolved
+        src_sr = int(src_sr)
+        sample_rate = int(sample_rate)
+        if sample_rate <= 0 or src_sr <= 0:
+            return None
+
+        cache_key: tuple
+        # File-backed audio
+        if clip.source_path:
+            try:
+                p = pathlib.Path(str(clip.source_path))
+                st = p.stat() if p.exists() else None
+                mtime_ns = int(st.st_mtime_ns) if st else 0
+                size = int(st.st_size) if st else 0
+                cache_key = (
+                    'file',
+                    target,
+                    str(p),
+                    mtime_ns,
+                    size,
+                    src_sr,
+                    sample_rate,
+                    float(getattr(clip, 'playback_rate', 1.0)),
+                )
+            except Exception:
+                cache_key = (
+                    'file',
+                    target,
+                    str(clip.source_path),
+                    src_sr,
+                    sample_rate,
+                    float(getattr(clip, 'playback_rate', 1.0)),
+                )
+        else:
+            # In-memory synthesized audio
+            cache_key = (
+                'mem',
+                target,
+                id(src_audio),
+                int(getattr(src_audio, 'shape', [0])[-1] if hasattr(src_audio, 'shape') else 0),
+                src_sr,
+                sample_rate,
+                float(getattr(clip, 'playback_rate', 1.0)),
+            )
+
+        cached = self._render_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        audio = self._resample_linear(np.asarray(src_audio, dtype=np.float32), src_sr, sample_rate)
+        audio = self._time_stretch_linear(audio, float(getattr(clip, 'playback_rate', 1.0)))
+        self._render_cache[cache_key] = audio
+        return audio
+
+    def _build_stream_mix_plan(self, target: str, start_beat: float):
+        sample_rate = int(self.state.sample_rate or self.processor.config.get('audio_sample_rate', 44100))
+        bpm = max(1.0, float(self.state.bpm))
+        start_beat = max(0.0, float(start_beat))
+        start_sec = start_beat * 60.0 / bpm
+
+        has_any_solo = any(track.solo for track in self.state.tracks.values())
+        clips: list[_PlaybackClipPlan] = []
+        max_end_sec = start_sec
+
+        for clip in self.state.clips.values():
+            if clip.muted:
+                continue
+            track = self.state.tracks.get(clip.track_id)
+            if not track:
+                continue
+            if track.muted:
+                continue
+            if has_any_solo and not track.solo:
+                continue
+
+            track_gain = float(np.clip(getattr(track, 'volume', 1.0), 0.0, 2.0))
+            desired_sec = max(0.0, float(clip.length_beats) * 60.0 / bpm)
+            if desired_sec <= 1e-6:
+                continue
+            clip_start_sec = max(0.0, float(clip.start_beat) * 60.0 / bpm)
+            clip_end_sec = clip_start_sec + desired_sec
+            max_end_sec = max(max_end_sec, clip_end_sec)
+
+            clip_audio = self._get_cached_clip_audio(clip, target, sample_rate)
+            if clip_audio is None or clip_audio.size <= 1:
+                continue
+
+            src_total_sec = float(clip_audio.size) / float(sample_rate)
+            trim_start_sec = max(0.0, float(clip.trim_start_beat) * 60.0 / bpm)
+            trim_end_sec = max(0.0, float(clip.trim_end_beat) * 60.0 / bpm)
+            available_sec = max(0.0, src_total_sec - trim_start_sec - trim_end_sec)
+            render_sec = min(max(0.0, desired_sec), available_sec)
+            if render_sec <= 1e-6:
+                continue
+
+            src_start = int(round(trim_start_sec * sample_rate))
+            render_len = int(round(render_sec * sample_rate))
+            if render_len <= 0:
+                continue
+            if src_start < 0:
+                src_start = 0
+            if src_start >= clip_audio.size:
+                continue
+            if src_start + render_len > clip_audio.size:
+                render_len = int(clip_audio.size - src_start)
+            if render_len <= 0:
+                continue
+
+            fade_in_sec = max(0.0, float(getattr(clip, 'fade_in_beats', 0.0)) * 60.0 / bpm)
+            fade_out_sec = max(0.0, float(getattr(clip, 'fade_out_beats', 0.0)) * 60.0 / bpm)
+            fade_in_n = int(round(fade_in_sec * sample_rate)) if fade_in_sec > 1e-6 else 0
+            fade_out_n = int(round(fade_out_sec * sample_rate)) if fade_out_sec > 1e-6 else 0
+            fade_in_n = max(0, min(fade_in_n, render_len))
+            fade_out_n = max(0, min(fade_out_n, render_len))
+
+            fade_in = None
+            if fade_in_n > 1:
+                t = np.linspace(0.0, 1.0, num=fade_in_n, endpoint=True, dtype=np.float32)
+                fade_in = np.sin(t * (math.pi / 2.0)).astype(np.float32)
+
+            fade_out = None
+            if fade_out_n > 1:
+                t = np.linspace(0.0, 1.0, num=fade_out_n, endpoint=True, dtype=np.float32)
+                fade_out = np.cos(t * (math.pi / 2.0)).astype(np.float32)
+
+            gain = float(np.clip(track_gain * float(getattr(clip, 'gain', 1.0)), 0.0, 2.0))
+            dst_start = int(round((clip_start_sec - start_sec) * sample_rate))
+            fade_out_start = max(0, render_len - (fade_out_n if fade_out is not None else 0))
+            clips.append(
+                _PlaybackClipPlan(
+                    clip_id=str(clip.id),
+                    dst_start=dst_start,
+                    render_len=render_len,
+                    src_audio=clip_audio,
+                    src_start=src_start,
+                    gain=gain,
+                    fade_in=fade_in,
+                    fade_out=fade_out,
+                    fade_out_start=fade_out_start,
+                )
+            )
+
+        total_len = int(round(max(0.0, max_end_sec - start_sec) * sample_rate))
+        if total_len <= 0 or not clips:
+            return sample_rate, 0, []
+        return sample_rate, total_len, clips
+
+    def _start_stream_playback(self, target: str, anchor_beat: float):
+        anchor_beat = max(0.0, float(anchor_beat))
+        # Stop any existing stream first.
+        self._stop_playback_stream()
+        sd.stop()
+
+        try:
+            sample_rate, total_len, clips = self._build_stream_mix_plan(target, anchor_beat)
+            if total_len <= 0 or not clips:
+                duration_sec = self._project_duration_sec_from_beat(anchor_beat)
+                payload = self._start_virtual_playback(target, duration_sec, 0.0)
+                payload['anchorBeat'] = anchor_beat
+                payload['clipId'] = None
+                payload['playing'] = target
+                return payload
+
+            # Freeze plan for callback thread.
+            plan = {
+                'sample_rate': int(sample_rate),
+                'total_len': int(total_len),
+                'clips': clips,
+            }
+
+            # Use a small blocksize for lower latency. Keep mono output for now.
+            pos = 0
+
+            def callback(outdata, frames, _time_info, status):
+                nonlocal pos
+                if status:
+                    # Keep callback running even if backend reports xruns.
+                    pass
+                sr = plan['sample_rate']
+                total = plan['total_len']
+                clip_plans: list[_PlaybackClipPlan] = plan['clips']
+
+                if pos >= total:
+                    outdata.fill(0)
+                    raise sd.CallbackStop
+
+                block_len = min(int(frames), int(total - pos))
+                out = np.zeros(int(frames), dtype=np.float32)
+
+                block_start = int(pos)
+                block_end = int(pos + block_len)
+
+                for c in clip_plans:
+                    clip_start = int(c.dst_start)
+                    clip_end = int(c.dst_start + c.render_len)
+                    if clip_end <= block_start or clip_start >= block_end:
+                        continue
+
+                    overlap_start = max(block_start, clip_start)
+                    overlap_end = min(block_end, clip_end)
+                    n = int(overlap_end - overlap_start)
+                    if n <= 0:
+                        continue
+
+                    out_off = int(overlap_start - block_start)
+                    rel0 = int(overlap_start - clip_start)
+                    src0 = int(c.src_start + rel0)
+                    src1 = int(src0 + n)
+                    if src0 < 0:
+                        # Shouldn't happen, but keep safe.
+                        trim = -src0
+                        src0 = 0
+                        out_off += trim
+                    if src1 > c.src_audio.size:
+                        src1 = int(c.src_audio.size)
+                    n2 = int(src1 - src0)
+                    if n2 <= 0 or out_off >= out.size:
+                        continue
+
+                    seg = np.asarray(c.src_audio[src0:src1], dtype=np.float32) * float(c.gain)
+
+                    # Fade-in
+                    if c.fade_in is not None and rel0 < c.fade_in.size:
+                        k = int(min(n2, int(c.fade_in.size - rel0)))
+                        if k > 0:
+                            seg[:k] *= c.fade_in[rel0 : rel0 + k]
+
+                    # Fade-out
+                    if c.fade_out is not None:
+                        if rel0 + n2 > c.fade_out_start:
+                            i_start = int(max(0, c.fade_out_start - rel0))
+                            f0 = int(max(0, rel0 - c.fade_out_start))
+                            k = int(
+                                min(
+                                    n2 - i_start,
+                                    int(c.fade_out.size - f0),
+                                )
+                            )
+                            if k > 0:
+                                seg[i_start : i_start + k] *= c.fade_out[f0 : f0 + k]
+
+                    out[out_off : out_off + n2] += seg[:n2]
+
+                np.clip(out, -1.0, 1.0, out=out)
+                if outdata.ndim == 2 and outdata.shape[1] >= 1:
+                    outdata[:block_len, 0] = out[:block_len]
+                    if block_len < frames:
+                        outdata[block_len:, 0] = 0
+                else:
+                    outdata[:block_len] = out[:block_len]
+                    if block_len < frames:
+                        outdata[block_len:] = 0
+
+                pos = int(pos + frames)
+
+            def finished():
+                # Stream ended normally; clear state.
+                self._stop_playback_stream()
+                self._clear_playback_state()
+
+            stream = sd.OutputStream(
+                samplerate=int(sample_rate),
+                channels=1,
+                dtype='float32',
+                blocksize=256,
+                latency='low',
+                callback=callback,
+                finished_callback=finished,
+            )
+
+            with self._playback_lock:
+                self._playback_stream = stream
+                self._playback_plan = plan
+
+            stream.start()
+
+            self.state.playback_target = target
+            self.state.playback_started_at = time.monotonic()
+            self.state.playback_start_sec = 0.0
+            self.state.playback_duration_sec = float(total_len / sample_rate)
+
+            return {
+                'ok': True,
+                'playing': target,
+                'start_sec': 0.0,
+                'duration_sec': self.state.playback_duration_sec,
+                'is_playing': True,
+                'anchorBeat': anchor_beat,
+                'clipId': None,
+            }
+        except Exception:
+            # Fallback to the old full-mix path if the stream backend is unavailable.
+            playhead_beat = anchor_beat
+            sample_rate, mixed = self._mix_project_audio(target, playhead_beat)
+            if mixed.size == 0:
+                duration_sec = self._project_duration_sec_from_beat(playhead_beat)
+                payload = self._start_virtual_playback(target, duration_sec, 0.0)
+                payload['anchorBeat'] = anchor_beat
+                payload['clipId'] = None
+                payload['playing'] = target
+                return payload
+            payload = self._start_playback(target, mixed, sample_rate, 0.0)
+            payload['anchorBeat'] = anchor_beat
+            payload['clipId'] = None
+            return payload
 
     def get_playback_state(self):
         try:

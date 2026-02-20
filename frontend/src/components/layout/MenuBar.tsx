@@ -1,5 +1,5 @@
 import React from "react";
-import { Flex, DropdownMenu, Button } from "@radix-ui/themes";
+import { Flex, DropdownMenu } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
@@ -35,20 +35,16 @@ export const MenuBar: React.FC = () => {
     return (
         <Flex
             align="center"
-            className="h-8 bg-qt-window border-b border-qt-border px-1 select-none z-50 flex-nowrap gap-1 overflow-hidden min-w-0"
+            className="h-8 bg-qt-window border-b border-qt-border px-1 select-none z-50 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden min-w-0 custom-scrollbar"
         >
+            {/**
+             * Note: @radix-ui/themes DropdownMenu.Trigger does not support asChild.
+             * Use Trigger as the actual button element to avoid nesting <button>.
+             */}
             {/* File Menu */}
             <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                    <Button
-                        variant="ghost"
-                        size="1"
-                        color="gray"
-                        className="hover:bg-qt-highlight hover:text-white shrink-0"
-                        style={{ fontWeight: "normal" }}
-                    >
-                        {t("menu_file")}
-                    </Button>
+                <DropdownMenu.Trigger className="shrink-0 rounded px-2 py-1 text-xs text-qt-text hover:bg-qt-highlight hover:text-white">
+                    <span>{t("menu_file")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
                     <DropdownMenu.Item
@@ -83,16 +79,8 @@ export const MenuBar: React.FC = () => {
 
             {/* Edit Menu */}
             <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                    <Button
-                        variant="ghost"
-                        size="1"
-                        color="gray"
-                        className="hover:bg-qt-highlight hover:text-white shrink-0"
-                        style={{ fontWeight: "normal" }}
-                    >
-                        {t("menu_edit")}
-                    </Button>
+                <DropdownMenu.Trigger className="shrink-0 rounded px-2 py-1 text-xs text-qt-text hover:bg-qt-highlight hover:text-white">
+                    <span>{t("menu_edit")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
                     <DropdownMenu.Item disabled>
@@ -119,16 +107,8 @@ export const MenuBar: React.FC = () => {
 
             {/* Track Menu */}
             <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                    <Button
-                        variant="ghost"
-                        size="1"
-                        color="gray"
-                        className="hover:bg-qt-highlight hover:text-white shrink-0"
-                        style={{ fontWeight: "normal" }}
-                    >
-                        {t("menu_track")}
-                    </Button>
+                <DropdownMenu.Trigger className="shrink-0 rounded px-2 py-1 text-xs text-qt-text hover:bg-qt-highlight hover:text-white">
+                    <span>{t("menu_track")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
                     <DropdownMenu.Item
@@ -150,16 +130,8 @@ export const MenuBar: React.FC = () => {
 
             {/* View Menu */}
             <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                    <Button
-                        variant="ghost"
-                        size="1"
-                        color="gray"
-                        className="hover:bg-qt-highlight hover:text-white shrink-0"
-                        style={{ fontWeight: "normal" }}
-                    >
-                        {t("menu_view")}
-                    </Button>
+                <DropdownMenu.Trigger className="shrink-0 rounded px-2 py-1 text-xs text-qt-text hover:bg-qt-highlight hover:text-white">
+                    <span>{t("menu_view")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
                     <DropdownMenu.Item
@@ -179,16 +151,8 @@ export const MenuBar: React.FC = () => {
 
             {/* Help Menu */}
             <DropdownMenu.Root>
-                <DropdownMenu.Trigger>
-                    <Button
-                        variant="ghost"
-                        size="1"
-                        color="gray"
-                        className="hover:bg-qt-highlight hover:text-white shrink-0"
-                        style={{ fontWeight: "normal" }}
-                    >
-                        {t("menu_help")}
-                    </Button>
+                <DropdownMenu.Trigger className="shrink-0 rounded px-2 py-1 text-xs text-qt-text hover:bg-qt-highlight hover:text-white">
+                    <span>{t("menu_help")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
                     <DropdownMenu.Item>About HiFiShifter</DropdownMenu.Item>
@@ -197,15 +161,8 @@ export const MenuBar: React.FC = () => {
 
             <Flex ml="auto" gap="2" align="center" className="shrink-0">
                 <DropdownMenu.Root>
-                    <DropdownMenu.Trigger>
-                        <Button
-                            variant="ghost"
-                            size="1"
-                            color="gray"
-                            className="shrink-0"
-                        >
-                            {t("language")}
-                        </Button>
+                    <DropdownMenu.Trigger className="shrink-0 rounded px-2 py-1 text-xs text-qt-text hover:bg-qt-highlight hover:text-white">
+                        <span>{t("language")}</span>
                     </DropdownMenu.Trigger>
                     <DropdownMenu.Content>
                         <DropdownMenu.Item onSelect={() => setLocale("en-US")}>

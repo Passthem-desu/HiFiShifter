@@ -95,6 +95,14 @@ HiFiShifter/
 
 - 后端 `set_transport(playhead_beat=...)` 在检测到正在播放时，会重启播放到新的 playhead 位置（对齐 DAW 的点击跳播行为）。
 - 前端在 `seekPlayhead.fulfilled` 且 `isPlaying` 时更新 `playbackAnchorBeat`，保证 `position_sec`（从 0 计时）到 beat 的换算正确。
+  - 目前 pywebview 播放重启走同一套 OutputStream 分块混音逻辑，避免 seek 时回退到离线整段混音导致的卡顿。
+
+### 低延迟播放（分块混音 + OutputStream）
+
+- 旧实现为：点击播放时一次性离线混音整段音频（从 playhead 到工程末尾）再 `sd.play()`。
+- 新实现为：启动播放时构建“混音计划”（clip 的起止、裁剪、淡入淡出、增益、轨道 mute/solo 等），播放阶段用 `sounddevice.OutputStream` 回调按块（block）实时混音输出。
+- 目标：在 clip 数量较多时，显著降低“点击播放 → 听到声音”的启动延迟，并避免一次性创建巨大的 mix 缓冲。
+- 代码位置：后端 pywebview API 的播放实现集中在 `hifi_shifter/web_api.py`（`play_original` / `play_synthesized`）。
 
 ### 工程边界与网格裁剪
 
@@ -184,12 +192,25 @@ HiFiShifter/
 frontend/
 ├── src/
 │   ├── components/
-│   │   ├── editor/          # 编辑器相关组件
-│   │   │   ├── TimelinePanel.tsx   # 时间线面板（轨道、剪辑）
+│   │   ├── editor/              # 编辑器相关组件
 │   │   │   └── PianoRollPanel.tsx  # 钢琴卷帘（参数编辑）
-│   │   └── layout/          # 布局组件
-│   │       ├── MenuBar.tsx      # 菜单栏
-│   │       └── ActionBar.tsx    # 操作栏
+│   │   └── layout/              # 布局组件
+│   │       ├── TimelinePanel.tsx    # 时间线编排入口（状态/交互/组合渲染）
+│   │       ├── timeline/            # 时间线子模块（组件/工具，降低单文件复杂度）
+│   │       │   ├── TrackList.tsx    # 左侧轨道列表
+│   │       │   ├── TimeRuler.tsx    # 顶部时间标尺
+│   │       │   ├── BackgroundGrid.tsx # 网格与工程边界
+│   │       │   ├── TimelineScrollArea.tsx # 滚动容器（scroll/缩放/持久化）
+│   │       │   ├── ClipItem.tsx     # 单个剪辑渲染与交互
+│   │       │   ├── GlueContextMenu.tsx # 右键菜单（胶合）
+│   │       │   ├── constants.ts     # 常量
+│   │       │   ├── math.ts          # clamp/db 等数学工具
+│   │       │   ├── grid.ts          # 网格步进
+│   │       │   ├── paths.ts         # 波形/淡入淡出 SVG path
+│   │       │   ├── dnd.ts           # 拖拽导入解析
+│   │       │   └── clipWaveform.ts  # 波形切片
+│   │       ├── MenuBar.tsx          # 菜单栏
+│   │       └── ActionBar.tsx        # 操作栏
 │   ├── features/
 │   │   └── session/         # Redux 状态管理
 │   │       └── sessionSlice.ts  # 会话状态切片

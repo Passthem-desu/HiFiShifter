@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Flex, Box, Text, IconButton, Slider } from "@radix-ui/themes";
-import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
+import { Flex } from "@radix-ui/themes";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
@@ -27,82 +26,27 @@ import {
     glueClipsRemote,
 } from "../../features/session/sessionSlice";
 
-const DEFAULT_PX_PER_BEAT = 50;
-const MIN_PX_PER_BEAT = 16;
-const MAX_PX_PER_BEAT = 160;
-const DEFAULT_ROW_HEIGHT = 96;
-const MIN_ROW_HEIGHT = 56;
-const MAX_ROW_HEIGHT = 192;
-const CLIP_HEADER_HEIGHT = 18;
-const CLIP_BODY_PADDING_Y = 6;
-
-function gridStepBeats(grid: string): number {
-    if (grid === "1/8") return 0.5;
-    if (grid === "1/16") return 0.25;
-    if (grid === "1/32") return 0.125;
-    return 1;
-}
-
-function waveformAreaPath(
-    samples: number[],
-    width: number,
-    height: number,
-    ampScale: number = 1,
-): string {
-    if (!samples.length || width <= 0 || height <= 0) return "";
-    const mid = height / 2;
-    const scale = height * 0.45;
-    const step = width / Math.max(1, samples.length - 1);
-    const s = Math.max(0, Number(ampScale) || 0);
-    let top = `M 0 ${mid.toFixed(2)}`;
-    for (let i = 0; i < samples.length; i++) {
-        const x = i * step;
-        const amp = Math.max(0, Math.min(1, Math.abs(samples[i] ?? 0) * s));
-        const y = mid - amp * scale;
-        top += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
-    }
-    let bottom = "";
-    for (let i = samples.length - 1; i >= 0; i--) {
-        const x = i * step;
-        const amp = Math.max(0, Math.min(1, Math.abs(samples[i] ?? 0) * s));
-        const y = mid + amp * scale;
-        bottom += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
-    }
-    return `${top}${bottom} Z`;
-}
-
-function fadeInAreaPath(width: number, height: number, steps = 24): string {
-    if (width <= 0 || height <= 0) return "";
-    const pts: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < steps; i++) {
-        const t = i / Math.max(1, steps - 1);
-        const x = t * width;
-        const g = Math.sin((t * Math.PI) / 2); // curved
-        const y = height * (1 - g);
-        pts.push({ x, y });
-    }
-    let d = `M 0 ${height.toFixed(2)}`;
-    for (const p of pts) d += ` L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`;
-    d += ` L ${width.toFixed(2)} ${height.toFixed(2)} Z`;
-    return d;
-}
-
-function fadeOutAreaPath(width: number, height: number, steps = 24): string {
-    if (width <= 0 || height <= 0) return "";
-    const pts: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < steps; i++) {
-        const t = i / Math.max(1, steps - 1);
-        const x = t * width;
-        const g = Math.cos((t * Math.PI) / 2); // curved
-        const y = height * (1 - g);
-        pts.push({ x, y });
-    }
-    let d = `M 0 ${height.toFixed(2)}`;
-    // first point is near top; the polygon still references bottom-left first.
-    for (const p of pts) d += ` L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`;
-    d += ` L ${width.toFixed(2)} ${height.toFixed(2)} Z`;
-    return d;
-}
+import {
+    BackgroundGrid,
+    ClipItem,
+    DEFAULT_PX_PER_BEAT,
+    DEFAULT_ROW_HEIGHT,
+    GlueContextMenu,
+    MAX_PX_PER_BEAT,
+    MAX_ROW_HEIGHT,
+    MIN_PX_PER_BEAT,
+    MIN_ROW_HEIGHT,
+    TimelineScrollArea,
+    TimeRuler,
+    TrackList,
+    clamp,
+    clipSourceBeats,
+    dbToGain,
+    extractLocalFilePath,
+    gainToDb,
+    gridStepBeats,
+    hasFileDrag,
+} from "./timeline";
 
 export const TimelinePanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -235,67 +179,6 @@ export const TimelinePanel: React.FC = () => {
         return Math.max(0, x / pxPerBeat);
     }
 
-    function hasFileDrag(dt: DataTransfer): boolean {
-        if (!dt) return false;
-        if (dt.files && dt.files.length > 0) return true;
-        const types = Array.from(dt.types ?? []);
-        if (types.includes("Files")) return true;
-        const items = Array.from(dt.items ?? []);
-        return items.some((it) => it.kind === "file");
-    }
-
-    function extractLocalFilePath(
-        dt: DataTransfer,
-    ): { path: string; name: string } | null {
-        const itemFile = Array.from(dt.items ?? [])
-            .find((it) => it.kind === "file")
-            ?.getAsFile() as any;
-        const file = (dt.files?.[0] as any) ?? itemFile;
-
-        const directPath = String(file?.path ?? "").trim();
-        if (directPath) {
-            return {
-                path: directPath,
-                name: String(file?.name ?? directPath),
-            };
-        }
-
-        const uriList = String(dt.getData("text/uri-list") ?? "").trim();
-        if (uriList) {
-            const first = uriList
-                .split(/\r?\n/)
-                .map((line) => line.trim())
-                .find((line) => line && !line.startsWith("#"));
-            if (first) {
-                try {
-                    const url = new URL(first);
-                    if (url.protocol === "file:") {
-                        let p = decodeURIComponent(url.pathname);
-                        if (/^\/[A-Za-z]:\//.test(p)) p = p.slice(1);
-                        if (p) {
-                            return {
-                                path: p,
-                                name: String(file?.name ?? p),
-                            };
-                        }
-                    }
-                } catch {
-                    // ignore
-                }
-            }
-        }
-
-        const text = String(dt.getData("text/plain") ?? "").trim();
-        if (text && (text.includes("\\") || /^[A-Za-z]:\\/.test(text))) {
-            return {
-                path: text,
-                name: String(file?.name ?? text),
-            };
-        }
-
-        return null;
-    }
-
     function trackIdFromClientY(clientY: number) {
         const scroller = scrollRef.current;
         if (!scroller) return null;
@@ -327,20 +210,6 @@ export const TimelinePanel: React.FC = () => {
         }
         return beat;
     }
-
-    useEffect(() => {
-        const scroller = scrollRef.current;
-        if (!scroller) return;
-        setScrollLeft(scroller.scrollLeft);
-    }, []);
-
-    useEffect(() => {
-        localStorage.setItem("hifishifter.pxPerBeat", String(pxPerBeat));
-    }, [pxPerBeat]);
-
-    useEffect(() => {
-        localStorage.setItem("hifishifter.rowHeight", String(rowHeight));
-    }, [rowHeight]);
 
     function startPan(e: React.MouseEvent) {
         const scroller = scrollRef.current;
@@ -382,10 +251,6 @@ export const TimelinePanel: React.FC = () => {
         return Math.round(beat / step) * step;
     }
 
-    function clamp(value: number, minV: number, maxV: number) {
-        return Math.min(maxV, Math.max(minV, value));
-    }
-
     function isEditableTarget(target: EventTarget | null): boolean {
         const el = target as HTMLElement | null;
         if (!el) return false;
@@ -398,21 +263,6 @@ export const TimelinePanel: React.FC = () => {
             return true;
         }
         return false;
-    }
-
-    function gainToDb(gain: number): number {
-        const g = Math.max(1e-4, Number(gain) || 1);
-        return 20 * Math.log10(g);
-    }
-
-    function dbToGain(db: number): number {
-        return Math.pow(10, db / 20);
-    }
-
-    function clipSourceBeats(clip: (typeof s.clips)[number]): number | null {
-        const durationSec = Number((clip as any).durationSec ?? 0);
-        if (!Number.isFinite(durationSec) || durationSec <= 0) return null;
-        return (durationSec * sessionRef.current.bpm) / 60;
     }
 
     function startEditDrag(
@@ -438,7 +288,7 @@ export const TimelinePanel: React.FC = () => {
             baseFadeInBeats: clip.fadeInBeats,
             baseFadeOutBeats: clip.fadeOutBeats,
             baseGain: clip.gain,
-            sourceBeats: clipSourceBeats(clip),
+            sourceBeats: clipSourceBeats(clip, sessionRef.current.bpm),
             rightEdgeBeat,
         };
 
@@ -645,32 +495,6 @@ export const TimelinePanel: React.FC = () => {
         window.addEventListener("pointercancel", end);
     }
 
-    function sliceWaveformSamples(
-        samples: number[],
-        clip: (typeof s.clips)[number],
-    ): number[] {
-        if (!Array.isArray(samples) || samples.length < 2) return samples;
-        const durationSec = Number((clip as any).durationSec ?? 0);
-        if (!Number.isFinite(durationSec) || durationSec <= 0) return samples;
-        const bpm = Math.max(1e-6, Number(s.bpm) || 120);
-        const sourceBeats = (durationSec * bpm) / 60;
-        if (!Number.isFinite(sourceBeats) || sourceBeats <= 1e-6)
-            return samples;
-
-        const trimStart = Math.max(0, Number(clip.trimStartBeat ?? 0) || 0);
-        const trimEnd = Math.max(0, Number(clip.trimEndBeat ?? 0) || 0);
-        const startBeat = clamp(trimStart, 0, sourceBeats);
-        const maxEndBeat = Math.max(startBeat, sourceBeats - trimEnd);
-        const desiredLen = Math.max(0, Number(clip.lengthBeats ?? 0) || 0);
-        const endBeat = clamp(startBeat + desiredLen, startBeat, maxEndBeat);
-        if (endBeat - startBeat <= 1e-9) return [];
-
-        const n = samples.length;
-        const i0 = clamp(Math.floor((startBeat / sourceBeats) * n), 0, n - 1);
-        const i1 = clamp(Math.ceil((endBeat / sourceBeats) * n), i0 + 1, n);
-        return samples.slice(i0, i1);
-    }
-
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
             if (e.repeat) return;
@@ -842,181 +666,69 @@ export const TimelinePanel: React.FC = () => {
 
     return (
         <Flex className="h-full w-full bg-qt-graph-bg overflow-hidden">
-            {/* Track List (Left) */}
-            <Flex
-                direction="column"
-                className="w-64 border-r border-qt-border bg-qt-window shrink-0"
-            >
-                <Box className="h-6 border-b border-qt-border px-2 flex items-center bg-qt-window shadow-sm z-10">
-                    <Text size="1" weight="bold" color="gray">
-                        {t("tracks")}
-                    </Text>
-                </Box>
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                    {s.tracks.map((track) => {
-                        const selected = s.selectedTrackId === track.id;
-                        const indent = Math.max(0, (track.depth ?? 0) * 12);
-                        const muted = Boolean(track.muted);
-                        const solo = Boolean(track.solo);
-                        const backendVolume = Math.max(
-                            0,
-                            Math.min(1, Number(track.volume ?? 0.9)),
-                        );
-                        const uiOverride = trackVolumeUi[track.id];
-                        const volume = Number.isFinite(uiOverride)
-                            ? uiOverride
-                            : backendVolume;
-
-                        return (
-                            <Box
-                                key={track.id}
-                                className={`border-b border-qt-border bg-qt-base relative group transition-colors overflow-hidden ${selected ? "bg-qt-button-hover" : "hover:bg-qt-button-hover"}`}
-                                style={{ height: rowHeight }}
-                                onClick={() =>
-                                    dispatch(selectTrackRemote(track.id))
-                                }
-                            >
-                                <div
-                                    className={`absolute left-0 top-0 bottom-0 w-1 bg-qt-highlight transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
-                                ></div>
-                                <Flex
-                                    direction="column"
-                                    p="2"
-                                    gap="2"
-                                    height="100%"
-                                    justify="center"
-                                >
-                                    <Flex
-                                        justify="between"
-                                        align="center"
-                                        style={{ paddingLeft: indent }}
-                                    >
-                                        <Text
-                                            size="2"
-                                            weight="medium"
-                                            className="text-gray-200 truncate pr-2"
-                                        >
-                                            {track.name}
-                                        </Text>
-                                        <IconButton
-                                            size="1"
-                                            variant="ghost"
-                                            color="gray"
-                                            className="opacity-0 group-hover:opacity-100"
-                                            disabled={s.tracks.length <= 1}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                dispatch(
-                                                    removeTrackRemote(track.id),
-                                                );
-                                            }}
-                                        >
-                                            <Cross2Icon />
-                                        </IconButton>
-                                    </Flex>
-
-                                    <Flex gap="2" align="center">
-                                        <button
-                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${muted ? "bg-red-900 text-red-200 border-red-500" : "bg-qt-button text-gray-300 border-transparent hover:border-red-500 hover:bg-red-900 hover:text-red-200"}`}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                dispatch(
-                                                    setTrackStateRemote({
-                                                        trackId: track.id,
-                                                        muted: !muted,
-                                                    }),
-                                                );
-                                            }}
-                                        >
-                                            M
-                                        </button>
-                                        <button
-                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${solo ? "bg-yellow-900 text-yellow-200 border-yellow-500" : "bg-qt-button text-gray-300 border-transparent hover:border-yellow-500 hover:bg-yellow-900 hover:text-yellow-200"}`}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                dispatch(
-                                                    setTrackStateRemote({
-                                                        trackId: track.id,
-                                                        solo: !solo,
-                                                    }),
-                                                );
-                                            }}
-                                        >
-                                            S
-                                        </button>
-                                        <Box flexGrow="1" />
-                                        <Text size="1" color="gray">
-                                            {Math.round(volume * 100)}%
-                                        </Text>
-                                    </Flex>
-
-                                    <Slider
-                                        value={[Math.round(volume * 100)]}
-                                        size="1"
-                                        className="w-full"
-                                        onValueChange={(v) => {
-                                            const next =
-                                                Math.max(
-                                                    0,
-                                                    Math.min(
-                                                        100,
-                                                        Number(v[0] ?? 0),
-                                                    ),
-                                                ) / 100;
-                                            setTrackVolumeUi((prev) => ({
-                                                ...prev,
-                                                [track.id]: next,
-                                            }));
-                                        }}
-                                        onValueCommit={(v) => {
-                                            const next =
-                                                Math.max(
-                                                    0,
-                                                    Math.min(
-                                                        100,
-                                                        Number(v[0] ?? 0),
-                                                    ),
-                                                ) / 100;
-                                            setTrackVolumeUi((prev) => {
-                                                const copy = { ...prev };
-                                                delete copy[track.id];
-                                                return copy;
-                                            });
-                                            dispatch(
-                                                setTrackStateRemote({
-                                                    trackId: track.id,
-                                                    volume: next,
-                                                }),
-                                            );
-                                        }}
-                                        onPointerDown={(e) =>
-                                            e.stopPropagation()
-                                        }
-                                    />
-                                </Flex>
-                            </Box>
-                        );
-                    })}
-                    <Flex
-                        align="center"
-                        justify="center"
-                        className="h-8 border-b border-qt-border border-dashed text-gray-500 hover:text-gray-300 hover:bg-qt-button-hover cursor-pointer transition-colors"
-                        onClick={() => dispatch(addTrackRemote({}))}
-                    >
-                        <PlusIcon className="mr-1" />{" "}
-                        <Text size="1">{t("track_add")}</Text>
-                    </Flex>
-                </div>
-            </Flex>
+            <TrackList
+                t={t}
+                tracks={s.tracks}
+                selectedTrackId={s.selectedTrackId}
+                rowHeight={rowHeight}
+                trackVolumeUi={trackVolumeUi}
+                onSelectTrack={(trackId) => {
+                    dispatch(selectTrackRemote(trackId));
+                }}
+                onRemoveTrack={(trackId) => {
+                    dispatch(removeTrackRemote(trackId));
+                }}
+                onToggleMute={(trackId, nextMuted) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            muted: nextMuted,
+                        }),
+                    );
+                }}
+                onToggleSolo={(trackId, nextSolo) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            solo: nextSolo,
+                        }),
+                    );
+                }}
+                onVolumeUiChange={(trackId, nextVolume) => {
+                    setTrackVolumeUi((prev) => ({
+                        ...prev,
+                        [trackId]: nextVolume,
+                    }));
+                }}
+                onVolumeCommit={(trackId, nextVolume) => {
+                    setTrackVolumeUi((prev) => {
+                        const copy = { ...prev };
+                        delete copy[trackId];
+                        return copy;
+                    });
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            volume: nextVolume,
+                        }),
+                    );
+                }}
+                onAddTrack={() => {
+                    dispatch(addTrackRemote({}));
+                }}
+            />
 
             {/* Timeline View (Right) */}
             <Flex
                 direction="column"
                 className="flex-1 relative overflow-hidden bg-qt-graph-bg"
             >
-                {/* Time Ruler */}
-                <Box
-                    className="h-6 bg-qt-window border-b border-qt-border relative overflow-hidden shrink-0 select-none"
+                <TimeRuler
+                    contentWidth={contentWidth}
+                    scrollLeft={scrollLeft}
+                    bars={bars}
+                    pxPerBeat={pxPerBeat}
+                    playheadBeat={s.playheadBeat}
                     onMouseDown={(e) => {
                         if (e.button !== 0) return;
                         const scroller = scrollRef.current;
@@ -1031,46 +743,17 @@ export const TimelinePanel: React.FC = () => {
                             true,
                         );
                     }}
-                >
-                    <div
-                        className="absolute inset-0 will-change-transform"
-                        style={{
-                            width: contentWidth,
-                            transform: `translateX(${-scrollLeft}px)`,
-                        }}
-                    >
-                        {bars.map((m) => (
-                            <div
-                                key={m.beat}
-                                className="absolute top-0 bottom-0 text-[10px] text-gray-500 pt-1"
-                                style={{ left: m.beat * pxPerBeat }}
-                            >
-                                <div className="pl-1 border-l border-gray-600 h-2">
-                                    {m.label}
-                                </div>
-                            </div>
-                        ))}
-
-                        {/* Playhead (ruler) */}
-                        <div
-                            className="absolute top-0 bottom-0 w-px bg-red-500 z-20"
-                            style={{ left: s.playheadBeat * pxPerBeat }}
-                        />
-                        <div
-                            className="absolute top-0 z-30"
-                            style={{
-                                left: s.playheadBeat * pxPerBeat,
-                                transform: "translateX(-6px)",
-                            }}
-                        >
-                            <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-red-500" />
-                        </div>
-                    </div>
-                </Box>
+                />
 
                 {/* Tracks Area */}
-                <div
-                    ref={scrollRef}
+                <TimelineScrollArea
+                    scrollRef={scrollRef}
+                    projectBeats={s.projectBeats}
+                    pxPerBeat={pxPerBeat}
+                    setPxPerBeat={setPxPerBeat}
+                    rowHeight={rowHeight}
+                    setRowHeight={setRowHeight}
+                    setScrollLeft={setScrollLeft}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"
                     onContextMenu={(e) => {
                         e.preventDefault();
@@ -1229,42 +912,6 @@ export const TimelinePanel: React.FC = () => {
                             );
                         }
                     }}
-                    onScroll={(e) => {
-                        setScrollLeft(
-                            (e.currentTarget as HTMLDivElement).scrollLeft,
-                        );
-                    }}
-                    onWheel={(e) => {
-                        // Alt + wheel: vertical zoom (track height)
-                        if (e.altKey) {
-                            e.preventDefault();
-                            const dir = e.deltaY < 0 ? 1 : -1;
-                            const factor = dir > 0 ? 1.1 : 0.9;
-                            setRowHeight((prev) =>
-                                Math.round(
-                                    clamp(
-                                        prev * factor,
-                                        MIN_ROW_HEIGHT,
-                                        MAX_ROW_HEIGHT,
-                                    ),
-                                ),
-                            );
-                            return;
-                        }
-
-                        // Ctrl + wheel: horizontal zoom (time scale)
-                        if (!e.ctrlKey) return;
-                        e.preventDefault();
-                        const dir = e.deltaY < 0 ? 1 : -1;
-                        const factor = dir > 0 ? 1.1 : 0.9;
-                        setPxPerBeat((prev) => {
-                            const next = Math.min(
-                                MAX_PX_PER_BEAT,
-                                Math.max(MIN_PX_PER_BEAT, prev * factor),
-                            );
-                            return next;
-                        });
-                    }}
                     onMouseDown={(e) => {
                         if (e.button === 1) {
                             e.preventDefault();
@@ -1311,32 +958,12 @@ export const TimelinePanel: React.FC = () => {
                             />
                         ) : null}
 
-                        {/* Background Grid (clipped to project width) */}
-                        <div
-                            className="absolute left-0 top-0 pointer-events-none"
-                            style={{
-                                width: contentWidth,
-                                height: contentHeight,
-                                backgroundImage: [
-                                    "linear-gradient(to right, var(--qt-graph-grid-weak) 1px, transparent 1px)",
-                                    "linear-gradient(to right, var(--qt-graph-grid-strong) 2px, transparent 2px)",
-                                ].join(", "),
-                                backgroundSize: [
-                                    `${pxPerBeat * gridStepBeats(s.grid)}px 100%`,
-                                    `${pxPerBeat * Math.max(1, Math.round(s.beats || 4))}px 100%`,
-                                ].join(", "),
-                                opacity: 0.75,
-                            }}
-                        />
-
-                        {/* Project End Boundary */}
-                        <div
-                            className="absolute top-0 bottom-0 w-px z-20"
-                            style={{
-                                left: contentWidth - 1,
-                                backgroundColor: "var(--qt-highlight)",
-                                opacity: 0.9,
-                            }}
+                        <BackgroundGrid
+                            contentWidth={contentWidth}
+                            contentHeight={contentHeight}
+                            pxPerBeat={pxPerBeat}
+                            grid={s.grid}
+                            beatsPerBar={Math.max(1, Math.round(s.beats || 4))}
                         />
 
                         {s.tracks.map((track) => {
@@ -1362,546 +989,94 @@ export const TimelinePanel: React.FC = () => {
                                             multiSelectedClipIds.length > 0
                                                 ? multiSelectedSet.has(clip.id)
                                                 : s.selectedClipId === clip.id;
-                                        const left = Math.max(
-                                            0,
-                                            clip.startBeat * pxPerBeat,
-                                        );
-                                        const width = Math.max(
-                                            1,
-                                            clip.lengthBeats * pxPerBeat,
-                                        );
-                                        const waveformAmpScale = clip.muted
-                                            ? 0
-                                            : clamp(
-                                                  Number(clip.gain ?? 1),
-                                                  0,
-                                                  4,
-                                              );
-                                        const waveform =
-                                            s.clipWaveforms[clip.id];
-                                        const stereo =
-                                            waveform &&
-                                            typeof waveform === "object" &&
-                                            !Array.isArray(waveform) &&
-                                            "l" in waveform &&
-                                            "r" in waveform;
+                                        const waveform = s.clipWaveforms[
+                                            clip.id
+                                        ] as any;
                                         return (
-                                            <div
+                                            <ClipItem
                                                 key={clip.id}
-                                                className={`absolute rounded-sm cursor-pointer shadow-sm overflow-visible border ${clip.muted ? "opacity-60 grayscale" : "opacity-95"} ${selected ? "border-white" : "border-qt-highlight"}`}
-                                                style={{
-                                                    left,
-                                                    width,
-                                                    top: CLIP_HEADER_HEIGHT,
-                                                    height:
-                                                        rowHeight -
-                                                        CLIP_HEADER_HEIGHT -
-                                                        CLIP_BODY_PADDING_Y,
-                                                    backgroundColor:
-                                                        "color-mix(in oklab, var(--qt-highlight) 35%, transparent)",
-                                                }}
-                                                onContextMenu={(e) => {
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    if (
-                                                        !multiSelectedSet.has(
-                                                            clip.id,
-                                                        )
-                                                    ) {
-                                                        setMultiSelectedClipIds(
-                                                            [clip.id],
-                                                        );
-                                                    }
-                                                    void dispatch(
-                                                        selectClipRemote(
-                                                            clip.id,
-                                                        ),
-                                                    );
-                                                    setContextMenu({
-                                                        x: e.clientX,
-                                                        y: e.clientY,
-                                                        clipId: clip.id,
-                                                    });
-                                                }}
-                                                onPointerDown={(e) => {
-                                                    // Only handle left-button interactions here.
-                                                    // Allow middle-button pan to bubble (so it won't be intercepted by clips).
-                                                    if (e.button !== 0) return;
-
-                                                    // Prevent pointer -> mouse compatibility events from bubbling to
-                                                    // the lane's onMouseDown (which would move the playhead).
-                                                    e.preventDefault();
-                                                    e.stopPropagation();
-                                                    setContextMenu(null);
-                                                    // When multi-selected, interacting with one selected clip should not clear selection.
+                                                clip={clip}
+                                                rowHeight={rowHeight}
+                                                pxPerBeat={pxPerBeat}
+                                                bpm={s.bpm}
+                                                waveform={waveform}
+                                                selected={selected}
+                                                isInMultiSelectedSet={multiSelectedSet.has(
+                                                    clip.id,
+                                                )}
+                                                multiSelectedCount={
+                                                    multiSelectedClipIds.length
+                                                }
+                                                ensureSelected={(clipId) => {
                                                     if (
                                                         multiSelectedClipIds.length ===
                                                             0 ||
                                                         !multiSelectedSet.has(
-                                                            clip.id,
+                                                            clipId,
                                                         )
                                                     ) {
                                                         setMultiSelectedClipIds(
-                                                            [clip.id],
+                                                            [clipId],
                                                         );
                                                     }
+                                                }}
+                                                selectClipRemote={(clipId) => {
                                                     void dispatch(
                                                         selectClipRemote(
-                                                            clip.id,
+                                                            clipId,
                                                         ),
                                                     );
-                                                    startClipDrag(
-                                                        e,
-                                                        clip.id,
-                                                        clip.startBeat,
+                                                }}
+                                                openContextMenu={(
+                                                    clipId,
+                                                    clientX,
+                                                    clientY,
+                                                ) => {
+                                                    setContextMenu({
+                                                        x: clientX,
+                                                        y: clientY,
+                                                        clipId,
+                                                    });
+                                                }}
+                                                seekFromClientX={(
+                                                    clientX,
+                                                    commit,
+                                                ) => {
+                                                    const scroller =
+                                                        scrollRef.current;
+                                                    if (!scroller) return;
+                                                    const bounds =
+                                                        scroller.getBoundingClientRect();
+                                                    setPlayheadFromClientX(
+                                                        clientX,
+                                                        bounds,
+                                                        scroller.scrollLeft,
+                                                        commit,
                                                     );
                                                 }}
-                                                title={
-                                                    clip.sourcePath ?? clip.name
-                                                }
-                                            >
-                                                {/* Trim handles */}
-                                                <div
-                                                    className="absolute left-0 top-0 bottom-0 w-[6px] z-40"
-                                                    style={{
-                                                        cursor: "ew-resize",
-                                                    }}
-                                                    onPointerDown={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        if (
-                                                            multiSelectedClipIds.length ===
-                                                                0 ||
-                                                            !multiSelectedSet.has(
-                                                                clip.id,
-                                                            )
-                                                        ) {
-                                                            setMultiSelectedClipIds(
-                                                                [clip.id],
-                                                            );
-                                                        }
-                                                        void dispatch(
-                                                            selectClipRemote(
-                                                                clip.id,
-                                                            ),
-                                                        );
-                                                        startEditDrag(
-                                                            e,
-                                                            clip.id,
-                                                            "trim_left",
-                                                        );
-                                                    }}
-                                                />
-                                                <div
-                                                    className="absolute right-0 top-0 bottom-0 w-[6px] z-40"
-                                                    style={{
-                                                        cursor: "ew-resize",
-                                                    }}
-                                                    onPointerDown={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        if (
-                                                            multiSelectedClipIds.length ===
-                                                                0 ||
-                                                            !multiSelectedSet.has(
-                                                                clip.id,
-                                                            )
-                                                        ) {
-                                                            setMultiSelectedClipIds(
-                                                                [clip.id],
-                                                            );
-                                                        }
-                                                        void dispatch(
-                                                            selectClipRemote(
-                                                                clip.id,
-                                                            ),
-                                                        );
-                                                        startEditDrag(
-                                                            e,
-                                                            clip.id,
-                                                            "trim_right",
-                                                        );
-                                                    }}
-                                                />
-
-                                                {/* Fade handles (top corners) */}
-                                                <div
-                                                    className="absolute left-0 top-0 w-[14px] h-[14px] z-50"
-                                                    style={{
-                                                        cursor: "nwse-resize",
-                                                    }}
-                                                    onPointerDown={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        if (
-                                                            multiSelectedClipIds.length ===
-                                                                0 ||
-                                                            !multiSelectedSet.has(
-                                                                clip.id,
-                                                            )
-                                                        ) {
-                                                            setMultiSelectedClipIds(
-                                                                [clip.id],
-                                                            );
-                                                        }
-                                                        void dispatch(
-                                                            selectClipRemote(
-                                                                clip.id,
-                                                            ),
-                                                        );
-                                                        startEditDrag(
-                                                            e,
-                                                            clip.id,
-                                                            "fade_in",
-                                                        );
-                                                    }}
-                                                />
-                                                <div
-                                                    className="absolute right-0 top-0 w-[14px] h-[14px] z-50"
-                                                    style={{
-                                                        cursor: "nesw-resize",
-                                                    }}
-                                                    onPointerDown={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        if (
-                                                            multiSelectedClipIds.length ===
-                                                                0 ||
-                                                            !multiSelectedSet.has(
-                                                                clip.id,
-                                                            )
-                                                        ) {
-                                                            setMultiSelectedClipIds(
-                                                                [clip.id],
-                                                            );
-                                                        }
-                                                        void dispatch(
-                                                            selectClipRemote(
-                                                                clip.id,
-                                                            ),
-                                                        );
-                                                        startEditDrag(
-                                                            e,
-                                                            clip.id,
-                                                            "fade_out",
-                                                        );
-                                                    }}
-                                                />
-
-                                                {/* Clip header strip (above body): M + gain knob + name + dB */}
-                                                <div
-                                                    className="absolute left-1 right-1 flex items-center gap-1 z-50"
-                                                    style={{
-                                                        top:
-                                                            -CLIP_HEADER_HEIGHT +
-                                                            1,
-                                                        height: CLIP_HEADER_HEIGHT,
-                                                        pointerEvents: "none",
-                                                    }}
-                                                >
-                                                    <button
-                                                        className={`w-5 h-4 rounded text-[10px] border transition-all ${clip.muted ? "bg-red-900 text-red-200 border-red-500" : "bg-qt-button text-gray-300 border-transparent hover:border-red-500 hover:bg-red-900 hover:text-red-200"}`}
-                                                        style={{
-                                                            pointerEvents:
-                                                                "auto",
-                                                        }}
-                                                        onPointerDown={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                        }}
-                                                        onClick={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            const next =
-                                                                !Boolean(
-                                                                    clip.muted,
-                                                                );
-                                                            dispatch(
-                                                                setClipMuted({
-                                                                    clipId: clip.id,
-                                                                    muted: next,
-                                                                }),
-                                                            );
-                                                            void dispatch(
-                                                                setClipStateRemote(
-                                                                    {
-                                                                        clipId: clip.id,
-                                                                        muted: next,
-                                                                    },
-                                                                ),
-                                                            );
-                                                        }}
-                                                        title={
-                                                            clip.muted
-                                                                ? "Unmute"
-                                                                : "Mute"
-                                                        }
-                                                    >
-                                                        M
-                                                    </button>
-
-                                                    <div
-                                                        title={`${gainToDb(clip.gain).toFixed(1)} dB`}
-                                                        style={{
-                                                            cursor: "ns-resize",
-                                                            pointerEvents:
-                                                                "auto",
-                                                        }}
-                                                        onPointerDown={(e) => {
-                                                            e.preventDefault();
-                                                            e.stopPropagation();
-                                                            if (
-                                                                multiSelectedClipIds.length ===
-                                                                    0 ||
-                                                                !multiSelectedSet.has(
-                                                                    clip.id,
-                                                                )
-                                                            ) {
-                                                                setMultiSelectedClipIds(
-                                                                    [clip.id],
-                                                                );
-                                                            }
-                                                            void dispatch(
-                                                                selectClipRemote(
-                                                                    clip.id,
-                                                                ),
-                                                            );
-                                                            startEditDrag(
-                                                                e,
-                                                                clip.id,
-                                                                "gain",
-                                                            );
-                                                        }}
-                                                    >
-                                                        <div className="w-4 h-4 rounded-full border border-white/60 bg-white/10" />
-                                                    </div>
-
-                                                    <div className="flex-1 min-w-0 pointer-events-none">
-                                                        <div className="text-[10px] text-white font-medium drop-shadow-md truncate">
-                                                            {clip.name}
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="text-[10px] text-white/80 drop-shadow-md pointer-events-none">
-                                                        {gainToDb(clip.gain) >=
-                                                        0
-                                                            ? "+"
-                                                            : ""}
-                                                        {gainToDb(
-                                                            clip.gain,
-                                                        ).toFixed(1)}
-                                                        dB
-                                                    </div>
-                                                </div>
-
-                                                {/* Fade lines */}
-                                                <div className="absolute inset-0 pointer-events-none z-30">
-                                                    {clip.fadeInBeats > 0 ? (
-                                                        <svg
-                                                            className="absolute left-0 top-0 h-full"
-                                                            width={Math.min(
-                                                                width,
-                                                                clip.fadeInBeats *
-                                                                    pxPerBeat,
-                                                            )}
-                                                            height={
-                                                                rowHeight -
-                                                                CLIP_HEADER_HEIGHT -
-                                                                CLIP_BODY_PADDING_Y
-                                                            }
-                                                            viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeInBeats * pxPerBeat))} ${Math.max(1, rowHeight - CLIP_HEADER_HEIGHT - CLIP_BODY_PADDING_Y)}`}
-                                                            preserveAspectRatio="none"
-                                                        >
-                                                            <path
-                                                                d={fadeInAreaPath(
-                                                                    Math.max(
-                                                                        1,
-                                                                        Math.min(
-                                                                            width,
-                                                                            clip.fadeInBeats *
-                                                                                pxPerBeat,
-                                                                        ),
-                                                                    ),
-                                                                    Math.max(
-                                                                        1,
-                                                                        rowHeight -
-                                                                            CLIP_HEADER_HEIGHT -
-                                                                            CLIP_BODY_PADDING_Y,
-                                                                    ),
-                                                                )}
-                                                                fill="rgba(255,255,255,0.14)"
-                                                                stroke="rgba(255,255,255,0.55)"
-                                                                strokeWidth="1"
-                                                                vectorEffect="non-scaling-stroke"
-                                                            />
-                                                        </svg>
-                                                    ) : null}
-                                                    {clip.fadeOutBeats > 0 ? (
-                                                        <svg
-                                                            className="absolute right-0 top-0 h-full"
-                                                            width={Math.min(
-                                                                width,
-                                                                clip.fadeOutBeats *
-                                                                    pxPerBeat,
-                                                            )}
-                                                            height={
-                                                                rowHeight -
-                                                                CLIP_HEADER_HEIGHT -
-                                                                CLIP_BODY_PADDING_Y
-                                                            }
-                                                            viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeOutBeats * pxPerBeat))} ${Math.max(1, rowHeight - CLIP_HEADER_HEIGHT - CLIP_BODY_PADDING_Y)}`}
-                                                            preserveAspectRatio="none"
-                                                        >
-                                                            <path
-                                                                d={fadeOutAreaPath(
-                                                                    Math.max(
-                                                                        1,
-                                                                        Math.min(
-                                                                            width,
-                                                                            clip.fadeOutBeats *
-                                                                                pxPerBeat,
-                                                                        ),
-                                                                    ),
-                                                                    Math.max(
-                                                                        1,
-                                                                        rowHeight -
-                                                                            CLIP_HEADER_HEIGHT -
-                                                                            CLIP_BODY_PADDING_Y,
-                                                                    ),
-                                                                )}
-                                                                fill="rgba(255,255,255,0.14)"
-                                                                stroke="rgba(255,255,255,0.55)"
-                                                                strokeWidth="1"
-                                                                vectorEffect="non-scaling-stroke"
-                                                            />
-                                                        </svg>
-                                                    ) : null}
-                                                </div>
-
-                                                <div className="absolute inset-x-0 inset-y-1 opacity-50">
-                                                    {stereo
-                                                        ? (() => {
-                                                              const w =
-                                                                  Math.max(
-                                                                      1,
-                                                                      Math.floor(
-                                                                          width,
-                                                                      ),
-                                                                  );
-                                                              const h = 22;
-                                                              const wf =
-                                                                  waveform as {
-                                                                      l: number[];
-                                                                      r: number[];
-                                                                  };
-                                                              const leftSamples =
-                                                                  sliceWaveformSamples(
-                                                                      wf.l ??
-                                                                          [],
-                                                                      clip,
-                                                                  );
-                                                              const rightSamples =
-                                                                  sliceWaveformSamples(
-                                                                      wf.r ??
-                                                                          [],
-                                                                      clip,
-                                                                  );
-                                                              return (
-                                                                  <svg
-                                                                      viewBox={`0 0 ${w} ${h}`}
-                                                                      preserveAspectRatio="none"
-                                                                      className="w-full h-full"
-                                                                  >
-                                                                      <path
-                                                                          d={waveformAreaPath(
-                                                                              leftSamples,
-                                                                              w,
-                                                                              h /
-                                                                                  2,
-                                                                              waveformAmpScale,
-                                                                          )}
-                                                                          transform={`translate(0,0)`}
-                                                                          fill="rgba(255,255,255,0.55)"
-                                                                          stroke="rgba(255,255,255,0.25)"
-                                                                          strokeWidth="1"
-                                                                          vectorEffect="non-scaling-stroke"
-                                                                      />
-                                                                      <path
-                                                                          d={waveformAreaPath(
-                                                                              rightSamples,
-                                                                              w,
-                                                                              h /
-                                                                                  2,
-                                                                              waveformAmpScale,
-                                                                          )}
-                                                                          transform={`translate(0,${h / 2})`}
-                                                                          fill="rgba(255,255,255,0.55)"
-                                                                          stroke="rgba(255,255,255,0.25)"
-                                                                          strokeWidth="1"
-                                                                          vectorEffect="non-scaling-stroke"
-                                                                      />
-                                                                      <line
-                                                                          x1="0"
-                                                                          x2={w}
-                                                                          y1={
-                                                                              h /
-                                                                              2
-                                                                          }
-                                                                          y2={
-                                                                              h /
-                                                                              2
-                                                                          }
-                                                                          stroke="rgba(255,255,255,0.15)"
-                                                                          strokeWidth="1"
-                                                                          vectorEffect="non-scaling-stroke"
-                                                                      />
-                                                                  </svg>
-                                                              );
-                                                          })()
-                                                        : Array.isArray(
-                                                                waveform,
-                                                            ) &&
-                                                            waveform.length > 0
-                                                          ? (() => {
-                                                                const mono =
-                                                                    sliceWaveformSamples(
-                                                                        waveform,
-                                                                        clip,
-                                                                    );
-                                                                if (
-                                                                    mono.length <
-                                                                    2
-                                                                )
-                                                                    return null;
-                                                                return (
-                                                                    <svg
-                                                                        viewBox={`0 0 ${Math.max(1, Math.floor(width))} 20`}
-                                                                        preserveAspectRatio="none"
-                                                                        className="w-full h-full"
-                                                                    >
-                                                                        <path
-                                                                            d={waveformAreaPath(
-                                                                                mono,
-                                                                                Math.max(
-                                                                                    1,
-                                                                                    Math.floor(
-                                                                                        width,
-                                                                                    ),
-                                                                                ),
-                                                                                20,
-                                                                                waveformAmpScale,
-                                                                            )}
-                                                                            fill="rgba(255,255,255,0.55)"
-                                                                            stroke="rgba(255,255,255,0.25)"
-                                                                            strokeWidth="1"
-                                                                            vectorEffect="non-scaling-stroke"
-                                                                        />
-                                                                    </svg>
-                                                                );
-                                                            })()
-                                                          : null}
-                                                </div>
-                                            </div>
+                                                startClipDrag={startClipDrag}
+                                                startEditDrag={startEditDrag}
+                                                toggleClipMuted={(
+                                                    clipId,
+                                                    nextMuted,
+                                                ) => {
+                                                    dispatch(
+                                                        setClipMuted({
+                                                            clipId,
+                                                            muted: nextMuted,
+                                                        }),
+                                                    );
+                                                    void dispatch(
+                                                        setClipStateRemote({
+                                                            clipId,
+                                                            muted: nextMuted,
+                                                        }),
+                                                    );
+                                                }}
+                                                clearContextMenu={() => {
+                                                    setContextMenu(null);
+                                                }}
+                                            />
                                         );
                                     })}
                                 </div>
@@ -2008,47 +1183,40 @@ export const TimelinePanel: React.FC = () => {
                             }}
                         />
                     </div>
-                </div>
+                </TimelineScrollArea>
 
                 {contextMenu ? (
-                    <div
-                        data-hs-context-menu="1"
-                        className="fixed z-50 rounded-sm border border-qt-border bg-qt-window text-qt-text shadow-sm"
-                        style={{ left: contextMenu.x, top: contextMenu.y }}
-                    >
-                        <button
-                            className="px-3 py-2 text-left w-full hover:bg-qt-button-hover disabled:opacity-40 disabled:hover:bg-transparent"
-                            disabled={(() => {
-                                const ids =
-                                    multiSelectedClipIds.length >= 2
-                                        ? multiSelectedClipIds
-                                        : [contextMenu.clipId];
-                                if (ids.length < 2) return true;
-                                const clips = sessionRef.current.clips.filter(
-                                    (c) => ids.includes(c.id),
-                                );
-                                if (clips.length !== ids.length) return true;
-                                const trackId = clips[0]?.trackId;
-                                return (
-                                    !trackId ||
-                                    clips.some((c) => c.trackId !== trackId)
-                                );
-                            })()}
-                            onClick={() => {
-                                const ids =
-                                    multiSelectedClipIds.length >= 2
-                                        ? multiSelectedClipIds
-                                        : [contextMenu.clipId];
-                                setContextMenu(null);
-                                if (ids.length >= 2) {
-                                    void dispatch(glueClipsRemote(ids));
-                                    setMultiSelectedClipIds([]);
-                                }
-                            }}
-                        >
-                            胶合
-                        </button>
-                    </div>
+                    <GlueContextMenu
+                        x={contextMenu.x}
+                        y={contextMenu.y}
+                        disabled={(() => {
+                            const ids =
+                                multiSelectedClipIds.length >= 2
+                                    ? multiSelectedClipIds
+                                    : [contextMenu.clipId];
+                            if (ids.length < 2) return true;
+                            const clips = sessionRef.current.clips.filter((c) =>
+                                ids.includes(c.id),
+                            );
+                            if (clips.length !== ids.length) return true;
+                            const trackId = clips[0]?.trackId;
+                            return (
+                                !trackId ||
+                                clips.some((c) => c.trackId !== trackId)
+                            );
+                        })()}
+                        onGlue={() => {
+                            const ids =
+                                multiSelectedClipIds.length >= 2
+                                    ? multiSelectedClipIds
+                                    : [contextMenu.clipId];
+                            setContextMenu(null);
+                            if (ids.length >= 2) {
+                                void dispatch(glueClipsRemote(ids));
+                                setMultiSelectedClipIds([]);
+                            }
+                        }}
+                    />
                 ) : null}
             </Flex>
         </Flex>
