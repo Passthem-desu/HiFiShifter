@@ -1,0 +1,14 @@
+LIBRARY rubberband
+EXPORTS
+    rubberband_new
+    rubberband_delete
+    rubberband_reset
+    rubberband_set_time_ratio
+    rubberband_set_pitch_scale
+    rubberband_set_expected_input_duration
+    rubberband_set_max_process_size
+    rubberband_study
+    rubberband_process
+    rubberband_available
+    rubberband_retrieve
+    rubberband_calculate_stretch

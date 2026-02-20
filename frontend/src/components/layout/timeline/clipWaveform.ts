@@ -9,7 +9,10 @@ export function clipSourceBeats(clip: ClipInfo, bpm: number): number | null {
 
 export function sliceWaveformSamples(
     samples: number[],
-    clip: ClipInfo,
+    clip: Pick<
+        ClipInfo,
+        "trimStartBeat" | "trimEndBeat" | "lengthBeats" | "durationSec"
+    >,
     bpm: number,
 ): number[] {
     if (!Array.isArray(samples) || samples.length < 2) return samples;
@@ -24,11 +27,31 @@ export function sliceWaveformSamples(
     const startBeat = clamp(trimStart, 0, sourceBeats);
     const maxEndBeat = Math.max(startBeat, sourceBeats - trimEnd);
     const desiredLen = Math.max(0, Number(clip.lengthBeats ?? 0) || 0);
-    const endBeat = clamp(startBeat + desiredLen, startBeat, maxEndBeat);
-    if (endBeat - startBeat <= 1e-9) return [];
+
+    const cycleLen = Math.max(0, maxEndBeat - startBeat);
+    if (cycleLen <= 1e-9 || desiredLen <= 1e-9) return [];
 
     const n = samples.length;
     const i0 = clamp(Math.floor((startBeat / sourceBeats) * n), 0, n - 1);
-    const i1 = clamp(Math.ceil((endBeat / sourceBeats) * n), i0 + 1, n);
-    return samples.slice(i0, i1);
+    const i1 = clamp(Math.ceil((maxEndBeat / sourceBeats) * n), i0 + 1, n);
+    const cycle = samples.slice(i0, i1);
+    if (cycle.length < 2) return [];
+
+    // We want samples proportional to desiredLen at the same density as the cycle.
+    const need = Math.max(2, Math.ceil((desiredLen / cycleLen) * cycle.length));
+    if (need <= cycle.length) {
+        return cycle.slice(0, need);
+    }
+
+    const out: number[] = [];
+    out.length = 0;
+    while (out.length < need) {
+        const remaining = need - out.length;
+        if (remaining >= cycle.length) {
+            out.push(...cycle);
+        } else {
+            out.push(...cycle.slice(0, remaining));
+        }
+    }
+    return out;
 }

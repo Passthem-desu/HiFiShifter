@@ -7,12 +7,25 @@ import type {
     SynthesizeResult,
     TrackSummaryResult,
     TimelineResult,
+    WaveformPeaksSegmentPayload,
 } from "../types/api";
 
 declare global {
     interface Window {
         pywebview?: {
             api?: Record<string, (...args: any[]) => Promise<any>>;
+        };
+        __TAURI__?: {
+            core?: {
+                invoke?: <T>(
+                    cmd: string,
+                    args?: Record<string, unknown>,
+                ) => Promise<T>;
+            };
+            invoke?: <T>(
+                cmd: string,
+                args?: Record<string, unknown>,
+            ) => Promise<T>;
         };
     }
 }
@@ -86,6 +99,143 @@ async function waitForPyWebviewApi(
 }
 
 async function invoke<T>(method: string, ...args: unknown[]): Promise<T> {
+    const tauriInvoke =
+        window.__TAURI__?.core?.invoke ?? window.__TAURI__?.invoke;
+    if (typeof tauriInvoke === "function") {
+        // Tauri invoke uses a named-argument object; pywebview uses positional args.
+        const buildArgs = (
+            m: string,
+            a: unknown[],
+        ): Record<string, unknown> | undefined => {
+            switch (m) {
+                case "set_transport": {
+                    const o: Record<string, unknown> = {};
+                    if (a[0] !== undefined) o.playheadBeat = a[0];
+                    if (a[1] !== undefined) o.bpm = a[1];
+                    return o;
+                }
+                case "import_audio_item":
+                    return {
+                        audioPath: a[0],
+                        ...(a[1] !== undefined ? { trackId: a[1] } : {}),
+                        ...(a[2] !== undefined ? { startBeat: a[2] } : {}),
+                    };
+                case "import_audio_bytes":
+                    return {
+                        fileName: a[0],
+                        base64Data: a[1],
+                        ...(a[2] !== undefined ? { trackId: a[2] } : {}),
+                        ...(a[3] !== undefined ? { startBeat: a[3] } : {}),
+                    };
+
+                case "add_track":
+                    return {
+                        name: a[0],
+                        parentTrackId: a[1] ?? null,
+                        index: a[2],
+                    };
+                case "remove_track":
+                    return { trackId: a[0] };
+                case "move_track":
+                    return {
+                        trackId: a[0],
+                        targetIndex: a[1],
+                        parentTrackId: a[2] ?? null,
+                    };
+                case "set_track_state":
+                    return {
+                        trackId: a[0],
+                        muted: a[1],
+                        solo: a[2],
+                        volume: a[3],
+                    };
+                case "select_track":
+                    return { trackId: a[0] };
+                case "set_project_length":
+                    return { projectBeats: a[0] };
+                case "get_track_summary":
+                    return a[0] === undefined ? undefined : { trackId: a[0] };
+
+                case "add_clip":
+                    return {
+                        trackId: a[0] ?? null,
+                        name: a[1],
+                        startBeat: a[2],
+                        lengthBeats: a[3],
+                        sourcePath: a[4],
+                    };
+                case "remove_clip":
+                    return { clipId: a[0] };
+                case "move_clip":
+                    return {
+                        clipId: a[0],
+                        startBeat: a[1],
+                        trackId: a[2] ?? null,
+                    };
+                case "set_clip_state":
+                    return {
+                        clipId: a[0],
+                        lengthBeats: a[1],
+                        gain: a[2],
+                        muted: a[3],
+                        trimStartBeat: a[4],
+                        trimEndBeat: a[5],
+                        playbackRate: a[6],
+                        fadeInBeats: a[7],
+                        fadeOutBeats: a[8],
+                    };
+                case "split_clip":
+                    return { clipId: a[0], splitBeat: a[1] };
+                case "glue_clips":
+                    return { clipIds: a[0] };
+                case "select_clip":
+                    return { clipId: a[0] };
+
+                case "load_model":
+                    return { modelDir: a[0] };
+                case "process_audio":
+                    return { audioPath: a[0] };
+                case "set_pitch_shift":
+                    return { semitones: a[0] };
+                case "save_synthesized":
+                    return { outputPath: a[0] };
+                case "play_original":
+                case "play_synthesized":
+                    return { startSec: a[0] };
+
+                case "open_project":
+                    return { projectPath: a[0] };
+
+                case "get_waveform_peaks_segment":
+                    return {
+                        sourcePath: a[0],
+                        startSec: a[1],
+                        durationSec: a[2],
+                        columns: a[3],
+                    };
+
+                default:
+                    return undefined;
+            }
+        };
+
+        const invokeArgs = buildArgs(method, args);
+        if (invokeArgs === undefined) {
+            if (args.length > 0) {
+                throw new Error(
+                    `Tauri backend: method not wired yet: ${method} (args: ${args.length})`,
+                );
+            }
+            return tauriInvoke<T>(method);
+        }
+        try {
+            return await tauriInvoke<T>(method, invokeArgs);
+        } catch (err) {
+            console.error("Tauri invoke failed", { method, invokeArgs, err });
+            throw err;
+        }
+    }
+
     const api = (await waitForPyWebviewApi(1500)) ?? null;
     if (!api || typeof api[method] !== "function") {
         throw new Error(`Python API not available: ${method}`);
@@ -106,6 +256,51 @@ export const webApi = {
             "pick_output_path",
         ),
     closeWindow: () => invoke<{ ok: boolean }>("close_window"),
+
+    // Undo/Redo (backend-authoritative)
+    undoTimeline: () => invoke<TimelineResult>("undo_timeline"),
+    redoTimeline: () => invoke<TimelineResult>("redo_timeline"),
+
+    // Project
+    getProjectMeta: () =>
+        invoke<{
+            name: string;
+            path?: string | null;
+            dirty: boolean;
+            recent: string[];
+        }>("get_project_meta"),
+    newProject: () => invoke<TimelineResult>("new_project"),
+    openProjectDialog: () =>
+        invoke<{ ok: boolean; canceled?: boolean; path?: string }>(
+            "open_project_dialog",
+        ),
+
+    // Waveform peaks
+    getWaveformPeaksSegment: (
+        sourcePath: string,
+        startSec: number,
+        durationSec: number,
+        columns: number,
+    ) =>
+        invoke<WaveformPeaksSegmentPayload>(
+            "get_waveform_peaks_segment",
+            sourcePath,
+            startSec,
+            durationSec,
+            columns,
+        ),
+
+    clearWaveformCache: () =>
+        invoke<{
+            ok: boolean;
+            removed_files: number;
+            removed_bytes: number;
+            dir: string;
+        }>("clear_waveform_cache"),
+    openProject: (projectPath: string) =>
+        invoke<TimelineResult>("open_project", projectPath),
+    saveProject: () => invoke<any>("save_project"),
+    saveProjectAs: () => invoke<any>("save_project_as"),
     loadDefaultModel: () => invoke<ModelConfigResult>("load_default_model"),
     loadModel: (modelDir: string) =>
         invoke<ModelConfigResult>("load_model", modelDir),
@@ -113,7 +308,7 @@ export const webApi = {
         invoke<ProcessAudioResult>("process_audio", audioPath),
     importAudioItem: (
         audioPath: string,
-        trackId?: string,
+        trackId?: string | null,
         startBeat?: number,
     ) =>
         invoke<TimelineResult>(
@@ -125,7 +320,7 @@ export const webApi = {
     importAudioBytes: (
         fileName: string,
         base64Data: string,
-        trackId?: string,
+        trackId?: string | null,
         startBeat?: number,
     ) =>
         invoke<TimelineResult>(

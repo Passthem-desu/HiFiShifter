@@ -13,6 +13,12 @@ import {
     stopAudioPlayback,
     playSynthesized,
     playOriginal,
+    undoRemote,
+    redoRemote,
+    newProjectRemote,
+    openProjectFromDialog,
+    saveProjectRemote,
+    saveProjectAsRemote,
 } from "./features/session/sessionSlice";
 import { useI18n } from "./i18n/I18nProvider";
 
@@ -137,6 +143,62 @@ function App() {
             return false;
         }
 
+        function onUndoRedo(e: KeyboardEvent) {
+            if (e.repeat) return;
+            if (!(e.ctrlKey || e.metaKey)) return;
+            if (e.altKey) return;
+
+            const active = document.activeElement as HTMLElement | null;
+            if (isEditableTarget(active) || isEditableTarget(e.target)) return;
+
+            const key = e.key.toLowerCase();
+            const isUndo = key === "z" && !e.shiftKey;
+            const isRedo = key === "y" || (key === "z" && e.shiftKey);
+            if (!isUndo && !isRedo) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+            void dispatch(isUndo ? undoRemote() : redoRemote());
+        }
+
+        function onProjectShortcuts(e: KeyboardEvent) {
+            if (e.repeat) return;
+            if (!(e.ctrlKey || e.metaKey)) return;
+            if (e.altKey) return;
+
+            const active = document.activeElement as HTMLElement | null;
+            if (isEditableTarget(active) || isEditableTarget(e.target)) return;
+
+            const key = e.key.toLowerCase();
+            const shift = Boolean(e.shiftKey);
+
+            // Ctrl+N
+            if (key === "n" && !shift) {
+                e.preventDefault();
+                e.stopPropagation();
+                void dispatch(newProjectRemote());
+                return;
+            }
+
+            // Ctrl+Shift+O
+            if (key === "o" && shift) {
+                e.preventDefault();
+                e.stopPropagation();
+                void dispatch(openProjectFromDialog());
+                return;
+            }
+
+            // Ctrl+S / Ctrl+Shift+S
+            if (key === "s") {
+                e.preventDefault();
+                e.stopPropagation();
+                void dispatch(
+                    shift ? saveProjectAsRemote() : saveProjectRemote(),
+                );
+                return;
+            }
+        }
+
         function onKeyDown(e: KeyboardEvent) {
             if (e.key !== " " && e.code !== "Space") return;
             if (e.repeat) return;
@@ -159,7 +221,13 @@ function App() {
         }
 
         window.addEventListener("keydown", onKeyDown, true);
-        return () => window.removeEventListener("keydown", onKeyDown, true);
+        window.addEventListener("keydown", onUndoRedo, true);
+        window.addEventListener("keydown", onProjectShortcuts, true);
+        return () => {
+            window.removeEventListener("keydown", onKeyDown, true);
+            window.removeEventListener("keydown", onUndoRedo, true);
+            window.removeEventListener("keydown", onProjectShortcuts, true);
+        };
     }, [dispatch]);
 
     useEffect(() => {

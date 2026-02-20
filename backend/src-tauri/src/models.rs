@@ -1,0 +1,148 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PitchRange {
+    pub min: f32,
+    pub max: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ProjectMetaPayload {
+    pub name: String,
+    pub path: Option<String>,
+    pub dirty: bool,
+    pub recent: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct TimelineTrack {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub depth: Option<u32>,
+    pub child_track_ids: Option<Vec<String>>,
+    pub muted: bool,
+    pub solo: bool,
+    pub volume: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct TimelineClip {
+    pub id: String,
+    pub track_id: String,
+    pub name: String,
+    pub start_beat: f64,
+    pub length_beats: f64,
+    pub color: String,
+
+    pub source_path: Option<String>,
+    pub duration_sec: Option<f64>,
+    pub waveform_preview: Option<Vec<f32>>,
+    pub pitch_range: Option<PitchRange>,
+
+    pub gain: Option<f32>,
+    pub muted: Option<bool>,
+    pub trim_start_beat: Option<f64>,
+    pub trim_end_beat: Option<f64>,
+    pub playback_rate: Option<f32>,
+    pub fade_in_beats: Option<f64>,
+    pub fade_out_beats: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct TimelineStatePayload {
+    pub ok: bool,
+    pub tracks: Vec<TimelineTrack>,
+    pub clips: Vec<TimelineClip>,
+    pub selected_track_id: Option<String>,
+    pub selected_clip_id: Option<String>,
+    pub bpm: f64,
+    pub playhead_beat: f64,
+    pub project_beats: Option<f64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectMetaPayload>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RuntimeInfoPayload {
+    pub ok: bool,
+    pub device: String,
+    pub model_loaded: bool,
+    pub audio_loaded: bool,
+    pub has_synthesized: bool,
+    pub is_playing: Option<bool>,
+    pub playback_target: Option<String>,
+    pub timeline: Option<TimelineStatePayload>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelConfigPayload {
+    pub ok: bool,
+    pub config: ModelConfig,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelConfig {
+    pub audio_sample_rate: u32,
+    pub audio_num_mel_bins: u32,
+    pub hop_size: u32,
+    pub fmin: f32,
+    pub fmax: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct PlaybackStatePayload {
+    pub ok: bool,
+    pub is_playing: bool,
+    pub target: Option<String>,
+    pub base_sec: f64,
+    pub position_sec: f64,
+    pub duration_sec: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ProcessAudioPayload {
+    pub ok: bool,
+    pub audio: Option<ProcessedAudio>,
+    pub feature: Option<AudioFeature>,
+    pub timeline: Option<TimelineStatePayload>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ProcessedAudio {
+    pub path: String,
+    pub sample_rate: u32,
+    pub duration_sec: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct AudioFeature {
+    pub mel_shape: Option<Vec<u32>>,
+    pub f0_frames: Option<u32>,
+    pub segment_count: Option<u32>,
+    pub segments_preview: Option<Vec<Vec<f32>>>,
+    pub waveform_preview: Option<Vec<f32>>,
+    pub pitch_range: Option<PitchRange>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SynthesizePayload {
+    pub ok: bool,
+    pub sample_rate: u32,
+    pub num_samples: u32,
+    pub duration_sec: f64,
+}

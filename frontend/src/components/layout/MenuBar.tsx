@@ -10,6 +10,14 @@ import {
     addTrackRemote,
     removeTrackRemote,
     refreshRuntime,
+    clearWaveformCacheRemote,
+    undoRemote,
+    redoRemote,
+    newProjectRemote,
+    openProjectFromDialog,
+    openProjectFromPath,
+    saveProjectRemote,
+    saveProjectAsRemote,
 } from "../../features/session/sessionSlice";
 import { webApi } from "../../services/webviewApi";
 import { useAppTheme } from "../../theme/AppThemeProvider";
@@ -48,6 +56,70 @@ export const MenuBar: React.FC = () => {
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
                     <DropdownMenu.Item
+                        onSelect={() => void dispatch(newProjectRemote())}
+                    >
+                        {t("menu_new_project")}
+                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                            Ctrl+N
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                        onSelect={() => void dispatch(openProjectFromDialog())}
+                    >
+                        {t("menu_open_project")}
+                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                            Ctrl+Shift+O
+                        </div>
+                    </DropdownMenu.Item>
+
+                    <DropdownMenu.Sub>
+                        <DropdownMenu.SubTrigger>
+                            {t("menu_recent_projects")}
+                        </DropdownMenu.SubTrigger>
+                        <DropdownMenu.SubContent>
+                            {s.project.recent.length ? (
+                                s.project.recent.slice(0, 12).map((p) => (
+                                    <DropdownMenu.Item
+                                        key={p}
+                                        onSelect={() =>
+                                            void dispatch(
+                                                openProjectFromPath(p),
+                                            )
+                                        }
+                                    >
+                                        {p}
+                                    </DropdownMenu.Item>
+                                ))
+                            ) : (
+                                <DropdownMenu.Item disabled>
+                                    {t("menu_recent_empty")}
+                                </DropdownMenu.Item>
+                            )}
+                        </DropdownMenu.SubContent>
+                    </DropdownMenu.Sub>
+
+                    <DropdownMenu.Separator />
+
+                    <DropdownMenu.Item
+                        onSelect={() => void dispatch(saveProjectRemote())}
+                    >
+                        {t("menu_save_project")}
+                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                            Ctrl+S
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                        onSelect={() => void dispatch(saveProjectAsRemote())}
+                    >
+                        {t("menu_save_project_as")}
+                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                            Ctrl+Shift+S
+                        </div>
+                    </DropdownMenu.Item>
+
+                    <DropdownMenu.Separator />
+
+                    <DropdownMenu.Item
                         onSelect={() => dispatch(importAudioFromDialog())}
                     >
                         {t("menu_import_audio")}{" "}
@@ -83,21 +155,25 @@ export const MenuBar: React.FC = () => {
                     <span>{t("menu_edit")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
-                    <DropdownMenu.Item disabled>
-                        Undo{" "}
+                    <DropdownMenu.Item
+                        onSelect={() => void dispatch(undoRemote())}
+                    >
+                        {t("menu_undo")}{" "}
                         <div className="ml-auto pl-4 text-xs text-gray-500">
                             Ctrl+Z
                         </div>
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item disabled>
-                        Redo{" "}
+                    <DropdownMenu.Item
+                        onSelect={() => void dispatch(redoRemote())}
+                    >
+                        {t("menu_redo")}{" "}
                         <div className="ml-auto pl-4 text-xs text-gray-500">
                             Ctrl+Y
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item>
-                        Select All{" "}
+                        {t("menu_select_all")}{" "}
                         <div className="ml-auto pl-4 text-xs text-gray-500">
                             Ctrl+A
                         </div>
@@ -138,6 +214,13 @@ export const MenuBar: React.FC = () => {
                         onSelect={() => dispatch(refreshRuntime())}
                     >
                         {t("action_refresh")}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                        onSelect={() =>
+                            void dispatch(clearWaveformCacheRemote())
+                        }
+                    >
+                        {t("menu_clear_waveform_cache")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item onSelect={() => theme.toggleMode()}>

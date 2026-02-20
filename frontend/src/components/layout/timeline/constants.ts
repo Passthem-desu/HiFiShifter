@@ -1,6 +1,6 @@
 export const DEFAULT_PX_PER_BEAT = 50;
 export const MIN_PX_PER_BEAT = 8;
-export const MAX_PX_PER_BEAT = 160;
+export const MAX_PX_PER_BEAT = 640;
 
 export const DEFAULT_ROW_HEIGHT = 96;
 export const MIN_ROW_HEIGHT = 56;

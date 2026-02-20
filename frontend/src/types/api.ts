@@ -36,7 +36,10 @@ export interface TimelineClip {
     color: string;
     source_path?: string;
     duration_sec?: number;
-    waveform_preview?: number[] | { l: number[]; r: number[] };
+    waveform_preview?:
+        | number[]
+        | { l: number[]; r: number[] }
+        | { min: number[]; max: number[] };
     pitch_range?: {
         min: number;
         max: number;
@@ -50,6 +53,13 @@ export interface TimelineClip {
     fade_out_beats?: number;
 }
 
+export interface ProjectMeta {
+    name: string;
+    path?: string | null;
+    dirty: boolean;
+    recent: string[];
+}
+
 export interface TimelineState {
     tracks: TimelineTrack[];
     clips: TimelineClip[];
@@ -58,6 +68,7 @@ export interface TimelineState {
     bpm: number;
     playhead_beat: number;
     project_beats?: number;
+    project?: ProjectMeta;
 }
 
 export interface TimelineResult {
@@ -69,6 +80,7 @@ export interface TimelineResult {
     bpm: number;
     playhead_beat: number;
     project_beats?: number;
+    project?: ProjectMeta;
 }
 
 export interface TrackSummaryResult {
@@ -125,6 +137,15 @@ export interface PlaybackStateResult {
     ok: true;
     is_playing: boolean;
     target: string | null;
+    base_sec: number;
     position_sec: number;
     duration_sec: number;
+}
+
+export interface WaveformPeaksSegmentPayload {
+    ok: boolean;
+    min: number[];
+    max: number[];
+    sample_rate: number;
+    hop: number;
 }

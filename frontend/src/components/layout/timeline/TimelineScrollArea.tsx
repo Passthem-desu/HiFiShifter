@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useLayoutEffect, useRef } from "react";
 
 import {
     MAX_PX_PER_BEAT,
@@ -30,11 +30,61 @@ export const TimelineScrollArea: React.FC<
     onWheel,
     ...divProps
 }) => {
+    const scrollRafRef = useRef<number | null>(null);
+    const pendingScrollLeftRef = useRef(0);
+
+    const pendingZoomRef = useRef<{
+        pointerX: number;
+        beatAtPointer: number;
+        nextPxPerBeat: number;
+    } | null>(null);
+
+    function scheduleScrollLeftUpdate(scroller: HTMLDivElement) {
+        pendingScrollLeftRef.current = scroller.scrollLeft;
+        if (scrollRafRef.current != null) return;
+        scrollRafRef.current = requestAnimationFrame(() => {
+            scrollRafRef.current = null;
+            setScrollLeft(pendingScrollLeftRef.current);
+        });
+    }
+
     useEffect(() => {
         const scroller = scrollRef.current;
         if (!scroller) return;
         setScrollLeft(scroller.scrollLeft);
     }, [scrollRef, setScrollLeft]);
+
+    useEffect(() => {
+        return () => {
+            if (scrollRafRef.current != null) {
+                cancelAnimationFrame(scrollRafRef.current);
+                scrollRafRef.current = null;
+            }
+        };
+    }, []);
+
+    useLayoutEffect(() => {
+        // Apply pending cursor-centered zoom scrollLeft after pxPerBeat has updated
+        // (so layout/width calculations are consistent).
+        const scroller = scrollRef.current;
+        const pending = pendingZoomRef.current;
+        if (!scroller || !pending) return;
+        if (Math.abs(pending.nextPxPerBeat - pxPerBeat) > 1e-9) return;
+
+        pendingZoomRef.current = null;
+        const { beatAtPointer, pointerX } = pending;
+        const maxScroll = Math.max(
+            0,
+            Math.ceil(Math.max(8, Math.ceil(projectBeats)) * pxPerBeat) -
+                scroller.clientWidth,
+        );
+        const nextScrollLeft = Math.min(
+            maxScroll,
+            Math.max(0, beatAtPointer * pxPerBeat - pointerX),
+        );
+        scroller.scrollLeft = nextScrollLeft;
+        scheduleScrollLeftUpdate(scroller);
+    }, [projectBeats, pxPerBeat, scrollRef]);
 
     useEffect(() => {
         localStorage.setItem("hifishifter.pxPerBeat", String(pxPerBeat));
@@ -49,7 +99,7 @@ export const TimelineScrollArea: React.FC<
             {...divProps}
             ref={scrollRef}
             onScroll={(e) => {
-                setScrollLeft((e.currentTarget as HTMLDivElement).scrollLeft);
+                scheduleScrollLeftUpdate(e.currentTarget as HTMLDivElement);
                 onScroll?.(e);
             }}
             onWheel={(e) => {
@@ -70,44 +120,31 @@ export const TimelineScrollArea: React.FC<
                     return;
                 }
 
-                // Ctrl + wheel: horizontal zoom (time scale)
-                if (!e.ctrlKey) {
-                    onWheel?.(e);
-                    return;
-                }
+                // Wheel: horizontal zoom (time scale)
                 e.preventDefault();
                 const dir = e.deltaY < 0 ? 1 : -1;
                 const factor = dir > 0 ? 1.1 : 0.9;
                 const scroller = e.currentTarget as HTMLDivElement;
                 const bounds = scroller.getBoundingClientRect();
                 const pointerX = e.clientX - bounds.left;
+
+                const next = clamp(
+                    pxPerBeat * factor,
+                    MIN_PX_PER_BEAT,
+                    MAX_PX_PER_BEAT,
+                );
+                if (Math.abs(next - pxPerBeat) < 1e-9) return;
+
+                // Compute beat under cursor using the current pxPerBeat and scrollLeft.
                 const beatAtPointer =
-                    (pointerX + scroller.scrollLeft) / pxPerBeat;
-
-                setPxPerBeat((prev) => {
-                    const next = Math.min(
-                        MAX_PX_PER_BEAT,
-                        Math.max(MIN_PX_PER_BEAT, prev * factor),
-                    );
-
-                    // Keep the beat under cursor fixed during zoom.
-                    // Defer scrollLeft update to next frame so layout can react to pxPerBeat changes.
-                    requestAnimationFrame(() => {
-                        const maxScroll = Math.max(
-                            0,
-                            Math.ceil(
-                                Math.max(8, Math.ceil(projectBeats)) * next,
-                            ) - scroller.clientWidth,
-                        );
-                        const nextScrollLeft = Math.min(
-                            maxScroll,
-                            Math.max(0, beatAtPointer * next - pointerX),
-                        );
-                        scroller.scrollLeft = nextScrollLeft;
-                        setScrollLeft(scroller.scrollLeft);
-                    });
-                    return next;
-                });
+                    (pointerX + scroller.scrollLeft) /
+                    Math.max(1e-9, pxPerBeat);
+                pendingZoomRef.current = {
+                    pointerX,
+                    beatAtPointer,
+                    nextPxPerBeat: next,
+                };
+                setPxPerBeat(next);
             }}
         />
     );

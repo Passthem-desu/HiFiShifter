@@ -43,6 +43,8 @@ export interface ClipInfo {
     fadeOutBeats: number;
 }
 
+export type ClipTemplate = Omit<ClipInfo, "id" | "color">;
+
 type ClipColor = ClipInfo["color"];
 
 export interface AutomationPoint {
@@ -105,6 +107,12 @@ interface SessionState {
 
     historyPast: StateSnapshot[];
     historyFuture: StateSnapshot[];
+    project: {
+        name: string;
+        path: string | null;
+        dirty: boolean;
+        recent: string[];
+    };
 
     busy: boolean;
     status: string;
@@ -240,7 +248,7 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         muted: Boolean(clip.muted),
         trimStartBeat: Math.max(0, Number(clip.trim_start_beat ?? 0)),
         trimEndBeat: Math.max(0, Number(clip.trim_end_beat ?? 0)),
-        playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.25, 4),
+        playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
         fadeInBeats: Math.max(0, Number(clip.fade_in_beats ?? 0)),
         fadeOutBeats: Math.max(0, Number(clip.fade_out_beats ?? 0)),
     }));
@@ -253,6 +261,28 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         4,
         Number(timeline.project_beats ?? state.projectBeats),
     );
+
+    const project = (timeline as any).project as
+        | {
+              name?: string;
+              path?: string | null;
+              dirty?: boolean;
+              recent?: string[];
+          }
+        | undefined;
+    if (project) {
+        state.project = {
+            name: String(project.name ?? state.project.name ?? "Untitled"),
+            path:
+                project.path === undefined
+                    ? state.project.path
+                    : ((project.path as any) ?? null),
+            dirty: Boolean(project.dirty),
+            recent: Array.isArray(project.recent)
+                ? project.recent
+                : state.project.recent,
+        };
+    }
 
     const availableClipIds = new Set(state.clips.map((clip) => clip.id));
     for (const clipId of Object.keys(state.clipAutomation)) {
@@ -398,10 +428,79 @@ const initialState: SessionState = {
 
     historyPast: [],
     historyFuture: [],
+    project: {
+        name: "Untitled",
+        path: null,
+        dirty: false,
+        recent: [],
+    },
 
     busy: false,
     status: "Ready",
 };
+
+export const undoRemote = createAsyncThunk("session/undoRemote", async () => {
+    return webApi.undoTimeline();
+});
+
+export const redoRemote = createAsyncThunk("session/redoRemote", async () => {
+    return webApi.redoTimeline();
+});
+
+export const newProjectRemote = createAsyncThunk(
+    "session/newProjectRemote",
+    async () => {
+        return webApi.newProject();
+    },
+);
+
+export const openProjectFromDialog = createAsyncThunk(
+    "session/openProjectFromDialog",
+    async (_, { rejectWithValue }) => {
+        const picked = await webApi.openProjectDialog();
+        if (!picked.ok) return rejectWithValue("open_project_dialog_failed");
+        if (picked.canceled || !picked.path) {
+            return { ok: true, canceled: true } as const;
+        }
+        const timeline = await webApi.openProject(picked.path);
+        return { ok: true, canceled: false, timeline } as const;
+    },
+);
+
+export const openProjectFromPath = createAsyncThunk(
+    "session/openProjectFromPath",
+    async (projectPath: string) => {
+        const timeline = await webApi.openProject(projectPath);
+        return timeline;
+    },
+);
+
+export const saveProjectRemote = createAsyncThunk(
+    "session/saveProjectRemote",
+    async (_, { rejectWithValue, getState }) => {
+        const state = getState() as any;
+        const hasPath = Boolean(state?.session?.project?.path);
+
+        const res = hasPath
+            ? await webApi.saveProject()
+            : await webApi.saveProjectAs();
+        if (!res || res.ok === false) {
+            return rejectWithValue(res?.error ?? "save_project_failed");
+        }
+        return res as any;
+    },
+);
+
+export const saveProjectAsRemote = createAsyncThunk(
+    "session/saveProjectAsRemote",
+    async (_, { rejectWithValue }) => {
+        const res = await webApi.saveProjectAs();
+        if (!res || res.ok === false) {
+            return rejectWithValue(res?.error ?? "save_project_as_failed");
+        }
+        return res as any;
+    },
+);
 
 export const fetchTimeline = createAsyncThunk(
     "session/fetchTimeline",
@@ -409,10 +508,17 @@ export const fetchTimeline = createAsyncThunk(
         return webApi.getTimelineState();
     },
 );
-
 export const seekPlayhead = createAsyncThunk(
     "session/seekPlayhead",
-    async (beat: number) => {
+    async (beat: number, { getState, dispatch }) => {
+        const state = getState() as { session: SessionState };
+        if (state.session.runtime.isPlaying) {
+            try {
+                await dispatch(stopAudioPlayback()).unwrap();
+            } catch {
+                // Best-effort: still seek even if stopping fails.
+            }
+        }
         return webApi.setTransport({ playheadBeat: beat });
     },
 );
@@ -477,6 +583,77 @@ export const addClipOnTrack = createAsyncThunk(
     "session/addClipOnTrack",
     async (payload: { trackId?: string }) => {
         return webApi.addClip({ trackId: payload.trackId });
+    },
+);
+
+export const createClipsRemote = createAsyncThunk(
+    "session/createClipsRemote",
+    async (
+        payload: { templates: ClipTemplate[] },
+        { getState, rejectWithValue },
+    ) => {
+        const state0 = getState() as { session: SessionState };
+        let knownIds = new Set(state0.session.clips.map((c) => c.id));
+        let lastTimeline: TimelineState | null = null;
+        const createdClipIds: string[] = [];
+
+        for (const tpl of payload.templates) {
+            const added = await webApi.addClip({
+                trackId: tpl.trackId,
+                name: tpl.name,
+                startBeat: tpl.startBeat,
+                lengthBeats: tpl.lengthBeats,
+                sourcePath: tpl.sourcePath,
+            });
+            if (!(added as { ok?: boolean }).ok) {
+                return rejectWithValue(
+                    (added as { error?: { message?: string } }).error
+                        ?.message ?? "add_clip_failed",
+                );
+            }
+
+            const createdId =
+                (added as TimelineState).clips.find((c) => !knownIds.has(c.id))
+                    ?.id ?? null;
+            if (!createdId) {
+                return rejectWithValue("add_clip_failed");
+            }
+
+            createdClipIds.push(createdId);
+
+            knownIds = new Set((added as TimelineState).clips.map((c) => c.id));
+
+            const updated = await webApi.setClipState({
+                clipId: createdId,
+                lengthBeats: tpl.lengthBeats,
+                gain: tpl.gain,
+                muted: tpl.muted,
+                trimStartBeat: tpl.trimStartBeat,
+                trimEndBeat: tpl.trimEndBeat,
+                playbackRate: tpl.playbackRate,
+                fadeInBeats: tpl.fadeInBeats,
+                fadeOutBeats: tpl.fadeOutBeats,
+            });
+            if (!(updated as { ok?: boolean }).ok) {
+                return rejectWithValue(
+                    (updated as { error?: { message?: string } }).error
+                        ?.message ?? "set_clip_state_failed",
+                );
+            }
+
+            knownIds = new Set(
+                (updated as TimelineState).clips.map((c) => c.id),
+            );
+            lastTimeline = updated as TimelineState;
+        }
+
+        if (!lastTimeline) {
+            return rejectWithValue("create_clips_failed");
+        }
+        return {
+            ...(lastTimeline as any),
+            createdClipIds,
+        } as TimelineState & { createdClipIds: string[] };
     },
 );
 
@@ -567,6 +744,13 @@ export const refreshRuntime = createAsyncThunk(
     },
 );
 
+export const clearWaveformCacheRemote = createAsyncThunk(
+    "session/clearWaveformCacheRemote",
+    async () => {
+        return webApi.clearWaveformCache();
+    },
+);
+
 export const loadModel = createAsyncThunk(
     "session/loadModel",
     async (modelDir: string) => {
@@ -645,13 +829,45 @@ export const importAudioFromPath = createAsyncThunk(
 export const importAudioAtPosition = createAsyncThunk(
     "session/importAudioAtPosition",
     async (
-        payload: { audioPath: string; trackId?: string; startBeat?: number },
-        { dispatch, rejectWithValue },
+        payload: {
+            audioPath: string;
+            trackId?: string | null;
+            startBeat?: number;
+        },
+        { dispatch, rejectWithValue, getState },
     ) => {
         dispatch(setAudioPath(payload.audioPath));
+
+        let targetTrackId: string | undefined;
+        if (payload.trackId === null) {
+            // Explicit null means: create a new track and import into it.
+            const state = getState() as { session: SessionState };
+            const beforeIds = new Set(state.session.tracks.map((t) => t.id));
+            try {
+                const added = await dispatch(
+                    addTrackRemote({ name: undefined, parentTrackId: null }),
+                ).unwrap();
+                const createdId =
+                    added.tracks.find((t) => !beforeIds.has(t.id))?.id ??
+                    added.selected_track_id ??
+                    added.tracks[added.tracks.length - 1]?.id ??
+                    null;
+                if (!createdId) {
+                    return rejectWithValue("add_track_failed");
+                }
+                targetTrackId = createdId;
+            } catch (err) {
+                return rejectWithValue(
+                    err instanceof Error ? err.message : "add_track_failed",
+                );
+            }
+        } else {
+            targetTrackId = payload.trackId ?? undefined;
+        }
+
         const imported = await webApi.importAudioItem(
             payload.audioPath,
-            payload.trackId,
+            targetTrackId,
             payload.startBeat,
         );
         if (!(imported as { ok?: boolean }).ok) {
@@ -670,10 +886,32 @@ export const importAudioAtPosition = createAsyncThunk(
 export const importAudioFileAtPosition = createAsyncThunk(
     "session/importAudioFileAtPosition",
     async (
-        payload: { file: File; trackId?: string; startBeat?: number },
-        { rejectWithValue },
+        payload: { file: File; trackId?: string | null; startBeat?: number },
+        { dispatch, rejectWithValue, getState },
     ) => {
         try {
+            let targetTrackId: string | undefined;
+            if (payload.trackId === null) {
+                const state = getState() as { session: SessionState };
+                const beforeIds = new Set(
+                    state.session.tracks.map((t) => t.id),
+                );
+                const added = await dispatch(
+                    addTrackRemote({ name: undefined, parentTrackId: null }),
+                ).unwrap();
+                const createdId =
+                    added.tracks.find((t) => !beforeIds.has(t.id))?.id ??
+                    added.selected_track_id ??
+                    added.tracks[added.tracks.length - 1]?.id ??
+                    null;
+                if (!createdId) {
+                    return rejectWithValue("add_track_failed");
+                }
+                targetTrackId = createdId;
+            } else {
+                targetTrackId = payload.trackId ?? undefined;
+            }
+
             const fileName = String(payload.file.name ?? "dropped-audio");
             const dataUrl = await new Promise<string>((resolve, reject) => {
                 const reader = new FileReader();
@@ -689,7 +927,7 @@ export const importAudioFileAtPosition = createAsyncThunk(
             const imported = await webApi.importAudioBytes(
                 fileName,
                 base64,
-                payload.trackId,
+                targetTrackId,
                 payload.startBeat,
             );
             if (!(imported as { ok?: boolean }).ok) {
@@ -749,6 +987,8 @@ export const playOriginal = createAsyncThunk(
     async (_, { getState }) => {
         const state = getState() as { session: SessionState };
         const anchorBeat = state.session.playheadBeat;
+        // Ensure backend transport is in sync before starting playback.
+        await webApi.setTransport({ playheadBeat: anchorBeat });
         const result = await webApi.playOriginal(0);
         return {
             ...result,
@@ -763,6 +1003,8 @@ export const playSynthesized = createAsyncThunk(
     async (_, { getState }) => {
         const state = getState() as { session: SessionState };
         const anchorBeat = state.session.playheadBeat;
+        // Ensure backend transport is in sync before starting playback.
+        await webApi.setTransport({ playheadBeat: anchorBeat });
         const result = await webApi.playSynthesized(0);
         return {
             ...result,
@@ -783,6 +1025,9 @@ const sessionSlice = createSlice({
     name: "session",
     initialState,
     reducers: {
+        checkpointHistory(state) {
+            pushHistory(state);
+        },
         setToolMode(state, action: PayloadAction<ToolMode>) {
             if (state.toolMode !== action.payload) {
                 pushHistory(state);
@@ -861,6 +1106,16 @@ const sessionSlice = createSlice({
             if (clip) {
                 clip.lengthBeats = Math.max(0.0, action.payload.lengthBeats);
             }
+        },
+        setClipPlaybackRate(
+            state,
+            action: PayloadAction<{ clipId: string; playbackRate: number }>,
+        ) {
+            const clip = state.clips.find(
+                (entry) => entry.id === action.payload.clipId,
+            );
+            if (!clip) return;
+            clip.playbackRate = clamp(action.payload.playbackRate, 0.1, 10);
         },
         setClipTrim(
             state,
@@ -1124,6 +1379,26 @@ const sessionSlice = createSlice({
             })
             .addCase(refreshRuntime.rejected, setRejected)
 
+            .addCase(clearWaveformCacheRemote.pending, (state) =>
+                setPending(state, "Clearing waveform cache..."),
+            )
+            .addCase(clearWaveformCacheRemote.fulfilled, (state, action) => {
+                state.busy = false;
+                const payload = action.payload as {
+                    ok?: boolean;
+                    removed_files?: number;
+                    removed_bytes?: number;
+                    dir?: string;
+                };
+                if (payload.ok) {
+                    const n = Number(payload.removed_files ?? 0) || 0;
+                    state.status = `Waveform cache cleared (${n} files)`;
+                } else {
+                    state.status = "Clear waveform cache failed";
+                }
+            })
+            .addCase(clearWaveformCacheRemote.rejected, setRejected)
+
             .addCase(loadDefaultModel.pending, (state) =>
                 setPending(state, "Loading default model..."),
             )
@@ -1346,7 +1621,8 @@ const sessionSlice = createSlice({
                 state.runtime.isPlaying = ok;
                 state.runtime.playbackTarget = ok ? "original" : null;
                 state.playbackClipId = ok ? (payload.clipId ?? null) : null;
-                state.playbackAnchorBeat = ok ? (payload.anchorBeat ?? 0) : 0;
+                // Backend playback state reports an absolute clock; anchor beat is no longer needed.
+                state.playbackAnchorBeat = 0;
                 state.status = ok ? "Playing original" : "Play original failed";
             })
             .addCase(playOriginal.rejected, setRejected)
@@ -1366,7 +1642,8 @@ const sessionSlice = createSlice({
                 state.runtime.isPlaying = ok;
                 state.runtime.playbackTarget = ok ? "synthesized" : null;
                 state.playbackClipId = ok ? (payload.clipId ?? null) : null;
-                state.playbackAnchorBeat = ok ? (payload.anchorBeat ?? 0) : 0;
+                // Backend playback state reports an absolute clock; anchor beat is no longer needed.
+                state.playbackAnchorBeat = 0;
                 state.status = ok
                     ? "Playing synthesized"
                     : "Play synthesized failed";
@@ -1396,6 +1673,7 @@ const sessionSlice = createSlice({
                     ok?: boolean;
                     is_playing?: boolean;
                     target?: string | null;
+                    base_sec?: number;
                     position_sec?: number;
                     duration_sec?: number;
                 };
@@ -1409,12 +1687,10 @@ const sessionSlice = createSlice({
                 state.runtime.playbackDurationSec = payload.duration_sec ?? 0;
 
                 if (state.runtime.isPlaying) {
-                    const beatPos =
-                        ((payload.position_sec ?? 0) * state.bpm) / 60;
-                    state.playheadBeat = Math.max(
-                        0,
-                        state.playbackAnchorBeat + beatPos,
-                    );
+                    const absSec =
+                        (payload.base_sec ?? 0) + (payload.position_sec ?? 0);
+                    const beatPos = (absSec * state.bpm) / 60;
+                    state.playheadBeat = Math.max(0, beatPos);
                 } else {
                     state.playbackClipId = null;
                     state.playbackAnchorBeat = 0;
@@ -1431,6 +1707,114 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload);
             })
 
+            .addCase(undoRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) return;
+                applyTimelineState(state, payload);
+            })
+
+            .addCase(redoRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) return;
+                applyTimelineState(state, payload);
+            })
+
+            .addCase(newProjectRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) return;
+                applyTimelineState(state, payload);
+                state.status = "New project";
+            })
+
+            .addCase(openProjectFromDialog.fulfilled, (state, action) => {
+                const payload = action.payload as
+                    | { ok: true; canceled: true }
+                    | { ok: true; canceled: false; timeline: TimelineState };
+                if (!payload || (payload as any).canceled) {
+                    state.status = "Open canceled";
+                    return;
+                }
+                applyTimelineState(state, (payload as any).timeline);
+                state.status = "Project opened";
+            })
+
+            .addCase(openProjectFromPath.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) return;
+                applyTimelineState(state, payload);
+                state.status = "Project opened";
+            })
+
+            .addCase(saveProjectRemote.fulfilled, (state, action) => {
+                const payload = action.payload as any;
+                if (payload?.ok && payload?.canceled) {
+                    state.status = "Save canceled";
+                    return;
+                }
+
+                if (payload?.ok && payload?.timeline?.ok) {
+                    applyTimelineState(
+                        state,
+                        payload.timeline as TimelineState,
+                    );
+                    state.status = "Project saved";
+                    return;
+                }
+
+                if (payload?.ok && payload?.tracks && payload?.clips) {
+                    applyTimelineState(state, payload as TimelineState);
+                    state.status = "Project saved";
+                    return;
+                }
+
+                if (payload?.ok) {
+                    state.project.dirty = false;
+                    state.status = "Project saved";
+                    return;
+                }
+
+                state.status = "Save failed";
+            })
+
+            .addCase(saveProjectAsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as any;
+                if (payload?.ok && payload?.canceled) {
+                    state.status = "Save As canceled";
+                    return;
+                }
+
+                if (payload?.ok && payload?.timeline?.ok) {
+                    applyTimelineState(
+                        state,
+                        payload.timeline as TimelineState,
+                    );
+                    state.status = "Project saved";
+                    return;
+                }
+
+                if (payload?.ok && payload?.tracks && payload?.clips) {
+                    applyTimelineState(state, payload as TimelineState);
+                    state.status = "Project saved";
+                    return;
+                }
+
+                if (payload?.ok) {
+                    state.project.dirty = false;
+                    state.status = "Project saved";
+                    return;
+                }
+
+                state.status = "Save As failed";
+            })
+
             .addCase(addClipOnTrack.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -1439,6 +1823,17 @@ const sessionSlice = createSlice({
                     return;
                 }
                 applyTimelineState(state, payload);
+            })
+
+            .addCase(createClipsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
+                state.status = "Clips created";
             })
 
             .addCase(removeClipRemote.fulfilled, (state, action) => {
@@ -1549,7 +1944,7 @@ const sessionSlice = createSlice({
                     Number(payload.playhead_beat ?? state.playheadBeat),
                 );
                 if (state.runtime.isPlaying) {
-                    state.playbackAnchorBeat = state.playheadBeat;
+                    state.playbackAnchorBeat = 0;
                 }
                 if (payload.tracks && payload.clips) {
                     applyTimelineState(state, payload as TimelineState);
@@ -1624,6 +2019,7 @@ const sessionSlice = createSlice({
 });
 
 export const {
+    checkpointHistory,
     setToolMode,
     setEditParam,
     setBpm,
@@ -1638,6 +2034,7 @@ export const {
     moveClipStart,
     moveClipTrack,
     setClipLength,
+    setClipPlaybackRate,
     setClipTrim,
     setClipFades,
     setClipGain,
