@@ -543,7 +543,7 @@ export const PianoRollPanel: React.FC = () => {
                 const i = f - pvStart;
                 out[f - minF] =
                     i >= 0 && i < (pvEdit as number[]).length
-                        ? (pvEdit as number[])[i] ?? 0
+                        ? ((pvEdit as number[])[i] ?? 0)
                         : 0;
             }
         } else {
