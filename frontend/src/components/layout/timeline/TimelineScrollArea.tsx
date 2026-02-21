@@ -30,8 +30,7 @@ export const TimelineScrollArea: React.FC<
     onWheel,
     ...divProps
 }) => {
-    const scrollRafRef = useRef<number | null>(null);
-    const pendingScrollLeftRef = useRef(0);
+    const lastScrollLeftRef = useRef<number | null>(null);
 
     const pendingZoomRef = useRef<{
         pointerX: number;
@@ -39,28 +38,26 @@ export const TimelineScrollArea: React.FC<
         nextPxPerBeat: number;
     } | null>(null);
 
-    function scheduleScrollLeftUpdate(scroller: HTMLDivElement) {
-        pendingScrollLeftRef.current = scroller.scrollLeft;
-        if (scrollRafRef.current != null) return;
-        scrollRafRef.current = requestAnimationFrame(() => {
-            scrollRafRef.current = null;
-            setScrollLeft(pendingScrollLeftRef.current);
-        });
+    function syncScrollLeft(scroller: HTMLDivElement) {
+        const next = scroller.scrollLeft;
+        if (
+            lastScrollLeftRef.current != null &&
+            lastScrollLeftRef.current === next
+        ) {
+            return;
+        }
+        lastScrollLeftRef.current = next;
+        setScrollLeft(next);
     }
 
     useEffect(() => {
         const scroller = scrollRef.current;
         if (!scroller) return;
-        setScrollLeft(scroller.scrollLeft);
+        syncScrollLeft(scroller);
     }, [scrollRef, setScrollLeft]);
 
     useEffect(() => {
-        return () => {
-            if (scrollRafRef.current != null) {
-                cancelAnimationFrame(scrollRafRef.current);
-                scrollRafRef.current = null;
-            }
-        };
+        return () => {};
     }, []);
 
     useLayoutEffect(() => {
@@ -83,7 +80,7 @@ export const TimelineScrollArea: React.FC<
             Math.max(0, beatAtPointer * pxPerBeat - pointerX),
         );
         scroller.scrollLeft = nextScrollLeft;
-        scheduleScrollLeftUpdate(scroller);
+        syncScrollLeft(scroller);
     }, [projectBeats, pxPerBeat, scrollRef]);
 
     useEffect(() => {
@@ -94,57 +91,66 @@ export const TimelineScrollArea: React.FC<
         localStorage.setItem("hifishifter.rowHeight", String(rowHeight));
     }, [rowHeight]);
 
+    useEffect(() => {
+        const scroller = scrollRef.current;
+        if (!scroller) return;
+
+        const handler: EventListener = (evt) => {
+            const e = evt as globalThis.WheelEvent;
+
+            // Ctrl + wheel: vertical zoom (track height)
+            if (e.ctrlKey) {
+                e.preventDefault();
+                const dir = e.deltaY < 0 ? 1 : -1;
+                const factor = dir > 0 ? 1.1 : 0.9;
+                setRowHeight((prev) =>
+                    Math.round(
+                        clamp(prev * factor, MIN_ROW_HEIGHT, MAX_ROW_HEIGHT),
+                    ),
+                );
+                return;
+            }
+
+            // Wheel: horizontal zoom (time scale)
+            e.preventDefault();
+            const dir = e.deltaY < 0 ? 1 : -1;
+            const factor = dir > 0 ? 1.1 : 0.9;
+            const bounds = scroller.getBoundingClientRect();
+            const pointerX = e.clientX - bounds.left;
+
+            const next = clamp(
+                pxPerBeat * factor,
+                MIN_PX_PER_BEAT,
+                MAX_PX_PER_BEAT,
+            );
+            if (Math.abs(next - pxPerBeat) < 1e-9) return;
+
+            // Compute beat under cursor using the current pxPerBeat and scrollLeft.
+            const beatAtPointer =
+                (pointerX + scroller.scrollLeft) / Math.max(1e-9, pxPerBeat);
+            pendingZoomRef.current = {
+                pointerX,
+                beatAtPointer,
+                nextPxPerBeat: next,
+            };
+            setPxPerBeat(next);
+        };
+
+        scroller.addEventListener("wheel", handler, {
+            passive: false,
+        } as globalThis.AddEventListenerOptions);
+        return () => {
+            scroller.removeEventListener("wheel", handler);
+        };
+    }, [pxPerBeat, scrollRef, setPxPerBeat, setRowHeight]);
+
     return (
         <div
             {...divProps}
             ref={scrollRef}
             onScroll={(e) => {
-                scheduleScrollLeftUpdate(e.currentTarget as HTMLDivElement);
+                syncScrollLeft(e.currentTarget as HTMLDivElement);
                 onScroll?.(e);
-            }}
-            onWheel={(e) => {
-                // Alt + wheel: vertical zoom (track height)
-                if (e.altKey) {
-                    e.preventDefault();
-                    const dir = e.deltaY < 0 ? 1 : -1;
-                    const factor = dir > 0 ? 1.1 : 0.9;
-                    setRowHeight((prev) =>
-                        Math.round(
-                            clamp(
-                                prev * factor,
-                                MIN_ROW_HEIGHT,
-                                MAX_ROW_HEIGHT,
-                            ),
-                        ),
-                    );
-                    return;
-                }
-
-                // Wheel: horizontal zoom (time scale)
-                e.preventDefault();
-                const dir = e.deltaY < 0 ? 1 : -1;
-                const factor = dir > 0 ? 1.1 : 0.9;
-                const scroller = e.currentTarget as HTMLDivElement;
-                const bounds = scroller.getBoundingClientRect();
-                const pointerX = e.clientX - bounds.left;
-
-                const next = clamp(
-                    pxPerBeat * factor,
-                    MIN_PX_PER_BEAT,
-                    MAX_PX_PER_BEAT,
-                );
-                if (Math.abs(next - pxPerBeat) < 1e-9) return;
-
-                // Compute beat under cursor using the current pxPerBeat and scrollLeft.
-                const beatAtPointer =
-                    (pointerX + scroller.scrollLeft) /
-                    Math.max(1e-9, pxPerBeat);
-                pendingZoomRef.current = {
-                    pointerX,
-                    beatAtPointer,
-                    nextPxPerBeat: next,
-                };
-                setPxPerBeat(next);
             }}
         />
     );

@@ -25,6 +25,9 @@ export interface TimelineTrack {
     muted: boolean;
     solo: boolean;
     volume: number;
+
+    compose_enabled: boolean;
+    pitch_analysis_algo: string;
 }
 
 export interface TimelineClip {
@@ -148,4 +151,14 @@ export interface WaveformPeaksSegmentPayload {
     max: number[];
     sample_rate: number;
     hop: number;
+}
+
+export interface ParamFramesPayload {
+    ok: boolean;
+    root_track_id: string;
+    param: string;
+    frame_period_ms: number;
+    start_frame: number;
+    orig: number[];
+    edit: number[];
 }

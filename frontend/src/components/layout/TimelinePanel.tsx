@@ -64,11 +64,41 @@ export const TimelinePanel: React.FC = () => {
         sessionRef.current = s;
     }, [s]);
     const scrollRef = useRef<HTMLDivElement | null>(null);
+    const rulerContentRef = useRef<HTMLDivElement | null>(null);
+    const scrollLeftRef = useRef(0);
+    const scrollStateRafRef = useRef<number | null>(null);
     const playheadDragRef = useRef<{
         pointerId: number;
         lastBeat: number;
     } | null>(null);
+
     const [scrollLeft, setScrollLeft] = useState(0);
+    useEffect(() => {
+        scrollLeftRef.current = scrollLeft;
+    }, [scrollLeft]);
+
+    function syncScrollLeft(next: number) {
+        scrollLeftRef.current = next;
+        if (rulerContentRef.current) {
+            rulerContentRef.current.style.transform = `translateX(${-next}px)`;
+        }
+        if (scrollStateRafRef.current == null) {
+            scrollStateRafRef.current = requestAnimationFrame(() => {
+                scrollStateRafRef.current = null;
+                setScrollLeft(scrollLeftRef.current);
+            });
+        }
+    }
+
+    const setScrollLeftAction: React.Dispatch<React.SetStateAction<number>> = (
+        action,
+    ) => {
+        const next =
+            typeof action === "function"
+                ? (action as (prev: number) => number)(scrollLeftRef.current)
+                : action;
+        syncScrollLeft(next);
+    };
     const [pxPerBeat, setPxPerBeat] = useState(() => {
         const stored = Number(localStorage.getItem("hifishifter.pxPerBeat"));
         return Number.isFinite(stored)
@@ -84,6 +114,7 @@ export const TimelinePanel: React.FC = () => {
     });
 
     const panRef = useRef<{
+        pointerId: number | null;
         startX: number;
         startY: number;
         scrollLeft: number;
@@ -120,8 +151,7 @@ export const TimelinePanel: React.FC = () => {
                 trimEndBeat: number;
                 playbackRate: number;
                 sourceBeats: number | null;
-                windowLenBeats: number | null;
-                repeating: boolean;
+                maxSlipBeats: number;
             }
         >;
     } | null>(null);
@@ -426,39 +456,54 @@ export const TimelinePanel: React.FC = () => {
         return beat;
     }
 
-    function startPan(e: React.MouseEvent) {
+    function startPanPointer(e: React.PointerEvent) {
         const scroller = scrollRef.current;
         if (!scroller) return;
+        if (e.pointerType !== "mouse") return;
         panRef.current = {
+            pointerId: e.pointerId,
             startX: e.clientX,
             startY: e.clientY,
             scrollLeft: scroller.scrollLeft,
             scrollTop: scroller.scrollTop,
         };
+
         const prevCursor = document.body.style.cursor;
         const prevSelect = document.body.style.userSelect;
         document.body.style.cursor = "grabbing";
         document.body.style.userSelect = "none";
 
-        function onMove(ev: MouseEvent) {
+        try {
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {
+            // ignore
+        }
+
+        function onMove(ev: PointerEvent) {
             const pan = panRef.current;
             const el = scrollRef.current;
             if (!pan || !el) return;
+            if (pan.pointerId != null && ev.pointerId !== pan.pointerId) return;
             el.scrollLeft = pan.scrollLeft - (ev.clientX - pan.startX);
             el.scrollTop = pan.scrollTop - (ev.clientY - pan.startY);
-            setScrollLeft(el.scrollLeft);
+            syncScrollLeft(el.scrollLeft);
         }
 
-        function end() {
+        function end(ev: PointerEvent) {
+            const pan = panRef.current;
+            if (!pan) return;
+            if (pan.pointerId != null && ev.pointerId !== pan.pointerId) return;
             panRef.current = null;
             document.body.style.cursor = prevCursor;
             document.body.style.userSelect = prevSelect;
-            window.removeEventListener("mousemove", onMove);
-            window.removeEventListener("mouseup", end);
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", end);
+            window.removeEventListener("pointercancel", end);
         }
 
-        window.addEventListener("mousemove", onMove);
-        window.addEventListener("mouseup", end);
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", end);
+        window.addEventListener("pointercancel", end);
     }
 
     function snapBeat(beat: number) {
@@ -674,7 +719,7 @@ export const TimelinePanel: React.FC = () => {
                 const usedDeltaTimeline = nextLen - drag.baseLengthBeats;
                 let nextTrimEnd =
                     drag.baseTrimEndBeat - usedDeltaTimeline * rate;
-                // Can't trim past the end; once trimEnd reaches 0, further extension repeats.
+                // Can't trim past the end; once trimEnd reaches 0, further extension is silence.
                 nextTrimEnd = Math.max(0, nextTrimEnd);
 
                 dispatch(
@@ -1306,8 +1351,7 @@ export const TimelinePanel: React.FC = () => {
                 trimEndBeat: number;
                 playbackRate: number;
                 sourceBeats: number | null;
-                windowLenBeats: number | null;
-                repeating: boolean;
+                maxSlipBeats: number;
             }
         > = {};
         const bpm = Number(sessionRef.current.bpm ?? 120) || 120;
@@ -1315,29 +1359,20 @@ export const TimelinePanel: React.FC = () => {
             const c = sessionRef.current.clips.find((x) => x.id === id);
             if (!c) continue;
             const sourceBeats = clipSourceBeats(c, bpm);
-            const trimStartBeat = Math.max(
-                0,
-                Number(c.trimStartBeat ?? 0) || 0,
-            );
+            const trimStartBeat = Number(c.trimStartBeat ?? 0) || 0;
             const trimEndBeat = Math.max(0, Number(c.trimEndBeat ?? 0) || 0);
-            const windowLenBeats =
-                sourceBeats == null
-                    ? null
-                    : Math.max(
-                          0,
-                          Number(sourceBeats) - trimStartBeat - trimEndBeat,
-                      );
-            const repeating =
-                windowLenBeats != null &&
-                windowLenBeats > 1e-6 &&
-                Number(c.lengthBeats ?? 0) > windowLenBeats + 1e-6;
+            // Clamp slip distance to at most 1x the original source duration (in beats).
+            // If source duration is unknown, fall back to the clip's current timeline length.
+            const maxSlipBeats =
+                sourceBeats != null && Number.isFinite(sourceBeats)
+                    ? Math.max(0, Number(sourceBeats))
+                    : Math.max(0, Number(c.lengthBeats ?? 0) || 0);
             initialById[id] = {
                 trimStartBeat,
                 trimEndBeat,
                 playbackRate: Number(c.playbackRate ?? 1) || 1,
                 sourceBeats,
-                windowLenBeats,
-                repeating,
+                maxSlipBeats,
             };
         }
 
@@ -1350,13 +1385,6 @@ export const TimelinePanel: React.FC = () => {
         };
 
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-
-        function safeMod(x: number, m: number): number {
-            if (!Number.isFinite(x) || !Number.isFinite(m) || m <= 1e-9)
-                return 0;
-            const r = x % m;
-            return r < 0 ? r + m : r;
-        }
 
         function onMove(ev: PointerEvent) {
             const drag = slipDragRef.current;
@@ -1380,54 +1408,19 @@ export const TimelinePanel: React.FC = () => {
 
                 const deltaSrcBeat = deltaBeat * rate;
 
-                // Keep the source window length stable while slipping.
-                // This avoids repeat boundary glitches (overlap/phase changes) when the clip is extended.
-                const sourceBeats =
-                    initial.sourceBeats != null &&
-                    Number.isFinite(initial.sourceBeats)
-                        ? Math.max(0, Number(initial.sourceBeats))
-                        : null;
-                const windowLenBeats =
-                    initial.windowLenBeats != null &&
-                    Number.isFinite(initial.windowLenBeats)
-                        ? Math.max(0, Number(initial.windowLenBeats))
-                        : null;
-
+                // Non-repeating slip-edit: allow moving past source bounds.
+                // Out-of-range time renders as silence.
+                let nextTrimStart = initial.trimStartBeat + deltaSrcBeat;
                 if (
-                    sourceBeats != null &&
-                    windowLenBeats != null &&
-                    windowLenBeats > 1e-6
+                    Number.isFinite(initial.maxSlipBeats) &&
+                    initial.maxSlipBeats > 1e-6
                 ) {
-                    const maxStart = Math.max(0, sourceBeats - windowLenBeats);
-                    let nextTrimStart = initial.trimStartBeat + deltaSrcBeat;
-
-                    if (initial.repeating && maxStart > 1e-6) {
-                        // In repeat mode, allow continuous wrap-around.
-                        nextTrimStart = safeMod(nextTrimStart, maxStart);
-                    } else {
-                        // Non-repeat: clamp within the available window.
-                        nextTrimStart = clamp(nextTrimStart, 0, maxStart);
-                    }
-
-                    const nextTrimEnd = Math.max(
-                        0,
-                        sourceBeats - windowLenBeats - nextTrimStart,
+                    nextTrimStart = clamp(
+                        nextTrimStart,
+                        -initial.maxSlipBeats,
+                        initial.maxSlipBeats,
                     );
-                    dispatch(
-                        setClipTrim({
-                            clipId: id,
-                            trimStartBeat: nextTrimStart,
-                            trimEndBeat: nextTrimEnd,
-                        }),
-                    );
-                    continue;
                 }
-
-                // Fallback: only slide trimStart.
-                const nextTrimStart = Math.max(
-                    0,
-                    initial.trimStartBeat + deltaSrcBeat,
-                );
                 dispatch(
                     setClipTrim({ clipId: id, trimStartBeat: nextTrimStart }),
                 );
@@ -1501,6 +1494,14 @@ export const TimelinePanel: React.FC = () => {
                         }),
                     );
                 }}
+                onToggleCompose={(trackId, nextComposeEnabled) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            composeEnabled: nextComposeEnabled,
+                        }),
+                    );
+                }}
                 onVolumeUiChange={(trackId, nextVolume) => {
                     setTrackVolumeUi((prev) => ({
                         ...prev,
@@ -1536,6 +1537,7 @@ export const TimelinePanel: React.FC = () => {
                     bars={bars}
                     pxPerBeat={pxPerBeat}
                     playheadBeat={s.playheadBeat}
+                    contentRef={rulerContentRef}
                     onMouseDown={(e) => {
                         if (e.button !== 0) return;
                         const scroller = scrollRef.current;
@@ -1560,8 +1562,18 @@ export const TimelinePanel: React.FC = () => {
                     setPxPerBeat={setPxPerBeat}
                     rowHeight={rowHeight}
                     setRowHeight={setRowHeight}
-                    setScrollLeft={setScrollLeft}
+                    setScrollLeft={setScrollLeftAction}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"
+                    onMouseDownCapture={(e) => {
+                        if (e.button === 1) {
+                            e.preventDefault();
+                        }
+                    }}
+                    onAuxClick={(e) => {
+                        if (e.button === 1) {
+                            e.preventDefault();
+                        }
+                    }}
                     onContextMenu={(e) => {
                         e.preventDefault();
                     }}
@@ -1790,12 +1802,13 @@ export const TimelinePanel: React.FC = () => {
                             );
                         }
                     }}
+                    onPointerDownCapture={(e) => {
+                        if (e.button !== 1) return;
+                        if (isEditableTarget(e.target)) return;
+                        e.preventDefault();
+                        startPanPointer(e);
+                    }}
                     onMouseDown={(e) => {
-                        if (e.button === 1) {
-                            e.preventDefault();
-                            startPan(e);
-                            return;
-                        }
                         if (e.button !== 0) return;
                         setContextMenu(null);
                         setMultiSelectedClipIds([]);

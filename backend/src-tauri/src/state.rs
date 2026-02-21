@@ -7,7 +7,47 @@ use crate::models::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use uuid::Uuid;
+
+fn default_frame_period_ms() -> f64 {
+    5.0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PitchAnalysisAlgo {
+    WorldDll,
+    NsfHifiganOnnx,
+    None,
+    #[serde(other)]
+    Unknown,
+}
+
+impl Default for PitchAnalysisAlgo {
+    fn default() -> Self {
+        Self::WorldDll
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TrackParamsState {
+    #[serde(default = "default_frame_period_ms")]
+    pub frame_period_ms: f64,
+
+    #[serde(default)]
+    pub pitch_orig: Vec<f32>,
+    #[serde(default)]
+    pub pitch_edit: Vec<f32>,
+
+    #[serde(default)]
+    pub tension_orig: Vec<f32>,
+    #[serde(default)]
+    pub tension_edit: Vec<f32>,
+
+    #[serde(skip)]
+    pub pitch_orig_key: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Track {
@@ -18,6 +58,12 @@ pub struct Track {
     pub muted: bool,
     pub solo: bool,
     pub volume: f32,
+
+    #[serde(default)]
+    pub compose_enabled: bool,
+
+    #[serde(default)]
+    pub pitch_analysis_algo: PitchAnalysisAlgo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +109,9 @@ pub struct TimelineState {
     pub playhead_beat: f64,
     pub project_beats: f64,
 
+    #[serde(default)]
+    pub params_by_root_track: BTreeMap<String, TrackParamsState>,
+
     pub next_track_order: i32,
 }
 
@@ -105,6 +154,9 @@ impl Default for TimelineState {
                 muted: false,
                 solo: false,
                 volume: 0.9,
+
+                compose_enabled: false,
+                pitch_analysis_algo: PitchAnalysisAlgo::default(),
             }],
             clips: vec![],
             selected_track_id: Some(track_id),
@@ -112,8 +164,87 @@ impl Default for TimelineState {
             bpm: 120.0,
             playhead_beat: 0.0,
             project_beats: 64.0,
+
+            params_by_root_track: BTreeMap::new(),
             next_track_order: 1,
         }
+    }
+}
+
+impl TimelineState {
+    pub fn resolve_root_track_id(&self, track_id: &str) -> Option<String> {
+        if track_id.trim().is_empty() {
+            return None;
+        }
+        let mut cur = track_id.to_string();
+        let mut safety = 0;
+        loop {
+            let parent = self
+                .tracks
+                .iter()
+                .find(|t| t.id == cur)
+                .and_then(|t| t.parent_id.clone());
+            match parent {
+                Some(p) if !p.trim().is_empty() => {
+                    cur = p;
+                }
+                _ => return Some(cur),
+            }
+            safety += 1;
+            if safety > 2048 {
+                return Some(cur);
+            }
+        }
+    }
+
+    pub fn frame_period_ms(&self) -> f64 {
+        default_frame_period_ms()
+    }
+
+    pub fn project_duration_sec(&self) -> f64 {
+        let bpm = self.bpm;
+        if !(bpm.is_finite() && bpm > 0.0) {
+            return 0.0;
+        }
+        let beat_sec = 60.0 / bpm;
+        (self.project_beats.max(0.0) * beat_sec).max(0.0)
+    }
+
+    pub fn target_param_frames(&self, frame_period_ms: f64) -> usize {
+        let fp = frame_period_ms.max(0.1);
+        let sec = self.project_duration_sec();
+        let frames = (sec * 1000.0 / fp).ceil();
+        if !(frames.is_finite() && frames > 0.0) {
+            return 1;
+        }
+        (frames as usize).max(1)
+    }
+
+    pub fn ensure_params_for_root(&mut self, root_track_id: &str) {
+        let fp = self.frame_period_ms();
+        let target = self.target_param_frames(fp);
+        let entry = self
+            .params_by_root_track
+            .entry(root_track_id.to_string())
+            .or_insert_with(|| TrackParamsState {
+                frame_period_ms: fp,
+                ..TrackParamsState::default()
+            });
+
+        entry.frame_period_ms = fp;
+
+        fn resize_curve(v: &mut Vec<f32>, target: usize, fill: f32) {
+            if v.len() < target {
+                v.extend(std::iter::repeat(fill).take(target - v.len()));
+            } else if v.len() > target {
+                v.truncate(target);
+            }
+        }
+
+        resize_curve(&mut entry.pitch_orig, target, 0.0);
+        resize_curve(&mut entry.pitch_edit, target, 0.0);
+        resize_curve(&mut entry.tension_orig, target, 0.0);
+        resize_curve(&mut entry.tension_edit, target, 0.0);
     }
 }
 
@@ -126,6 +257,13 @@ pub struct AppState {
     pub waveform_cache: std::sync::Mutex<
         std::collections::HashMap<String, std::sync::Arc<crate::waveform::CachedPeaks>>,
     >,
+
+    // Set in Tauri setup. Used for async notifications.
+    pub app_handle: OnceLock<tauri::AppHandle>,
+
+    // De-dup background pitch analysis jobs (keyed by rootTrackId + analysis key).
+    pub pitch_inflight: std::sync::Mutex<std::collections::HashSet<String>>,
+
     pub audio_engine: AudioEngine,
 }
 
@@ -144,6 +282,10 @@ impl Default for AppState {
                 crate::waveform_disk_cache::default_cache_dir(),
             ),
             waveform_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+
+            app_handle: OnceLock::new(),
+            pitch_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
+
             audio_engine: AudioEngine::new(),
         }
     }
@@ -162,7 +304,10 @@ impl AppState {
         let cache_key = format!("{}|{}", source_path, hop);
 
         {
-            let cache = self.waveform_cache.lock().expect("waveform_cache mutex poisoned");
+            let cache = self
+                .waveform_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(found) = cache.get(&cache_key) {
                 return Ok(found.clone());
             }
@@ -172,7 +317,7 @@ impl AppState {
         let cache_dir = {
             self.waveform_cache_dir
                 .lock()
-                .expect("waveform_cache_dir mutex poisoned")
+                .unwrap_or_else(|e| e.into_inner())
                 .clone()
         };
         let disk_path = crate::waveform_disk_cache::cache_file_path(&cache_dir, source_path, hop);
@@ -182,7 +327,7 @@ impl AppState {
                 let mut cache = self
                     .waveform_cache
                     .lock()
-                    .expect("waveform_cache mutex poisoned");
+                    .unwrap_or_else(|e| e.into_inner());
                 cache.insert(cache_key.clone(), found.clone());
                 return Ok(found);
             }
@@ -197,28 +342,34 @@ impl AppState {
         let _ = crate::waveform_disk_cache::save_peaks(&disk_path, &peaks);
 
         let peaks = std::sync::Arc::new(peaks);
-        let mut cache = self.waveform_cache.lock().expect("waveform_cache mutex poisoned");
+        let mut cache = self
+            .waveform_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         cache.insert(cache_key, peaks.clone());
         Ok(peaks)
     }
 
     pub fn clear_waveform_cache(&self) -> crate::waveform_disk_cache::ClearStats {
         {
-            let mut cache = self.waveform_cache.lock().expect("waveform_cache mutex poisoned");
+            let mut cache = self
+                .waveform_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             cache.clear();
         }
 
         let cache_dir = {
             self.waveform_cache_dir
                 .lock()
-                .expect("waveform_cache_dir mutex poisoned")
+                .unwrap_or_else(|e| e.into_inner())
                 .clone()
         };
         crate::waveform_disk_cache::clear_dir(&cache_dir)
     }
 
     pub fn project_meta_payload(&self) -> ProjectMetaPayload {
-        let p = self.project.lock().expect("project mutex poisoned").clone();
+        let p = self.project.lock().unwrap_or_else(|e| e.into_inner()).clone();
         ProjectMetaPayload {
             name: p.name,
             path: p.path,
@@ -231,7 +382,7 @@ impl AppState {
         let mut h = self
             .timeline_history
             .lock()
-            .expect("timeline_history mutex poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         h.undo.push(snapshot.clone());
         if h.undo.len() > 100 {
             h.undo.remove(0);
@@ -239,7 +390,7 @@ impl AppState {
         h.redo.clear();
         drop(h);
 
-        let mut p = self.project.lock().expect("project mutex poisoned");
+        let mut p = self.project.lock().unwrap_or_else(|e| e.into_inner());
         p.dirty = true;
     }
 
@@ -247,17 +398,17 @@ impl AppState {
         let mut h = self
             .timeline_history
             .lock()
-            .expect("timeline_history mutex poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         h.undo.clear();
         h.redo.clear();
     }
 
     pub fn undo_timeline(&self) -> TimelineStatePayload {
-        let mut tl = self.timeline.lock().expect("timeline mutex poisoned");
+        let mut tl = self.timeline.lock().unwrap_or_else(|e| e.into_inner());
         let mut h = self
             .timeline_history
             .lock()
-            .expect("timeline_history mutex poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         let Some(prev) = h.undo.pop() else {
             let mut payload = tl.to_payload();
             payload.project = Some(self.project_meta_payload());
@@ -273,11 +424,11 @@ impl AppState {
     }
 
     pub fn redo_timeline(&self) -> TimelineStatePayload {
-        let mut tl = self.timeline.lock().expect("timeline mutex poisoned");
+        let mut tl = self.timeline.lock().unwrap_or_else(|e| e.into_inner());
         let mut h = self
             .timeline_history
             .lock()
-            .expect("timeline_history mutex poisoned");
+            .unwrap_or_else(|e| e.into_inner());
         let Some(next) = h.redo.pop() else {
             let mut payload = tl.to_payload();
             payload.project = Some(self.project_meta_payload());
@@ -371,6 +522,9 @@ impl TimelineState {
             muted: false,
             solo: false,
             volume: 0.9,
+
+            compose_enabled: false,
+            pitch_analysis_algo: PitchAnalysisAlgo::default(),
         };
         self.tracks.push(track);
 
@@ -461,6 +615,8 @@ impl TimelineState {
         muted: Option<bool>,
         solo: Option<bool>,
         volume: Option<f32>,
+        compose_enabled: Option<bool>,
+        pitch_analysis_algo: Option<PitchAnalysisAlgo>,
     ) {
         if let Some(t) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(v) = muted {
@@ -471,6 +627,13 @@ impl TimelineState {
             }
             if let Some(v) = volume {
                 t.volume = v.clamp(0.0, 1.0);
+            }
+
+            if let Some(v) = compose_enabled {
+                t.compose_enabled = v;
+            }
+            if let Some(v) = pitch_analysis_algo {
+                t.pitch_analysis_algo = v;
             }
         }
     }
@@ -513,6 +676,9 @@ impl TimelineState {
                 muted: false,
                 solo: false,
                 volume: 0.9,
+
+                compose_enabled: false,
+                pitch_analysis_algo: PitchAnalysisAlgo::default(),
             });
             self.next_track_order += 1;
         }
@@ -605,7 +771,11 @@ impl TimelineState {
                 c.muted = v;
             }
             if let Some(v) = trim_start_beat {
-                c.trim_start_beat = v.max(0.0);
+                if v.is_finite() {
+                    // Negative values are allowed (slip-edit past the source start -> leading silence).
+                    // Keep a reasonable bound to avoid accidental extreme values.
+                    c.trim_start_beat = v.clamp(-1_000_000.0, 1_000_000.0);
+                }
             }
             if let Some(v) = trim_end_beat {
                 c.trim_end_beat = v.max(0.0);
@@ -664,7 +834,10 @@ impl TimelineState {
         // trim_* are in beats (source time), while playback_rate scales source progress per timeline time.
         let rate = right.playback_rate as f64;
         let rate = if rate.is_finite() && rate > 0.0 { rate } else { 1.0 };
-        right.trim_start_beat = (right.trim_start_beat + left_len * rate).max(0.0);
+        if right.trim_start_beat.is_finite() {
+            right.trim_start_beat = (right.trim_start_beat + left_len * rate)
+                .clamp(-1_000_000.0, 1_000_000.0);
+        }
         self.clips.push(right);
     }
 
@@ -685,8 +858,11 @@ impl TimelineState {
         if selected.iter().any(|c| c.track_id != track_id) {
             return;
         }
-        selected.sort_by(|a, b| a.start_beat.partial_cmp(&b.start_beat).unwrap());
-        let start = selected.first().unwrap().start_beat;
+        selected.sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
+        let Some(first) = selected.first() else {
+            return;
+        };
+        let start = first.start_beat;
         let end = selected
             .iter()
             .map(|c| c.start_beat + c.length_beats)
@@ -694,7 +870,7 @@ impl TimelineState {
 
         self.ensure_project_end_beat(end);
 
-        let mut glued = selected.first().unwrap().clone();
+        let mut glued = first.clone();
         glued.id = new_id("clip");
         glued.name = "Glued".to_string();
         glued.start_beat = start;
@@ -808,6 +984,15 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
         by_parent: &HashMap<Option<String>, Vec<Track>>,
         out: &mut Vec<TimelineTrack>,
     ) {
+        fn algo_name(a: &PitchAnalysisAlgo) -> String {
+            match a {
+                PitchAnalysisAlgo::WorldDll => "world_dll".to_string(),
+                PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx".to_string(),
+                PitchAnalysisAlgo::None => "none".to_string(),
+                PitchAnalysisAlgo::Unknown => "unknown".to_string(),
+            }
+        }
+
         let children = by_parent
             .get(&Some(t.id.clone()))
             .cloned()
@@ -823,6 +1008,8 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
             muted: t.muted,
             solo: t.solo,
             volume: t.volume,
+            compose_enabled: t.compose_enabled,
+            pitch_analysis_algo: algo_name(&t.pitch_analysis_algo),
         });
 
         for c in children {
@@ -851,6 +1038,13 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
                     muted: t.muted,
                     solo: t.solo,
                     volume: t.volume,
+                    compose_enabled: t.compose_enabled,
+                    pitch_analysis_algo: match t.pitch_analysis_algo {
+                        PitchAnalysisAlgo::WorldDll => "world_dll".to_string(),
+                        PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx".to_string(),
+                        PitchAnalysisAlgo::None => "none".to_string(),
+                        PitchAnalysisAlgo::Unknown => "unknown".to_string(),
+                    },
                 });
             }
         }
@@ -861,7 +1055,7 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
 
 impl AppState {
     pub fn runtime_info(&self) -> RuntimeInfoPayload {
-        let rt = self.runtime.lock().expect("runtime mutex poisoned");
+        let rt = self.runtime.lock().unwrap_or_else(|e| e.into_inner());
         let pb = self.audio_engine.snapshot_state();
 
         RuntimeInfoPayload {

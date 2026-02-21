@@ -124,7 +124,6 @@ export function ActionBar() {
                     size="1"
                     value={bpmText}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                        bpmDirtyRef.current = true;
                         setBpmText(e.target.value);
                     }}
                     onBlur={() => commitBpm()}

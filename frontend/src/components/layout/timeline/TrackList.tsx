@@ -18,6 +18,7 @@ export const TrackList: React.FC<{
     }) => void;
     onToggleMute: (trackId: string, nextMuted: boolean) => void;
     onToggleSolo: (trackId: string, nextSolo: boolean) => void;
+    onToggleCompose: (trackId: string, nextComposeEnabled: boolean) => void;
     onVolumeUiChange: (trackId: string, nextVolume: number) => void;
     onVolumeCommit: (trackId: string, nextVolume: number) => void;
     onAddTrack: () => void;
@@ -32,6 +33,7 @@ export const TrackList: React.FC<{
     onMoveTrack,
     onToggleMute,
     onToggleSolo,
+    onToggleCompose,
     onVolumeUiChange,
     onVolumeCommit,
     onAddTrack,
@@ -213,6 +215,10 @@ export const TrackList: React.FC<{
                     const isOver = dragUi?.overTrackId === track.id;
                     const muted = Boolean(track.muted);
                     const solo = Boolean(track.solo);
+                    const isRoot = (track.parentId ?? null) == null;
+                    const composeEnabled = Boolean(
+                        (track as any).composeEnabled,
+                    );
                     const backendVolume = Math.max(
                         0,
                         Math.min(1, Number(track.volume ?? 0.9)),
@@ -460,6 +466,24 @@ export const TrackList: React.FC<{
                                     </Flex>
 
                                     <Flex gap="2" align="center">
+                                        {isRoot ? (
+                                            <button
+                                                className={`w-6 h-5 rounded text-[10px] border transition-all ${composeEnabled ? "bg-qt-highlight text-white border-transparent" : "bg-qt-button text-gray-300 border-transparent hover:border-qt-highlight hover:bg-qt-button-hover"}`}
+                                                title="Compose"
+                                                onPointerDown={(e) =>
+                                                    e.stopPropagation()
+                                                }
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onToggleCompose(
+                                                        track.id,
+                                                        !composeEnabled,
+                                                    );
+                                                }}
+                                            >
+                                                C
+                                            </button>
+                                        ) : null}
                                         <button
                                             className={`w-6 h-5 rounded text-[10px] border transition-all ${muted ? "bg-red-900 text-red-200 border-red-500" : "bg-qt-button text-gray-300 border-transparent hover:border-red-500 hover:bg-red-900 hover:text-red-200"}`}
                                             onPointerDown={(e) =>

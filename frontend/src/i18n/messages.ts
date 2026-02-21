@@ -38,6 +38,7 @@ export const messages = {
         action_play_out: "Play Out",
         action_stop: "Stop",
         action_refresh: "Refresh",
+        loading: "Loading...",
         playhead: "Playhead",
 
         panel_editor: "Editor",
@@ -75,6 +76,8 @@ export const messages = {
         track_remove_selected: "Remove Selected Track",
 
         param_editor: "Parameter Editor",
+        pitch_requires_compose:
+            "Enable Compose (C) on the root track to generate pitch curve",
         pitch_label: "Pitch (semitones)",
         tension_label: "Tension (0-1)",
         points_help: "Double click add · Drag move · Right click delete",
@@ -140,6 +143,7 @@ export const messages = {
         action_play_out: "播放合成",
         action_stop: "停止",
         action_refresh: "刷新",
+        loading: "加载中...",
         playhead: "播放头",
 
         panel_editor: "编辑器",
@@ -177,6 +181,7 @@ export const messages = {
         track_remove_selected: "删除选中轨道",
 
         param_editor: "参数编辑器",
+        pitch_requires_compose: "请在根轨开启 Compose（C）以生成音高曲线",
         pitch_label: "音高（半音）",
         tension_label: "张力（0-1）",
         points_help: "双击新增 · 拖拽移动 · 右键删除",

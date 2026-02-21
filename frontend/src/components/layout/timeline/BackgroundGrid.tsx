@@ -1,38 +1,104 @@
 import React from "react";
 import { gridStepBeats } from "./grid";
 
+function positiveMod(value: number, mod: number): number {
+    if (!Number.isFinite(value) || !Number.isFinite(mod) || mod <= 0) return 0;
+    const r = value % mod;
+    return (r + mod) % mod;
+}
+
 export const BackgroundGrid: React.FC<{
     contentWidth: number;
     contentHeight: number;
     pxPerBeat: number;
     grid: string;
     beatsPerBar: number;
-}> = ({ contentWidth, contentHeight, pxPerBeat, grid, beatsPerBar }) => {
+    viewportWidth?: number;
+    scrollLeft?: number;
+    layerRef?: React.Ref<HTMLDivElement>;
+    boundaryRef?: React.Ref<HTMLDivElement>;
+}> = ({
+    contentWidth,
+    contentHeight,
+    pxPerBeat,
+    grid,
+    beatsPerBar,
+    viewportWidth,
+    scrollLeft,
+    layerRef,
+    boundaryRef,
+}) => {
+    const useViewport =
+        viewportWidth != null &&
+        Number.isFinite(viewportWidth) &&
+        scrollLeft != null &&
+        Number.isFinite(scrollLeft);
+
+    const weakStepPx = Math.max(1e-6, pxPerBeat * gridStepBeats(grid));
+    const barStepPx = Math.max(1e-6, pxPerBeat * beatsPerBar);
+
+    const width = useViewport
+        ? Math.max(1, Math.floor(viewportWidth))
+        : contentWidth;
+    const height = contentHeight;
+
+    const weakOffsetPx = useViewport
+        ? -positiveMod(scrollLeft as number, weakStepPx)
+        : 0;
+    const barOffsetPx = useViewport
+        ? -positiveMod(scrollLeft as number, barStepPx)
+        : 0;
+
+    // If the parent provides refs in viewport mode, it may be doing imperative
+    // syncing (e.g. in a scroll handler). Avoid overriding those styles with
+    // potentially throttled/stale React props.
+    const manualViewportSync =
+        useViewport && (layerRef != null || boundaryRef != null);
+
+    const boundaryLeft = useViewport
+        ? contentWidth - 1 - (scrollLeft as number)
+        : contentWidth - 1;
+
+    const showBoundary =
+        Number.isFinite(boundaryLeft) &&
+        boundaryLeft >= -2 &&
+        boundaryLeft <= width + 2;
+
     return (
         <>
             <div
+                ref={layerRef}
                 className="absolute left-0 top-0 pointer-events-none"
                 style={{
-                    width: contentWidth,
-                    height: contentHeight,
+                    width,
+                    height,
                     backgroundImage: [
                         "linear-gradient(to right, var(--qt-graph-grid-weak) 1px, transparent 1px)",
                         "linear-gradient(to right, var(--qt-graph-grid-strong) 3px, transparent 3px)",
                     ].join(", "),
                     backgroundSize: [
-                        `${pxPerBeat * gridStepBeats(grid)}px 100%`,
-                        `${pxPerBeat * beatsPerBar}px 100%`,
+                        `${weakStepPx}px 100%`,
+                        `${barStepPx}px 100%`,
                     ].join(", "),
+                    backgroundPosition: useViewport
+                        ? manualViewportSync
+                            ? undefined
+                            : [
+                                  `${weakOffsetPx}px 0px`,
+                                  `${barOffsetPx}px 0px`,
+                              ].join(", ")
+                        : undefined,
                     opacity: 0.9,
                 }}
             />
 
             <div
+                ref={boundaryRef}
                 className="absolute top-0 bottom-0 w-px z-20"
                 style={{
-                    left: contentWidth - 1,
+                    left: manualViewportSync ? 0 : boundaryLeft,
                     backgroundColor: "var(--qt-highlight)",
-                    opacity: 0.9,
+                    opacity: manualViewportSync ? 0 : showBoundary ? 0.9 : 0,
                 }}
             />
         </>

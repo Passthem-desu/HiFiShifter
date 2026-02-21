@@ -3,15 +3,25 @@ mod audio_utils;
 mod commands;
 mod mixdown;
 mod models;
+mod pitch_editing;
+mod pitch_analysis;
+mod nsf_hifigan_onnx;
 mod project;
 mod rubberband;
 mod state;
 mod time_stretch;
+mod world;
+mod world_lock;
+mod world_vocoder;
 mod waveform;
 mod waveform_disk_cache;
 
 use tauri::Manager;
 use std::path::PathBuf;
+
+pub fn nsf_hifigan_onnx_probe() -> Result<String, String> {
+    nsf_hifigan_onnx::probe_load()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -49,7 +59,39 @@ pub fn run() {
                 }
             }
 
+            // Prefer pre-bundled WORLD DLL if present.
+            if std::env::var_os("HIFISHIFTER_WORLD_DLL").is_none() {
+                // 1) Bundled resource dir (packaged apps)
+                if let Ok(res_dir) = app.path().resource_dir() {
+                    let p = res_dir
+                        .join("world")
+                        .join("windows")
+                        .join("x64")
+                        .join("world.dll");
+                    if p.exists() {
+                        std::env::set_var("HIFISHIFTER_WORLD_DLL", p);
+                    }
+                }
+
+                // 2) Workspace path (dev runs)
+                if std::env::var_os("HIFISHIFTER_WORLD_DLL").is_none() {
+                    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("resources")
+                        .join("world")
+                        .join("windows")
+                        .join("x64")
+                        .join("world.dll");
+                    if p.exists() {
+                        std::env::set_var("HIFISHIFTER_WORLD_DLL", p);
+                    }
+                }
+            }
+
             let state = app.state::<state::AppState>();
+
+            // Expose app handle for background workers.
+            let _ = state.app_handle.set(app.handle().clone());
+
             // Prefer the OS-level app cache dir so peaks persist across runs.
             let base = app
                 .path()
@@ -60,7 +102,7 @@ pub fn run() {
                 let mut d = state
                     .waveform_cache_dir
                     .lock()
-                    .expect("waveform_cache_dir mutex poisoned");
+                    .unwrap_or_else(|e| e.into_inner());
                 *d = dir.clone();
             }
             let _ = waveform_disk_cache::ensure_dir(&dir);
@@ -70,7 +112,7 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<state::AppState>();
                 let (dirty, allow_close, has_path, name) = {
-                    let mut p = state.project.lock().expect("project mutex poisoned");
+                    let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
                     if p.allow_close {
                         p.allow_close = false;
                         return;
@@ -94,7 +136,7 @@ pub fn run() {
                 match decision {
                     rfd::MessageDialogResult::Yes => {
                         let project_path = if has_path {
-                            let p = state.project.lock().expect("project mutex poisoned");
+                            let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
                             p.path.clone()
                         } else {
                             let default_name = if name.trim().is_empty() {
@@ -116,7 +158,7 @@ pub fn run() {
                         match commands::save_project_to_path_inner(state.inner(), window, path) {
                             Ok(_) => {
                                 {
-                                    let mut p = state.project.lock().expect("project mutex poisoned");
+                                    let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
                                     p.allow_close = true;
                                 }
                                 let _ = window.close();
@@ -132,7 +174,7 @@ pub fn run() {
                     }
                     rfd::MessageDialogResult::No => {
                         {
-                            let mut p = state.project.lock().expect("project mutex poisoned");
+                            let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
                             p.allow_close = true;
                         }
                         let _ = window.close();
@@ -166,6 +208,8 @@ pub fn run() {
             commands::open_audio_dialog,
             commands::pick_output_path,
             commands::get_waveform_peaks_segment,
+            commands::get_root_mix_waveform_peaks_segment,
+            commands::get_track_mix_waveform_peaks_segment,
             commands::clear_waveform_cache,
             commands::import_audio_item,
             commands::import_audio_bytes,
@@ -177,6 +221,10 @@ pub fn run() {
             commands::select_track,
             commands::set_project_length,
             commands::get_track_summary,
+
+            commands::get_param_frames,
+            commands::set_param_frames,
+            commands::restore_param_frames,
 
             commands::add_clip,
             commands::remove_clip,

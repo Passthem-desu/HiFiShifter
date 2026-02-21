@@ -2,6 +2,7 @@
 import type {
     ModelConfigResult,
     PlaybackStateResult,
+    ParamFramesPayload,
     ProcessAudioResult,
     RuntimeInfo,
     SynthesizeResult,
@@ -148,6 +149,8 @@ async function invoke<T>(method: string, ...args: unknown[]): Promise<T> {
                         muted: a[1],
                         solo: a[2],
                         volume: a[3],
+                        composeEnabled: a[4],
+                        pitchAnalysisAlgo: a[5],
                     };
                 case "select_track":
                     return { trackId: a[0] };
@@ -212,6 +215,49 @@ async function invoke<T>(method: string, ...args: unknown[]): Promise<T> {
                         startSec: a[1],
                         durationSec: a[2],
                         columns: a[3],
+                    };
+
+                case "get_root_mix_waveform_peaks_segment":
+                    return {
+                        trackId: a[0],
+                        startSec: a[1],
+                        durationSec: a[2],
+                        columns: a[3],
+                    };
+
+                case "get_track_mix_waveform_peaks_segment":
+                    return {
+                        trackId: a[0],
+                        startSec: a[1],
+                        durationSec: a[2],
+                        columns: a[3],
+                    };
+
+                case "get_param_frames":
+                    return {
+                        trackId: a[0],
+                        param: a[1],
+                        startFrame: a[2],
+                        frameCount: a[3],
+                        stride: a[4],
+                    };
+
+                case "set_param_frames":
+                    return {
+                        trackId: a[0],
+                        param: a[1],
+                        startFrame: a[2],
+                        values: a[3],
+                        checkpoint: a[4],
+                    };
+
+                case "restore_param_frames":
+                    return {
+                        trackId: a[0],
+                        param: a[1],
+                        startFrame: a[2],
+                        frameCount: a[3],
+                        checkpoint: a[4],
                     };
 
                 default:
@@ -288,6 +334,83 @@ export const webApi = {
             startSec,
             durationSec,
             columns,
+        ),
+
+    getRootMixWaveformPeaksSegment: (
+        trackId: string,
+        startSec: number,
+        durationSec: number,
+        columns: number,
+    ) =>
+        invoke<WaveformPeaksSegmentPayload>(
+            "get_root_mix_waveform_peaks_segment",
+            trackId,
+            startSec,
+            durationSec,
+            columns,
+        ),
+
+    getTrackMixWaveformPeaksSegment: (
+        trackId: string,
+        startSec: number,
+        durationSec: number,
+        columns: number,
+    ) =>
+        invoke<WaveformPeaksSegmentPayload>(
+            "get_track_mix_waveform_peaks_segment",
+            trackId,
+            startSec,
+            durationSec,
+            columns,
+        ),
+
+    // Param curves (frame-based)
+    getParamFrames: (
+        trackId: string,
+        param: string,
+        startFrame: number,
+        frameCount: number,
+        stride?: number,
+    ) =>
+        invoke<ParamFramesPayload>(
+            "get_param_frames",
+            trackId,
+            param,
+            startFrame,
+            frameCount,
+            stride,
+        ),
+
+    setParamFrames: (
+        trackId: string,
+        param: string,
+        startFrame: number,
+        values: number[],
+        checkpoint?: boolean,
+    ) =>
+        invoke<{ ok: boolean }>(
+            "set_param_frames",
+            trackId,
+            param,
+            startFrame,
+            values,
+            checkpoint,
+        ),
+
+    restoreParamFrames: (
+        trackId: string,
+        param: string,
+        startFrame: number,
+        frameCount: number,
+        checkpoint?: boolean,
+    ) =>
+        invoke<{ ok: boolean }>(
+            "restore_param_frames",
+            trackId,
+            param,
+            startFrame,
+            frameCount,
+            checkpoint,
         ),
 
     clearWaveformCache: () =>
@@ -385,6 +508,8 @@ export const webApi = {
         muted?: boolean;
         solo?: boolean;
         volume?: number;
+        composeEnabled?: boolean;
+        pitchAnalysisAlgo?: string;
     }) =>
         invoke<TimelineResult>(
             "set_track_state",
@@ -392,6 +517,8 @@ export const webApi = {
             payload.muted,
             payload.solo,
             payload.volume,
+            payload.composeEnabled,
+            payload.pitchAnalysisAlgo,
         ),
     selectTrack: (trackId: string) =>
         invoke<TimelineResult>("select_track", trackId),

@@ -1,6 +1,6 @@
-use crate::state::{Clip, TimelineState, Track};
+use crate::state::{TimelineState, Track};
 use crate::time_stretch::{time_stretch_interleaved, StretchAlgorithm};
-use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
+use hound::{SampleFormat, WavSpec, WavWriter};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -9,6 +9,7 @@ pub struct MixdownOptions {
     pub sample_rate: u32,
     pub start_sec: f64,
     pub end_sec: Option<f64>,
+    pub stretch: StretchAlgorithm,
 }
 
 #[derive(Debug, Clone)]
@@ -39,52 +40,6 @@ fn clamp11(x: f32) -> f32 {
     } else {
         x
     }
-}
-
-fn is_wav_path(path: &str) -> bool {
-    Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("wav"))
-        .unwrap_or(false)
-}
-
-fn read_wav_f32_interleaved(path: &Path) -> Option<(u32, u16, Vec<f32>)> {
-    let mut reader = WavReader::open(path).ok()?;
-    let spec = reader.spec();
-    if spec.sample_rate == 0 || spec.channels == 0 {
-        return None;
-    }
-
-    let channels = spec.channels;
-    let sample_rate = spec.sample_rate;
-
-    // Read samples to f32 interleaved in [-1, 1].
-    let mut out: Vec<f32> = Vec::with_capacity(reader.duration() as usize);
-
-    match (spec.sample_format, spec.bits_per_sample) {
-        (SampleFormat::Int, 16) => {
-            for s in reader.samples::<i16>() {
-                let v = s.ok()? as f32 / i16::MAX as f32;
-                out.push(v);
-            }
-        }
-        (SampleFormat::Int, 24) | (SampleFormat::Int, 32) => {
-            // hound reads 24-bit packed into i32.
-            for s in reader.samples::<i32>() {
-                let v = s.ok()? as f32 / i32::MAX as f32;
-                out.push(v);
-            }
-        }
-        (SampleFormat::Float, 32) => {
-            for s in reader.samples::<f32>() {
-                out.push(s.ok()?);
-            }
-        }
-        _ => return None,
-    }
-
-    Some((sample_rate, channels, out))
 }
 
 fn linear_resample_interleaved(
@@ -181,16 +136,16 @@ fn compute_track_gains(tracks: &[Track]) -> HashMap<String, (f32, bool, bool)> {
     out
 }
 
-fn clip_source_bounds_sec(clip: &Clip, bpm: f64) -> Option<(f64, f64)> {
-    let duration_sec = clip.duration_sec?;
-    if !(duration_sec.is_finite() && duration_sec > 0.0) {
+fn clip_duration_sec_from_wav(sample_rate: u32, channels: u16, pcm: &[f32]) -> Option<f64> {
+    let ch = channels as usize;
+    if sample_rate == 0 || ch == 0 {
         return None;
     }
-    let bs = beat_sec(bpm);
-    let trim_start_sec = (clip.trim_start_beat.max(0.0)) * bs;
-    let trim_end_sec = (clip.trim_end_beat.max(0.0)) * bs;
-    let max_end_sec = (duration_sec - trim_end_sec).max(trim_start_sec);
-    Some((trim_start_sec, max_end_sec))
+    let frames = pcm.len() / ch;
+    if frames == 0 {
+        return None;
+    }
+    Some(frames as f64 / sample_rate as f64)
 }
 
 pub fn render_mixdown_wav(
@@ -198,6 +153,44 @@ pub fn render_mixdown_wav(
     output_path: &Path,
     opts: MixdownOptions,
 ) -> Result<MixdownResult, String> {
+    let (out_rate, out_channels, duration_sec, mix) =
+        render_mixdown_interleaved(timeline, opts.clone())?;
+
+    // Write WAV 16-bit.
+    let spec = WavSpec {
+        channels: out_channels,
+        sample_rate: out_rate,
+        bits_per_sample: 16,
+        sample_format: SampleFormat::Int,
+    };
+    let mut writer = WavWriter::create(output_path, spec).map_err(|e| e.to_string())?;
+
+    for s in mix {
+        let v = clamp11(s);
+        let i = (v * i16::MAX as f32) as i16;
+        writer.write_sample(i).map_err(|e| e.to_string())?;
+    }
+    writer.finalize().map_err(|e| e.to_string())?;
+
+    Ok(MixdownResult {
+        sample_rate: out_rate,
+        duration_sec,
+    })
+}
+
+pub fn render_mixdown_interleaved(
+    timeline: &TimelineState,
+    opts: MixdownOptions,
+) -> Result<(u32, u16, f64, Vec<f32>), String> {
+    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
+        .ok()
+        .as_deref()
+        == Some("1");
+
+    let mut clips_considered: u32 = 0;
+    let mut clips_decoded: u32 = 0;
+    let mut clips_mixed: u32 = 0;
+
     let bpm = timeline.bpm;
     if !(bpm.is_finite() && bpm > 0.0) {
         return Err("invalid bpm".to_string());
@@ -234,10 +227,8 @@ pub fn render_mixdown_wav(
         let Some(source_path) = clip.source_path.as_ref() else {
             continue;
         };
-        if !is_wav_path(source_path) {
-            // MVP: only WAV sources are mixed.
-            continue;
-        }
+
+        clips_considered = clips_considered.saturating_add(1);
 
         let (track_gain_value, _tmuted, _solo_ok) = track_gain
             .get(&clip.track_id)
@@ -261,12 +252,6 @@ pub fn render_mixdown_wav(
             continue;
         }
 
-        // Determine source segment in seconds.
-        let (src_start_sec, src_max_end_sec) = match clip_source_bounds_sec(clip, bpm) {
-            Some(v) => v,
-            None => continue,
-        };
-
         let playback_rate = clip.playback_rate as f64;
         let playback_rate = if playback_rate.is_finite() && playback_rate > 0.0 {
             playback_rate
@@ -274,18 +259,26 @@ pub fn render_mixdown_wav(
             1.0
         };
 
-        // Time-stretch model: timeline length is fixed; source consumed scales by playbackRate.
-        let desired_src_len_sec = clip_timeline_len_sec * playback_rate;
-        let src_end_sec = (src_start_sec + desired_src_len_sec).min(src_max_end_sec);
-        if src_end_sec - src_start_sec <= 1e-6 {
-            continue;
-        }
-
-        // Decode WAV.
-        let (in_rate, in_channels, pcm) = match read_wav_f32_interleaved(Path::new(source_path)) {
-            Some(v) => v,
-            None => continue,
+        // Decode audio (WAV fast-path; otherwise Symphonia).
+        let (in_rate, in_channels, pcm) = match crate::audio_utils::decode_audio_f32_interleaved(
+            Path::new(source_path),
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                if debug {
+                    eprintln!(
+                        "mixdown: decode failed; clip_id={} track_id={} path={} err={}",
+                        clip.id,
+                        clip.track_id,
+                        source_path,
+                        e
+                    );
+                }
+                continue;
+            }
         };
+
+        clips_decoded = clips_decoded.saturating_add(1);
 
         let in_channels_usize = in_channels as usize;
         let in_frames = pcm.len() / in_channels_usize;
@@ -293,9 +286,34 @@ pub fn render_mixdown_wav(
             continue;
         }
 
+        // Source trimming is expressed in beats using BPM -> seconds.
+        // Negative trim_start_beat means leading silence in the clip (slip-edit past source start).
+        let bs = beat_sec(bpm);
+        let trim_start_beats_src = clip.trim_start_beat.max(0.0);
+        let trim_end_beats_src = clip.trim_end_beat.max(0.0);
+        let pre_silence_beats_src = (-clip.trim_start_beat).max(0.0);
+
+        let trim_start_sec = trim_start_beats_src * bs;
+        let trim_end_sec = trim_end_beats_src * bs;
+        // pre-silence is in source beats, so convert to timeline time by dividing by playback_rate.
+        let pre_silence_sec = (pre_silence_beats_src * bs) / playback_rate.max(1e-6);
+
+        let total_sec = match clip_duration_sec_from_wav(in_rate, in_channels, &pcm) {
+            Some(v) => v,
+            None => continue,
+        };
+        if !(total_sec.is_finite() && total_sec > 0.0) {
+            continue;
+        }
+
+        let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
+        if src_end_limit_sec - trim_start_sec <= 1e-9 {
+            continue;
+        }
+
         // Slice source by time in its own rate.
-        let src_i0 = (src_start_sec * in_rate as f64).floor().max(0.0) as usize;
-        let src_i1 = (src_end_sec * in_rate as f64).ceil().max(src_i0 as f64) as usize;
+        let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
+        let src_i1 = (src_end_limit_sec * in_rate as f64).ceil().max(src_i0 as f64) as usize;
         let src_i1 = src_i1.min(in_frames);
         if src_i1 <= src_i0 + 1 {
             continue;
@@ -326,16 +344,25 @@ pub fn render_mixdown_wav(
             continue;
         };
 
-        let target_frames_total = (clip_timeline_len_sec * out_rate as f64).round().max(1.0) as usize;
-        let segment = time_stretch_interleaved(
-            &segment,
-            2,
-            out_rate,
-            target_frames_total,
-            StretchAlgorithm::RubberBand,
-        );
+        // Pitch-preserving time-stretch:
+        // - playback_rate == 1: keep source window duration as-is.
+        // - playback_rate != 1: stretch the trimmed window to (src_len / playback_rate) in timeline time.
+        let mut segment = segment;
+        if (playback_rate - 1.0).abs() > 1e-6 {
+            let seg_frames_in = segment.len() / 2;
+            let target_frames = ((seg_frames_in as f64) / playback_rate)
+                .round()
+                .max(2.0) as usize;
+            segment = time_stretch_interleaved(
+                &segment,
+                2,
+                out_rate,
+                target_frames,
+                opts.stretch.clone(),
+            );
+        }
 
-        // Apply fades (linear) and gain.
+        // Apply fades (linear) and gain (timeline-referenced).
         let fade_in_frames = ((clip.fade_in_beats.max(0.0) * bs) * out_rate as f64)
             .round()
             .max(0.0) as usize;
@@ -343,33 +370,28 @@ pub fn render_mixdown_wav(
             .round()
             .max(0.0) as usize;
 
-        let mut segment = segment;
         let seg_frames = segment.len() / 2;
-
-        for f in 0..seg_frames {
-            let mut g = gain;
-            if fade_in_frames > 0 && f < fade_in_frames {
-                g *= (f as f32 / fade_in_frames as f32).clamp(0.0, 1.0);
-            }
-            if fade_out_frames > 0 && f + fade_out_frames > seg_frames {
-                let remain = seg_frames.saturating_sub(f);
-                g *= (remain as f32 / fade_out_frames as f32).clamp(0.0, 1.0);
-            }
-
-            segment[f * 2] *= g;
-            segment[f * 2 + 1] *= g;
-        }
+        let clip_total_frames = (clip_timeline_len_sec * out_rate as f64).round().max(1.0) as usize;
+        let pre_silence_frames = (pre_silence_sec * out_rate as f64).round().max(0.0) as usize;
 
         // Mix into output, considering overlap window.
-        let clip_window_start = clip_start_sec.max(start_sec);
-        let clip_window_end = clip_end_sec.min(end_sec);
+        // The audio segment starts after pre_silence_sec and lasts seg_frames/out_rate.
+        let seg_start_sec = clip_start_sec + pre_silence_sec;
+        let seg_end_sec = seg_start_sec + (seg_frames as f64) / out_rate as f64;
+
+        let clip_window_start = seg_start_sec.max(start_sec);
+        let clip_window_end = seg_end_sec.min(end_sec).min(clip_end_sec);
         let window_len_sec = (clip_window_end - clip_window_start).max(0.0);
         if window_len_sec <= 1e-9 {
             continue;
         }
 
-        let out_offset_frames = ((clip_window_start - start_sec) * out_rate as f64).round().max(0.0) as usize;
-        let seg_offset_frames = ((clip_window_start - clip_start_sec) * out_rate as f64).round().max(0.0) as usize;
+        let out_offset_frames = ((clip_window_start - start_sec) * out_rate as f64)
+            .round()
+            .max(0.0) as usize;
+        let seg_offset_frames = ((clip_window_start - seg_start_sec) * out_rate as f64)
+            .round()
+            .max(0.0) as usize;
         let frames_to_mix = ((window_len_sec) * out_rate as f64).round().max(0.0) as usize;
 
         let max_frames_to_mix = frames_to_mix
@@ -379,32 +401,73 @@ pub fn render_mixdown_wav(
             continue;
         }
 
+        clips_mixed = clips_mixed.saturating_add(1);
+
         for f in 0..max_frames_to_mix {
             let oi = (out_offset_frames + f) * 2;
             let si = (seg_offset_frames + f) * 2;
-            mix[oi] += segment[si];
-            mix[oi + 1] += segment[si + 1];
+
+            // Local position inside the CLIP (timeline), used for fades.
+            let local_in_clip = pre_silence_frames.saturating_add(seg_offset_frames + f);
+            if local_in_clip >= clip_total_frames {
+                break;
+            }
+
+            let mut g = gain;
+            if fade_in_frames > 0 && local_in_clip < fade_in_frames {
+                g *= (local_in_clip as f32 / fade_in_frames as f32).clamp(0.0, 1.0);
+            }
+            if fade_out_frames > 0 && local_in_clip + fade_out_frames > clip_total_frames {
+                let remain = clip_total_frames.saturating_sub(local_in_clip);
+                g *= (remain as f32 / fade_out_frames as f32).clamp(0.0, 1.0);
+            }
+            if g <= 0.0 {
+                continue;
+            }
+
+            mix[oi] += segment[si] * g;
+            mix[oi + 1] += segment[si + 1] * g;
+        }
+
+    }
+
+    // Apply pitch edit curve (WORLD vocoder) if enabled for the selected root track.
+    // Best-effort: if pitch edit fails, keep the original mix.
+    if timeline.tracks.iter().any(|t| t.compose_enabled) {
+        if let Err(e) = crate::pitch_editing::apply_pitch_edit_to_mixdown(
+            timeline,
+            start_sec,
+            out_rate,
+            out_channels as usize,
+            &mut mix,
+        ) {
+            if debug {
+                eprintln!("mixdown: pitch_edit skipped due to error: {e}");
+            }
         }
     }
 
-    // Write WAV 16-bit.
-    let spec = WavSpec {
-        channels: out_channels,
-        sample_rate: out_rate,
-        bits_per_sample: 16,
-        sample_format: SampleFormat::Int,
-    };
-    let mut writer = WavWriter::create(output_path, spec).map_err(|e| e.to_string())?;
-
-    for s in mix {
-        let v = clamp11(s);
-        let i = (v * i16::MAX as f32) as i16;
-        writer.write_sample(i).map_err(|e| e.to_string())?;
+    if debug {
+        let mut max_abs = 0.0f32;
+        for &v in &mix {
+            let a = v.abs();
+            if a.is_finite() && a > max_abs {
+                max_abs = a;
+            }
+        }
+        eprintln!(
+            "mixdown: rendered window start_sec={:.3} end_sec={:.3} sr={} frames={} max_abs={:.6} clips_considered={} clips_decoded={} clips_mixed={}",
+            start_sec,
+            end_sec,
+            out_rate,
+            out_frames,
+            max_abs
+            ,
+            clips_considered,
+            clips_decoded,
+            clips_mixed
+        );
     }
-    writer.finalize().map_err(|e| e.to_string())?;
 
-    Ok(MixdownResult {
-        sample_rate: out_rate,
-        duration_sec,
-    })
+    Ok((out_rate, out_channels, duration_sec, mix))
 }

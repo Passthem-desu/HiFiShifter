@@ -23,6 +23,9 @@ export interface TrackInfo {
     muted: boolean;
     solo: boolean;
     volume: number;
+
+    composeEnabled: boolean;
+    pitchAnalysisAlgo: string;
 }
 
 export interface ClipInfo {
@@ -233,6 +236,11 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         muted: Boolean(track.muted),
         solo: Boolean(track.solo),
         volume: clamp(Number(track.volume ?? 0.9), 0, 1),
+
+        composeEnabled: Boolean((track as any).compose_enabled),
+        pitchAnalysisAlgo: String(
+            (track as any).pitch_analysis_algo ?? "world_dll",
+        ),
     }));
 
     state.clips = timeline.clips.map((clip: TimelineClip) => ({
@@ -246,7 +254,8 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         durationSec: Number(clip.duration_sec ?? 0) || undefined,
         gain: clamp(Number(clip.gain ?? 1), 0, 2),
         muted: Boolean(clip.muted),
-        trimStartBeat: Math.max(0, Number(clip.trim_start_beat ?? 0)),
+        // Allow negative trimStartBeat to represent leading silence (slip-edit past source start).
+        trimStartBeat: Number(clip.trim_start_beat ?? 0) || 0,
         trimEndBeat: Math.max(0, Number(clip.trim_end_beat ?? 0)),
         playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
         fadeInBeats: Math.max(0, Number(clip.fade_in_beats ?? 0)),
@@ -334,6 +343,9 @@ function upsertImportedClip(
             muted: false,
             solo: false,
             volume: 0.9,
+
+            composeEnabled: true,
+            pitchAnalysisAlgo: "world_dll",
         });
     }
 
@@ -391,6 +403,9 @@ const initialState: SessionState = {
             muted: false,
             solo: false,
             volume: 0.9,
+
+            composeEnabled: true,
+            pitchAnalysisAlgo: "world_dll",
         },
     ],
     clips: [],
@@ -720,6 +735,8 @@ export const setTrackStateRemote = createAsyncThunk(
         muted?: boolean;
         solo?: boolean;
         volume?: number;
+        composeEnabled?: boolean;
+        pitchAnalysisAlgo?: string;
     }) => {
         return webApi.setTrackState(payload);
     },
@@ -1130,7 +1147,7 @@ const sessionSlice = createSlice({
             );
             if (!clip) return;
             if (action.payload.trimStartBeat !== undefined) {
-                clip.trimStartBeat = Math.max(0, action.payload.trimStartBeat);
+                clip.trimStartBeat = Number(action.payload.trimStartBeat) || 0;
             }
             if (action.payload.trimEndBeat !== undefined) {
                 clip.trimEndBeat = Math.max(0, action.payload.trimEndBeat);

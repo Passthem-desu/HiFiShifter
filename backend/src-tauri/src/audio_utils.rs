@@ -1,5 +1,142 @@
 use std::path::Path;
 
+pub fn decode_audio_f32_interleaved(path: &Path) -> Result<(u32, u16, Vec<f32>), String> {
+    if path.as_os_str().is_empty() {
+        return Err("empty path".to_string());
+    }
+
+    let is_wav = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("wav"))
+        .unwrap_or(false);
+
+    if is_wav {
+        if let Ok(v) = decode_wav_f32_interleaved_hound(path) {
+            return Ok(v);
+        }
+    }
+
+    decode_audio_f32_interleaved_symphonia(path)
+}
+
+fn decode_wav_f32_interleaved_hound(path: &Path) -> Result<(u32, u16, Vec<f32>), String> {
+    use hound::{SampleFormat, WavReader};
+
+    let mut reader = WavReader::open(path).map_err(|e| e.to_string())?;
+    let spec = reader.spec();
+    if spec.sample_rate == 0 || spec.channels == 0 {
+        return Err("invalid wav spec".to_string());
+    }
+
+    let channels = spec.channels;
+    let sample_rate = spec.sample_rate;
+    let mut out: Vec<f32> = Vec::with_capacity(reader.duration() as usize);
+
+    match (spec.sample_format, spec.bits_per_sample) {
+        (SampleFormat::Int, 16) => {
+            for s in reader.samples::<i16>() {
+                let v = s.map_err(|e| e.to_string())? as f32 / i16::MAX as f32;
+                out.push(v);
+            }
+        }
+        (SampleFormat::Int, 24) => {
+            // hound returns 24-bit PCM as sign-extended i32 in range [-2^23, 2^23-1].
+            let denom = (1u32 << 23) as f32;
+            for s in reader.samples::<i32>() {
+                let v = s.map_err(|e| e.to_string())? as f32 / denom;
+                out.push(v);
+            }
+        }
+        (SampleFormat::Int, 32) => {
+            for s in reader.samples::<i32>() {
+                let v = s.map_err(|e| e.to_string())? as f32 / i32::MAX as f32;
+                out.push(v);
+            }
+        }
+        (SampleFormat::Float, 32) => {
+            for s in reader.samples::<f32>() {
+                out.push(s.map_err(|e| e.to_string())?);
+            }
+        }
+        _ => return Err("unsupported wav format".to_string()),
+    }
+
+    Ok((sample_rate, channels, out))
+}
+
+fn decode_audio_f32_interleaved_symphonia(path: &Path) -> Result<(u32, u16, Vec<f32>), String> {
+    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::errors::Error;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| e.to_string())?;
+    let mut format = probed.format;
+    let track = format
+        .default_track()
+        .ok_or_else(|| "no default track".to_string())?;
+
+    let mut sample_rate = track.codec_params.sample_rate.unwrap_or(0);
+    let channels = track
+        .codec_params
+        .channels
+        .map(|c| c.count())
+        .unwrap_or(1)
+        .max(1);
+
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| e.to_string())?;
+
+    let mut out: Vec<f32> = Vec::new();
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(Error::IoError(_)) => break,
+            Err(e) => return Err(e.to_string()),
+        };
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(Error::DecodeError(_)) => continue,
+            Err(Error::IoError(_)) => break,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        // Some containers/codecs may not populate codec_params.sample_rate.
+        // Fall back to the actual decoded spec.
+        if sample_rate == 0 {
+            sample_rate = decoded.spec().rate;
+        }
+
+        let spec = *decoded.spec();
+        let duration = decoded.capacity() as u64;
+        let mut sbuf = symphonia::core::audio::SampleBuffer::<f32>::new(duration, spec);
+        sbuf.copy_interleaved_ref(decoded);
+        out.extend_from_slice(sbuf.samples());
+    }
+
+    Ok((if sample_rate == 0 { 44100 } else { sample_rate }, channels as u16, out))
+}
+
 pub struct WavInfo {
     pub sample_rate: u32,
     pub duration_sec: f64,

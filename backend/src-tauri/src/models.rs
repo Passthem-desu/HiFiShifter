@@ -27,6 +27,9 @@ pub struct TimelineTrack {
     pub muted: bool,
     pub solo: bool,
     pub volume: f32,
+
+    pub compose_enabled: bool,
+    pub pitch_analysis_algo: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,6 +111,18 @@ pub struct PlaybackStatePayload {
     pub base_sec: f64,
     pub position_sec: f64,
     pub duration_sec: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ParamFramesPayload {
+    pub ok: bool,
+    pub root_track_id: String,
+    pub param: String,
+    pub frame_period_ms: f64,
+    pub start_frame: u32,
+    pub orig: Vec<f32>,
+    pub edit: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Serialize)]

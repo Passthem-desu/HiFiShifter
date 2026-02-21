@@ -34,17 +34,10 @@ type PeaksRenderState = {
     segmentMax: number[];
     segmentLenBeats: number;
     segmentColumns: number;
-    startBeat: number;
-    cycleLenBeats: number;
-    repeat: boolean;
+    // Leading silence in CLIP domain (timeline beats).
+    leadSilenceBeats: number;
     isPreview?: boolean;
 };
-
-function safeMod(x: number, m: number): number {
-    if (!Number.isFinite(x) || !Number.isFinite(m) || m <= 1e-9) return 0;
-    const r = x % m;
-    return r < 0 ? r + m : r;
-}
 
 function lerp(a: number, b: number, t: number): number {
     return a + (b - a) * t;
@@ -77,63 +70,7 @@ function sampleSegmentMinMaxAtBeat(
     return { min: lerp(mn0, mn1, f), max: lerp(mx0, mx1, f) };
 }
 
-function buildPreviewPeaks(
-    prev: PeaksRenderState,
-    next: {
-        desiredLenBeats: number;
-        startBeat: number;
-        cycleLenBeats: number;
-        repeat: boolean;
-        outColumns: number;
-    },
-): PeaksRenderState {
-    const outColumns = clamp(Math.floor(next.outColumns), 16, 8192);
-    const desiredLenBeats = Math.max(1e-9, Number(next.desiredLenBeats) || 0);
-    const denom = Math.max(1, outColumns - 1);
-
-    const outMin: number[] = new Array(outColumns);
-    const outMax: number[] = new Array(outColumns);
-
-    const prevStart = Number(prev.startBeat) || 0;
-    const prevCycle = Math.max(0, Number(prev.cycleLenBeats) || 0);
-    const prevSegLen = Math.max(1e-9, Number(prev.segmentLenBeats) || 0);
-
-    for (let i = 0; i < outColumns; i += 1) {
-        const t = i / denom;
-        const clipBeat = t * desiredLenBeats;
-        const srcBeat =
-            (Number(next.startBeat) || 0) +
-            (next.repeat
-                ? safeMod(
-                      clipBeat,
-                      Math.max(1e-9, Number(next.cycleLenBeats) || 0),
-                  )
-                : clipBeat);
-
-        const rel = srcBeat - prevStart;
-        const phase = prev.repeat
-            ? safeMod(rel, Math.max(1e-9, prevCycle))
-            : clamp(rel, 0, prevSegLen);
-
-        const mm = sampleSegmentMinMaxAtBeat(
-            prev.segmentMin,
-            prev.segmentMax,
-            prevSegLen,
-            phase,
-        );
-        outMin[i] = mm.min;
-        outMax[i] = mm.max;
-    }
-
-    return {
-        ...prev,
-        ok: true,
-        min: outMin,
-        max: outMax,
-        columns: outColumns,
-        isPreview: true,
-    };
-}
+// Note: we intentionally removed repeat-mode preview remapping; peaks will update from backend.
 
 const peaksSegmentCache = new Map<string, CachedSegment>();
 const peaksSegmentInflight = new Map<
@@ -349,31 +286,8 @@ export const ClipItem: React.FC<{
     const sourceWindowLenBeats =
         Math.max(0, Number(clip.lengthBeats ?? 0) || 0) * playbackRate;
 
-    const durationSec = Number((clip as any).durationSec ?? 0);
-    const sourceBeats =
-        Number.isFinite(durationSec) && durationSec > 0
-            ? (durationSec * Math.max(1e-6, Number(bpm) || 120)) / 60
-            : null;
-    const trimStart = Math.max(0, Number(clip.trimStartBeat ?? 0) || 0);
-    const trimEnd = Math.max(0, Number(clip.trimEndBeat ?? 0) || 0);
-    const cycleLenBeats =
-        sourceBeats == null
-            ? null
-            : Math.max(
-                  0,
-                  Math.max(
-                      clamp(trimStart, 0, sourceBeats),
-                      sourceBeats - trimEnd,
-                  ) - clamp(trimStart, 0, sourceBeats),
-              );
-    const showRepeatMarker =
-        cycleLenBeats != null &&
-        cycleLenBeats > 1e-6 &&
-        sourceWindowLenBeats > cycleLenBeats + 1e-6;
-    const repeatMarkerX =
-        showRepeatMarker && cycleLenBeats != null
-            ? (cycleLenBeats / Math.max(1e-6, playbackRate)) * pxPerBeat
-            : 0;
+    const showRepeatMarker = false;
+    const repeatMarkerX = 0;
 
     const waveformAmpScale = clip.muted
         ? 0
@@ -381,6 +295,8 @@ export const ClipItem: React.FC<{
 
     // Map full-scale audio (|v|≈1) to the band boundary. Keep gain applied.
     const waveformVisualAmpScale = waveformAmpScale;
+
+    const hasWaveformPreview = waveform != null;
 
     const peaksRequest = React.useMemo(() => {
         if (!hasTauriInvoke()) return null;
@@ -405,17 +321,23 @@ export const ClipItem: React.FC<{
         const desiredLenBeats = timelineLenBeats * pr;
         if (desiredLenBeats <= 1e-9) return null;
 
-        const trimStart = Math.max(0, Number(clip.trimStartBeat ?? 0) || 0);
+        const trimStartRaw = Number(clip.trimStartBeat ?? 0) || 0;
+        const preSilenceBeatsSrc = Math.max(0, -trimStartRaw);
+        const trimStart = Math.max(0, trimStartRaw);
         const trimEnd = Math.max(0, Number(clip.trimEndBeat ?? 0) || 0);
         const startBeat = clamp(trimStart, 0, sourceBeats);
         const maxEndBeat = Math.max(startBeat, sourceBeats - trimEnd);
         const cycleLenBeats = Math.max(0, maxEndBeat - startBeat);
         if (cycleLenBeats <= 1e-9) return null;
 
-        const repeat = desiredLenBeats > cycleLenBeats + 1e-6;
-        const segmentLenBeats = repeat
-            ? cycleLenBeats
-            : Math.min(desiredLenBeats, cycleLenBeats);
+        // Non-repeating: any length beyond the available source window is silence.
+        // Negative trimStart introduces leading silence that also consumes clip time.
+        const playableBeatsSrc = Math.max(
+            0,
+            desiredLenBeats - preSilenceBeatsSrc,
+        );
+        const segmentLenBeats = Math.min(playableBeatsSrc, cycleLenBeats);
+        if (segmentLenBeats <= 1e-9) return null;
 
         const startSec = (startBeat / sourceBeats) * durationSec;
         const segmentLenSec = (segmentLenBeats / sourceBeats) * durationSec;
@@ -427,32 +349,42 @@ export const ClipItem: React.FC<{
             return null;
         }
 
+        // During Alt+drag slip-edit, peaks requests can become very high frequency and
+        // backend rendering might lag. Quantize and downsample the request so UI stays responsive.
+        const quantStepSec = altPressed ? 0.02 : 0.005; // 20ms vs 5ms
+        const qsec = (x: number) => {
+            if (!Number.isFinite(x)) return 0;
+            const step = Math.max(1e-6, quantStepSec);
+            return Math.round(x / step) * step;
+        };
+        const startSecQ = qsec(startSec);
+        const segmentLenSecQ = Math.max(quantStepSec, qsec(segmentLenSec));
+
         // Request columns in coarse steps so trim drags don't spam unique requests.
         // We render at the current pixel width anyway (interpolated), so request resolution
         // only needs to be "good enough" and stable.
         const rawColumns = clamp(Math.floor(width), 16, 8192);
         const outColumns = clamp(Math.round(rawColumns / 64) * 64, 16, 8192);
-        const segmentColumns = repeat
-            ? clamp(
-                  Math.floor((segmentLenBeats / desiredLenBeats) * outColumns),
-                  16,
-                  outColumns,
-              )
+        const segmentColumns = altPressed
+            ? clamp(Math.round(outColumns / 4), 16, 2048)
             : outColumns;
+
+        const leadSilenceBeats = preSilenceBeatsSrc / Math.max(1e-6, pr);
+        const segmentLenBeatsTimeline = segmentLenBeats / Math.max(1e-6, pr);
 
         return {
             sourcePath,
-            startSec,
-            durationSec: segmentLenSec,
+            startSec: startSecQ,
+            durationSec: segmentLenSecQ,
             outColumns,
             segmentColumns,
-            repeat,
-            startBeat,
             desiredLenBeats,
             cycleLenBeats,
             segmentLenBeats,
+            leadSilenceBeats,
+            segmentLenBeatsTimeline,
         };
-    }, [bpm, clip, width]);
+    }, [altPressed, bpm, clip, width]);
 
     const [peaks, setPeaks] = React.useState<PeaksRenderState | null>(null);
 
@@ -474,36 +406,20 @@ export const ClipItem: React.FC<{
             durationSec: segSec,
             outColumns,
             segmentColumns,
-            repeat,
-            startBeat,
-            desiredLenBeats,
-            cycleLenBeats,
-            segmentLenBeats,
+            leadSilenceBeats,
+            segmentLenBeatsTimeline,
         } = peaksRequest;
 
         const key = `${sourcePath}|${startSec.toFixed(3)}|${segSec.toFixed(3)}|${segmentColumns}`;
         const cached = getCachedSegment(key);
 
-        // Avoid flashing on trim drags: if we don't have a cache hit yet, generate a
-        // fast preview by remapping the previous segment peaks into the new clip domain.
         if (peaksKeyRef.current !== key) {
             peaksKeyRef.current = key;
-            if (!cached) {
-                setPeaks((prev) => {
-                    if (!prev || !prev.ok) return prev;
-                    if (
-                        prev.segmentMin.length < 2 ||
-                        prev.segmentMax.length < 2
-                    )
-                        return prev;
-                    return buildPreviewPeaks(prev, {
-                        desiredLenBeats,
-                        startBeat,
-                        cycleLenBeats,
-                        repeat,
-                        outColumns,
-                    });
-                });
+
+            // Prefer immediate, local waveform preview during slip-edit drags.
+            // Otherwise we may keep showing a stale peaks buffer until the backend responds.
+            if (altPressed && hasWaveformPreview && !cached) {
+                setPeaks(null);
             }
         }
 
@@ -511,51 +427,49 @@ export const ClipItem: React.FC<{
             segMin: number[],
             segMax: number[],
         ): PeaksRenderState => {
+            const outCols = clamp(Math.floor(outColumns), 16, 8192);
             const segCols = Math.min(segMin.length, segMax.length);
-            const segLen = Math.max(1e-9, Number(segmentLenBeats) || 0);
-            if (!repeat) {
-                return {
-                    ok: true,
-                    min: segMin,
-                    max: segMax,
-                    columns: outColumns,
-                    segmentMin: segMin,
-                    segmentMax: segMax,
-                    segmentLenBeats: segLen,
-                    segmentColumns: segCols,
-                    startBeat,
-                    cycleLenBeats,
-                    repeat,
-                    isPreview: false,
-                };
-            }
+            const segLen = Math.max(1e-9, Number(segmentLenBeatsTimeline) || 0);
+            const denom = Math.max(1, outCols - 1);
 
-            const outMin: number[] = [];
-            const outMax: number[] = [];
-            const need = outColumns;
+            const outMin: number[] = new Array(outCols);
+            const outMax: number[] = new Array(outCols);
 
-            while (outMin.length < need) {
-                const remaining = need - outMin.length;
-                if (remaining >= segMin.length) {
-                    outMin.push(...segMin);
-                    outMax.push(...segMax);
-                } else {
-                    outMin.push(...segMin.slice(0, remaining));
-                    outMax.push(...segMax.slice(0, remaining));
+            const clipLenBeats = Math.max(
+                1e-9,
+                Number(clip.lengthBeats ?? 0) || 0,
+            );
+            const lead = Math.max(0, Number(leadSilenceBeats) || 0);
+
+            for (let i = 0; i < outCols; i += 1) {
+                const t = i / denom;
+                const beatAtClip = t * clipLenBeats;
+                const beatInSeg = beatAtClip - lead;
+                if (beatInSeg < 0 || beatInSeg > segLen) {
+                    outMin[i] = 0;
+                    outMax[i] = 0;
+                    continue;
                 }
+                const mm = sampleSegmentMinMaxAtBeat(
+                    segMin,
+                    segMax,
+                    segLen,
+                    beatInSeg,
+                );
+                outMin[i] = mm.min;
+                outMax[i] = mm.max;
             }
+
             return {
                 ok: true,
                 min: outMin,
                 max: outMax,
-                columns: outColumns,
+                columns: outCols,
                 segmentMin: segMin,
                 segmentMax: segMax,
                 segmentLenBeats: segLen,
                 segmentColumns: segCols,
-                startBeat,
-                cycleLenBeats,
-                repeat,
+                leadSilenceBeats: lead,
                 isPreview: false,
             };
         };
@@ -570,6 +484,7 @@ export const ClipItem: React.FC<{
         }
 
         const requestId = ++peaksRequestIdRef.current;
+        const debounceMs = altPressed ? 75 : 25;
         peaksDebounceRef.current = window.setTimeout(async () => {
             try {
                 let p = peaksSegmentInflight.get(key);
@@ -606,7 +521,7 @@ export const ClipItem: React.FC<{
             } catch {
                 // Ignore peaks failures; fallback waveform preview may still render.
             }
-        }, 25);
+        }, debounceMs);
 
         return () => {
             if (peaksDebounceRef.current != null) {
@@ -614,7 +529,7 @@ export const ClipItem: React.FC<{
                 peaksDebounceRef.current = null;
             }
         };
-    }, [peaksRequest]);
+    }, [altPressed, hasWaveformPreview, peaksRequest]);
 
     const stereo =
         waveform &&

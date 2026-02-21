@@ -27,7 +27,8 @@
         "active": true,
         "targets": "all",
         "resources": [
-            "resources/rubberband/windows/x64/rubberband.dll"
+            "resources/rubberband/windows/x64/rubberband.dll",
+            "resources/world/windows/x64/world.dll"
         ],
         "icon": [
             "icons/32x32.png",

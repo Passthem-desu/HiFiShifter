@@ -1,0 +1,73 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU32 as AtomicU32Cell;
+
+#[derive(Debug)]
+pub(crate) struct StreamRingStereo {
+    pub(crate) cap_frames: u64,
+    // Interleaved stereo stored as atomic bits so the audio callback can read lock-free.
+    pub(crate) buf: Vec<AtomicU32Cell>,
+    pub(crate) base_frame: AtomicU64,
+    pub(crate) write_frame: AtomicU64,
+}
+
+impl StreamRingStereo {
+    pub(crate) fn new(cap_frames: u64) -> Self {
+        let cap_frames = cap_frames.max(256);
+        let len = (cap_frames as usize) * 2;
+        let mut buf = Vec::with_capacity(len);
+        buf.resize_with(len, || AtomicU32Cell::new(0));
+        Self {
+            cap_frames,
+            buf,
+            base_frame: AtomicU64::new(0),
+            write_frame: AtomicU64::new(0),
+        }
+    }
+
+    pub(crate) fn reset(&self, start_frame: u64) {
+        self.base_frame.store(start_frame, Ordering::Release);
+        self.write_frame.store(start_frame, Ordering::Release);
+    }
+
+    pub(crate) fn write_interleaved(&self, start_frame: u64, pcm: &[f32]) {
+        let frames = pcm.len() / 2;
+        if frames == 0 {
+            return;
+        }
+
+        // Ensure the window never exceeds capacity.
+        let mut base = self.base_frame.load(Ordering::Acquire);
+        let end_frame = start_frame.saturating_add(frames as u64);
+        if end_frame.saturating_sub(base) > self.cap_frames {
+            base = end_frame.saturating_sub(self.cap_frames);
+            self.base_frame.store(base, Ordering::Release);
+        }
+
+        for i in 0..frames {
+            let f = start_frame.saturating_add(i as u64);
+            if f < base {
+                continue;
+            }
+            let idx = ((f % self.cap_frames) as usize) * 2;
+            self.buf[idx].store(pcm[i * 2].to_bits(), Ordering::Relaxed);
+            self.buf[idx + 1].store(pcm[i * 2 + 1].to_bits(), Ordering::Relaxed);
+        }
+
+        let prev = self.write_frame.load(Ordering::Acquire);
+        if end_frame > prev {
+            self.write_frame.store(end_frame, Ordering::Release);
+        }
+    }
+
+    pub(crate) fn read_frame(&self, frame: u64) -> Option<(f32, f32)> {
+        let base = self.base_frame.load(Ordering::Acquire);
+        let write = self.write_frame.load(Ordering::Acquire);
+        if frame < base || frame >= write {
+            return None;
+        }
+        let idx = ((frame % self.cap_frames) as usize) * 2;
+        let l = f32::from_bits(self.buf[idx].load(Ordering::Relaxed));
+        let r = f32::from_bits(self.buf[idx + 1].load(Ordering::Relaxed));
+        Some((l, r))
+    }
+}
