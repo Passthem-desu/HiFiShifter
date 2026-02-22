@@ -17,8 +17,12 @@ use super::mix::{render_callback_f32, render_callback_i16, render_callback_u16};
 use super::snapshot::{build_snapshot, build_snapshot_for_file, schedule_stretch_jobs, source_bounds_frames};
 use super::types::{AudioEngineStateSnapshot, EngineCommand, EngineSnapshot, ResampledStereo, StretchJob, StretchKey};
 
+use crate::pitch_editing::PitchEditAlgorithm;
+
 pub struct AudioEngine {
     tx: mpsc::Sender<EngineCommand>,
+
+    snapshot: Arc<ArcSwap<EngineSnapshot>>,
 
     is_playing: Arc<AtomicBool>,
     target: Arc<Mutex<Option<String>>>,
@@ -26,6 +30,21 @@ pub struct AudioEngine {
     position_frames: Arc<AtomicU64>,
     duration_frames: Arc<AtomicU64>,
     sample_rate: Arc<AtomicU32>,
+}
+
+impl Clone for AudioEngine {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            snapshot: self.snapshot.clone(),
+            is_playing: self.is_playing.clone(),
+            target: self.target.clone(),
+            base_frames: self.base_frames.clone(),
+            position_frames: self.position_frames.clone(),
+            duration_frames: self.duration_frames.clone(),
+            sample_rate: self.sample_rate.clone(),
+        }
+    }
 }
 
 impl AudioEngine {
@@ -40,6 +59,10 @@ impl AudioEngine {
         let duration_frames = Arc::new(AtomicU64::new(0));
         let sample_rate = Arc::new(AtomicU32::new(44100));
 
+        // Shared snapshot store for both the audio callback and command-side status queries.
+        // This is updated by the engine worker thread.
+        let snapshot: Arc<ArcSwap<EngineSnapshot>> = Arc::new(ArcSwap::from_pointee(EngineSnapshot::empty(44100)));
+
         let is_playing_thread = is_playing.clone();
         let target_thread = target.clone();
         let base_frames_thread = base_frames.clone();
@@ -47,6 +70,7 @@ impl AudioEngine {
         let duration_frames_thread = duration_frames.clone();
         let sample_rate_thread = sample_rate.clone();
 
+        let snapshot_for_thread = snapshot.clone();
         thread::spawn(move || {
             let host = cpal::default_host();
             let device = match host.default_output_device() {
@@ -77,9 +101,9 @@ impl AudioEngine {
             let sr = default_config.sample_rate().0;
             sample_rate_thread.store(sr, Ordering::Relaxed);
 
-            let snapshot: Arc<ArcSwap<EngineSnapshot>> =
-                Arc::new(ArcSwap::from_pointee(EngineSnapshot::empty(sr)));
-            let snapshot_for_cb = snapshot.clone();
+            // Re-initialize the shared snapshot to the actual output sample rate.
+            snapshot_for_thread.store(Arc::new(EngineSnapshot::empty(sr)));
+            let snapshot_for_cb = snapshot_for_thread.clone();
 
             // cache: (path, out_rate) -> stereo pcm
             let cache: Arc<Mutex<HashMap<(PathBuf, u32), ResampledStereo>>> =
@@ -351,7 +375,7 @@ impl AudioEngine {
                             &stretch_stream_epoch,
                         );
                         duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
-                        snapshot.store(Arc::new(snap));
+                        snapshot_for_thread.store(Arc::new(snap));
                     }
                     Ok(EngineCommand::StretchReady { key }) => {
                         if let Ok(mut s) = stretch_inflight_for_cmd.lock() {
@@ -370,7 +394,7 @@ impl AudioEngine {
                                 &stretch_stream_epoch,
                             );
                             duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
-                            snapshot.store(Arc::new(snap));
+                            snapshot_for_thread.store(Arc::new(snap));
                         }
                     }
                     Ok(EngineCommand::PlayFile {
@@ -383,7 +407,7 @@ impl AudioEngine {
                         // Represent the file as a single clip in a snapshot.
                         let snap = build_snapshot_for_file(&path, sr, offset_sec, &cache_for_cmd);
                         duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
-                        snapshot.store(Arc::new(snap));
+                        snapshot_for_thread.store(Arc::new(snap));
                         // File playback reports absolute position via base_sec + position_sec.
                         let base = (offset_sec.max(0.0) * sr as f64).round().max(0.0) as u64;
                         base_frames_thread.store(base, Ordering::Relaxed);
@@ -397,6 +421,7 @@ impl AudioEngine {
 
         Self {
             tx,
+            snapshot,
             is_playing,
             target,
             base_frames,
@@ -404,6 +429,33 @@ impl AudioEngine {
             duration_frames,
             sample_rate,
         }
+    }
+
+    pub fn sample_rate_hz(&self) -> u32 {
+        self.sample_rate.load(Ordering::Relaxed).max(1)
+    }
+
+    pub fn position_frames(&self) -> u64 {
+        self.position_frames.load(Ordering::Relaxed)
+    }
+
+    pub fn pitch_stream_priming_info(&self) -> Option<(PitchEditAlgorithm, u64, u64, bool)> {
+        let snap = self.snapshot.load();
+        let algo = snap.pitch_stream_algo?;
+        let stream = snap.pitch_stream.as_ref()?;
+        let base = stream.base_frame.load(Ordering::Acquire);
+        let write = stream.write_frame.load(Ordering::Acquire);
+        let hard_start = stream.is_hard_start_enabled();
+        Some((algo, base, write, hard_start))
+    }
+
+    pub fn set_pitch_stream_hard_start_enabled(&self, enabled: bool) -> bool {
+        let snap = self.snapshot.load();
+        let Some(stream) = snap.pitch_stream.as_ref() else {
+            return false;
+        };
+        stream.set_hard_start_enabled(enabled);
+        true
     }
 
     pub fn shutdown(&self) {

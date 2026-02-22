@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::atomic::AtomicU32 as AtomicU32Cell;
 
 #[derive(Debug)]
@@ -6,6 +6,9 @@ pub(crate) struct StreamRingStereo {
     pub(crate) cap_frames: u64,
     // Interleaved stereo stored as atomic bits so the audio callback can read lock-free.
     pub(crate) buf: Vec<AtomicU32Cell>,
+    // If enabled, the callback may choose to output silence and not advance
+    // position until the requested window is covered by [base_frame, write_frame).
+    pub(crate) hard_start_enabled: AtomicBool,
     pub(crate) base_frame: AtomicU64,
     pub(crate) write_frame: AtomicU64,
 }
@@ -19,9 +22,18 @@ impl StreamRingStereo {
         Self {
             cap_frames,
             buf,
+            hard_start_enabled: AtomicBool::new(false),
             base_frame: AtomicU64::new(0),
             write_frame: AtomicU64::new(0),
         }
+    }
+
+    pub(crate) fn set_hard_start_enabled(&self, enabled: bool) {
+        self.hard_start_enabled.store(enabled, Ordering::Release);
+    }
+
+    pub(crate) fn is_hard_start_enabled(&self) -> bool {
+        self.hard_start_enabled.load(Ordering::Acquire)
     }
 
     pub(crate) fn reset(&self, start_frame: u64) {

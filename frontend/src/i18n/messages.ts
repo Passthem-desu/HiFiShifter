@@ -39,6 +39,8 @@ export const messages = {
         action_stop: "Stop",
         action_refresh: "Refresh",
         loading: "Loading...",
+        rendering: "Rendering...",
+        pitch_analyzing: "Analyzing pitch...",
         playhead: "Playhead",
 
         panel_editor: "Editor",
@@ -144,6 +146,8 @@ export const messages = {
         action_stop: "停止",
         action_refresh: "刷新",
         loading: "加载中...",
+        rendering: "渲染中...",
+        pitch_analyzing: "正在分析音高...",
         playhead: "播放头",
 
         panel_editor: "编辑器",

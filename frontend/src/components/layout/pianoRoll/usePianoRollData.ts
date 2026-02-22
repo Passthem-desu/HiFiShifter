@@ -48,6 +48,11 @@ export function usePianoRollData(args: {
     const [wavePeaks, setWavePeaks] = useState<WavePeaksSegment | null>(null);
     const [paramView, setParamView] = useState<ParamViewSegment | null>(null);
 
+    const [pitchAnalysisPending, setPitchAnalysisPending] = useState(false);
+    const [pitchAnalysisProgress, setPitchAnalysisProgress] = useState<
+        number | null
+    >(null);
+
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [loadingCount, setLoadingCount] = useState(0);
     const isLoading = loadingCount > 0;
@@ -70,10 +75,12 @@ export function usePianoRollData(args: {
     const fetchReqIdRef = useRef(0);
     const [refreshToken, setRefreshToken] = useState(0);
 
-    // Listen for backend pitch update notifications (Tauri only).
+    // Listen for backend pitch analysis lifecycle notifications (Tauri only).
     useEffect(() => {
         let disposed = false;
-        let unlisten: null | (() => void) = null;
+        let unlistenUpdated: null | (() => void) = null;
+        let unlistenStarted: null | (() => void) = null;
+        let unlistenProgress: null | (() => void) = null;
 
         async function setup() {
             if (editParam !== "pitch") return;
@@ -81,7 +88,7 @@ export function usePianoRollData(args: {
             if (!rootTrackId) return;
             try {
                 const mod = await import("@tauri-apps/api/event");
-                unlisten = await mod.listen(
+                unlistenUpdated = await mod.listen(
                     "pitch_orig_updated",
                     (event: any) => {
                         if (disposed) return;
@@ -93,7 +100,48 @@ export function usePianoRollData(args: {
                             payload.rootTrackId !== rootTrackId
                         )
                             return;
+
+                        setPitchAnalysisPending(false);
+                        setPitchAnalysisProgress(null);
                         setRefreshToken((x) => x + 1);
+                    },
+                );
+
+                unlistenStarted = await mod.listen(
+                    "pitch_orig_analysis_started",
+                    (event: any) => {
+                        if (disposed) return;
+                        const payload = (event?.payload ?? {}) as {
+                            rootTrackId?: string;
+                        };
+                        if (
+                            payload?.rootTrackId &&
+                            payload.rootTrackId !== rootTrackId
+                        )
+                            return;
+                        setPitchAnalysisPending(true);
+                        setPitchAnalysisProgress(0);
+                    },
+                );
+
+                unlistenProgress = await mod.listen(
+                    "pitch_orig_analysis_progress",
+                    (event: any) => {
+                        if (disposed) return;
+                        const payload = (event?.payload ?? {}) as {
+                            rootTrackId?: string;
+                            progress?: number;
+                        };
+                        if (
+                            payload?.rootTrackId &&
+                            payload.rootTrackId !== rootTrackId
+                        )
+                            return;
+                        const p = Number(payload?.progress);
+                        if (!Number.isFinite(p)) return;
+                        const pp = Math.max(0, Math.min(1, p));
+                        setPitchAnalysisPending(true);
+                        setPitchAnalysisProgress(pp);
                     },
                 );
             } catch {
@@ -105,7 +153,9 @@ export function usePianoRollData(args: {
 
         return () => {
             disposed = true;
-            if (unlisten) unlisten();
+            if (unlistenUpdated) unlistenUpdated();
+            if (unlistenStarted) unlistenStarted();
+            if (unlistenProgress) unlistenProgress();
         };
     }, [editParam, pitchEnabled, rootTrackId]);
 
@@ -384,6 +434,14 @@ export function usePianoRollData(args: {
                         }
                         return;
                     }
+
+                    if (editParam === "pitch") {
+                        const pending = Boolean(
+                            (res as any).analysis_pending ?? false,
+                        );
+                        setPitchAnalysisPending(pending);
+                        if (!pending) setPitchAnalysisProgress(null);
+                    }
                     const fpRes =
                         Number((res as any).frame_period_ms ?? fpMs) || fpMs;
                     paramFramePeriodCache.set(fpKey, fpRes);
@@ -492,6 +550,13 @@ export function usePianoRollData(args: {
             }
 
             if (shouldFetchParam && paramRes?.ok) {
+                if (editParam === "pitch") {
+                    const pending = Boolean(
+                        (paramRes as any).analysis_pending ?? false,
+                    );
+                    setPitchAnalysisPending(pending);
+                    if (!pending) setPitchAnalysisProgress(null);
+                }
                 const fpRes =
                     Number((paramRes as any).frame_period_ms ?? fpMs) || fpMs;
                 paramFramePeriodCache.set(fpKey, fpRes);
@@ -572,5 +637,7 @@ export function usePianoRollData(args: {
         refreshNow,
         isRefreshing,
         isLoading,
+        pitchAnalysisPending,
+        pitchAnalysisProgress,
     };
 }

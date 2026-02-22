@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use crate::state::TimelineState;
 
+use crate::pitch_editing::PitchEditAlgorithm;
+
 use super::ring::StreamRingStereo;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -82,6 +84,9 @@ pub(crate) struct EngineSnapshot {
     // Optional: when pitch edit is active, a background worker renders the full mixdown
     // (including WORLD-based pitch edits) into this ring buffer in absolute timeline frames.
     pub(crate) pitch_stream: Option<Arc<StreamRingStereo>>,
+
+    // Captures which algorithm was selected when building `pitch_stream`.
+    pub(crate) pitch_stream_algo: Option<PitchEditAlgorithm>,
 }
 
 impl EngineSnapshot {
@@ -92,6 +97,7 @@ impl EngineSnapshot {
             duration_frames: 0,
             clips: vec![],
             pitch_stream: None,
+            pitch_stream_algo: None,
         }
     }
 }

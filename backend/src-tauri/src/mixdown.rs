@@ -10,6 +10,7 @@ pub struct MixdownOptions {
     pub start_sec: f64,
     pub end_sec: Option<f64>,
     pub stretch: StretchAlgorithm,
+    pub apply_pitch_edit: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -431,9 +432,9 @@ pub fn render_mixdown_interleaved(
 
     }
 
-    // Apply pitch edit curve (WORLD vocoder) if enabled for the selected root track.
+    // Apply pitch edit curve (WORLD or ONNX) if enabled for the selected root track.
     // Best-effort: if pitch edit fails, keep the original mix.
-    if timeline.tracks.iter().any(|t| t.compose_enabled) {
+    if opts.apply_pitch_edit && timeline.tracks.iter().any(|t| t.compose_enabled) {
         if let Err(e) = crate::pitch_editing::apply_pitch_edit_to_mixdown(
             timeline,
             start_sec,

@@ -36,7 +36,8 @@ libloading = "0.8"
 
 # ONNX inference + feature extraction helpers
 # Use prebuilt ONNX Runtime binaries (downloaded at build time) to avoid relying on a system-installed onnxruntime.dll.
-ort = { version = "2.0.0-rc.11", default-features = false, features = ["std", "download-binaries", "tls-native"] }
+# CUDA: enable the CUDA EP (cu12 runtime). If CUDA is unavailable at runtime, the app falls back to CPU.
+ort = { version = "2.0.0-rc.11", default-features = false, features = ["std", "download-binaries", "tls-native", "cuda"] }
 rustfft = "6"
 num-complex = "0.4"
 

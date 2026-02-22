@@ -161,4 +161,7 @@ export interface ParamFramesPayload {
     start_frame: number;
     orig: number[];
     edit: number[];
+
+    analysis_pending?: boolean;
+    analysis_progress?: number;
 }

@@ -7,10 +7,90 @@ fn pitch_edit_algo_from_env() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PitchEditAlgorithm {
     WorldVocoder,
     NsfHifiganOnnx,
     Bypass,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PitchCurvesSnapshot {
+    pub frame_period_ms: f64,
+    pub pitch_orig: Vec<f32>,
+    pub pitch_edit: Vec<f32>,
+}
+
+impl PitchCurvesSnapshot {
+    pub fn midi_at_time(&self, abs_time_sec: f64) -> f64 {
+        if !(abs_time_sec.is_finite() && abs_time_sec >= 0.0) {
+            return 0.0;
+        }
+
+        let fp = self.frame_period_ms.max(0.1);
+        let idx_f = (abs_time_sec * 1000.0) / fp;
+        if !(idx_f.is_finite() && idx_f >= 0.0) {
+            return 0.0;
+        }
+        let i0 = idx_f.floor() as isize;
+        if i0 < 0 {
+            return 0.0;
+        }
+        let i0 = i0 as usize;
+        let len = self.pitch_orig.len().min(self.pitch_edit.len().max(1));
+        if i0 >= len {
+            return 0.0;
+        }
+        let i1 = (i0 + 1).min(len.saturating_sub(1));
+        let frac = (idx_f - (i0 as f64)).clamp(0.0, 1.0);
+
+        let orig0 = self.pitch_orig.get(i0).copied().unwrap_or(0.0) as f64;
+        let orig1 = self.pitch_orig.get(i1).copied().unwrap_or(0.0) as f64;
+        let edit0 = self.pitch_edit.get(i0).copied().unwrap_or(0.0) as f64;
+        let edit1 = self.pitch_edit.get(i1).copied().unwrap_or(0.0) as f64;
+
+        // For ONNX, `pitch_edit` is treated as an absolute target MIDI curve.
+        // Allow it to work even when `pitch_orig` is missing (all zeros).
+        let mut base0 = if edit0.is_finite() && edit0 > 0.0 { edit0 } else { orig0 };
+        let mut base1 = if edit1.is_finite() && edit1 > 0.0 { edit1 } else { orig1 };
+
+        if !(base0.is_finite() && base0 > 0.0) && (base1.is_finite() && base1 > 0.0) {
+            base0 = base1;
+        }
+        if !(base1.is_finite() && base1 > 0.0) && (base0.is_finite() && base0 > 0.0) {
+            base1 = base0;
+        }
+        if !(base0.is_finite() && base0 > 0.0 && base1.is_finite() && base1 > 0.0) {
+            return 0.0;
+        }
+
+        let v = base0 + (base1 - base0) * frac;
+        if v.is_finite() { v } else { 0.0 }
+    }
+
+    pub fn is_voiced_at_time(&self, abs_time_sec: f64) -> bool {
+        let fp = self.frame_period_ms.max(0.1);
+        let idx = ((abs_time_sec.max(0.0) * 1000.0) / fp).round().max(0.0) as usize;
+        let orig = self.pitch_orig.get(idx).copied().unwrap_or(0.0);
+        let edit = self.pitch_edit.get(idx).copied().unwrap_or(0.0);
+        (orig.is_finite() && orig > 0.0) || (edit.is_finite() && edit > 0.0)
+    }
+}
+
+pub(crate) fn selected_pitch_curves_snapshot(timeline: &TimelineState) -> Option<PitchCurvesSnapshot> {
+    let selected = timeline
+        .selected_track_id
+        .clone()
+        .or_else(|| timeline.tracks.first().map(|t| t.id.clone()))
+        .unwrap_or_default();
+    let root = timeline.resolve_root_track_id(&selected)?;
+
+    let entry = timeline.params_by_root_track.get(&root)?;
+    Some(PitchCurvesSnapshot {
+        frame_period_ms: entry.frame_period_ms.max(0.1),
+        pitch_orig: entry.pitch_orig.clone(),
+        pitch_edit: entry.pitch_edit.clone(),
+    })
 }
 
 impl PitchEditAlgorithm {
@@ -29,6 +109,24 @@ impl PitchEditAlgorithm {
             PitchAnalysisAlgo::None => Self::Bypass,
         }
     }
+}
+
+pub fn selected_pitch_edit_algorithm(timeline: &TimelineState) -> PitchEditAlgorithm {
+    let selected = timeline
+        .selected_track_id
+        .clone()
+        .or_else(|| timeline.tracks.first().map(|t| t.id.clone()))
+        .unwrap_or_default();
+    let Some(root) = timeline.resolve_root_track_id(&selected) else {
+        return PitchEditAlgorithm::Bypass;
+    };
+
+    let track = timeline.tracks.iter().find(|t| t.id == root);
+    let Some(track) = track else {
+        return PitchEditAlgorithm::Bypass;
+    };
+
+    PitchEditAlgorithm::from_track_algo(&track.pitch_analysis_algo)
 }
 
 fn semitone_ratio(semitones: f64) -> f64 {

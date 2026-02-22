@@ -1,11 +1,13 @@
 use num_complex::Complex32;
+use ort::ep;
 use ort::session::Session;
 use ort::value::Tensor;
+use rustfft::Fft;
 use rustfft::FftPlanner;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 static ORT_INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
@@ -17,6 +19,86 @@ fn ensure_ort_init() -> Result<(), String> {
         Ok(()) => Ok(()),
         Err(e) => Err(e.clone()),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OrtExecutionProviderChoice {
+    Auto,
+    Cpu,
+    Cuda,
+}
+
+fn env_ep_choice() -> OrtExecutionProviderChoice {
+    let v = std::env::var("HIFISHIFTER_ORT_EP")
+        .ok()
+        .unwrap_or_else(|| "auto".to_string());
+    match v.trim().to_ascii_lowercase().as_str() {
+        "cpu" => OrtExecutionProviderChoice::Cpu,
+        "cuda" => OrtExecutionProviderChoice::Cuda,
+        "auto" | "" => OrtExecutionProviderChoice::Auto,
+        _ => OrtExecutionProviderChoice::Auto,
+    }
+}
+
+fn env_i32(name: &str) -> Option<i32> {
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+}
+
+fn debug_enabled() -> bool {
+    std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
+        .ok()
+        .as_deref()
+        == Some("1")
+}
+
+fn build_session_with_ep(onnx_path: &Path) -> Result<Session, String> {
+    let mut builder = Session::builder()
+        .map_err(|e| format!("create ort session builder failed: {e}"))?;
+
+    let choice = env_ep_choice();
+    let device_id = env_i32("HIFISHIFTER_ORT_CUDA_DEVICE_ID").unwrap_or(0);
+
+    let selected: &str;
+
+    match choice {
+        OrtExecutionProviderChoice::Cpu => {
+            // Default session uses CPU EP.
+            selected = "cpu";
+        }
+        OrtExecutionProviderChoice::Cuda => {
+            builder = builder
+                .with_execution_providers([ep::CUDA::default().with_device_id(device_id).build()])
+                .map_err(|e| format!("enable CUDA EP failed: {e}"))?;
+            selected = "cuda";
+        }
+        OrtExecutionProviderChoice::Auto => {
+            // Try CUDA first, then fall back to CPU.
+            match builder.clone().with_execution_providers([
+                ep::CUDA::default().with_device_id(device_id).build(),
+            ]) {
+                Ok(b) => {
+                    builder = b;
+                    selected = "cuda";
+                }
+                Err(e) => {
+                    if debug_enabled() {
+                        eprintln!("nsf_hifigan_onnx: CUDA EP unavailable, falling back to CPU: {e}");
+                    }
+                    selected = "cpu";
+                }
+            }
+        }
+    }
+
+    if debug_enabled() {
+        eprintln!("nsf_hifigan_onnx: ort ep={selected} (HIFISHIFTER_ORT_EP={:?}, cuda_device_id={device_id})", choice);
+    }
+
+    builder
+        .commit_from_file(onnx_path)
+        .map_err(|e| format!("load onnx into ort session failed: {e}"))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -109,10 +191,7 @@ pub(crate) fn probe_load() -> Result<String, String> {
     let cfg = read_config(&cfg_path)?;
 
     // Create a session (this also validates that the model is loadable by ORT).
-    let mut session = Session::builder()
-        .map_err(|e| format!("create ort session builder failed: {e}"))?
-        .commit_from_file(&onnx_path)
-        .map_err(|e| format!("load onnx into ort session failed: {e}"))?;
+    let mut session = build_session_with_ep(&onnx_path)?;
 
     // Best-effort smoke run to ensure inputs/outputs are compatible.
     // Model expects mel: (1, n_mels, T) and f0: (1, T).
@@ -283,6 +362,7 @@ fn mel_filterbank_slaney(
     weights
 }
 
+#[allow(dead_code)]
 fn stft_magnitude(
     y: &[f32],
     n_fft: usize,
@@ -379,6 +459,10 @@ fn linear_resample_mono(input: &[f32], in_rate: u32, out_rate: u32) -> Vec<f32> 
 pub struct NsfHifiganOnnx {
     cfg: NsfHifiganConfig,
     mel_fb: Vec<Vec<f32>>,
+    window: Vec<f32>,
+    fft: Arc<dyn Fft<f32>>,
+    fft_buf: Vec<Complex32>,
+    mag_buf: Vec<f32>,
     session: Session,
 }
 
@@ -400,18 +484,93 @@ impl NsfHifiganOnnx {
             cfg.fmax,
         );
 
-        let session = Session::builder()
-            .map_err(|e| format!("create ort session builder failed: {e}"))?
-            .commit_from_file(&onnx_path)
-            .map_err(|e| format!("load onnx into ort session failed: {e}"))?;
+        let window = hann_window(cfg.win_size);
+        let mut planner = FftPlanner::<f32>::new();
+        let fft = planner.plan_fft_forward(cfg.n_fft);
+        let fft_buf: Vec<Complex32> = vec![Complex32::new(0.0, 0.0); cfg.n_fft];
+        let mag_buf: Vec<f32> = vec![0.0f32; cfg.n_fft / 2 + 1];
+
+        let session = build_session_with_ep(&onnx_path)?;
 
         Ok(Self {
             cfg,
             mel_fb,
+            window,
+            fft,
+            fft_buf,
+            mag_buf,
             session,
         })
     }
 
+    fn mel_from_audio_fast(&mut self, audio: &[f32]) -> Result<Vec<f32>, String> {
+        let hop = self.cfg.hop_size;
+        let win_size = self.cfg.win_size;
+        let n_fft = self.cfg.n_fft;
+
+        if win_size == 0 || hop == 0 || n_fft == 0 {
+            return Err("mel: invalid config".to_string());
+        }
+        if self.window.len() != win_size {
+            return Err("mel: window length mismatch".to_string());
+        }
+        if self.fft_buf.len() != n_fft {
+            return Err("mel: fft buffer length mismatch".to_string());
+        }
+
+        let pad_left = ((win_size as isize - hop as isize) / 2).max(0) as usize;
+        let pad_right = ((win_size as isize - hop as isize + 1) / 2).max(0) as usize;
+        let y = reflect_pad(audio, pad_left, pad_right);
+
+        let n_freqs = n_fft / 2 + 1;
+        if self.mag_buf.len() != n_freqs {
+            self.mag_buf.resize(n_freqs, 0.0);
+        }
+
+        if y.len() < win_size {
+            let n_frames = 1usize;
+            let mut mel = vec![0.0f32; self.cfg.num_mels * n_frames];
+            for m in 0..self.cfg.num_mels {
+                mel[m * n_frames] = dynamic_range_compression_ln(0.0);
+            }
+            return Ok(mel);
+        }
+
+        let n_frames = 1 + (y.len().saturating_sub(win_size)) / hop;
+        let mut mel = vec![0.0f32; self.cfg.num_mels * n_frames];
+
+        for frame in 0..n_frames {
+            let start = frame * hop;
+
+            for i in 0..win_size {
+                let v = y.get(start + i).copied().unwrap_or(0.0);
+                self.fft_buf[i] = Complex32::new(v * self.window[i], 0.0);
+            }
+            for i in win_size..n_fft {
+                self.fft_buf[i] = Complex32::new(0.0, 0.0);
+            }
+
+            self.fft.process(&mut self.fft_buf);
+
+            for f in 0..n_freqs {
+                let c = self.fft_buf[f];
+                self.mag_buf[f] = (c.re * c.re + c.im * c.im).sqrt();
+            }
+
+            for m in 0..self.cfg.num_mels {
+                let fb = &self.mel_fb[m];
+                let mut acc = 0.0f32;
+                for f in 0..n_freqs {
+                    acc += fb[f] * self.mag_buf[f];
+                }
+                mel[m * n_frames + frame] = dynamic_range_compression_ln(acc);
+            }
+        }
+
+        Ok(mel)
+    }
+
+    #[allow(dead_code)]
     fn mel_from_audio(&self, audio: &[f32], key_shift_semitones: f32) -> Result<Vec<f32>, String> {
         // Replicates utils/wav2mel.py (PitchAdjustableMelSpectrogram + log compression),
         // but we currently only use key_shift=0 in the app.
@@ -467,34 +626,18 @@ impl NsfHifiganOnnx {
         Ok(mel)
     }
 
-    pub fn infer_from_audio_and_midi(
-        &mut self,
-        audio_mono: &[f32],
-        sample_rate: u32,
-        start_sec: f64,
-        midi_at_time: impl Fn(f64) -> f64,
-    ) -> Result<Vec<f32>, String> {
-        let model_sr = self.cfg.sampling_rate;
-        let audio_model = linear_resample_mono(audio_mono, sample_rate, model_sr);
+    fn env_usize(name: &str) -> Option<usize> {
+        std::env::var(name)
+            .ok()
+            .and_then(|s| s.trim().parse::<usize>().ok())
+            .filter(|v| *v > 0)
+    }
 
-        let mel = self.mel_from_audio(&audio_model, 0.0)?;
-
-        // mel is stored as (n_mels, T) contiguous. Build f0 (1, T) in Hz.
-        let t = mel.len() / self.cfg.num_mels;
-        if t == 0 {
-            return Ok(vec![0.0; audio_mono.len()]);
-        }
-
-        let hop_sec = (self.cfg.hop_size as f64) / (model_sr.max(1) as f64);
-        let mut f0 = vec![0.0f32; t];
-        for i in 0..t {
-            let abs_t = start_sec + (i as f64) * hop_sec;
-            let midi = midi_at_time(abs_t);
-            f0[i] = midi_to_hz(midi);
-        }
-
-        let mel_tensor = Tensor::from_array(([1usize, self.cfg.num_mels, t], mel.into_boxed_slice()))
-            .map_err(|e| format!("build mel tensor failed: {e}"))?;
+    fn run_model(&mut self, mel: Vec<f32>, f0: Vec<f32>, t: usize) -> Result<Vec<f32>, String> {
+        let mel_tensor = Tensor::from_array(
+            ([1usize, self.cfg.num_mels, t], mel.into_boxed_slice()),
+        )
+        .map_err(|e| format!("build mel tensor failed: {e}"))?;
         let f0_tensor = Tensor::from_array(([1usize, t], f0.into_boxed_slice()))
             .map_err(|e| format!("build f0 tensor failed: {e}"))?;
 
@@ -511,7 +654,113 @@ impl NsfHifiganOnnx {
             .1
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("ort output type mismatch: {e}"))?;
-        let y_vec: Vec<f32> = data.to_vec();
+        Ok(data.to_vec())
+    }
+
+    pub fn infer_from_audio_and_midi(
+        &mut self,
+        audio_mono: &[f32],
+        sample_rate: u32,
+        start_sec: f64,
+        midi_at_time: impl Fn(f64) -> f64,
+    ) -> Result<Vec<f32>, String> {
+        let model_sr = self.cfg.sampling_rate;
+        let audio_model = linear_resample_mono(audio_mono, sample_rate, model_sr);
+
+        // Fast path: key_shift=0 is the only mode used by the app currently.
+        // This avoids reallocating STFT matrices and re-planning FFT every call.
+        let mel = self.mel_from_audio_fast(&audio_model)?;
+
+        // mel is stored as (n_mels, T) contiguous. Build f0 (1, T) in Hz.
+        let t = mel.len() / self.cfg.num_mels;
+        if t == 0 {
+            return Ok(vec![0.0; audio_mono.len()]);
+        }
+
+        let hop_sec = (self.cfg.hop_size as f64) / (model_sr.max(1) as f64);
+        let mut f0 = vec![0.0f32; t];
+        for i in 0..t {
+            let abs_t = start_sec + (i as f64) * hop_sec;
+            let midi = midi_at_time(abs_t);
+            f0[i] = midi_to_hz(midi);
+        }
+
+        // Optional experimental segmented inference (stream-like).
+        // This can reduce peak latency / memory for very long buffers at the cost of extra overlap compute.
+        // Disabled by default to avoid boundary artifacts.
+        let seg_frames = Self::env_usize("HIFISHIFTER_NSF_HIFIGAN_SEGMENT_FRAMES").unwrap_or(0);
+        let overlap_frames = Self::env_usize("HIFISHIFTER_NSF_HIFIGAN_OVERLAP_FRAMES").unwrap_or(8);
+
+        let y_vec: Vec<f32> = if seg_frames >= 16 && t > seg_frames {
+            let overlap_frames = overlap_frames.min(seg_frames.saturating_sub(1));
+            let step = seg_frames.saturating_sub(overlap_frames).max(1);
+
+            let expected_total = (t as usize)
+                .saturating_mul(self.cfg.hop_size)
+                .max(1);
+            let mut out = vec![0.0f32; expected_total];
+            let mut wsum = vec![0.0f32; expected_total];
+
+            let mut s = 0usize;
+            while s < t {
+                let end = (s + seg_frames).min(t);
+                let seg_t = end.saturating_sub(s).max(1);
+
+                // Slice mel: original layout is (n_mels, T)
+                let mut mel_seg = vec![0.0f32; self.cfg.num_mels * seg_t];
+                for m in 0..self.cfg.num_mels {
+                    let src = &mel[m * t + s..m * t + end];
+                    let dst = &mut mel_seg[m * seg_t..(m + 1) * seg_t];
+                    dst.copy_from_slice(src);
+                }
+                let f0_seg = f0[s..end].to_vec();
+
+                let y_seg = self.run_model(mel_seg, f0_seg, seg_t)?;
+                let seg_expected = seg_t.saturating_mul(self.cfg.hop_size).max(1);
+                let seg_samples = y_seg.len().min(seg_expected);
+
+                let overlap_samples = overlap_frames.saturating_mul(self.cfg.hop_size);
+                let base = s.saturating_mul(self.cfg.hop_size);
+
+                for i in 0..seg_samples {
+                    let g = base + i;
+                    if g >= out.len() {
+                        break;
+                    }
+                    let mut w = 1.0f32;
+                    if overlap_samples > 0 {
+                        if s > 0 && i < overlap_samples {
+                            w = (i as f32) / (overlap_samples as f32);
+                        }
+                        if end < t && seg_samples > overlap_samples {
+                            let tail = seg_samples.saturating_sub(1).saturating_sub(i);
+                            if tail < overlap_samples {
+                                let w_out = (tail as f32) / (overlap_samples as f32);
+                                w = w.min(w_out);
+                            }
+                        }
+                    }
+
+                    out[g] += y_seg[i] * w;
+                    wsum[g] += w;
+                }
+
+                if end >= t {
+                    break;
+                }
+                s += step;
+            }
+
+            for i in 0..out.len() {
+                let w = wsum[i];
+                if w > 1e-6 {
+                    out[i] /= w;
+                }
+            }
+            out
+        } else {
+            self.run_model(mel, f0, t)?
+        };
 
         // Resample back to mixdown rate if needed.
         let y_mix = linear_resample_mono(&y_vec, model_sr, sample_rate);

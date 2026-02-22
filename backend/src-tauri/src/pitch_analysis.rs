@@ -138,6 +138,20 @@ pub struct PitchOrigUpdatedEvent {
     pub root_track_id: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PitchOrigAnalysisStartedEvent {
+    pub root_track_id: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PitchOrigAnalysisProgressEvent {
+    pub root_track_id: String,
+    pub progress: f32,
+}
+
 fn resample_curve_linear(values: &[f32], out_len: usize) -> Vec<f32> {
     if out_len == 0 {
         return vec![];
@@ -255,11 +269,13 @@ fn build_pitch_job(tl: &TimelineState, root_track_id: &str) -> Option<PitchJob> 
     })
 }
 
-fn compute_pitch_curve(job: &PitchJob) -> Vec<f32> {
+fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<f32> {
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
         .ok()
         .as_deref()
         == Some("1");
+
+    on_progress(0.02);
 
     // If WORLD isn't available, return zeros.
     if matches!(
@@ -304,6 +320,7 @@ fn compute_pitch_curve(job: &PitchJob) -> Vec<f32> {
         end_sec: Some(project_sec),
         // Match UI waveform background exactly.
         stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
+        apply_pitch_edit: false,
     };
 
     let (sr, ch, _dur, mix) = match crate::mixdown::render_mixdown_interleaved(&job.timeline, opts)
@@ -319,6 +336,8 @@ fn compute_pitch_curve(job: &PitchJob) -> Vec<f32> {
             return out;
         }
     };
+
+    on_progress(0.40);
 
     let channels = ch.max(1) as usize;
     let frames = mix.len() / channels.max(1);
@@ -363,6 +382,8 @@ fn compute_pitch_curve(job: &PitchJob) -> Vec<f32> {
         let vv = (v - mean) * scale;
         mono.push(vv.clamp(-1.0, 1.0));
     }
+
+    on_progress(0.55);
 
     // Match python demo defaults (utils/wav2F0.py): f0_min=40, f0_max=1600.
     let f0_floor = 40.0;
@@ -419,6 +440,8 @@ fn compute_pitch_curve(job: &PitchJob) -> Vec<f32> {
         PitchAnalysisAlgo::None => vec![],
     };
 
+    on_progress(0.90);
+
     let mut midi: Vec<f32> = Vec::with_capacity(f0_hz.len());
     let mut last: f32 = 0.0;
     for hz in f0_hz {
@@ -434,6 +457,8 @@ fn compute_pitch_curve(job: &PitchJob) -> Vec<f32> {
     let midi = resample_curve_linear(&midi, job.target_frames);
     out.copy_from_slice(&midi);
 
+    on_progress(1.0);
+
     if debug {
         let any_nonzero = out.iter().any(|&v| v.is_finite() && v > 0.0);
         eprintln!(
@@ -446,7 +471,8 @@ fn compute_pitch_curve(job: &PitchJob) -> Vec<f32> {
     out
 }
 
-pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) {
+/// Returns whether pitch analysis is currently pending (scheduled or already inflight).
+pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool {
     // Build job snapshot under timeline lock, then release lock for heavy work.
     let job = {
         let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
@@ -454,7 +480,7 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) {
     };
 
     let Some(job) = job else {
-        return;
+        return false;
     };
 
     // De-dup inflight.
@@ -470,7 +496,7 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) {
         false
     };
     if !should_spawn {
-        return;
+        return true;
     }
 
     let Some(app) = state.app_handle.get().cloned() else {
@@ -478,14 +504,32 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) {
         if let Ok(mut set) = state.pitch_inflight.lock() {
             set.remove(&inflight_key);
         }
-        return;
+        return false;
     };
+
+    // Notify UI that analysis has started for this root track.
+    let _ = app.emit(
+        "pitch_orig_analysis_started",
+        PitchOrigAnalysisStartedEvent {
+            root_track_id: job.root_track_id.clone(),
+            key: job.key.clone(),
+        },
+    );
 
     let job2 = job.clone();
     std::thread::spawn(move || {
         let state = app.state::<AppState>();
 
-        let curve = compute_pitch_curve(&job2);
+        let curve = compute_pitch_curve(&job2, |p| {
+            let pp = p.clamp(0.0, 1.0);
+            let _ = app.emit(
+                "pitch_orig_analysis_progress",
+                PitchOrigAnalysisProgressEvent {
+                    root_track_id: job2.root_track_id.clone(),
+                    progress: pp,
+                },
+            );
+        });
 
         // Apply if still current.
         let mut should_emit = false;
@@ -522,4 +566,6 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) {
             );
         }
     });
+
+    true
 }

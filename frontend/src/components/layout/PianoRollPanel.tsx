@@ -336,6 +336,8 @@ export const PianoRollPanel: React.FC = () => {
         bumpRefreshToken,
         refreshNow,
         isLoading,
+        pitchAnalysisPending,
+        pitchAnalysisProgress,
     } = usePianoRollData({
         editParam,
         pitchEnabled,
@@ -626,6 +628,24 @@ export const PianoRollPanel: React.FC = () => {
     // Silence unused state warnings; selectionUi is future UI.
     void selectionUi;
 
+    const showPitchAnalyzingOverlay =
+        editParam === "pitch" &&
+        pitchEnabled &&
+        Boolean(rootTrackId) &&
+        pitchAnalysisPending;
+
+    const showOverlay = isLoading || showPitchAnalyzingOverlay;
+
+    const pitchPercent =
+        pitchAnalysisProgress != null &&
+        Number.isFinite(pitchAnalysisProgress) &&
+        pitchAnalysisProgress >= 0
+            ? Math.max(
+                  0,
+                  Math.min(100, Math.round(pitchAnalysisProgress * 100)),
+              )
+            : null;
+
     return (
         <Flex
             direction="column"
@@ -667,7 +687,7 @@ export const PianoRollPanel: React.FC = () => {
                         size="1"
                         variant="soft"
                         color="gray"
-                        disabled={isLoading}
+                        disabled={isLoading || showPitchAnalyzingOverlay}
                         onClick={() => void refreshNow()}
                         style={{ cursor: isLoading ? "default" : "pointer" }}
                     >
@@ -824,11 +844,37 @@ export const PianoRollPanel: React.FC = () => {
                     </div>
                 </Flex>
 
-                {isLoading ? (
+                {showOverlay ? (
                     <div className="absolute inset-0 z-50 flex items-center justify-center bg-qt-base opacity-60">
-                        <Text size="2" color="gray">
-                            {t("loading")}
-                        </Text>
+                        <div className="flex flex-col items-center gap-2">
+                            <Text size="2" color="gray">
+                                {showPitchAnalyzingOverlay
+                                    ? pitchPercent != null
+                                        ? `${t("pitch_analyzing")} ${pitchPercent}%`
+                                        : t("pitch_analyzing")
+                                    : t("loading")}
+                            </Text>
+                            {showPitchAnalyzingOverlay ? (
+                                <div className="w-64 h-2 bg-qt-button border border-qt-border rounded overflow-hidden">
+                                    <div
+                                        className={
+                                            "h-full bg-qt-highlight" +
+                                            (pitchPercent == null
+                                                ? " animate-pulse"
+                                                : "")
+                                        }
+                                        style={{
+                                            width:
+                                                pitchPercent != null
+                                                    ? `${pitchPercent}%`
+                                                    : "15%",
+                                            opacity:
+                                                pitchPercent != null ? 1 : 0.6,
+                                        }}
+                                    />
+                                </div>
+                            ) : null}
+                        </div>
                     </div>
                 ) : null}
             </Flex>

@@ -111,6 +111,55 @@ function App() {
         ? t(statusKey[s.status] as any)
         : s.status;
 
+    const [rendering, setRendering] = useState<{
+        active: boolean;
+        progress: number | null;
+        target: string | null;
+    }>({ active: false, progress: null, target: null });
+
+    // Listen for backend playback priming notifications (Tauri only).
+    useEffect(() => {
+        let disposed = false;
+        let unlisten: null | (() => void) = null;
+
+        async function setup() {
+            try {
+                const mod = await import("@tauri-apps/api/event");
+                unlisten = await mod.listen(
+                    "playback_rendering_state",
+                    (event: any) => {
+                        if (disposed) return;
+                        const payload = (event?.payload ?? {}) as {
+                            active?: boolean;
+                            progress?: number | null;
+                            target?: string | null;
+                        };
+                        const active = Boolean(payload?.active);
+                        const pRaw = payload?.progress;
+                        const p =
+                            typeof pRaw === "number" && Number.isFinite(pRaw)
+                                ? Math.max(0, Math.min(1, pRaw))
+                                : null;
+                        const target =
+                            typeof payload?.target === "string"
+                                ? payload.target
+                                : null;
+
+                        setRendering({ active, progress: p, target });
+                    },
+                );
+            } catch {
+                // Safe no-op for non-Tauri builds.
+            }
+        }
+
+        void setup();
+        return () => {
+            disposed = true;
+            if (unlisten) unlisten();
+        };
+    }, []);
+
     const runtimeRef = useRef({
         isPlaying: false,
         hasSynthesized: false,
@@ -300,6 +349,15 @@ function App() {
             >
                 <Text size="1" color={s.error ? "red" : "gray"}>
                     {s.error ? `Error: ${s.error}` : statusText}
+                    {rendering.active ? (
+                        <>
+                            {" | "}
+                            {t("rendering")}
+                            {rendering.progress != null
+                                ? ` ${Math.round(rendering.progress * 100)}%`
+                                : ""}
+                        </>
+                    ) : null}
                 </Text>
                 <Text size="1" color="gray">
                     {t("status_device")}: {s.runtime.device} |{" "}

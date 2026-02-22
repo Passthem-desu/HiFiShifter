@@ -187,10 +187,19 @@ fn mix_into_scratch_stereo(
         // might not have rendered any frames yet. Previously we would fall back to
         // original realtime mixing, which sounded like "original -> pitched".
         //
-        // New behavior: if we're at the stream base and the requested window is not
-        // covered yet, output silence and *do not advance the playhead* until the
-        // pitch-stream catches up.
-        if pos0 == base && pos1 > write {
+        // IMPORTANT: never block the real-time callback.
+        // If we're at the stream base and the requested window is not covered yet,
+        // we default to falling back to normal realtime mixing (so playback advances
+        // instead of appearing to "freeze").
+        //
+        // If you prefer the old "hard start" (silence + do not advance until covered),
+        // set: HIFISHIFTER_PITCH_STREAM_HARD_START=1
+        let hard_start_env = std::env::var("HIFISHIFTER_PITCH_STREAM_HARD_START")
+            .ok()
+            .as_deref()
+            == Some("1");
+        let hard_start = hard_start_env || stream.is_hard_start_enabled();
+        if hard_start && pos0 == base && pos1 > write {
             return;
         }
 
@@ -205,6 +214,7 @@ fn mix_into_scratch_stereo(
             }
         } else {
             // Not fully covered yet: mix normally, then override the frames we do have.
+            // This also acts as the fallback path when the stream hasn't warmed up.
             mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch);
             for f in 0..frames {
                 let abs_f = pos0.saturating_add(f as u64);

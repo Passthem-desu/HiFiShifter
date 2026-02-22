@@ -5,11 +5,22 @@ use crate::project::{make_paths_relative, project_name_from_path, resolve_paths_
 use crate::state::AppState;
 use crate::waveform;
 use base64::Engine;
+use serde::Serialize;
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+use tauri::Emitter;
 use tauri::{State, Window};
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlaybackRenderingStateEvent {
+    active: bool,
+    progress: Option<f64>,
+    target: Option<String>,
+}
 
 fn guard_json_command(name: &str, f: impl FnOnce() -> serde_json::Value) -> serde_json::Value {
     match catch_unwind(AssertUnwindSafe(f)) {
@@ -397,6 +408,7 @@ fn render_timeline_to_wav(
             start_sec,
             end_sec,
             stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
+            apply_pitch_edit: true,
         },
     )
 }
@@ -589,6 +601,8 @@ pub fn get_param_frames(
                     start_frame,
                     orig: vec![],
                     edit: vec![],
+                    analysis_pending: None,
+                    analysis_progress: None,
                 }
             }
         };
@@ -619,13 +633,17 @@ pub fn get_param_frames(
             start_frame,
             orig: vec![],
             edit: vec![],
+            analysis_pending: None,
+            analysis_progress: None,
         };
     }
 
     // Schedule pitch_orig analysis in background; return current cached curve immediately.
-    if param == "pitch" {
-        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root);
-    }
+    let analysis_pending = if param == "pitch" {
+        Some(crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root))
+    } else {
+        None
+    };
 
     let start = start_frame as usize;
     let count = (frame_count as usize).max(1);
@@ -660,6 +678,8 @@ pub fn get_param_frames(
         start_frame,
         orig,
         edit,
+        analysis_pending,
+        analysis_progress: None,
     }
 }
 
@@ -902,6 +922,7 @@ pub fn get_root_mix_waveform_peaks_segment(
         // stretched clips line up with the same timing as pitch analysis.
         // (Falls back to LinearResample if RubberBand is unavailable.)
         stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
+        apply_pitch_edit: true,
     };
 
     let (sr, ch, _dur, mix) = match crate::mixdown::render_mixdown_interleaved(&tl, opts) {
@@ -1047,6 +1068,7 @@ pub fn get_track_mix_waveform_peaks_segment(
         // stretched clips line up with the same timing as pitch analysis.
         // (Falls back to LinearResample if RubberBand is unavailable.)
         stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
+        apply_pitch_edit: true,
     };
 
     let (sr, ch, _dur, mix) = match crate::mixdown::render_mixdown_interleaved(&tl, opts) {
@@ -1438,9 +1460,135 @@ pub fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde_json::
         let playhead_sec = (playhead_beat.max(0.0)) * 60.0 / bpm;
         let start_sec = playhead_sec + start_sec.max(0.0);
 
-        state.audio_engine.update_timeline(timeline);
+        // IMPORTANT: order matters (mpsc is FIFO).
+        // Seek first so the snapshot build (and pitch_stream ring.reset) uses the correct base.
         state.audio_engine.seek_sec(start_sec);
+        state.audio_engine.update_timeline(timeline);
         state.audio_engine.set_playing(true, Some("original"));
+
+        // If ONNX pitch streaming is active, we may be in A-mode hard-start (silent, not advancing)
+        // until enough frames are rendered. Emit a UI hint so the user sees "渲染中".
+        if let Some(app) = state.app_handle.get().cloned() {
+            let engine = state.audio_engine.clone();
+            std::thread::spawn(move || {
+                // Small delay to let the engine thread build the snapshot.
+                std::thread::sleep(Duration::from_millis(5));
+
+                let (algo, base, write0, hard_start) = match engine.pitch_stream_priming_info() {
+                    Some(v) => v,
+                    None => return,
+                };
+
+                if algo != crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx {
+                    return;
+                }
+                if !hard_start {
+                    return;
+                }
+
+                // Configure priming window.
+                let prime_sec: f64 = std::env::var("HIFISHIFTER_ONNX_STREAM_PRIME_SEC")
+                    .ok()
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .unwrap_or(0.25);
+                let timeout_ms: u64 = std::env::var("HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS")
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .filter(|v| *v > 0)
+                    .unwrap_or(4000);
+
+                let sr = engine.sample_rate_hz() as f64;
+                let prime_frames = (prime_sec * sr).round().max(1.0) as u64;
+                let need_frame = base.saturating_add(prime_frames);
+
+                // If already covered, don't flash UI.
+                if write0 >= need_frame {
+                    return;
+                }
+
+                let _ = app.emit(
+                    "playback_rendering_state",
+                    PlaybackRenderingStateEvent {
+                        active: true,
+                        progress: Some(0.0),
+                        target: Some("original".to_string()),
+                    },
+                );
+
+                let t0 = Instant::now();
+                let mut last_progress_bucket: i64 = -1;
+                loop {
+                    if !engine.is_playing() {
+                        break;
+                    }
+
+                    let (_, base_now, write_now, hard_start_now) = match engine.pitch_stream_priming_info() {
+                        Some(v) => v,
+                        None => break,
+                    };
+
+                    // If the stream base moved (seek/reset), recompute the target.
+                    let need_frame = base_now.saturating_add(prime_frames);
+
+                    if write_now >= need_frame {
+                        let _ = app.emit(
+                            "playback_rendering_state",
+                            PlaybackRenderingStateEvent {
+                                active: false,
+                                progress: Some(1.0),
+                                target: Some("original".to_string()),
+                            },
+                        );
+                        return;
+                    }
+
+                    let denom = prime_frames.max(1) as f64;
+                    let p = ((write_now.saturating_sub(base_now)) as f64 / denom)
+                        .clamp(0.0, 1.0);
+                    let bucket = (p * 100.0).floor() as i64;
+                    if bucket != last_progress_bucket {
+                        last_progress_bucket = bucket;
+                        let _ = app.emit(
+                            "playback_rendering_state",
+                            PlaybackRenderingStateEvent {
+                                active: true,
+                                progress: Some(p),
+                                target: Some("original".to_string()),
+                            },
+                        );
+                    }
+
+                    if t0.elapsed().as_millis() as u64 >= timeout_ms {
+                        // Fail-safe: break hard-start so playback can fall back to realtime mix.
+                        // This prevents a permanent "stuck" transport if inference fails.
+                        if hard_start_now {
+                            let _ = engine.set_pitch_stream_hard_start_enabled(false);
+                        }
+                        let _ = app.emit(
+                            "playback_rendering_state",
+                            PlaybackRenderingStateEvent {
+                                active: false,
+                                progress: None,
+                                target: Some("original".to_string()),
+                            },
+                        );
+                        return;
+                    }
+
+                    std::thread::sleep(Duration::from_millis(15));
+                }
+
+                let _ = app.emit(
+                    "playback_rendering_state",
+                    PlaybackRenderingStateEvent {
+                        active: false,
+                        progress: None,
+                        target: Some("original".to_string()),
+                    },
+                );
+            });
+        }
 
         serde_json::json!({"ok": true, "playing": "original", "start_sec": start_sec})
     })

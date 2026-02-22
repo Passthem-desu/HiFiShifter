@@ -522,6 +522,7 @@ pub(crate) fn build_snapshot(
     // mixdown (which applies pitch edits) and lets the audio callback read lock-free.
     // This is best-effort; if the selected pitch-edit backend isn't available, we keep normal realtime mixing.
     let mut pitch_stream: Option<Arc<StreamRingStereo>> = None;
+    let mut pitch_stream_algo: Option<crate::pitch_editing::PitchEditAlgorithm> = None;
     let pitch_stream_enabled = std::env::var("HIFISHIFTER_REALTIME_PITCH_STREAM")
         .ok()
         .as_deref()
@@ -536,8 +537,29 @@ pub(crate) fn build_snapshot(
     }
 
     if pitch_stream_enabled && pitch_active && pitch_backend_ok {
-        let cap_frames = (out_rate as u64).saturating_mul(8); // ~8s buffer
+        let algo = crate::pitch_editing::selected_pitch_edit_algorithm(timeline);
+        pitch_stream_algo = Some(algo);
+
+        // Buffer sizing tradeoff:
+        // - WORLD is usually fast enough; keeping a few seconds ahead reduces glitches.
+        // - ONNX (NSF-HiFiGAN) can be significantly slower; keeping a huge lookahead just burns CPU
+        //   and increases perceived latency. Keep it short and allow fallback mixing when needed.
+        let cap_frames = match algo {
+            crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx => (out_rate as u64).saturating_mul(2),
+            _ => (out_rate as u64).saturating_mul(8),
+        };
         let ring = Arc::new(StreamRingStereo::new(cap_frames));
+
+        // A-mode: for slow ONNX inference, prefer a short prebuffer before advancing.
+        // This avoids the audible "original -> pitched" transition at the very beginning.
+        // Can be disabled for debugging via: HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START=0
+        let onnx_hard_start = std::env::var("HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START")
+            .ok()
+            .as_deref()
+            != Some("0");
+        if matches!(algo, crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx) && onnx_hard_start {
+            ring.set_hard_start_enabled(true);
+        }
         let ring_for_thread = ring.clone();
 
         // Start close to current playhead to reduce perceived delay.
@@ -552,98 +574,122 @@ pub(crate) fn build_snapshot(
         let tl_for_thread = timeline.clone();
         let sr = out_rate;
 
-        thread::spawn(move || {
-            let warmup_block_frames: u64 = ((sr as u64) / 2).max(256); // ~0.5s
-            let warmup_ahead_frames: u64 = ((sr as u64) / 2).max(256); // keep at least ~0.5s initially
-            let block_frames_normal: u64 = (sr as u64).saturating_mul(2); // 2s blocks
-            let lookahead_frames_normal: u64 = (sr as u64).saturating_mul(3); // keep ~3s ahead
-
-            let mut out_cursor: u64 = pos.load(Ordering::Relaxed);
-
-            loop {
-                if epoch.load(Ordering::Relaxed) != my_epoch {
-                    break;
+        match algo {
+            crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx => {
+                let curves = crate::pitch_editing::selected_pitch_curves_snapshot(&tl_for_thread);
+                if let Some(curves) = curves {
+                    super::pitch_stream_onnx::spawn_pitch_stream_onnx(
+                        tl_for_thread,
+                        sr,
+                        ring_for_thread,
+                        pos,
+                        playing,
+                        epoch,
+                        my_epoch,
+                        curves,
+                        debug,
+                    );
+                } else if debug {
+                    eprintln!("AudioEngine: pitch_stream ONNX not started (missing pitch curves)");
                 }
-                if !playing.load(Ordering::Relaxed) {
-                    std::thread::sleep(std::time::Duration::from_millis(8));
-                    continue;
-                }
-
-                let now_abs = pos.load(Ordering::Relaxed);
-                let base = ring_for_thread.base_frame.load(Ordering::Acquire);
-                let write = ring_for_thread.write_frame.load(Ordering::Acquire);
-
-                // Reset on large jumps (seek / transport changes).
-                if now_abs < base || now_abs > write.saturating_add(sr as u64) {
-                    out_cursor = now_abs;
-                    ring_for_thread.reset(now_abs);
-                    std::thread::sleep(std::time::Duration::from_millis(2));
-                    continue;
-                }
-
-                // Don't render behind the playhead.
-                if out_cursor < now_abs {
-                    out_cursor = now_abs;
-                }
-
-                // Warm up quickly so playback can start without falling back.
-                let need_until = if write <= now_abs.saturating_add(warmup_ahead_frames) {
-                    now_abs.saturating_add(warmup_ahead_frames)
-                } else {
-                    now_abs.saturating_add(lookahead_frames_normal)
-                };
-                if write >= need_until {
-                    std::thread::sleep(std::time::Duration::from_millis(3));
-                    continue;
-                }
-
-                let block_frames = if write <= now_abs.saturating_add(warmup_ahead_frames) {
-                    warmup_block_frames
-                } else {
-                    block_frames_normal
-                };
-
-                let t0 = (out_cursor as f64) / (sr.max(1) as f64);
-                let t1 = ((out_cursor.saturating_add(block_frames)) as f64) / (sr.max(1) as f64);
-
-                let stretch = if crate::rubberband::is_available() {
-                    StretchAlgorithm::RubberBand
-                } else {
-                    StretchAlgorithm::LinearResample
-                };
-                if debug {
-                    eprintln!("AudioEngine: pitch_stream stretch={stretch:?}");
-                }
-
-                let rendered = render_mixdown_interleaved(
-                    &tl_for_thread,
-                    MixdownOptions {
-                        sample_rate: sr,
-                        start_sec: t0,
-                        end_sec: Some(t1),
-                        stretch,
-                    },
-                );
-
-                let (_out_sr, _ch, _dur, pcm) = match rendered {
-                    Ok(v) => v,
-                    Err(_) => {
-                        // Avoid hot-looping on errors.
-                        std::thread::sleep(std::time::Duration::from_millis(30));
-                        continue;
-                    }
-                };
-
-                let frames_out = (pcm.len() / 2) as u64;
-                if frames_out == 0 {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    continue;
-                }
-
-                ring_for_thread.write_interleaved(out_cursor, pcm.as_slice());
-                out_cursor = out_cursor.saturating_add(frames_out);
             }
-        });
+            _ => {
+                thread::spawn(move || {
+                    // Default: prioritize smoothness.
+                    let warmup_block_frames = ((sr as u64) / 2).max(256); // ~0.5s
+                    let warmup_ahead_frames = ((sr as u64) / 2).max(256); // keep at least ~0.5s initially
+                    let block_frames_normal = (sr as u64).saturating_mul(2); // 2s blocks
+                    let lookahead_frames_normal = (sr as u64).saturating_mul(3); // keep ~3s ahead
+
+                    let mut out_cursor: u64 = pos.load(Ordering::Relaxed);
+
+                    loop {
+                        if epoch.load(Ordering::Relaxed) != my_epoch {
+                            break;
+                        }
+                        if !playing.load(Ordering::Relaxed) {
+                            std::thread::sleep(std::time::Duration::from_millis(8));
+                            continue;
+                        }
+
+                        let now_abs = pos.load(Ordering::Relaxed);
+                        let base = ring_for_thread.base_frame.load(Ordering::Acquire);
+                        let write = ring_for_thread.write_frame.load(Ordering::Acquire);
+
+                        // Reset on large jumps (seek / transport changes).
+                        if now_abs < base || now_abs > write.saturating_add(sr as u64) {
+                            out_cursor = now_abs;
+                            ring_for_thread.reset(now_abs);
+                            std::thread::sleep(std::time::Duration::from_millis(2));
+                            continue;
+                        }
+
+                        // Don't render behind the playhead.
+                        if out_cursor < now_abs {
+                            out_cursor = now_abs;
+                        }
+
+                        // Warm up quickly so playback can start without falling back.
+                        let need_until = if write <= now_abs.saturating_add(warmup_ahead_frames) {
+                            now_abs.saturating_add(warmup_ahead_frames)
+                        } else {
+                            now_abs.saturating_add(lookahead_frames_normal)
+                        };
+                        if write >= need_until {
+                            std::thread::sleep(std::time::Duration::from_millis(3));
+                            continue;
+                        }
+
+                        let block_frames = if write <= now_abs.saturating_add(warmup_ahead_frames) {
+                            warmup_block_frames
+                        } else {
+                            block_frames_normal
+                        };
+
+                        let t0 = (out_cursor as f64) / (sr.max(1) as f64);
+                        let t1 = ((out_cursor.saturating_add(block_frames)) as f64) / (sr.max(1) as f64);
+
+                        let stretch = if crate::rubberband::is_available() {
+                            StretchAlgorithm::RubberBand
+                        } else {
+                            StretchAlgorithm::LinearResample
+                        };
+                        if debug {
+                            eprintln!("AudioEngine: pitch_stream stretch={stretch:?}");
+                        }
+
+                        let rendered = render_mixdown_interleaved(
+                            &tl_for_thread,
+                            MixdownOptions {
+                                sample_rate: sr,
+                                start_sec: t0,
+                                end_sec: Some(t1),
+                                stretch,
+                                apply_pitch_edit: true,
+                            },
+                        );
+
+                        let (_out_sr, _ch, _dur, pcm) = match rendered {
+                            Ok(v) => v,
+                            Err(_) => {
+                                // Avoid hot-looping on errors.
+                                std::thread::sleep(std::time::Duration::from_millis(30));
+                                continue;
+                            }
+                        };
+
+                        let frames_out = (pcm.len() / 2) as u64;
+                        if frames_out == 0 {
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            continue;
+                        }
+
+                        ring_for_thread.write_interleaved(out_cursor, pcm.as_slice());
+                        out_cursor = out_cursor.saturating_add(frames_out);
+                    }
+                });
+            }
+        }
 
         pitch_stream = Some(ring);
     } else if debug {
@@ -685,6 +731,7 @@ pub(crate) fn build_snapshot(
         duration_frames,
         clips: clips_out,
         pitch_stream,
+        pitch_stream_algo,
     }
 }
 
@@ -726,5 +773,6 @@ pub(crate) fn build_snapshot_for_file(
             gain: 1.0,
         }],
         pitch_stream: None,
+        pitch_stream_algo: None,
     }
 }

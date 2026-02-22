@@ -1,6 +1,7 @@
 mod engine;
 mod io;
 mod mix;
+mod pitch_stream_onnx;
 mod ring;
 mod snapshot;
 mod types;

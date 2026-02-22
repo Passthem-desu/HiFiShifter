@@ -12,7 +12,7 @@ HifiShifter 是一个基于深度学习神经声码器（NSF-HiFiGAN）的图形
 - **工程管理**：保存/加载工程（`.hsp`），包含时间线与剪辑信息；支持“最近打开工程”、窗口标题显示工程名与未保存标记（`*`），关闭窗口时未保存会提示。
 - **撤销/重做（后端权威）**：在 Tauri/Rust 后端维护 Undo/Redo 栈，前端 `Ctrl+Z / Ctrl+Y` 直接调用后端撤销重做，避免“前端撤销后被后端状态覆盖”。
 - **下方参数面板（Pitch/Tension，独立视窗）**：底部参数编辑器拥有独立的 `缩放(pxPerBeat)` 与 `横向滚动(scrollLeft)`（不强制与时间线同步）；顶部提供时间标尺与 BPM 网格；背景显示“选中根轨道（根+子轨）混音输入”的波形预览，便于对齐编辑。
-- **根轨 `C`（是否合成）开关**：根轨道可一键开启/关闭合成输出；当 `C` 开启且编辑参数为 Pitch 时，后端会基于“根轨道（根+子轨）混音输入”（与参数面板背景波形一致）**后台生成/更新**该根轨的 `pitch_orig`（用于虚线原始曲线），计算完成后会通知前端自动刷新显示；当 `C` 关闭时 Pitch 面板仅显示波形并提示开启 `C`。
+- **根轨 `C`（是否合成）开关**：根轨道可一键开启/关闭合成输出；当 `C` 开启且编辑参数为 Pitch 时，后端会基于“根轨道（根+子轨）混音输入”（与参数面板背景波形一致）**后台生成/更新**该根轨的 `pitch_orig`（用于虚线原始曲线）。底部 Pitch 面板会进入 loading（可显示进度条）并一直持续到音高检测完成后自动结束；当 `C` 关闭时 Pitch 面板仅显示波形并提示开启 `C`。
 - **Pitch 曲线对齐时间线**：`pitch_orig` 生成会按剪辑的时间线长度/播放速率进行时间轴对齐（必要时会对音频做 time-stretch 后再跑分析），因此在做 Time Stretch（拉伸/缩短）后，曲线会随时间轴一起缩放并与波形/标尺保持同尺度。
 - **Pitch 编辑影响播放/合成/导出（默认 WORLD，可切换 ONNX）**：当 `C` 开启时，底部参数面板绘制的 `pitch_edit` 会在“播放原音（实时引擎）/ 合成并播放 / 导出 WAV”路径中真正作用到最终 mix（默认通过 WORLD vocoder 做变调；也支持切换为 NSF-HiFiGAN ONNX 推理，见下方说明）。
 - **Pitch 算法可切换（按根轨道）**：Pitch 面板可为当前根轨道切换分析算法（当前已接入 WORLD DLL；`none` 表示不生成）。
@@ -65,6 +65,11 @@ Windows 下可直接运行 `build_and_run.bat`，按提示选择：
 - （可选）`HIFISHIFTER_NSF_HIFIGAN_CONFIG=...\\config.json`（默认取模型目录内的 `config.json`）
 - 说明：ONNX Runtime 由 Rust 依赖在 **构建时自动下载并静态链接**，正常情况下无需额外准备 `onnxruntime.dll`。
   - 若处于离线环境，可设置 `ORT_SKIP_DOWNLOAD=1` 并改为使用系统已安装/自编译的 ONNX Runtime（需要自行处理链接配置）。
+  - CUDA（NVIDIA GPU，加速推理）：
+    - 默认 `HIFISHIFTER_ORT_EP=auto`：会优先尝试 CUDA，失败自动回退到 CPU。
+    - 强制 CUDA：`HIFISHIFTER_ORT_EP=cuda`
+    - 可选指定显卡：`HIFISHIFTER_ORT_CUDA_DEVICE_ID=0`
+    - 若 CUDA 依赖/DLL 不完整或驱动不匹配，`auto` 会回退 CPU；可设置 `HIFISHIFTER_DEBUG_COMMANDS=1` 查看选到的 EP。
 
 示例（PowerShell）：
 ```powershell
@@ -86,6 +91,10 @@ cargo tauri dev
 
 说明（Tauri 2.0 / Rust 后端，当前 MVP）：
 - **播放**：使用 Rust 侧的低延迟实时音频引擎（`cpal` 输出流回调中混音），播放启动不再依赖“整段离线渲染”。
+  - 当 Pitch Edit 算法切到 **NSF-HiFiGAN ONNX** 时，为了避免“先听到原音再突然变调”的跳变，播放会采用 A 模式：按下播放后可能会先短暂等待预缓冲；左下角状态栏会显示“渲染中...”提示，预缓冲完成后再开始推进播放头并发声。
+    - 可选调参（环境变量）：`HIFISHIFTER_ONNX_STREAM_PRIME_SEC`（默认 0.25）、`HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS`（默认 4000）。
+    - 如需禁用该等待（回退为“尽快开播 + 覆盖到的部分再替换”）：`HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START=0`。
+  - ONNX 实时变调会按 `pitch_orig/pitch_edit` 的发声区间做整段推理（unvoiced 原音直通），以减少固定时间窗分片导致的边界噪声；参数可通过下方开发文档中的环境变量调节。
 - **音频源格式**：实时播放侧会尝试通过 `symphonia` 解码常见音频格式；离线导出/mixdown 的格式支持范围可能与实时播放不同。
 - **波形/时长预览**：导入音频后，后端会提取时长与波形预览用于时间线显示。Tauri/Rust 模式下时间线波形优先使用“按需 peaks（min/max）+ 缓存”的波形绘制方式：缩放放大时会请求更多列数，从而获得更清晰细节；WAV 优先走 `hound`（支持 16/24/32-bit int + 32-bit float），其他格式走 `symphonia` 通用解码兜底。
 - **波形缓存（性能）**：后端会把每个音频文件的 base peaks 写入磁盘缓存（类似 REAPER 的 `.reapeaks` 思路），以减少重复计算；可在菜单 `视图` → `清除波形缓存` 主动清理。

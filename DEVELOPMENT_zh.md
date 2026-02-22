@@ -222,7 +222,7 @@ WORLD-vocoder 内部 F0 清理（缓解“咯痰感/气泡噪声”）：
 除了默认的 WORLD-vocoder 变调外，后端还支持一个 **NSF-HiFiGAN ONNX 推理** 的实验性实现：
 
 - 实现文件：`backend/src-tauri/src/nsf_hifigan_onnx.rs`
-- 运行库：`tract-onnx`（纯 Rust，无需额外 DLL）
+- 运行库：`ort` crate + ONNX Runtime（构建时下载并捆绑；可选 CUDA EP）
 - ONNX 模型接口对齐旧 Python demo：输入张量名 `mel` 与 `f0`
   - `mel`：shape `(1, num_mels, T)`，并在进入模型前做 `ln(max(mel, 1e-9))` 动态范围压缩
   - `f0`：shape `(1, T)`，单位 Hz（由 MIDI 转换：$f0 = 440\cdot 2^{(m-69)/12}$，0/无效视为 unvoiced）
@@ -256,11 +256,19 @@ WORLD-vocoder 内部 F0 清理（缓解“咯痰感/气泡噪声”）：
 当前限制（v1）：
 - 处理以 **mono** 作为输入/输出（对 stereo mix 会折叠为 mono 并写回所有声道），因此暂时会损失立体声像。
 - 实时播放（`play_original`）已接入（best-effort，低延迟优先）：
-  - `backend/src-tauri/src/audio_engine/snapshot.rs` 在检测到“Pitch Edit 启用且 WORLD vocoder DLL 可用”时，会启动一个后台 worker 以前向窗口调用 `mixdown` 渲染（该渲染内部已应用 `pitch_edit` 的 WORLD 变调），并把输出写入一个 `StreamRingStereo`（绝对时间线帧）。
+  - `backend/src-tauri/src/audio_engine/snapshot.rs` 在检测到“Pitch Edit 启用且后端可用（WORLD DLL / NSF-HiFiGAN ONNX）”时，会启动一个后台 worker 以前向窗口渲染并把输出写入一个 `StreamRingStereo`（绝对时间线帧）。
+    - WORLD：直接调用 `mixdown`（内部应用 pitch-edit）并写入 ring。
+    - ONNX：使用 `backend/src-tauri/src/audio_engine/pitch_stream_onnx.rs`，按发声段（VAD）整段推理（unvoiced 原音直通），避免固定时间窗分片的边界噪声。
   - 音频回调优先从该 ring buffer 读取；当刚开始播放/刚 seek 时，ring 可能尚未覆盖当前窗口：
-    - 为避免出现“先原声后变调”的听感，回调会在 **起始窗口未覆盖时输出静音并暂停推进 playhead**，直到 pitch-stream 覆盖后再开始出声。
-    - 在播放过程中若偶发出现覆盖缺口（例如 CPU 过载导致 streamer 落后），仍会沿用 best-effort 策略：先走实时混音，再用 pitch-stream 已覆盖的帧覆盖（保证不中断，但可能短暂听感不一致）。
-  - streamer 启动会先进行一个较短的 warmup 窗口渲染（~0.5s）以降低“等待 pitch-stream 首帧”的延迟，然后再切回更大的 block（~2s）并维持 ~3s lookahead。
+    - **默认（WORLD/大多数场景）**：回调永不阻塞，直接走实时混音并推进 playhead；当 ring 覆盖到的帧可用时，再用已覆盖部分覆盖输出（保证不卡死，但起始可能短暂听到“原声 → 变调”的过渡）。
+    - **ONNX（NSF-HiFiGAN）A 模式**：为避免“先原声后变调”的跳变，ONNX pitch-stream 默认启用 hard-start：起始窗口未覆盖时输出静音且不推进 playhead，直到预缓冲完成再开播。前端会监听 `playback_rendering_state` 并在**左下角状态栏**显示“渲染中...”提示。
+      - 关闭该等待（回退为默认 best-effort）：`HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START=0`
+      - 调参：`HIFISHIFTER_ONNX_STREAM_PRIME_SEC`（默认 0.25）、`HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS`（默认 4000）
+  - ONNX 发声段分割与推理调参（环境变量，实时播放路径）：
+    - `HIFISHIFTER_ONNX_VAD_PAD_MS`（默认 120）：把 voiced 区间两端扩展，尽量把气声/边缘纳入 voiced。
+    - `HIFISHIFTER_ONNX_VAD_CTX_SEC`（默认 1.5）：voiced 推理时额外渲染的上下文长度。
+    - `HIFISHIFTER_ONNX_VAD_XFADE_MS`（默认 40）：voiced/unvoiced 边界 crossfade 长度。
+    - `HIFISHIFTER_ONNX_VAD_MAX_SEC`（默认 60）：单次 ONNX 推理的安全上限（防止超长段导致峰值内存过高）。设置为 `0` 可关闭该上限（允许对超长 voiced 段一次性整段推理）。
 
 补充：参数曲线写入的输入清洗（用于定位前端输入异常导致的噪声）
 - `set_param_frames`（`backend/src-tauri/src/commands.rs`）在写入时会对 values 做轻量清洗：

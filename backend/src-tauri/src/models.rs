@@ -123,6 +123,12 @@ pub struct ParamFramesPayload {
     pub start_frame: u32,
     pub orig: Vec<f32>,
     pub edit: Vec<f32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_pending: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_progress: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
