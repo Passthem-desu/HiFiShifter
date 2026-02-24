@@ -55,10 +55,10 @@ export const TimeRuler: React.FC<{
                 {bars.map((m) => (
                     <div
                         key={m.beat}
-                        className="absolute top-0 bottom-0 text-[10px] text-gray-500 pt-1"
+                        className="absolute top-0 bottom-0 text-[10px] text-qt-text-muted pt-1"
                         style={{ left: m.beat * pxPerBeat }}
                     >
-                        <div className="pl-1 border-l border-gray-600 h-2">
+                        <div className="pl-1 border-l border-qt-border h-2">
                             {m.label}
                         </div>
                     </div>
@@ -77,7 +77,7 @@ export const TimeRuler: React.FC<{
 
                 {/* Playhead (content-coordinates; container is shifted) */}
                 <div
-                    className="absolute top-0 bottom-0 w-px bg-red-500 z-20"
+                    className="absolute top-0 bottom-0 w-px bg-qt-playhead z-20"
                     style={{ left: playheadBeat * pxPerBeat }}
                 />
                 <div
@@ -87,7 +87,7 @@ export const TimeRuler: React.FC<{
                         transform: "translateX(-6px)",
                     }}
                 >
-                    <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-red-500" />
+                    <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-qt-playhead" />
                 </div>
             </div>
         </Box>

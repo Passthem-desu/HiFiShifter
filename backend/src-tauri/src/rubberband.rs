@@ -39,7 +39,8 @@ type RubberbandDelete = unsafe extern "C" fn(state: RubberBandState);
 type RubberbandReset = unsafe extern "C" fn(state: RubberBandState);
 type RubberbandSetTimeRatio = unsafe extern "C" fn(state: RubberBandState, ratio: f64);
 type RubberbandSetPitchScale = unsafe extern "C" fn(state: RubberBandState, scale: f64);
-type RubberbandSetExpectedInputDuration = unsafe extern "C" fn(state: RubberBandState, samples: u32);
+type RubberbandSetExpectedInputDuration =
+    unsafe extern "C" fn(state: RubberBandState, samples: u32);
 type RubberbandSetMaxProcessSize = unsafe extern "C" fn(state: RubberBandState, samples: u32);
 type RubberbandStudy = unsafe extern "C" fn(
     state: RubberBandState,
@@ -54,11 +55,8 @@ type RubberbandProcess = unsafe extern "C" fn(
     final_: c_int,
 );
 type RubberbandAvailable = unsafe extern "C" fn(state: RubberBandState) -> c_int;
-type RubberbandRetrieve = unsafe extern "C" fn(
-    state: RubberBandState,
-    output: *const *mut f32,
-    samples: u32,
-) -> u32;
+type RubberbandRetrieve =
+    unsafe extern "C" fn(state: RubberBandState, output: *const *mut f32, samples: u32) -> u32;
 type RubberbandCalculateStretch = unsafe extern "C" fn(state: RubberBandState);
 
 struct RubberBandApi {
@@ -138,12 +136,15 @@ fn api() -> Result<&'static RubberBandApi, String> {
                 .map_err(|e| e.to_string())?;
             let rubberband_study: RubberbandStudy =
                 *lib.get(b"rubberband_study\0").map_err(|e| e.to_string())?;
-            let rubberband_process: RubberbandProcess =
-                *lib.get(b"rubberband_process\0").map_err(|e| e.to_string())?;
-            let rubberband_available: RubberbandAvailable =
-                *lib.get(b"rubberband_available\0").map_err(|e| e.to_string())?;
-            let rubberband_retrieve: RubberbandRetrieve =
-                *lib.get(b"rubberband_retrieve\0").map_err(|e| e.to_string())?;
+            let rubberband_process: RubberbandProcess = *lib
+                .get(b"rubberband_process\0")
+                .map_err(|e| e.to_string())?;
+            let rubberband_available: RubberbandAvailable = *lib
+                .get(b"rubberband_available\0")
+                .map_err(|e| e.to_string())?;
+            let rubberband_retrieve: RubberbandRetrieve = *lib
+                .get(b"rubberband_retrieve\0")
+                .map_err(|e| e.to_string())?;
             let rubberband_calculate_stretch: RubberbandCalculateStretch = *lib
                 .get(b"rubberband_calculate_stretch\0")
                 .map_err(|e| e.to_string())?;
@@ -201,7 +202,15 @@ impl RubberBandRealtimeStretcher {
             | opts::RubberBandOptionDetectorSoft
             | opts::RubberBandOptionPhaseLaminar;
 
-        let state = unsafe { (api.rubberband_new)(sample_rate.max(1), channels as u32, options, time_ratio, 1.0) };
+        let state = unsafe {
+            (api.rubberband_new)(
+                sample_rate.max(1),
+                channels as u32,
+                options,
+                time_ratio,
+                1.0,
+            )
+        };
         if state.is_null() {
             return Err("rubberband_new returned null".to_string());
         }
@@ -240,7 +249,11 @@ impl RubberBandRealtimeStretcher {
         Ok(())
     }
 
-    pub fn process_interleaved(&mut self, input_interleaved: &[f32], final_: bool) -> Result<(), String> {
+    pub fn process_interleaved(
+        &mut self,
+        input_interleaved: &[f32],
+        final_: bool,
+    ) -> Result<(), String> {
         if input_interleaved.is_empty() {
             return Ok(());
         }
@@ -270,7 +283,12 @@ impl RubberBandRealtimeStretcher {
             }
 
             unsafe {
-                (api.rubberband_process)(self.state, ptrs.as_ptr(), count as u32, if is_final { 1 } else { 0 });
+                (api.rubberband_process)(
+                    self.state,
+                    ptrs.as_ptr(),
+                    count as u32,
+                    if is_final { 1 } else { 0 },
+                );
             }
 
             i = end;
@@ -280,7 +298,11 @@ impl RubberBandRealtimeStretcher {
     }
 
     /// Retrieve up to `max_frames` frames, interleaved.
-    pub fn retrieve_interleaved_into(&mut self, out_interleaved: &mut Vec<f32>, max_frames: usize) -> Result<usize, String> {
+    pub fn retrieve_interleaved_into(
+        &mut self,
+        out_interleaved: &mut Vec<f32>,
+        max_frames: usize,
+    ) -> Result<usize, String> {
         let api = api()?;
         let avail = unsafe { (api.rubberband_available)(self.state) };
         if avail <= 0 {
@@ -296,7 +318,9 @@ impl RubberBandRealtimeStretcher {
             out_ptrs.push(self.out_ch[ch].as_mut_ptr());
         }
 
-        let got = unsafe { (api.rubberband_retrieve)(self.state, out_ptrs.as_ptr(), req as u32) as usize };
+        let got = unsafe {
+            (api.rubberband_retrieve)(self.state, out_ptrs.as_ptr(), req as u32) as usize
+        };
         if got == 0 {
             return Ok(0);
         }
@@ -398,10 +422,7 @@ pub fn try_time_stretch_interleaved_offline(
             let count = end - i;
             let final_ = if end >= in_frames { 1 } else { 0 };
 
-            let mut ptrs: Vec<*const f32> = Vec::with_capacity(channels);
-            for ch in 0..channels {
-                ptrs.push(ch_buf[ch].as_ptr().add(i));
-            }
+            let ptrs: Vec<*const f32> = ch_buf.iter().map(|b| b.as_ptr().add(i)).collect();
             (api.rubberband_study)(state, ptrs.as_ptr(), count as u32, final_);
             i = end;
         }
@@ -415,10 +436,7 @@ pub fn try_time_stretch_interleaved_offline(
             let count = end - i;
             let final_ = if end >= in_frames { 1 } else { 0 };
 
-            let mut ptrs: Vec<*const f32> = Vec::with_capacity(channels);
-            for ch in 0..channels {
-                ptrs.push(ch_buf[ch].as_ptr().add(i));
-            }
+            let ptrs: Vec<*const f32> = ch_buf.iter().map(|b| b.as_ptr().add(i)).collect();
             (api.rubberband_process)(state, ptrs.as_ptr(), count as u32, final_);
             i = end;
         }
@@ -436,17 +454,14 @@ pub fn try_time_stretch_interleaved_offline(
             }
             let req = (avail as usize).min(BLOCK);
 
-            let mut out_ptrs: Vec<*mut f32> = Vec::with_capacity(channels);
-            for ch in 0..channels {
-                out_ptrs.push(temp[ch].as_mut_ptr());
-            }
+            let out_ptrs: Vec<*mut f32> = temp.iter_mut().map(|t| t.as_mut_ptr()).collect();
 
             let got = (api.rubberband_retrieve)(state, out_ptrs.as_ptr(), req as u32) as usize;
             if got == 0 {
                 break;
             }
-            for ch in 0..channels {
-                out_ch[ch].extend_from_slice(&temp[ch][..got]);
+            for (out_buf, tmp) in out_ch.iter_mut().zip(temp.iter()) {
+                out_buf.extend_from_slice(&tmp[..got]);
             }
         }
 
@@ -454,7 +469,7 @@ pub fn try_time_stretch_interleaved_offline(
         (api.rubberband_delete)(state);
 
         let out_frames = out_ch
-            .get(0)
+            .first()
             .map(|v| v.len())
             .unwrap_or(0)
             .min(out_ch.get(1).map(|v| v.len()).unwrap_or(usize::MAX));
@@ -464,9 +479,9 @@ pub fn try_time_stretch_interleaved_offline(
 
         // Interleave.
         let mut out = vec![0.0f32; out_frames * channels];
-        for f in 0..out_frames {
-            for ch in 0..channels {
-                out[f * channels + ch] = out_ch[ch][f];
+        for (f, frame) in out.chunks_exact_mut(channels).enumerate() {
+            for (ch, v) in frame.iter_mut().enumerate() {
+                *v = out_ch[ch][f];
             }
         }
         Ok(out)

@@ -57,7 +57,7 @@ pub fn segment_from_cached(
     }
 
     let hop = peaks.hop.max(1) as i64;
-    let start_peak = (start_frame.div_euclid(hop)).max(0) as i64;
+    let start_peak = (start_frame.div_euclid(hop)).max(0);
     let end_peak = ((start_frame + frames + hop - 1).div_euclid(hop)).max(start_peak + 1);
 
     let len = peaks.min.len().min(peaks.max.len()) as i64;

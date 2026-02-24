@@ -69,11 +69,11 @@ export function ActionBar() {
         <Flex
             align="center"
             gap="3"
-            className="h-10 bg-qt-window border-b border-qt-border px-2 text-qt-text flex-nowrap overflow-x-auto overflow-y-hidden min-w-0 custom-scrollbar"
+            className="h-8 bg-qt-window border-b border-qt-border px-1 text-qt-text flex-nowrap overflow-x-auto overflow-y-hidden min-w-0 custom-scrollbar"
         >
             {/* Mode & Param Group */}
             <Flex align="center" gap="2" className="shrink-0">
-                <Text size="1" color="gray">
+                <Text size="1" className="text-qt-text-muted">
                     {t("tool_mode")}:
                 </Text>
                 <Select.Root
@@ -83,7 +83,9 @@ export function ActionBar() {
                         dispatch(setToolMode(v as typeof s.toolMode))
                     }
                 >
-                    <Select.Trigger style={{ backgroundColor: "#303030" }} />
+                    <Select.Trigger
+                        style={{ backgroundColor: "var(--qt-base)" }}
+                    />
                     <Select.Content>
                         <Select.Item value="select">{t("select")}</Select.Item>
                         <Select.Item value="draw">{t("draw")}</Select.Item>
@@ -92,7 +94,7 @@ export function ActionBar() {
             </Flex>
 
             <Flex align="center" gap="2" className="shrink-0">
-                <Text size="1" color="gray">
+                <Text size="1" className="text-qt-text-muted">
                     {t("edit_param")}:
                 </Text>
                 <Select.Root
@@ -102,7 +104,9 @@ export function ActionBar() {
                         dispatch(setEditParam(v as typeof s.editParam))
                     }
                 >
-                    <Select.Trigger style={{ backgroundColor: "#303030" }} />
+                    <Select.Trigger
+                        style={{ backgroundColor: "var(--qt-base)" }}
+                    />
                     <Select.Content>
                         <Select.Item value="pitch">{t("pitch")}</Select.Item>
                         <Select.Item value="tension">
@@ -117,8 +121,8 @@ export function ActionBar() {
 
             {/* BPM & Time */}
             <Flex align="center" gap="2" className="shrink-0">
-                <Text size="1" color="gray">
-                    BPM:
+                <Text size="1" className="text-qt-text-muted">
+                    {t("bpm")}:
                 </Text>
                 <TextField.Root
                     size="1"
@@ -145,7 +149,7 @@ export function ActionBar() {
                         backgroundColor: "var(--qt-base)",
                     }}
                 />
-                <Text size="1" color="gray">
+                <Text size="1" className="text-qt-text-muted">
                     {t("beats_per_bar")}:
                 </Text>
                 <Flex align="center" gap="1">
@@ -168,12 +172,12 @@ export function ActionBar() {
                             backgroundColor: "var(--qt-base)",
                         }}
                     />
-                    <Text size="1" color="gray">
+                    <Text size="1" className="text-qt-text-muted">
                         / 4
                     </Text>
                 </Flex>
 
-                <Text size="1" color="gray">
+                <Text size="1" className="text-qt-text-muted">
                     {t("grid")}:
                 </Text>
                 <Select.Root

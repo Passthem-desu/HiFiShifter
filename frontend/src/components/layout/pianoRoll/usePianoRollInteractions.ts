@@ -8,13 +8,14 @@ import type {
 } from "react";
 import { useCallback } from "react";
 
-import { webApi } from "../../../services/webviewApi";
+import type { ParamFramesPayload } from "../../../types/api";
+import type { AppDispatch } from "../../../app/store";
+import { paramsApi } from "../../../services/api";
 import {
     seekPlayhead,
     setPlayheadBeat,
 } from "../../../features/session/sessionSlice";
 import { clamp, MAX_PX_PER_BEAT, MIN_PX_PER_BEAT } from "../timeline";
-
 import type {
     ParamName,
     ParamViewSegment,
@@ -24,7 +25,7 @@ import type {
 } from "./types";
 
 export function usePianoRollInteractions(args: {
-    dispatch: any;
+    dispatch: AppDispatch;
     rootTrackId: string | null;
     editParam: ParamName;
     pitchEnabled: boolean;
@@ -211,7 +212,7 @@ export function usePianoRollInteractions(args: {
             if (e.key.toLowerCase() === "c") {
                 e.preventDefault();
                 void (async () => {
-                    const res = await webApi.getParamFrames(
+                    const res = await paramsApi.getParamFrames(
                         rootTrackId,
                         editParam,
                         startFrame,
@@ -219,13 +220,11 @@ export function usePianoRollInteractions(args: {
                         1,
                     );
                     if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
                     clipboardRef.current = {
                         param: editParam,
-                        framePeriodMs:
-                            Number((res as any).frame_period_ms ?? fp) || fp,
-                        values: ((res as any).edit ?? []).map(
-                            (v: any) => Number(v) || 0,
-                        ),
+                        framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
+                        values: (payload.edit ?? []).map((v) => Number(v) || 0),
                     };
                 })();
                 return;
@@ -237,7 +236,7 @@ export function usePianoRollInteractions(args: {
                 if (!clip) return;
                 if (clip.param !== editParam) return;
                 void (async () => {
-                    await webApi.setParamFrames(
+                    await paramsApi.setParamFrames(
                         rootTrackId,
                         editParam,
                         startFrame,

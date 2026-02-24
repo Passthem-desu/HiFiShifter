@@ -29,8 +29,9 @@ import {
     splitClipRemote,
     glueClipsRemote,
     createClipsRemote,
-    type ClipTemplate,
 } from "../../features/session/sessionSlice";
+
+import type { ClipTemplate } from "../../features/session/sessionTypes";
 
 import {
     BackgroundGrid,
@@ -211,13 +212,31 @@ export const TimelinePanel: React.FC = () => {
                     console.log("[dnd] attaching tauri drag-drop listener");
                 }
 
-                unlisten = await win.onDragDropEvent((event: any) => {
-                    if (disposed) return;
-                    const payload = event?.payload ?? event ?? {};
-                    const type = String(payload?.type ?? payload?.event ?? "");
-                    const paths: string[] = Array.isArray(payload?.paths)
-                        ? payload.paths
-                        : [];
+                type TauriDragDropPayload = {
+                    type?: string;
+                    event?: string;
+                    paths?: string[];
+                    position?: { x?: number; y?: number };
+                    pos?: { x?: number; y?: number };
+                    cursorPosition?: { x?: number; y?: number };
+                };
+
+                type TauriDragDropEvent =
+                    | { payload?: TauriDragDropPayload }
+                    | TauriDragDropPayload;
+
+                unlisten = await win.onDragDropEvent(
+                    (event: TauriDragDropEvent) => {
+                        if (disposed) return;
+                        const payload = (
+                            "payload" in event ? event.payload : event
+                        ) as TauriDragDropPayload | undefined;
+                        const type = String(
+                            payload?.type ?? payload?.event ?? "",
+                        );
+                        const paths: string[] = Array.isArray(payload?.paths)
+                            ? payload.paths
+                            : [];
 
                     if (debugDnd) {
                         console.log("[dnd] tauri event", {
@@ -964,7 +983,7 @@ export const TimelinePanel: React.FC = () => {
                     dispatch(checkpointHistory());
                     void dispatch(createClipsRemote({ templates }))
                         .unwrap()
-                        .then((payload: any) => {
+.then((payload) => {
                             const created: string[] =
                                 payload?.createdClipIds ?? [];
                             if (!Array.isArray(created) || created.length === 0)
@@ -1026,7 +1045,7 @@ export const TimelinePanel: React.FC = () => {
         const alt = Boolean(
             altPressedHint ||
             e.altKey ||
-            (e.nativeEvent as any)?.getModifierState?.("Alt"),
+            e.nativeEvent.getModifierState?.("Alt"),
         );
         if (alt) {
             startSlipDrag(e, clipId);
@@ -1170,12 +1189,14 @@ export const TimelinePanel: React.FC = () => {
                 const before = new Set(
                     sessionRef.current.tracks.map((t) => t.id),
                 );
-                const res: any = await dispatch(
+                const res = (await dispatch(
                     addTrackRemote({ name: undefined, parentTrackId: null }),
-                ).unwrap();
-                const nextTracks: any[] = Array.isArray(res?.tracks)
-                    ? res.tracks
-                    : [];
+                ).unwrap()) as {
+                    tracks?: Array<{ id?: string }>;
+                    selected_track_id?: string | null;
+                };
+
+                const nextTracks = Array.isArray(res?.tracks) ? res.tracks : [];
                 const created = nextTracks.find(
                     (t) => !before.has(String(t?.id)),
                 );
@@ -1237,7 +1258,7 @@ export const TimelinePanel: React.FC = () => {
                             }
                         }
 
-                        const payload: any = await dispatch(
+                        const payload = await dispatch(
                             createClipsRemote({ templates }),
                         ).unwrap();
                         const created: string[] = payload?.createdClipIds ?? [];
@@ -1670,7 +1691,10 @@ export const TimelinePanel: React.FC = () => {
                         const hasDomFile = Boolean(
                             dt?.files && dt.files.length > 0,
                         );
-                        const isTauri = Boolean((window as any).__TAURI__);
+                        const isTauri = Boolean(
+                            (window as unknown as { __TAURI__?: unknown })
+                                .__TAURI__,
+                        );
 
                         // In Tauri, DataTransfer may not expose files/types during external drag.
                         // Always preventDefault so the DOM drop event can fire.
@@ -1727,7 +1751,10 @@ export const TimelinePanel: React.FC = () => {
                         const hasDomFile = Boolean(
                             dt?.files && dt.files.length > 0,
                         );
-                        const isTauri = Boolean((window as any).__TAURI__);
+                        const isTauri = Boolean(
+                            (window as unknown as { __TAURI__?: unknown })
+                                .__TAURI__,
+                        );
                         if (
                             !isTauri &&
                             !hasFileDrag(dt) &&
@@ -1899,9 +1926,8 @@ export const TimelinePanel: React.FC = () => {
                                             multiSelectedClipIds.length > 0
                                                 ? multiSelectedSet.has(clip.id)
                                                 : s.selectedClipId === clip.id;
-                                        const waveform = s.clipWaveforms[
-                                            clip.id
-                                        ] as any;
+                                        const waveform =
+                                            s.clipWaveforms[clip.id];
                                         return (
                                             <ClipItem
                                                 key={clip.id}
@@ -2011,7 +2037,7 @@ export const TimelinePanel: React.FC = () => {
                                 }}
                             >
                                 <div className="h-full w-full rounded-sm border border-dashed border-qt-highlight bg-[color-mix(in_oklab,var(--qt-highlight)_20%,transparent)]">
-                                    <div className="px-2 pt-1 text-[10px] text-gray-200 truncate">
+                                    <div className="px-2 pt-1 text-[10px] text-qt-text truncate">
                                         {dropPreview.fileName}
                                     </div>
                                 </div>
@@ -2020,7 +2046,7 @@ export const TimelinePanel: React.FC = () => {
 
                         {/* Playhead Cursor */}
                         <div
-                            className="absolute top-0 bottom-0 w-px bg-red-500 z-20 cursor-ew-resize"
+                            className="absolute top-0 bottom-0 w-px bg-qt-playhead z-20 cursor-ew-resize"
                             style={{ left: s.playheadBeat * pxPerBeat }}
                             onPointerDown={(e) => {
                                 if (e.button !== 0) return;

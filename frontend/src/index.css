@@ -11,27 +11,51 @@
 .qt-theme.dark {
   --qt-window: #353535;
   --qt-base: #303030;
+  --qt-panel: #2b2b2b;
+  --qt-surface: #3a3a3a;
   --qt-text: #cccccc;
+  --qt-text-muted: #a1a1aa;
   --qt-highlight: #2a82da;
+  --qt-playhead: #e04444;
   --qt-button: #303030;
   --qt-button-hover: #404040;
   --qt-border: #444444;
+  --qt-danger-bg: #7f1d1d;
+  --qt-danger-text: #fecaca;
+  --qt-danger-border: #ef4444;
+  --qt-warning-bg: #78350f;
+  --qt-warning-text: #fde68a;
+  --qt-warning-border: #f59e0b;
   --qt-graph-bg: #1e1e1e;
   --qt-graph-grid-strong: #2d2d2d;
   --qt-graph-grid-weak: #252525;
+  --qt-scrollbar-thumb: #555555;
+  --qt-scrollbar-thumb-hover: #777777;
 }
 
 .qt-theme.light {
   --qt-window: var(--gray-2);
   --qt-base: var(--gray-3);
+  --qt-panel: var(--gray-1);
+  --qt-surface: var(--gray-4);
   --qt-text: var(--gray-12);
+  --qt-text-muted: var(--gray-11);
   --qt-highlight: var(--accent-9);
+  --qt-playhead: var(--red-9);
   --qt-button: var(--gray-3);
   --qt-button-hover: var(--gray-4);
   --qt-border: var(--gray-6);
+  --qt-danger-bg: var(--red-3);
+  --qt-danger-text: var(--red-11);
+  --qt-danger-border: var(--red-9);
+  --qt-warning-bg: var(--amber-3);
+  --qt-warning-text: var(--amber-11);
+  --qt-warning-border: var(--amber-9);
   --qt-graph-bg: var(--gray-2);
   --qt-graph-grid-strong: var(--gray-6);
   --qt-graph-grid-weak: var(--gray-5);
+  --qt-scrollbar-thumb: var(--gray-8);
+  --qt-scrollbar-thumb-hover: var(--gray-9);
 }
 
 :root {
@@ -87,24 +111,16 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #555555;
+  background: var(--qt-scrollbar-thumb, #555555);
   border-radius: 2px;
   border: 2px solid var(--qt-base, #303030);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #777777;
+  background: var(--qt-scrollbar-thumb-hover, #777777);
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, #71717a 0%, #52525b 100%);
-}
-
-::-webkit-scrollbar-corner {
-  background: #1a1a1d;
+  width: 8px;
+  height: 8px;
 }

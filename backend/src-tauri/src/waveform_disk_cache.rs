@@ -109,16 +109,15 @@ pub fn save_peaks(path: &Path, peaks: &CachedPeaks) -> Result<(), String> {
     ensure_dir(parent)?;
 
     let len = peaks.min.len().min(peaks.max.len());
-    let len_u32: u32 = len
-        .try_into()
-        .map_err(|_| "peaks too large".to_string())?;
+    let len_u32: u32 = len.try_into().map_err(|_| "peaks too large".to_string())?;
 
     let mut tmp = path.to_path_buf();
     tmp.set_extension("tmp");
 
     let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
     f.write_all(MAGIC).map_err(|e| e.to_string())?;
-    f.write_all(&VERSION.to_le_bytes()).map_err(|e| e.to_string())?;
+    f.write_all(&VERSION.to_le_bytes())
+        .map_err(|e| e.to_string())?;
     f.write_all(&peaks.sample_rate.to_le_bytes())
         .map_err(|e| e.to_string())?;
     f.write_all(&(peaks.hop as u32).to_le_bytes())

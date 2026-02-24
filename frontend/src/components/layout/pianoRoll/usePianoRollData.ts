@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-import { webApi } from "../../../services/webviewApi";
+import type { ParamFramesPayload } from "../../../types/api";
+import { paramsApi, waveformApi } from "../../../services/api";
 import { clamp } from "../timeline";
 
 import type { ParamName, ParamViewSegment, WavePeaksSegment } from "./types";
@@ -11,7 +12,6 @@ import {
     rootMixPeaksCache,
     rootMixPeaksInflight,
 } from "./peaksCache";
-
 const paramFramePeriodCache = new Map<string, number>();
 
 export function usePianoRollData(args: {
@@ -88,13 +88,19 @@ export function usePianoRollData(args: {
             if (!rootTrackId) return;
             try {
                 const mod = await import("@tauri-apps/api/event");
-                unlistenUpdated = await mod.listen(
+
+                type PitchOrigUpdatedPayload = { rootTrackId?: string };
+                type PitchOrigAnalysisStartedPayload = { rootTrackId?: string };
+                type PitchOrigAnalysisProgressPayload = {
+                    rootTrackId?: string;
+                    progress?: number;
+                };
+
+                unlistenUpdated = await mod.listen<PitchOrigUpdatedPayload>(
                     "pitch_orig_updated",
-                    (event: any) => {
+                    (event) => {
                         if (disposed) return;
-                        const payload = (event?.payload ?? {}) as {
-                            rootTrackId?: string;
-                        };
+                        const payload = event.payload ?? {};
                         if (
                             payload?.rootTrackId &&
                             payload.rootTrackId !== rootTrackId
@@ -107,13 +113,11 @@ export function usePianoRollData(args: {
                     },
                 );
 
-                unlistenStarted = await mod.listen(
+                unlistenStarted = await mod.listen<PitchOrigAnalysisStartedPayload>(
                     "pitch_orig_analysis_started",
-                    (event: any) => {
+                    (event) => {
                         if (disposed) return;
-                        const payload = (event?.payload ?? {}) as {
-                            rootTrackId?: string;
-                        };
+                        const payload = event.payload ?? {};
                         if (
                             payload?.rootTrackId &&
                             payload.rootTrackId !== rootTrackId
@@ -124,14 +128,11 @@ export function usePianoRollData(args: {
                     },
                 );
 
-                unlistenProgress = await mod.listen(
+                unlistenProgress = await mod.listen<PitchOrigAnalysisProgressPayload>(
                     "pitch_orig_analysis_progress",
-                    (event: any) => {
+                    (event) => {
                         if (disposed) return;
-                        const payload = (event?.payload ?? {}) as {
-                            rootTrackId?: string;
-                            progress?: number;
-                        };
+                        const payload = event.payload ?? {};
                         if (
                             payload?.rootTrackId &&
                             payload.rootTrackId !== rootTrackId
@@ -343,7 +344,7 @@ export function usePianoRollData(args: {
         const waveP = shouldFetchWave
             ? (rootMixPeaksInflight.get(waveKey) ??
               (async () => {
-                  const res = await webApi.getTrackMixWaveformPeaksSegment(
+                  const res = await waveformApi.getTrackMixWaveformPeaksSegment(
                       waveTrackId,
                       startSecQ,
                       durSecQ,
@@ -373,8 +374,8 @@ export function usePianoRollData(args: {
                         }
                         return;
                     }
-                    const min = (res.min ?? []).map((v: any) => Number(v) || 0);
-                    const max = (res.max ?? []).map((v: any) => Number(v) || 0);
+                    const min = (res.min ?? []).map((v) => Number(v) || 0);
+                    const max = (res.max ?? []).map((v) => Number(v) || 0);
                     lruSet(
                         rootMixPeaksCache,
                         waveKey,
@@ -408,7 +409,7 @@ export function usePianoRollData(args: {
             void (async () => {
                 beginLoading();
                 try {
-                    const res = await webApi.getParamFrames(
+                    const res = await paramsApi.getParamFrames(
                         trackId,
                         editParam,
                         startFrame,
@@ -435,30 +436,23 @@ export function usePianoRollData(args: {
                         return;
                     }
 
+                    const payload = res as ParamFramesPayload;
+
                     if (editParam === "pitch") {
-                        const pending = Boolean(
-                            (res as any).analysis_pending ?? false,
-                        );
+                        const pending = Boolean(payload.analysis_pending ?? false);
                         setPitchAnalysisPending(pending);
                         if (!pending) setPitchAnalysisProgress(null);
                     }
-                    const fpRes =
-                        Number((res as any).frame_period_ms ?? fpMs) || fpMs;
+                    const fpRes = Number(payload.frame_period_ms ?? fpMs) || fpMs;
                     paramFramePeriodCache.set(fpKey, fpRes);
 
                     setParamView({
                         key: paramKey,
                         framePeriodMs: fpRes,
-                        startFrame:
-                            Number((res as any).start_frame ?? startFrame) ||
-                            startFrame,
+                        startFrame: Number(payload.start_frame ?? startFrame) || startFrame,
                         stride,
-                        orig: ((res as any).orig ?? []).map(
-                            (v: any) => Number(v) || 0,
-                        ),
-                        edit: ((res as any).edit ?? []).map(
-                            (v: any) => Number(v) || 0,
-                        ),
+                        orig: (payload.orig ?? []).map((v) => Number(v) || 0),
+                        edit: (payload.edit ?? []).map((v) => Number(v) || 0),
                     });
                     invalidate();
 
@@ -504,28 +498,28 @@ export function usePianoRollData(args: {
         try {
             beginLoading();
             const [waveRes, paramRes] = await Promise.all([
-                webApi.getTrackMixWaveformPeaksSegment(
+                waveformApi.getTrackMixWaveformPeaksSegment(
                     waveTrackId,
                     startSecQ,
                     durSecQ,
                     covCols,
                 ),
                 shouldFetchParam
-                    ? webApi.getParamFrames(
+                    ? paramsApi.getParamFrames(
                           trackId,
                           editParam,
                           startFrame,
                           frameCount,
                           stride,
                       )
-                    : Promise.resolve(null as any),
+                    : Promise.resolve(null),
             ]);
 
             if (fetchReqIdRef.current !== reqId) return;
 
             if (waveRes?.ok) {
-                const min = (waveRes.min ?? []).map((v: any) => Number(v) || 0);
-                const max = (waveRes.max ?? []).map((v: any) => Number(v) || 0);
+                const min = (waveRes.min ?? []).map((v) => Number(v) || 0);
+                const max = (waveRes.max ?? []).map((v) => Number(v) || 0);
                 lruSet(
                     rootMixPeaksCache,
                     waveKey,
@@ -550,29 +544,22 @@ export function usePianoRollData(args: {
             }
 
             if (shouldFetchParam && paramRes?.ok) {
+                const payload = paramRes as ParamFramesPayload;
+
                 if (editParam === "pitch") {
-                    const pending = Boolean(
-                        (paramRes as any).analysis_pending ?? false,
-                    );
+                    const pending = Boolean(payload.analysis_pending ?? false);
                     setPitchAnalysisPending(pending);
                     if (!pending) setPitchAnalysisProgress(null);
                 }
-                const fpRes =
-                    Number((paramRes as any).frame_period_ms ?? fpMs) || fpMs;
+                const fpRes = Number(payload.frame_period_ms ?? fpMs) || fpMs;
                 paramFramePeriodCache.set(fpKey, fpRes);
                 setParamView({
                     key: paramKey,
                     framePeriodMs: fpRes,
-                    startFrame:
-                        Number((paramRes as any).start_frame ?? startFrame) ||
-                        startFrame,
+                    startFrame: Number(payload.start_frame ?? startFrame) || startFrame,
                     stride,
-                    orig: ((paramRes as any).orig ?? []).map(
-                        (v: any) => Number(v) || 0,
-                    ),
-                    edit: ((paramRes as any).edit ?? []).map(
-                        (v: any) => Number(v) || 0,
-                    ),
+                    orig: (payload.orig ?? []).map((v) => Number(v) || 0),
+                    edit: (payload.edit ?? []).map((v) => Number(v) || 0),
                 });
 
                 if (Math.abs(fpRes - fpMs) > 1e-3) {

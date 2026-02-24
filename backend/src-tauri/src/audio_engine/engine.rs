@@ -12,10 +12,15 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crate::state::TimelineState;
 use crate::time_stretch::{time_stretch_interleaved, StretchAlgorithm};
 
-use super::io::get_resampled_stereo;
 use super::mix::{render_callback_f32, render_callback_i16, render_callback_u16};
-use super::snapshot::{build_snapshot, build_snapshot_for_file, schedule_stretch_jobs, source_bounds_frames};
-use super::types::{AudioEngineStateSnapshot, EngineCommand, EngineSnapshot, ResampledStereo, StretchJob, StretchKey};
+use super::resource_manager::ResourceManager;
+use super::snapshot::{
+    build_snapshot, build_snapshot_for_file, schedule_stretch_jobs, source_bounds_frames,
+};
+use super::types::{
+    AudioEngineStateSnapshot, EngineCommand, EngineSnapshot, ResampledStereo, StretchJob,
+    StretchKey,
+};
 
 use crate::pitch_editing::PitchEditAlgorithm;
 
@@ -61,7 +66,8 @@ impl AudioEngine {
 
         // Shared snapshot store for both the audio callback and command-side status queries.
         // This is updated by the engine worker thread.
-        let snapshot: Arc<ArcSwap<EngineSnapshot>> = Arc::new(ArcSwap::from_pointee(EngineSnapshot::empty(44100)));
+        let snapshot: Arc<ArcSwap<EngineSnapshot>> =
+            Arc::new(ArcSwap::from_pointee(EngineSnapshot::empty(44100)));
 
         let is_playing_thread = is_playing.clone();
         let target_thread = target.clone();
@@ -105,10 +111,9 @@ impl AudioEngine {
             snapshot_for_thread.store(Arc::new(EngineSnapshot::empty(sr)));
             let snapshot_for_cb = snapshot_for_thread.clone();
 
-            // cache: (path, out_rate) -> stereo pcm
-            let cache: Arc<Mutex<HashMap<(PathBuf, u32), ResampledStereo>>> =
-                Arc::new(Mutex::new(HashMap::new()));
-            let cache_for_cmd = cache.clone();
+            // Async resource manager for decoded/resampled PCM.
+            let resources = ResourceManager::new(tx_for_worker.clone());
+            let cache_for_cmd = resources.cache().clone();
 
             // Time-stretch cache: computed, pitch-preserving loop buffers.
             let stretch_cache: Arc<Mutex<HashMap<StretchKey, ResampledStereo>>> =
@@ -126,94 +131,95 @@ impl AudioEngine {
             // Worker that computes RubberBand stretches off the command thread.
             // Keep it small to avoid CPU spikes.
             {
-                let cache = cache.clone();
+                let cache = cache_for_cmd.clone();
                 let stretch_cache = stretch_cache_for_worker.clone();
                 let inflight = stretch_inflight_for_worker.clone();
                 let tx_ready = tx_for_worker.clone();
-                thread::spawn(move || loop {
-                    let job = match stretch_rx.recv() {
-                        Ok(j) => j,
-                        Err(_) => break,
-                    };
-
-                    // If RubberBand isn't available, drop the job.
-                    if !crate::rubberband::is_available() {
-                        if let Ok(mut s) = inflight.lock() {
-                            s.remove(&job.key);
-                        }
-                        continue;
-                    }
-
-                    let src = match get_resampled_stereo(&job.key.path, job.key.out_rate, &cache) {
-                        Some(v) => v,
-                        None => {
+                thread::spawn(move || {
+                    while let Ok(job) = stretch_rx.recv() {
+                        // If RubberBand isn't available, drop the job.
+                        if !crate::rubberband::is_available() {
                             if let Ok(mut s) = inflight.lock() {
                                 s.remove(&job.key);
                             }
                             continue;
                         }
-                    };
 
-                    let (src_start, src_end) = source_bounds_frames(
-                        job.trim_start_beat,
-                        job.trim_end_beat,
-                        job.bpm,
-                        src.frames,
-                        job.key.out_rate,
-                    );
-                    let loop_in_frames = src_end.saturating_sub(src_start) as usize;
-                    if loop_in_frames < 2 {
-                        if let Ok(mut s) = inflight.lock() {
-                            s.remove(&job.key);
+                        let src = match super::io::get_resampled_stereo_cached(
+                            &job.key.path,
+                            job.key.out_rate,
+                            &cache,
+                        ) {
+                            Some(v) => v,
+                            None => {
+                                if let Ok(mut s) = inflight.lock() {
+                                    s.remove(&job.key);
+                                }
+                                continue;
+                            }
+                        };
+
+                        let (src_start, src_end) = source_bounds_frames(
+                            job.trim_start_beat,
+                            job.trim_end_beat,
+                            job.bpm,
+                            src.frames,
+                            job.key.out_rate,
+                        );
+                        let loop_in_frames = src_end.saturating_sub(src_start) as usize;
+                        if loop_in_frames < 2 {
+                            if let Ok(mut s) = inflight.lock() {
+                                s.remove(&job.key);
+                            }
+                            continue;
                         }
-                        continue;
-                    }
 
-                    let playback_rate = if job.playback_rate.is_finite() && job.playback_rate > 0.0 {
-                        job.playback_rate
-                    } else {
-                        1.0
-                    };
-                    if (playback_rate - 1.0).abs() <= 1e-6 {
-                        if let Ok(mut s) = inflight.lock() {
-                            s.remove(&job.key);
+                        let playback_rate =
+                            if job.playback_rate.is_finite() && job.playback_rate > 0.0 {
+                                job.playback_rate
+                            } else {
+                                1.0
+                            };
+                        if (playback_rate - 1.0).abs() <= 1e-6 {
+                            if let Ok(mut s) = inflight.lock() {
+                                s.remove(&job.key);
+                            }
+                            continue;
                         }
-                        continue;
-                    }
 
-                    let i0 = (src_start as usize) * 2;
-                    let i1 = (src_end as usize) * 2;
-                    if i1 > src.pcm.len() || i0 + 4 > i1 {
-                        if let Ok(mut s) = inflight.lock() {
-                            s.remove(&job.key);
+                        let i0 = (src_start as usize) * 2;
+                        let i1 = (src_end as usize) * 2;
+                        if i1 > src.pcm.len() || i0 + 4 > i1 {
+                            if let Ok(mut s) = inflight.lock() {
+                                s.remove(&job.key);
+                            }
+                            continue;
                         }
-                        continue;
+
+                        let loop_pcm: Vec<f32> = src.pcm[i0..i1].to_vec();
+                        let loop_out_frames =
+                            ((loop_in_frames as f64) / playback_rate).round().max(2.0) as usize;
+
+                        let stretched = time_stretch_interleaved(
+                            &loop_pcm,
+                            2,
+                            job.key.out_rate,
+                            loop_out_frames,
+                            StretchAlgorithm::RubberBand,
+                        );
+
+                        let stretched_src = ResampledStereo {
+                            sample_rate: job.key.out_rate,
+                            frames: loop_out_frames,
+                            pcm: Arc::new(stretched),
+                        };
+
+                        if let Ok(mut m) = stretch_cache.lock() {
+                            m.insert(job.key.clone(), stretched_src);
+                        }
+
+                        let _ = tx_ready.send(EngineCommand::StretchReady { key: job.key });
                     }
-
-                    let loop_pcm: Vec<f32> = src.pcm[i0..i1].to_vec();
-                    let loop_out_frames = ((loop_in_frames as f64) / playback_rate)
-                        .round()
-                        .max(2.0) as usize;
-
-                    let stretched = time_stretch_interleaved(
-                        &loop_pcm,
-                        2,
-                        job.key.out_rate,
-                        loop_out_frames,
-                        StretchAlgorithm::RubberBand,
-                    );
-
-                    let stretched_src = ResampledStereo {
-                        sample_rate: job.key.out_rate,
-                        frames: loop_out_frames,
-                        pcm: Arc::new(stretched),
-                    };
-
-                    if let Ok(mut m) = stretch_cache.lock() {
-                        m.insert(job.key.clone(), stretched_src);
-                    }
-
-                    let _ = tx_ready.send(EngineCommand::StretchReady { key: job.key });
                 });
             }
 
@@ -327,6 +333,7 @@ impl AudioEngine {
             }
 
             let mut last_timeline: Option<TimelineState> = None;
+            let mut last_play_file: Option<(PathBuf, f64, String)> = None;
             let stretch_stream_epoch: Arc<AtomicU64> = Arc::new(AtomicU64::new(1));
 
             loop {
@@ -336,6 +343,7 @@ impl AudioEngine {
                         is_playing_thread.store(false, Ordering::Relaxed);
                         *target_thread.lock().unwrap_or_else(|e| e.into_inner()) = None;
                         base_frames_thread.store(0, Ordering::Relaxed);
+                        last_play_file = None;
                     }
                     Ok(EngineCommand::SeekSec { sec }) => {
                         let sec = sec.max(0.0);
@@ -350,9 +358,38 @@ impl AudioEngine {
                     }
                     Ok(EngineCommand::UpdateTimeline(tl)) => {
                         last_timeline = Some(tl.clone());
+                        last_play_file = None;
 
                         // Cancel any existing streamers; the new snapshot will respawn them.
                         stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
+
+                        // Pre-request decoded PCM for all audible clips (async, non-blocking).
+                        {
+                            let track_gain = super::snapshot::compute_track_gains(&tl.tracks);
+                            let mut audible_tracks: std::collections::HashSet<String> =
+                                std::collections::HashSet::new();
+                            for (tid, (_gain, muted, solo_ok)) in &track_gain {
+                                if !*muted && *solo_ok {
+                                    audible_tracks.insert(tid.clone());
+                                }
+                            }
+                            for clip in &tl.clips {
+                                if clip.muted {
+                                    continue;
+                                }
+                                if !audible_tracks.contains(&clip.track_id) {
+                                    continue;
+                                }
+                                let Some(source_path) = clip.source_path.as_ref() else {
+                                    continue;
+                                };
+                                let path = Path::new(source_path);
+                                if !super::io::is_audio_path(path) {
+                                    continue;
+                                }
+                                let _ = resources.get_or_request(path, sr);
+                            }
+                        }
 
                         // Schedule stretch work in background (do not block snapshot build).
                         if crate::rubberband::is_available() {
@@ -397,11 +434,43 @@ impl AudioEngine {
                             snapshot_for_thread.store(Arc::new(snap));
                         }
                     }
+                    Ok(EngineCommand::AudioReady { .. }) => {
+                        // A decoded/resampled buffer became available.
+                        // Rebuild the snapshot so missing clips can be attached.
+                        if let Some(tl) = last_timeline.as_ref() {
+                            let snap = build_snapshot(
+                                tl,
+                                sr,
+                                &cache_for_cmd,
+                                &stretch_cache_for_cmd,
+                                &position_frames_thread,
+                                &is_playing_thread,
+                                &stretch_stream_epoch,
+                            );
+                            duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
+                            snapshot_for_thread.store(Arc::new(snap));
+                        } else if let Some((path, offset_sec, _target)) = last_play_file.as_ref() {
+                            let snap = build_snapshot_for_file(
+                                path.as_path(),
+                                sr,
+                                *offset_sec,
+                                &cache_for_cmd,
+                            );
+                            duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
+                            snapshot_for_thread.store(Arc::new(snap));
+                        }
+                    }
                     Ok(EngineCommand::PlayFile {
                         path,
                         offset_sec,
                         target,
                     }) => {
+                        last_timeline = None;
+                        last_play_file = Some((path.clone(), offset_sec, target.clone()));
+
+                        // Request decode asynchronously (snapshot building is cache-only).
+                        let _ = resources.get_or_request(path.as_path(), sr);
+
                         // Snapshot will be replaced; stop any timeline streamers.
                         stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
                         // Represent the file as a single clip in a snapshot.
@@ -435,6 +504,7 @@ impl AudioEngine {
         self.sample_rate.load(Ordering::Relaxed).max(1)
     }
 
+    #[allow(dead_code)]
     pub fn position_frames(&self) -> u64 {
         self.position_frames.load(Ordering::Relaxed)
     }
@@ -458,6 +528,7 @@ impl AudioEngine {
         true
     }
 
+    #[allow(dead_code)]
     pub fn shutdown(&self) {
         let _ = self.tx.send(EngineCommand::Shutdown);
     }
@@ -500,7 +571,11 @@ impl AudioEngine {
         let dur = self.duration_frames.load(Ordering::Relaxed);
         AudioEngineStateSnapshot {
             is_playing: self.is_playing(),
-            target: self.target.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            target: self
+                .target
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
             base_sec: base as f64 / sr as f64,
             position_sec: pos as f64 / sr as f64,
             duration_sec: dur as f64 / sr as f64,

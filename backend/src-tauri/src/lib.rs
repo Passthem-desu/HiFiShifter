@@ -3,24 +3,41 @@ mod audio_utils;
 mod commands;
 mod mixdown;
 mod models;
-mod pitch_editing;
 mod pitch_analysis;
+mod pitch_clip;
+mod pitch_editing;
+
+#[cfg(feature = "onnx")]
 mod nsf_hifigan_onnx;
+#[cfg(not(feature = "onnx"))]
+mod nsf_hifigan_onnx_stub;
+#[cfg(not(feature = "onnx"))]
+use nsf_hifigan_onnx_stub as nsf_hifigan_onnx;
+
 mod project;
 mod rubberband;
 mod state;
 mod time_stretch;
+mod waveform;
+mod waveform_disk_cache;
 mod world;
 mod world_lock;
 mod world_vocoder;
-mod waveform;
-mod waveform_disk_cache;
 
-use tauri::Manager;
 use std::path::PathBuf;
+use tauri::Manager;
 
 pub fn nsf_hifigan_onnx_probe() -> Result<String, String> {
-    nsf_hifigan_onnx::probe_load()
+    // Probe ONNX model availability.
+    #[cfg(feature = "onnx")]
+    {
+        nsf_hifigan_onnx::probe_load();
+        Ok("ok".to_string())
+    }
+    #[cfg(not(feature = "onnx"))]
+    {
+        Err("onnx feature disabled".to_string())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -158,7 +175,8 @@ pub fn run() {
                         match commands::save_project_to_path_inner(state.inner(), window, path) {
                             Ok(_) => {
                                 {
-                                    let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+                                    let mut p =
+                                        state.project.lock().unwrap_or_else(|e| e.into_inner());
                                     p.allow_close = true;
                                 }
                                 let _ = window.close();
@@ -194,17 +212,14 @@ pub fn run() {
             commands::get_timeline_state,
             commands::set_transport,
             commands::close_window,
-
             commands::undo_timeline,
             commands::redo_timeline,
-
             commands::get_project_meta,
             commands::new_project,
             commands::open_project_dialog,
             commands::open_project,
             commands::save_project,
             commands::save_project_as,
-
             commands::open_audio_dialog,
             commands::pick_output_path,
             commands::get_waveform_peaks_segment,
@@ -213,7 +228,6 @@ pub fn run() {
             commands::clear_waveform_cache,
             commands::import_audio_item,
             commands::import_audio_bytes,
-
             commands::add_track,
             commands::remove_track,
             commands::move_track,
@@ -221,11 +235,9 @@ pub fn run() {
             commands::select_track,
             commands::set_project_length,
             commands::get_track_summary,
-
             commands::get_param_frames,
             commands::set_param_frames,
             commands::restore_param_frames,
-
             commands::add_clip,
             commands::remove_clip,
             commands::move_clip,
@@ -233,14 +245,12 @@ pub fn run() {
             commands::split_clip,
             commands::glue_clips,
             commands::select_clip,
-
             commands::load_default_model,
             commands::load_model,
             commands::set_pitch_shift,
             commands::process_audio,
             commands::synthesize,
             commands::save_synthesized,
-
             commands::play_original,
             commands::play_synthesized,
             commands::stop_audio,

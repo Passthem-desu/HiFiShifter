@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Flex, Box, Text, IconButton, Slider } from "@radix-ui/themes";
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
-import type { TrackInfo } from "../../../features/session/sessionSlice";
+import type { TrackInfo } from "../../../features/session/sessionTypes";
+import type { MessageKey } from "../../../i18n/messages";
 
 export const TrackList: React.FC<{
-    t: (key: any) => string;
+    t: (key: MessageKey) => string;
     tracks: TrackInfo[];
     selectedTrackId: string | null;
     rowHeight: number;
@@ -216,9 +217,7 @@ export const TrackList: React.FC<{
                     const muted = Boolean(track.muted);
                     const solo = Boolean(track.solo);
                     const isRoot = (track.parentId ?? null) == null;
-                    const composeEnabled = Boolean(
-                        (track as any).composeEnabled,
-                    );
+                    const composeEnabled = Boolean(track.composeEnabled);
                     const backendVolume = Math.max(
                         0,
                         Math.min(1, Number(track.volume ?? 0.9)),
@@ -443,7 +442,7 @@ export const TrackList: React.FC<{
                                         <Text
                                             size="2"
                                             weight="medium"
-                                            className={`text-gray-200 truncate pr-2 ${depth > 0 ? "opacity-90" : ""}`}
+                                            className={`text-qt-text truncate pr-2 ${depth > 0 ? "opacity-90" : ""}`}
                                         >
                                             {track.name}
                                         </Text>
@@ -468,8 +467,8 @@ export const TrackList: React.FC<{
                                     <Flex gap="2" align="center">
                                         {isRoot ? (
                                             <button
-                                                className={`w-6 h-5 rounded text-[10px] border transition-all ${composeEnabled ? "bg-qt-highlight text-white border-transparent" : "bg-qt-button text-gray-300 border-transparent hover:border-qt-highlight hover:bg-qt-button-hover"}`}
-                                                title="Compose"
+                                                className={`w-6 h-5 rounded text-[10px] border transition-all ${composeEnabled ? "bg-qt-highlight text-white border-transparent" : "bg-qt-button text-qt-text border-transparent hover:border-qt-highlight hover:bg-qt-button-hover"}`}
+                                                title={t("compose")}
                                                 onPointerDown={(e) =>
                                                     e.stopPropagation()
                                                 }
@@ -485,7 +484,7 @@ export const TrackList: React.FC<{
                                             </button>
                                         ) : null}
                                         <button
-                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${muted ? "bg-red-900 text-red-200 border-red-500" : "bg-qt-button text-gray-300 border-transparent hover:border-red-500 hover:bg-red-900 hover:text-red-200"}`}
+                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${muted ? "bg-qt-danger-bg text-qt-danger-text border-qt-danger-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-danger-border hover:bg-qt-danger-bg hover:text-qt-danger-text"}`}
                                             onPointerDown={(e) =>
                                                 e.stopPropagation()
                                             }
@@ -497,7 +496,7 @@ export const TrackList: React.FC<{
                                             M
                                         </button>
                                         <button
-                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${solo ? "bg-yellow-900 text-yellow-200 border-yellow-500" : "bg-qt-button text-gray-300 border-transparent hover:border-yellow-500 hover:bg-yellow-900 hover:text-yellow-200"}`}
+                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${solo ? "bg-qt-warning-bg text-qt-warning-text border-qt-warning-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-warning-border hover:bg-qt-warning-bg hover:text-qt-warning-text"}`}
                                             onPointerDown={(e) =>
                                                 e.stopPropagation()
                                             }
@@ -553,7 +552,7 @@ export const TrackList: React.FC<{
                 <Flex
                     align="center"
                     justify="center"
-                    className="h-8 border-b border-qt-border border-dashed text-gray-500 hover:text-gray-300 hover:bg-qt-button-hover cursor-pointer transition-colors"
+                    className="h-8 border-b border-qt-border border-dashed text-qt-text-muted hover:text-qt-text hover:bg-qt-button-hover cursor-pointer transition-colors"
                     onClick={onAddTrack}
                 >
                     <PlusIcon className="mr-1" />{" "}

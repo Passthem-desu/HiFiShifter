@@ -1,26 +1,19 @@
+#[allow(dead_code)]
 pub(crate) fn beat_to_sec(beat: f64, bpm: f64) -> f64 {
-    let bpm = if bpm.is_finite() && bpm > 0.0 { bpm } else { 120.0 };
+    let bpm = if bpm.is_finite() && bpm > 0.0 {
+        bpm
+    } else {
+        120.0
+    };
     beat * 60.0 / bpm
 }
 
 pub(crate) fn clamp01(x: f32) -> f32 {
-    if x < 0.0 {
-        0.0
-    } else if x > 1.0 {
-        1.0
-    } else {
-        x
-    }
+    x.clamp(0.0, 1.0)
 }
 
 pub(crate) fn clamp11(x: f32) -> f32 {
-    if x < -1.0 {
-        -1.0
-    } else if x > 1.0 {
-        1.0
-    } else {
-        x
-    }
+    x.clamp(-1.0, 1.0)
 }
 
 pub(crate) fn quantize_i64(x: f64, scale: f64) -> i64 {

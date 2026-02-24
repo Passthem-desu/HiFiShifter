@@ -1,8 +1,8 @@
 import React from "react";
-import type { ClipInfo } from "../../../../features/session/sessionSlice";
+import type { ClipInfo } from "../../../../features/session/sessionTypes";
 import { CLIP_HEADER_HEIGHT } from "../constants";
 import { gainToDb } from "../math";
-
+import { useI18n } from "../../../../i18n/I18nProvider";
 export const ClipHeader: React.FC<{
     clip: ClipInfo;
     ensureSelected: (clipId: string) => void;
@@ -24,6 +24,8 @@ export const ClipHeader: React.FC<{
     isInMultiSelectedSet,
     multiSelectedCount,
 }) => {
+    const { t } = useI18n();
+
     return (
         <div
             className="absolute left-1 right-1 flex items-center gap-1 z-50 select-none"
@@ -33,7 +35,7 @@ export const ClipHeader: React.FC<{
             }}
         >
             <button
-                className={`w-5 h-4 rounded text-[10px] border transition-all ${clip.muted ? "bg-red-900 text-red-200 border-red-500" : "bg-qt-button text-gray-300 border-transparent hover:border-red-500 hover:bg-red-900 hover:text-red-200"}`}
+                className={`w-5 h-4 rounded text-[10px] border transition-all ${clip.muted ? "bg-qt-danger-bg text-qt-danger-text border-qt-danger-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-danger-border hover:bg-qt-danger-bg hover:text-qt-danger-text"}`}
                 onPointerDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -44,7 +46,7 @@ export const ClipHeader: React.FC<{
                     const next = !Boolean(clip.muted);
                     toggleClipMuted(clip.id, next);
                 }}
-                title={clip.muted ? "Unmute" : "Mute"}
+                title={clip.muted ? t("clip_unmute") : t("clip_mute")}
             >
                 M
             </button>

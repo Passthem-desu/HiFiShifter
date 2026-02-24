@@ -145,15 +145,12 @@ pub(crate) fn decode_audio_f32_interleaved(path: &Path) -> Result<(u32, usize, V
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| e.to_string())?;
 
-    let sample_rate = track.codec_params.sample_rate.ok_or_else(|| {
-        "missing sample_rate in codec params".to_string()
-    })?;
-
-    let channels = track
+    let sample_rate = track
         .codec_params
-        .channels
-        .map(|c| c.count())
-        .unwrap_or(1);
+        .sample_rate
+        .ok_or_else(|| "missing sample_rate in codec params".to_string())?;
+
+    let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(1);
 
     let mut out: Vec<f32> = Vec::new();
 
@@ -202,32 +199,17 @@ pub(crate) fn decode_audio_f32_interleaved(path: &Path) -> Result<(u32, usize, V
     Ok((sample_rate, channels, out))
 }
 
-pub(crate) fn get_resampled_stereo(
-    path: &Path,
-    out_rate: u32,
-    cache: &Arc<Mutex<HashMap<(PathBuf, u32), ResampledStereo>>>,
-) -> Option<ResampledStereo> {
+pub(crate) fn decode_resampled_stereo(path: &Path, out_rate: u32) -> Option<ResampledStereo> {
     if !path.exists() {
         return None;
-    }
-
-    let key = (path.to_path_buf(), out_rate);
-    if let Ok(map) = cache.lock() {
-        if let Some(v) = map.get(&key) {
-            return Some(v.clone());
-        }
     }
 
     let (in_rate, in_channels, pcm) = match decode_audio_f32_interleaved(path) {
         Ok(v) => v,
         Err(e) => {
-            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
-                .ok()
-                .as_deref()
-                == Some("1")
-            {
+            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                 eprintln!(
-                    "AudioEngine: decode failed: path={} err={}",
+                    "AudioEngine: decode failed: path={} err={} ",
                     path.display(),
                     e
                 );
@@ -257,11 +239,48 @@ pub(crate) fn get_resampled_stereo(
     };
 
     let frames = stereo.len() / 2;
-    let v = ResampledStereo {
+    Some(ResampledStereo {
         sample_rate: out_rate,
         frames,
         pcm: Arc::new(stereo),
-    };
+    })
+}
+
+pub(crate) fn get_resampled_stereo_cached(
+    path: &Path,
+    out_rate: u32,
+    cache: &Arc<Mutex<HashMap<(PathBuf, u32), ResampledStereo>>>,
+) -> Option<ResampledStereo> {
+    if !path.exists() {
+        return None;
+    }
+    let key = (path.to_path_buf(), out_rate);
+    if let Ok(map) = cache.lock() {
+        if let Some(v) = map.get(&key) {
+            return Some(v.clone());
+        }
+    }
+    None
+}
+
+#[allow(dead_code)]
+pub(crate) fn get_resampled_stereo(
+    path: &Path,
+    out_rate: u32,
+    cache: &Arc<Mutex<HashMap<(PathBuf, u32), ResampledStereo>>>,
+) -> Option<ResampledStereo> {
+    if !path.exists() {
+        return None;
+    }
+
+    let key = (path.to_path_buf(), out_rate);
+    if let Ok(map) = cache.lock() {
+        if let Some(v) = map.get(&key) {
+            return Some(v.clone());
+        }
+    }
+
+    let v = decode_resampled_stereo(path, out_rate)?;
 
     if let Ok(mut map) = cache.lock() {
         map.insert(key, v.clone());

@@ -1,10 +1,14 @@
+import type { WaveformPeaksSegmentPayload } from "../../../types/api";
+
 export type CachedPeaks = { min: number[]; max: number[]; t: number };
 
 export const ROOT_MIX_CACHE_LIMIT = 64;
 
 export const rootMixPeaksCache = new Map<string, CachedPeaks>();
-export const rootMixPeaksInflight = new Map<string, Promise<any>>();
-
+export const rootMixPeaksInflight = new Map<
+    string,
+    Promise<WaveformPeaksSegmentPayload>
+>();
 export function lruGet<K, V>(m: Map<K, V>, k: K): V | null {
     const v = m.get(k);
     if (v === undefined) return null;

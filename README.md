@@ -63,13 +63,18 @@ Windows 下可直接运行 `build_and_run.bat`，按提示选择：
   - `HIFISHIFTER_NSF_HIFIGAN_ONNX=...\\pc_nsf_hifigan.onnx`
   - 或 `HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR=...\\pc_nsf_hifigan_44.1k_hop512_128bin_2025.02`
 - （可选）`HIFISHIFTER_NSF_HIFIGAN_CONFIG=...\\config.json`（默认取模型目录内的 `config.json`）
-- 说明：ONNX Runtime 由 Rust 依赖在 **构建时自动下载并静态链接**，正常情况下无需额外准备 `onnxruntime.dll`。
-  - 若处于离线环境，可设置 `ORT_SKIP_DOWNLOAD=1` 并改为使用系统已安装/自编译的 ONNX Runtime（需要自行处理链接配置）。
-  - CUDA（NVIDIA GPU，加速推理）：
-    - 默认 `HIFISHIFTER_ORT_EP=auto`：会优先尝试 CUDA，失败自动回退到 CPU。
-    - 强制 CUDA：`HIFISHIFTER_ORT_EP=cuda`
-    - 可选指定显卡：`HIFISHIFTER_ORT_CUDA_DEVICE_ID=0`
-    - 若 CUDA 依赖/DLL 不完整或驱动不匹配，`auto` 会回退 CPU；可设置 `HIFISHIFTER_DEBUG_COMMANDS=1` 查看选到的 EP。
+- **编译开关（Tauri/Rust）**：ONNX Runtime 依赖现在默认不编译进后端，需要启用 feature：
+  - `cargo tauri dev --features onnx`
+  - 或 `cargo build --features onnx`
+
+Pitch Edit 作用方式（v1/v2 灰度切换）：
+- 默认：`v2`（逐 clip 变调后再按 fade 混回，避免在整段 mixdown 上做一次全局变调导致的边界伪影）
+- 回退到旧实现（整段 mixdown 变调）：
+  - `HIFISHIFTER_PITCH_EDIT_APPLY=v1`
+  - 或 `HIFISHIFTER_PER_CLIP_PITCH_EDIT=0`
+- 强制使用 v2：
+  - `HIFISHIFTER_PITCH_EDIT_APPLY=v2`
+  - 或 `HIFISHIFTER_PER_CLIP_PITCH_EDIT=1`
 
 示例（PowerShell）：
 ```powershell
@@ -91,8 +96,8 @@ cargo tauri dev
 
 说明（Tauri 2.0 / Rust 后端，当前 MVP）：
 - **播放**：使用 Rust 侧的低延迟实时音频引擎（`cpal` 输出流回调中混音），播放启动不再依赖“整段离线渲染”。
-  - 当 Pitch Edit 算法切到 **NSF-HiFiGAN ONNX** 时，为了避免“先听到原音再突然变调”的跳变，播放会采用 A 模式：按下播放后可能会先短暂等待预缓冲；左下角状态栏会显示“渲染中...”提示，预缓冲完成后再开始推进播放头并发声。
-    - 可选调参（环境变量）：`HIFISHIFTER_ONNX_STREAM_PRIME_SEC`（默认 0.25）、`HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS`（默认 4000）。
+  - 为避免时间线变更时卡顿，音频解码/重采样会在后台异步准备；在首次加载某段音频的极短时间内，该剪辑可能会先输出静音，占位完成后自动恢复。
+- 当 Pitch Edit 算法切到 **NSF-HiFiGAN ONNX** 时，为了避免“先听到原音再突然变调”的跳变，播放会采用 A 模式：按下播放后可能会先短暂等待预缓冲；左下角状态栏会显示“渲染中...”提示    - 可选调参（环境变量）：`HIFISHIFTER_ONNX_STREAM_PRIME_SEC`（默认 0.25）、`HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS`（默认 4000）。
     - 如需禁用该等待（回退为“尽快开播 + 覆盖到的部分再替换”）：`HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START=0`。
   - ONNX 实时变调会按 `pitch_orig/pitch_edit` 的发声区间做整段推理（unvoiced 原音直通），以减少固定时间窗分片导致的边界噪声；参数可通过下方开发文档中的环境变量调节。
 - **音频源格式**：实时播放侧会尝试通过 `symphonia` 解码常见音频格式；离线导出/mixdown 的格式支持范围可能与实时播放不同。

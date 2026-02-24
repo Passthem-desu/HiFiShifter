@@ -4,6 +4,8 @@ HiFiShifter 是一个基于深度学习神经声码器（NSF-HiFiGAN）的图形
 
 ## 0. 快速开发启动
 
+> 使用手册（面向最终用户）：`USER_MANUAL_zh.md`（当新增/修改用户可见功能时，请同步更新）
+
 - **Python**：建议 Python 3.10+
 - **安装依赖**：
 
@@ -49,10 +51,11 @@ cargo tauri dev --config tauri.conf.dist-dev.json
 - 该模式会在启动前执行一次 `npm --prefix ../frontend run build`，然后用静态资源运行（无 HMR）。
 - 适合做交互/性能调试与还原 release 行为；若要频繁改 UI，仍建议用默认 dev server。
 
-- **前端与后端的调用桥**：前端统一通过 `frontend/src/services/webviewApi.ts` 调用后端。
-  - 在 pywebview 模式下走 `window.pywebview.api.*`（位置参数）。
-  - 在 Tauri 2 模式下走 `window.__TAURI__.core.invoke`（named args），并在该文件内做“位置参数 → named args”的映射。
-  - **注意命名规则**：前端这里使用 camelCase keys（如 `audioPath` / `trackId` / `startBeat` / `playheadBeat`），后端对应的 `#[tauri::command]` 需要启用 `rename_all = "camelCase"`（否则会出现“命令似乎没触发/无反应”的反序列化失败）。
+- **前端与后端的调用桥**：前端统一通过服务层调用后端，核心约定是“调用收口 + 统一错误处理 + 分组 API”。
+  - **门面层（兼容旧接口）**：`frontend/src/services/webviewApi.ts` 仅作为门面，保留历史导出的 `webApi.*` 方法，内部转调分组 API。
+  - **统一调用封装**：`frontend/src/services/invoke.ts` 负责在 **pywebview（位置参数）** 与 **Tauri 2（named args）** 之间做兼容映射，并统一包装错误（`BackendInvokeError`）。
+  - **分组 API（推荐新代码直接使用）**：`frontend/src/services/api/*`（例如 `coreApi / projectApi / timelineApi / waveformApi / paramsApi`），每个模块只关心自己的命令与类型。
+  - **注意命名规则**：Tauri 侧使用 camelCase keys（如 `audioPath` / `trackId` / `startBeat` / `playheadBeat`），后端对应的 `#[tauri::command]` 需要启用 `rename_all = "camelCase"`（否则会出现“命令似乎没触发/无反应”的反序列化失败）。
 
 #### 工程（Project）与撤销重做（Undo/Redo）的权威归属
 
@@ -63,10 +66,29 @@ cargo tauri dev --config tauri.conf.dist-dev.json
 - **未保存退出提示**：后端在窗口 `CloseRequested` 事件里检测 `dirty`，弹窗询问保存/不保存/取消；选择保存会执行保存逻辑后关闭窗口。
 
 相关代码：
-- 后端命令与工程 IO：`backend/src-tauri/src/commands.rs`
+- 后端命令门面（Tauri commands 入口）：`backend/src-tauri/src/commands.rs`
+- 后端命令实现（按领域拆分）：`backend/src-tauri/src/commands/`
+  - 工程/IO：`backend/src-tauri/src/commands/project.rs`
+  - Undo/Redo/transport 等核心：`backend/src-tauri/src/commands/core.rs`
+  - 关闭窗口拦截相关（内部 helper）：`backend/src-tauri/src/commands.rs`（`save_project_to_path_inner` re-export）
 - 关闭窗口拦截：`backend/src-tauri/src/lib.rs`
 - 前端桥接：`frontend/src/services/webviewApi.ts`
-- 前端状态与快捷键/菜单：`frontend/src/features/session/sessionSlice.ts`、`frontend/src/App.tsx`、`frontend/src/components/layout/MenuBar.tsx`
+  - 前端状态与快捷键/菜单：`frontend/src/features/session/sessionSlice.ts`、`frontend/src/App.tsx`、`frontend/src/components/layout/MenuBar.tsx`
+  - **类型与实现分离**：UI 组件不要从 `frontend/src/features/session/sessionSlice.ts` 引入类型（该文件很大且耦合重）。
+    - 统一从 `frontend/src/features/session/sessionTypes.ts` 引入 `ClipInfo` / `TrackInfo` / `ClipTemplate` 等类型。
+  - **thunk 模块化（重要）**：为控制 `sessionSlice.ts` 体积与耦合，异步 thunk 按领域拆分到 `frontend/src/features/session/thunks/*`：
+    - `thunks/timelineThunks.ts`：轨道/剪辑结构编辑（add/move/remove/split/glue/select 等）
+    - `thunks/transportThunks.ts`：transport / playback（fetchTimeline/seek/set bpm/play/stop/sync playback state）
+    - `thunks/projectThunks.ts`：工程与撤销（new/open/save/undo/redo）
+    - `thunks/runtimeThunks.ts`：运行时信息与缓存（refreshRuntime/clearWaveformCache）
+    - `thunks/modelThunks.ts`：模型加载（loadModel/loadDefaultModel）
+    - `thunks/audioThunks.ts`：音频处理与导出（process/synthesize/export/pickOutput/applyPitchShift）
+    - `thunks/importThunks.ts`：导入音频（dialog/path/drag-drop File、指定位置与必要时自动建轨）
+    - `thunks/trackThunks.ts`：轨道属性与辅助操作（setTrackState/removeSelectedClip）
+    - 约定：`sessionSlice.ts` 负责 state/reducers/extraReducers 的组装，并且继续 **re-export** 这些 thunk（保持调用方 API 不变）；但 slice 内部 `extraReducers` 需要用到的 thunk 仍需显式 `import`。
+    - 约定（循环依赖防护）：`thunks/*` **不要从** `sessionSlice.ts` **import slice action creators**（例如 `setAudioPath`），否则容易形成 `sessionSlice -> thunks -> sessionSlice` 的循环依赖。需要 dispatch 同 slice action 时，优先：
+      - 用字符串 action type（例如 `dispatch({ type: "session/setAudioPath", payload })`），或
+      - 抽一个轻量的 `sessionActions.ts`（只放 action creators / type 常量，不引入 thunks）。
 
 #### Rust 后端音频链路（当前 tauri2 分支）
 
@@ -75,10 +97,11 @@ cargo tauri dev --config tauri.conf.dist-dev.json
   - timeline 变更（导入、移动剪辑、推子/静音/独奏等）会在 commands 内同步推送到引擎（`update_timeline(...)`），让播放中状态即时生效。
   - 解码侧使用 `symphonia`（实时播放的格式支持范围取决于 Cargo features）。
   - **模块拆分（便于替换算法/定位崩溃）**：
-    - `audio_engine/engine.rs`：CPAL 输出流 + 命令循环 + stretch worker 编排（对外暴露 `AudioEngine`）。
-    - `audio_engine/snapshot.rs`：从 `TimelineState` 构建 `EngineSnapshot`（含 pitch-stream 预渲染与 stretch-stream worker）。
+    - `audio_engine/engine.rs`：CPAL 输出流 + 命令循环 + worker 编排（对外暴露 `AudioEngine`）。
+    - `audio_engine/snapshot.rs`：从 `TimelineState` 构建 `EngineSnapshot`（含 pitch-stream 预渲染与 stretch-stream worker）。**注意：snapshot 构建只读缓存，不做同步解码**（避免阻塞 UI/命令线程）。
     - `audio_engine/mix.rs`：音频回调混音（优先读 ring buffer，缺口回退实时混音）。
-    - `audio_engine/io.rs`：解码 / 重采样 / PCM cache。
+    - `audio_engine/io.rs`：解码 / 重采样 / PCM 相关工具函数（不再建议在 snapshot 构建路径里做阻塞解码）。
+    - `audio_engine/resource_manager.rs`：音频 PCM 资源管理（cache + inflight 去重 + 后台解码/重采样队列），并在资源就绪后发送 `EngineCommand::AudioReady` 触发一次 snapshot rebuild。
     - `audio_engine/ring.rs`：无锁 `StreamRingStereo`。
     - `audio_engine/types.rs`：引擎内部数据结构与命令枚举。
   - **稳定性/崩溃排查提示**：
@@ -178,7 +201,7 @@ WORLD-vocoder 内部 F0 清理（缓解“咯痰感/气泡噪声”）：
 - 播放头同步注意：时间标尺是 React 渲染，但底部图表是 Canvas 渲染；当 `playheadBeat` 因“点击定位/播放推进”发生变化时，需要显式触发一次 `invalidate()`，否则会出现“标尺在动但底下光标不动/延迟很大”。
 - Pitch 轴为 C2 → C8 的“钢琴窗”形式，叠加半音横线与 C 音名标注；张力等线性参数则显示数值刻度。
 
-相关后端命令（均在 `backend/src-tauri/src/commands.rs`，并以 `rename_all = "camelCase"` 暴露给前端）：
+相关后端命令（对外入口在 `backend/src-tauri/src/commands.rs`，实现位于 `backend/src-tauri/src/commands/params.rs`，并以 `rename_all = "camelCase"` 暴露给前端）：
 - `get_param_frames(rootTrackId, param, startFrame, frameCount, stride)`
   - 返回 `orig/edit` 两条曲线片段（对应“虚线原始曲线 / 实线编辑曲线”）。
   - 对于 `pitch`：当用户尚未编辑时，后端会让 `edit` 默认继承 `orig`，保证 UI 主实线显示“识别音高线”。
@@ -233,10 +256,25 @@ WORLD-vocoder 内部 F0 清理（缓解“咯痰感/气泡噪声”）：
 - 方式 B（调试/强制覆盖，默认不启用）：
 
 - `HIFISHIFTER_PITCH_EDIT_ALGO=nsf_hifigan_onnx`
-- 模型路径（二选一）：
-  - `HIFISHIFTER_NSF_HIFIGAN_ONNX=...\\pc_nsf_hifigan.onnx`
-  - 或 `HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR=...\\pc_nsf_hifigan_44.1k_hop512_128bin_2025.02`
-- （可选）`HIFISHIFTER_NSF_HIFIGAN_CONFIG=...\\config.json`
+- `HIFISHIFTER_NSF_HIFIGAN_ONNX=...\\pc_nsf_hifigan.onnx`
+- `HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR=...\\pc_nsf_hifigan_44.1k_hop512_128bin_2025.02`
+- `HIFISHIFTER_NSF_HIFIGAN_CONFIG=...\\config.json`（默认取模型目录内的 `config.json`）
+
+#### Pitch Edit 作用方式（v1/v2）
+
+当前 Pitch Edit 有两套作用方式：
+- **v1（MixdownV1）**：对整段 mixdown buffer 做一次变调（旧实现，边界处更容易有伪影）。
+- **v2（PerClipV2）**：对每个 clip 的“可听段”先单独做变调，再按 clip 的 fade/gain 混回到总线（新实现）。
+
+灰度开关（优先级从高到低）：
+- `HIFISHIFTER_PER_CLIP_PITCH_EDIT=1|0`
+  - `1`：强制 v2
+  - `0`：强制 v1
+- `HIFISHIFTER_PITCH_EDIT_APPLY=v2|v1`
+
+说明：
+- v2 依赖 per-clip 的 `WORLD f0 -> MIDI` 缓存（见 `backend/src-tauri/src/pitch_clip.rs`），key 中包含 `frame_period_ms`、BPM、文件签名与剪辑关键参数，避免错配。
+- v1/v2 在混音链路中互斥：当 v2 生效时，不会再额外执行 v1 的整段变调，避免双重变调。
 
 实现要点：
 
@@ -271,14 +309,17 @@ WORLD-vocoder 内部 F0 清理（缓解“咯痰感/气泡噪声”）：
     - `HIFISHIFTER_ONNX_VAD_MAX_SEC`（默认 60）：单次 ONNX 推理的安全上限（防止超长段导致峰值内存过高）。设置为 `0` 可关闭该上限（允许对超长 voiced 段一次性整段推理）。
 
 补充：参数曲线写入的输入清洗（用于定位前端输入异常导致的噪声）
-- `set_param_frames`（`backend/src-tauri/src/commands.rs`）在写入时会对 values 做轻量清洗：
+- `set_param_frames`（对外入口：`backend/src-tauri/src/commands.rs`；实现：`backend/src-tauri/src/commands/params.rs`）在写入时会对 values 做轻量清洗：
   - `pitch`：非有限值（NaN/Inf）置 0；保留 0 作为“unset”；其余 clamp 到 MIDI [1, 127]。
   - `tension`：非有限值置 0；clamp 到 [-100, 100]。
 - 当 `HIFISHIFTER_DEBUG_COMMANDS=1` 时，会输出每次写入的统计（non_finite/clamped/min/max/max_delta），用于判断是否存在异常输入或急剧跳变。
 
 代码位置：
 - 状态与序列化：`backend/src-tauri/src/state.rs`
-- 命令层：`backend/src-tauri/src/commands.rs`
+- 命令层（门面/入口）：`backend/src-tauri/src/commands.rs`
+- 命令实现：
+  - 参数曲线：`backend/src-tauri/src/commands/params.rs`
+  - 波形相关：`backend/src-tauri/src/commands/waveform.rs`
 - 混音渲染复用：`backend/src-tauri/src/mixdown.rs`
 - 前端桥接：`frontend/src/services/webviewApi.ts`
 - 前端 UI：`frontend/src/components/layout/PianoRollPanel.tsx`
@@ -346,7 +387,7 @@ $$
 - 若用户在拖拽后通常会立刻点播放，可在 pointer-up 提交后优先把该 clip 放到队列头（降低体感延迟）。
 - 仍保留 **Elastique Soloist** 作为商业 SDK 的未来占位（当前仓库不包含其库/头文件）。
 - **离线渲染/导出**：`backend/src-tauri/src/mixdown.rs` 仍用于将 timeline 渲染成 WAV（导出或某些合成缓存路径会复用）。
-- **commands 对应关系**（均在 `backend/src-tauri/src/commands.rs`）：
+- **commands 对应关系**（对外入口：`backend/src-tauri/src/commands.rs`；实现主要在 `backend/src-tauri/src/commands/playback.rs`）：
   - `play_original`：将当前 timeline 推送给实时引擎并从 `playhead_beat` 对应位置开始播放。
   - `play_synthesized`：当需要时仍会生成合成音频文件，但播放由实时引擎负责（可从 offset 位置开始）。
   - `stop_audio` / `set_transport`：驱动实时引擎停止/跳转。
@@ -567,6 +608,25 @@ HiFiShifter/
 - **前端**：React + TypeScript + Tailwind CSS 负责 UI 渲染和交互
 - **通信**：通过 pywebview 的 JS API 进行前后端通信
 
+#### UI 视觉规范（Design Tokens / qt-theme）
+
+前端统一通过 `qt-theme` 的 CSS 变量 + Tailwind 语义类名映射来控制视觉样式，避免在组件里散落硬编码颜色（例如 `text-gray-500`、`border-zinc-700` 等）。
+
+- **推荐用法**：优先使用 Tailwind 语义类名（已映射到 `qt` token）
+  - 背景：`bg-qt-window` / `bg-qt-base` / `bg-qt-panel`
+  - 文本：`text-qt-text` / `text-qt-text-muted`
+  - 边框：`border-qt-border`
+  - 强调：`bg-qt-highlight`（hover/active）
+- **约定**：
+  - **布局 Bar**（`MenuBar` / `ActionBar` / `StatusBar`）使用 `bg-qt-window` + `border-qt-border`
+  - **布局 Bar 尺寸（方案 1）**：
+    - `MenuBar`: `h-8 px-1`（顶部菜单）
+    - `ActionBar`: `h-8 px-1`（顶部工具/参数/transport）
+    - `StatusBar`: `h-6 px-1`（底部状态）
+  - 快捷键、辅助说明等弱化信息使用 `text-qt-text-muted`
+  - 组件间分隔优先用 `border-*`，减少额外 `Separator` 组件造成的视觉不一致
+
+
 #### 前端项目结构
 
 ```text
@@ -591,12 +651,20 @@ frontend/
 │   │       │   ├── dnd.ts           # 拖拽导入解析
 │   │       │   └── clipWaveform.ts  # 波形切片
 │   │       ├── MenuBar.tsx          # 菜单栏
-│   │       └── ActionBar.tsx        # 操作栏
+│   │       └── ActionBar.tsx        # 操作栏（工具模式、编辑参数、网格、BPM 等）
 │   ├── features/
 │   │   └── session/         # Redux 状态管理
 │   │       └── sessionSlice.ts  # 会话状态切片
 │   ├── services/
-│   │   └── webviewApi.ts    # Python API 调用封装
+│   │   ├── invoke.ts        # 统一后端调用封装（Tauri named args + pywebview 位置参数 + 错误包装）
+│   │   ├── api/             # 分组 API（推荐新代码直接使用）
+│   │   │   ├── core.ts      # 通用命令（runtime/info/播放状态/模型与处理等）
+│   │   │   ├── project.ts   # 工程（open/save/meta）
+│   │   │   ├── timeline.ts  # 时间线（undo/redo/轨道/剪辑/transport/导入等）
+│   │   │   ├── waveform.ts  # 波形 peaks
+│   │   │   ├── params.ts    # 参数曲线帧读写
+│   │   │   └── index.ts     # 分组 API 统一导出
+│   │   └── webviewApi.ts    # 门面层：保留历史 webApi.* 接口（内部转调分组 API）
 │   └── types/
 │       └── api.ts           # API 类型定义
 └── ...
@@ -666,7 +734,7 @@ frontend/
   - **实现位置**：
     - 前端：`frontend/src/components/layout/timeline/TrackList.tsx`（pointer-based drag + deadzone）
     - 前端到后端：`sessionSlice.ts::moveTrackRemote` → `webviewApi.ts::moveTrack`
-    - 后端：`backend/src-tauri/src/commands.rs::move_track` → `backend/src-tauri/src/state.rs::TimelineState::move_track`
+    - 后端：`backend/src-tauri/src/commands.rs::move_track`（实现：`backend/src-tauri/src/commands/timeline.rs`） → `backend/src-tauri/src/state.rs::TimelineState::move_track`
   - **数据结构**：后端 track payload 会包含 `parent_id`、`depth`、`child_track_ids`，前端用 `depth` 做缩进渲染
   - **约束**：前端在计算 drop 目标时做简单的“防环”检查（避免把父轨拖进自己的子树）
 

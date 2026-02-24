@@ -1,64 +1,97 @@
-import {
-    createAsyncThunk,
-    createSlice,
-    type PayloadAction,
-} from "@reduxjs/toolkit";
-import { webApi } from "../../services/webviewApi";
+import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
 import type {
     TimelineClip,
     TimelineState,
     TrackSummaryResult,
 } from "../../types/api";
+import type {
+    AutomationPoint,
+    ClipInfo,
+    ClipTemplate,
+    EditParam,
+    GridSize,
+    ToolMode,
+    TrackInfo,
+} from "./sessionTypes";
 
-export type ToolMode = "draw" | "select";
-export type EditParam = "pitch" | "tension" | "breath";
-export type GridSize = "1/4" | "1/8" | "1/16" | "1/32";
+import {
+    addClipOnTrack,
+    addTrackRemote,
+    createClipsRemote,
+    fetchSelectedTrackSummary,
+    glueClipsRemote,
+    moveClipRemote,
+    moveTrackRemote,
+    removeClipRemote,
+    removeTrackRemote,
+    selectClipRemote,
+    selectTrackRemote,
+    setClipStateRemote,
+    setProjectLengthRemote,
+    splitClipRemote,
+} from "./thunks/timelineThunks";
 
-export interface TrackInfo {
-    id: string;
-    name: string;
-    parentId?: string | null;
-    depth?: number;
-    childTrackIds?: string[];
-    muted: boolean;
-    solo: boolean;
-    volume: number;
+import {
+    newProjectRemote,
+    openProjectFromDialog,
+    openProjectFromPath,
+    redoRemote,
+    saveProjectAsRemote,
+    saveProjectRemote,
+    undoRemote,
+} from "./thunks/projectThunks";
 
-    composeEnabled: boolean;
-    pitchAnalysisAlgo: string;
-}
+import {
+    fetchTimeline,
+    playOriginal,
+    playSynthesized,
+    seekPlayhead,
+    stopAudioPlayback,
+    syncPlaybackState,
+    updateTransportBpm,
+} from "./thunks/transportThunks";
 
-export interface ClipInfo {
-    id: string;
-    trackId: string;
-    name: string;
-    startBeat: number;
-    lengthBeats: number;
-    color: "blue" | "violet" | "emerald" | "amber";
-    sourcePath?: string;
-    durationSec?: number;
-    gain: number;
-    muted: boolean;
-    trimStartBeat: number;
-    trimEndBeat: number;
-    playbackRate: number;
-    fadeInBeats: number;
-    fadeOutBeats: number;
-}
+import {
+    clearWaveformCacheRemote,
+    refreshRuntime,
+} from "./thunks/runtimeThunks";
 
-export type ClipTemplate = Omit<ClipInfo, "id" | "color">;
+import { loadDefaultModel, loadModel } from "./thunks/modelThunks";
+
+import {
+    applyPitchShift,
+    exportAudio,
+    pickOutputPath,
+    processAudio,
+    synthesizeAudio,
+} from "./thunks/audioThunks";
+
+import {
+    importAudioAtPosition,
+    importAudioFileAtPosition,
+    importAudioFromDialog,
+    importAudioFromPath,
+} from "./thunks/importThunks";
+
+import {
+    removeSelectedClipRemote,
+    setTrackStateRemote,
+} from "./thunks/trackThunks";
+
+export type {
+    AutomationPoint,
+    ClipInfo,
+    ClipTemplate,
+    EditParam,
+    GridSize,
+    ToolMode,
+    TrackInfo,
+};
 
 type ClipColor = ClipInfo["color"];
-
-export interface AutomationPoint {
-    id: string;
-    beat: number;
-    value: number;
-}
-
 type WaveformPreview = number[] | { l: number[]; r: number[] };
 
-interface SessionState {
+export interface SessionState {
     toolMode: ToolMode;
     editParam: EditParam;
     bpm: number;
@@ -454,589 +487,75 @@ const initialState: SessionState = {
     status: "Ready",
 };
 
-export const undoRemote = createAsyncThunk("session/undoRemote", async () => {
-    return webApi.undoTimeline();
-});
+export {
+    undoRemote,
+    redoRemote,
+    newProjectRemote,
+    openProjectFromDialog,
+    openProjectFromPath,
+    saveProjectRemote,
+    saveProjectAsRemote,
+} from "./thunks/projectThunks";
 
-export const redoRemote = createAsyncThunk("session/redoRemote", async () => {
-    return webApi.redoTimeline();
-});
+export {
+    fetchTimeline,
+    seekPlayhead,
+    updateTransportBpm,
+    syncPlaybackState,
+    playOriginal,
+    playSynthesized,
+    stopAudioPlayback,
+} from "./thunks/transportThunks";
 
-export const newProjectRemote = createAsyncThunk(
-    "session/newProjectRemote",
-    async () => {
-        return webApi.newProject();
-    },
-);
+export {
+    addTrackRemote,
+    removeTrackRemote,
+    moveTrackRemote,
+    selectTrackRemote,
+    setProjectLengthRemote,
+    fetchSelectedTrackSummary,
+    addClipOnTrack,
+    createClipsRemote,
+    removeClipRemote,
+    moveClipRemote,
+    setClipStateRemote,
+    splitClipRemote,
+    glueClipsRemote,
+    selectClipRemote,
+} from "./thunks/timelineThunks";
 
-export const openProjectFromDialog = createAsyncThunk(
-    "session/openProjectFromDialog",
-    async (_, { rejectWithValue }) => {
-        const picked = await webApi.openProjectDialog();
-        if (!picked.ok) return rejectWithValue("open_project_dialog_failed");
-        if (picked.canceled || !picked.path) {
-            return { ok: true, canceled: true } as const;
-        }
-        const timeline = await webApi.openProject(picked.path);
-        return { ok: true, canceled: false, timeline } as const;
-    },
-);
+export {
+    setTrackStateRemote,
+    removeSelectedClipRemote,
+} from "./thunks/trackThunks";
 
-export const openProjectFromPath = createAsyncThunk(
-    "session/openProjectFromPath",
-    async (projectPath: string) => {
-        const timeline = await webApi.openProject(projectPath);
-        return timeline;
-    },
-);
+export {
+    refreshRuntime,
+    clearWaveformCacheRemote,
+} from "./thunks/runtimeThunks";
 
-export const saveProjectRemote = createAsyncThunk(
-    "session/saveProjectRemote",
-    async (_, { rejectWithValue, getState }) => {
-        const state = getState() as any;
-        const hasPath = Boolean(state?.session?.project?.path);
+export {
+    loadModel,
+    loadDefaultModel,
+} from "./thunks/modelThunks";
 
-        const res = hasPath
-            ? await webApi.saveProject()
-            : await webApi.saveProjectAs();
-        if (!res || res.ok === false) {
-            return rejectWithValue(res?.error ?? "save_project_failed");
-        }
-        return res as any;
-    },
-);
+export {
+    processAudio,
+    pickOutputPath,
+    applyPitchShift,
+    synthesizeAudio,
+    exportAudio,
+} from "./thunks/audioThunks";
 
-export const saveProjectAsRemote = createAsyncThunk(
-    "session/saveProjectAsRemote",
-    async (_, { rejectWithValue }) => {
-        const res = await webApi.saveProjectAs();
-        if (!res || res.ok === false) {
-            return rejectWithValue(res?.error ?? "save_project_as_failed");
-        }
-        return res as any;
-    },
-);
+export {
+    importAudioFromDialog,
+    importAudioFromPath,
+    importAudioAtPosition,
+    importAudioFileAtPosition,
+} from "./thunks/importThunks";
 
-export const fetchTimeline = createAsyncThunk(
-    "session/fetchTimeline",
-    async () => {
-        return webApi.getTimelineState();
-    },
-);
-export const seekPlayhead = createAsyncThunk(
-    "session/seekPlayhead",
-    async (beat: number, { getState, dispatch }) => {
-        const state = getState() as { session: SessionState };
-        if (state.session.runtime.isPlaying) {
-            try {
-                await dispatch(stopAudioPlayback()).unwrap();
-            } catch {
-                // Best-effort: still seek even if stopping fails.
-            }
-        }
-        return webApi.setTransport({ playheadBeat: beat });
-    },
-);
 
-export const updateTransportBpm = createAsyncThunk(
-    "session/updateTransportBpm",
-    async (bpm: number) => {
-        return webApi.setTransport({ bpm });
-    },
-);
 
-export const addTrackRemote = createAsyncThunk(
-    "session/addTrackRemote",
-    async (payload: { name?: string; parentTrackId?: string | null }) => {
-        return webApi.addTrackNested(payload);
-    },
-);
-
-export const removeTrackRemote = createAsyncThunk(
-    "session/removeTrackRemote",
-    async (trackId: string) => {
-        return webApi.removeTrack(trackId);
-    },
-);
-
-export const moveTrackRemote = createAsyncThunk(
-    "session/moveTrackRemote",
-    async (payload: {
-        trackId: string;
-        targetIndex: number;
-        parentTrackId?: string | null;
-    }) => {
-        return webApi.moveTrack(payload);
-    },
-);
-
-export const selectTrackRemote = createAsyncThunk(
-    "session/selectTrackRemote",
-    async (trackId: string) => {
-        return webApi.selectTrack(trackId);
-    },
-);
-
-export const setProjectLengthRemote = createAsyncThunk(
-    "session/setProjectLengthRemote",
-    async (projectBeats: number) => {
-        return webApi.setProjectLength(projectBeats);
-    },
-);
-
-export const fetchSelectedTrackSummary = createAsyncThunk(
-    "session/fetchSelectedTrackSummary",
-    async (_, { getState }) => {
-        const state = getState() as { session: SessionState };
-        return webApi.getTrackSummary(
-            state.session.selectedTrackId ?? undefined,
-        );
-    },
-);
-
-export const addClipOnTrack = createAsyncThunk(
-    "session/addClipOnTrack",
-    async (payload: { trackId?: string }) => {
-        return webApi.addClip({ trackId: payload.trackId });
-    },
-);
-
-export const createClipsRemote = createAsyncThunk(
-    "session/createClipsRemote",
-    async (
-        payload: { templates: ClipTemplate[] },
-        { getState, rejectWithValue },
-    ) => {
-        const state0 = getState() as { session: SessionState };
-        let knownIds = new Set(state0.session.clips.map((c) => c.id));
-        let lastTimeline: TimelineState | null = null;
-        const createdClipIds: string[] = [];
-
-        for (const tpl of payload.templates) {
-            const added = await webApi.addClip({
-                trackId: tpl.trackId,
-                name: tpl.name,
-                startBeat: tpl.startBeat,
-                lengthBeats: tpl.lengthBeats,
-                sourcePath: tpl.sourcePath,
-            });
-            if (!(added as { ok?: boolean }).ok) {
-                return rejectWithValue(
-                    (added as { error?: { message?: string } }).error
-                        ?.message ?? "add_clip_failed",
-                );
-            }
-
-            const createdId =
-                (added as TimelineState).clips.find((c) => !knownIds.has(c.id))
-                    ?.id ?? null;
-            if (!createdId) {
-                return rejectWithValue("add_clip_failed");
-            }
-
-            createdClipIds.push(createdId);
-
-            knownIds = new Set((added as TimelineState).clips.map((c) => c.id));
-
-            const updated = await webApi.setClipState({
-                clipId: createdId,
-                lengthBeats: tpl.lengthBeats,
-                gain: tpl.gain,
-                muted: tpl.muted,
-                trimStartBeat: tpl.trimStartBeat,
-                trimEndBeat: tpl.trimEndBeat,
-                playbackRate: tpl.playbackRate,
-                fadeInBeats: tpl.fadeInBeats,
-                fadeOutBeats: tpl.fadeOutBeats,
-            });
-            if (!(updated as { ok?: boolean }).ok) {
-                return rejectWithValue(
-                    (updated as { error?: { message?: string } }).error
-                        ?.message ?? "set_clip_state_failed",
-                );
-            }
-
-            knownIds = new Set(
-                (updated as TimelineState).clips.map((c) => c.id),
-            );
-            lastTimeline = updated as TimelineState;
-        }
-
-        if (!lastTimeline) {
-            return rejectWithValue("create_clips_failed");
-        }
-        return {
-            ...(lastTimeline as any),
-            createdClipIds,
-        } as TimelineState & { createdClipIds: string[] };
-    },
-);
-
-export const removeClipRemote = createAsyncThunk(
-    "session/removeClipRemote",
-    async (clipId: string) => {
-        return webApi.removeClip(clipId);
-    },
-);
-
-export const moveClipRemote = createAsyncThunk(
-    "session/moveClipRemote",
-    async (payload: {
-        clipId: string;
-        startBeat: number;
-        trackId?: string;
-    }) => {
-        return webApi.moveClip(payload);
-    },
-);
-
-export const setClipStateRemote = createAsyncThunk(
-    "session/setClipStateRemote",
-    async (payload: {
-        clipId: string;
-        lengthBeats?: number;
-        gain?: number;
-        muted?: boolean;
-        trimStartBeat?: number;
-        trimEndBeat?: number;
-        playbackRate?: number;
-        fadeInBeats?: number;
-        fadeOutBeats?: number;
-    }) => {
-        return webApi.setClipState(payload);
-    },
-);
-
-export const splitClipRemote = createAsyncThunk(
-    "session/splitClipRemote",
-    async (payload: { clipId: string; splitBeat: number }) => {
-        return webApi.splitClip(payload.clipId, payload.splitBeat);
-    },
-);
-
-export const glueClipsRemote = createAsyncThunk(
-    "session/glueClipsRemote",
-    async (clipIds: string[]) => {
-        return webApi.glueClips(clipIds);
-    },
-);
-
-export const selectClipRemote = createAsyncThunk(
-    "session/selectClipRemote",
-    async (clipId: string | null) => {
-        return webApi.selectClip(clipId);
-    },
-);
-
-export const setTrackStateRemote = createAsyncThunk(
-    "session/setTrackStateRemote",
-    async (payload: {
-        trackId: string;
-        muted?: boolean;
-        solo?: boolean;
-        volume?: number;
-        composeEnabled?: boolean;
-        pitchAnalysisAlgo?: string;
-    }) => {
-        return webApi.setTrackState(payload);
-    },
-);
-
-export const removeSelectedClipRemote = createAsyncThunk(
-    "session/removeSelectedClipRemote",
-    async (_, { getState, rejectWithValue }) => {
-        const state = getState() as { session: SessionState };
-        const selectedClipId = state.session.selectedClipId;
-        if (!selectedClipId) {
-            return rejectWithValue("no_selected_clip");
-        }
-        return webApi.removeClip(selectedClipId);
-    },
-);
-
-export const refreshRuntime = createAsyncThunk(
-    "session/refreshRuntime",
-    async () => {
-        return webApi.getRuntimeInfo();
-    },
-);
-
-export const clearWaveformCacheRemote = createAsyncThunk(
-    "session/clearWaveformCacheRemote",
-    async () => {
-        return webApi.clearWaveformCache();
-    },
-);
-
-export const loadModel = createAsyncThunk(
-    "session/loadModel",
-    async (modelDir: string) => {
-        return webApi.loadModel(modelDir);
-    },
-);
-
-export const loadDefaultModel = createAsyncThunk(
-    "session/loadDefaultModel",
-    async () => {
-        return webApi.loadDefaultModel();
-    },
-);
-
-export const syncPlaybackState = createAsyncThunk(
-    "session/syncPlaybackState",
-    async () => {
-        return webApi.getPlaybackState();
-    },
-);
-
-export const processAudio = createAsyncThunk(
-    "session/processAudio",
-    async (audioPath: string) => {
-        return webApi.processAudio(audioPath);
-    },
-);
-
-export const importAudioFromDialog = createAsyncThunk(
-    "session/importAudioFromDialog",
-    async (_, { dispatch, rejectWithValue }) => {
-        const picked = await webApi.openAudioDialog();
-        if (!picked.ok) {
-            return rejectWithValue("open_audio_dialog_failed");
-        }
-        if (picked.canceled || !picked.path) {
-            return { ok: true, canceled: true };
-        }
-
-        dispatch(setAudioPath(picked.path));
-        const imported = await webApi.importAudioItem(picked.path);
-        if (!(imported as { ok?: boolean }).ok) {
-            return rejectWithValue(
-                (imported as { error?: { message?: string } }).error?.message ??
-                    "import_audio_item_failed",
-            );
-        }
-        return {
-            ok: true,
-            canceled: false,
-            path: picked.path,
-            imported,
-        };
-    },
-);
-
-export const importAudioFromPath = createAsyncThunk(
-    "session/importAudioFromPath",
-    async (audioPath: string, { dispatch, rejectWithValue }) => {
-        dispatch(setAudioPath(audioPath));
-        const imported = await webApi.importAudioItem(audioPath);
-        if (!(imported as { ok?: boolean }).ok) {
-            return rejectWithValue(
-                (imported as { error?: { message?: string } }).error?.message ??
-                    "import_audio_item_failed",
-            );
-        }
-        return {
-            ok: true,
-            path: audioPath,
-            imported,
-        };
-    },
-);
-
-export const importAudioAtPosition = createAsyncThunk(
-    "session/importAudioAtPosition",
-    async (
-        payload: {
-            audioPath: string;
-            trackId?: string | null;
-            startBeat?: number;
-        },
-        { dispatch, rejectWithValue, getState },
-    ) => {
-        dispatch(setAudioPath(payload.audioPath));
-
-        let targetTrackId: string | undefined;
-        if (payload.trackId === null) {
-            // Explicit null means: create a new track and import into it.
-            const state = getState() as { session: SessionState };
-            const beforeIds = new Set(state.session.tracks.map((t) => t.id));
-            try {
-                const added = await dispatch(
-                    addTrackRemote({ name: undefined, parentTrackId: null }),
-                ).unwrap();
-                const createdId =
-                    added.tracks.find((t) => !beforeIds.has(t.id))?.id ??
-                    added.selected_track_id ??
-                    added.tracks[added.tracks.length - 1]?.id ??
-                    null;
-                if (!createdId) {
-                    return rejectWithValue("add_track_failed");
-                }
-                targetTrackId = createdId;
-            } catch (err) {
-                return rejectWithValue(
-                    err instanceof Error ? err.message : "add_track_failed",
-                );
-            }
-        } else {
-            targetTrackId = payload.trackId ?? undefined;
-        }
-
-        const imported = await webApi.importAudioItem(
-            payload.audioPath,
-            targetTrackId,
-            payload.startBeat,
-        );
-        if (!(imported as { ok?: boolean }).ok) {
-            return rejectWithValue(
-                (imported as { error?: { message?: string } }).error?.message ??
-                    "import_audio_item_failed",
-            );
-        }
-        return {
-            ok: true,
-            imported,
-        };
-    },
-);
-
-export const importAudioFileAtPosition = createAsyncThunk(
-    "session/importAudioFileAtPosition",
-    async (
-        payload: { file: File; trackId?: string | null; startBeat?: number },
-        { dispatch, rejectWithValue, getState },
-    ) => {
-        try {
-            let targetTrackId: string | undefined;
-            if (payload.trackId === null) {
-                const state = getState() as { session: SessionState };
-                const beforeIds = new Set(
-                    state.session.tracks.map((t) => t.id),
-                );
-                const added = await dispatch(
-                    addTrackRemote({ name: undefined, parentTrackId: null }),
-                ).unwrap();
-                const createdId =
-                    added.tracks.find((t) => !beforeIds.has(t.id))?.id ??
-                    added.selected_track_id ??
-                    added.tracks[added.tracks.length - 1]?.id ??
-                    null;
-                if (!createdId) {
-                    return rejectWithValue("add_track_failed");
-                }
-                targetTrackId = createdId;
-            } else {
-                targetTrackId = payload.trackId ?? undefined;
-            }
-
-            const fileName = String(payload.file.name ?? "dropped-audio");
-            const dataUrl = await new Promise<string>((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onerror = () => reject(new Error("read_failed"));
-                reader.onload = () => resolve(String(reader.result ?? ""));
-                reader.readAsDataURL(payload.file);
-            });
-
-            const base64 = dataUrl.includes(",")
-                ? dataUrl.split(",").slice(1).join(",")
-                : dataUrl;
-
-            const imported = await webApi.importAudioBytes(
-                fileName,
-                base64,
-                targetTrackId,
-                payload.startBeat,
-            );
-            if (!(imported as { ok?: boolean }).ok) {
-                return rejectWithValue(
-                    (imported as { error?: { message?: string } }).error
-                        ?.message ?? "import_audio_bytes_failed",
-                );
-            }
-            return {
-                ok: true,
-                imported,
-            };
-        } catch (err) {
-            return rejectWithValue(
-                err instanceof Error
-                    ? err.message
-                    : "import_audio_bytes_failed",
-            );
-        }
-    },
-);
-
-export const pickOutputPath = createAsyncThunk(
-    "session/pickOutputPath",
-    async (_, { rejectWithValue }) => {
-        const picked = await webApi.pickOutputPath();
-        if (!picked.ok) {
-            return rejectWithValue("pick_output_path_failed");
-        }
-        return picked;
-    },
-);
-
-export const applyPitchShift = createAsyncThunk(
-    "session/applyPitchShift",
-    async (semitones: number) => {
-        return webApi.setPitchShift(semitones);
-    },
-);
-
-export const synthesizeAudio = createAsyncThunk(
-    "session/synthesizeAudio",
-    async () => {
-        return webApi.synthesize();
-    },
-);
-
-export const exportAudio = createAsyncThunk(
-    "session/exportAudio",
-    async (outputPath: string) => {
-        return webApi.saveSynthesized(outputPath);
-    },
-);
-
-export const playOriginal = createAsyncThunk(
-    "session/playOriginal",
-    async (_, { getState }) => {
-        const state = getState() as { session: SessionState };
-        const anchorBeat = state.session.playheadBeat;
-        // Ensure backend transport is in sync before starting playback.
-        await webApi.setTransport({ playheadBeat: anchorBeat });
-        const result = await webApi.playOriginal(0);
-        return {
-            ...result,
-            clipId: null,
-            anchorBeat,
-        };
-    },
-);
-
-export const playSynthesized = createAsyncThunk(
-    "session/playSynthesized",
-    async (_, { getState }) => {
-        const state = getState() as { session: SessionState };
-        const anchorBeat = state.session.playheadBeat;
-        // Ensure backend transport is in sync before starting playback.
-        await webApi.setTransport({ playheadBeat: anchorBeat });
-        const result = await webApi.playSynthesized(0);
-        return {
-            ...result,
-            clipId: null,
-            anchorBeat,
-        };
-    },
-);
-
-export const stopAudioPlayback = createAsyncThunk(
-    "session/stopAudioPlayback",
-    async () => {
-        return webApi.stopAudio();
-    },
-);
 
 const sessionSlice = createSlice({
     name: "session",

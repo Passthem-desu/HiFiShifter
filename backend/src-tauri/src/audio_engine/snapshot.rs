@@ -10,12 +10,12 @@ use crate::mixdown::{render_mixdown_interleaved, MixdownOptions};
 use crate::state::{Clip, TimelineState, Track};
 use crate::time_stretch::StretchAlgorithm;
 
-use super::io::{get_resampled_stereo, is_audio_path};
+use super::io::{get_resampled_stereo_cached, is_audio_path};
 use super::ring::StreamRingStereo;
 use super::types::{EngineClip, EngineSnapshot, ResampledStereo, StretchJob, StretchKey};
 use super::util::{clamp01, quantize_i64, quantize_u32};
 
-fn compute_track_gains(tracks: &[Track]) -> HashMap<String, (f32, bool, bool)> {
+pub(crate) fn compute_track_gains(tracks: &[Track]) -> HashMap<String, (f32, bool, bool)> {
     fn build_parent_map(tracks: &[Track]) -> HashMap<String, Option<String>> {
         let mut map = HashMap::new();
         for t in tracks {
@@ -40,11 +40,7 @@ fn compute_track_gains(tracks: &[Track]) -> HashMap<String, (f32, bool, bool)> {
     }
 
     let parent_map = build_parent_map(tracks);
-    let by_id: HashMap<String, Track> = tracks
-        .iter()
-        .cloned()
-        .map(|t| (t.id.clone(), t))
-        .collect();
+    let by_id: HashMap<String, Track> = tracks.iter().cloned().map(|t| (t.id.clone(), t)).collect();
 
     let any_solo = tracks.iter().any(|t| t.solo);
     let mut out = HashMap::new();
@@ -106,7 +102,12 @@ pub(crate) fn source_bounds_frames(
     (start_u, end_u)
 }
 
-fn clip_source_bounds_frames(clip: &Clip, bpm: f64, src_total_frames: usize, sr: u32) -> (u64, u64) {
+fn clip_source_bounds_frames(
+    clip: &Clip,
+    bpm: f64,
+    src_total_frames: usize,
+    sr: u32,
+) -> (u64, u64) {
     source_bounds_frames(
         clip.trim_start_beat.max(0.0),
         clip.trim_end_beat,
@@ -227,10 +228,7 @@ pub(crate) fn build_snapshot(
     is_playing: &Arc<AtomicBool>,
     stretch_stream_epoch: &Arc<AtomicU64>,
 ) -> EngineSnapshot {
-    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
-        .ok()
-        .as_deref()
-        == Some("1");
+    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
     let bpm = if timeline.bpm.is_finite() && timeline.bpm > 0.0 {
         timeline.bpm
     } else {
@@ -293,7 +291,7 @@ pub(crate) fn build_snapshot(
             1.0
         };
 
-        let src = match get_resampled_stereo(path, out_rate, cache) {
+        let src = match get_resampled_stereo_cached(path, out_rate, cache) {
             Some(v) => v,
             None => continue,
         };
@@ -311,14 +309,15 @@ pub(crate) fn build_snapshot(
         // Negative trimStart means the clip starts before the source: render leading silence.
         // trim_* are expressed in SOURCE beats (i.e. they already incorporate playbackRate in UI).
         // Therefore leading silence in timeline time scales by 1 / playback_rate.
-        let local_src_offset_frames: i64 = if clip.trim_start_beat.is_finite() && clip.trim_start_beat < 0.0 {
-            let pr = playback_rate.max(1e-6);
-            let pre_silence_sec = (-clip.trim_start_beat) * bs / pr;
-            let frames = (pre_silence_sec * out_rate as f64).round().max(0.0) as i64;
-            -frames
-        } else {
-            0
-        };
+        let local_src_offset_frames: i64 =
+            if clip.trim_start_beat.is_finite() && clip.trim_start_beat < 0.0 {
+                let pr = playback_rate.max(1e-6);
+                let pre_silence_sec = (-clip.trim_start_beat) * bs / pr;
+                let frames = (pre_silence_sec * out_rate as f64).round().max(0.0) as i64;
+                -frames
+            } else {
+                0
+            };
 
         // If playback_rate != 1, prefer an asynchronously precomputed, pitch-preserving buffer.
         // Never block snapshot building here.
@@ -352,7 +351,7 @@ pub(crate) fn build_snapshot(
 
                 // Start close to current playhead to reduce perceived delay.
                 let now = position_frames.load(Ordering::Relaxed);
-                let local0 = if now > start_frame { now - start_frame } else { 0 };
+                let local0 = now.saturating_sub(start_frame);
                 ring.reset(local0);
 
                 let my_epoch = stretch_stream_epoch.load(Ordering::Relaxed);
@@ -374,11 +373,12 @@ pub(crate) fn build_snapshot(
 
                 thread::spawn(move || {
                     let time_ratio = 1.0 / pr.max(1e-6);
-                    let mut rb =
-                        match crate::rubberband::RubberBandRealtimeStretcher::new(out_rate, 2, time_ratio) {
-                            Ok(v) => v,
-                            Err(_) => return,
-                        };
+                    let mut rb = match crate::rubberband::RubberBandRealtimeStretcher::new(
+                        out_rate, 2, time_ratio,
+                    ) {
+                        Ok(v) => v,
+                        Err(_) => return,
+                    };
 
                     let src_pcm = src_for_thread.pcm.as_slice();
                     let src_total = src_for_thread.frames as u64;
@@ -399,7 +399,7 @@ pub(crate) fn build_snapshot(
                         }
 
                         let now_abs = pos.load(Ordering::Relaxed);
-                        let local = if now_abs > start_frame { now_abs - start_frame } else { 0 };
+                        let local = now_abs.saturating_sub(start_frame);
                         if local >= clip_len {
                             std::thread::sleep(std::time::Duration::from_millis(8));
                             continue;
@@ -451,7 +451,8 @@ pub(crate) fn build_snapshot(
                         for i in 0..want_in {
                             let src_f = if repeat_clip {
                                 let loop_len = src_end_u.saturating_sub(src_start_u).max(1);
-                                let within = (in_cursor.saturating_sub(src_start_u) + i as u64) % loop_len;
+                                let within =
+                                    (in_cursor.saturating_sub(src_start_u) + i as u64) % loop_len;
                                 (src_start_u + within).min(src_total.saturating_sub(1))
                             } else {
                                 (in_cursor + i as u64).min(src_total.saturating_sub(1))
@@ -472,10 +473,9 @@ pub(crate) fn build_snapshot(
 
                         out_block.clear();
                         for _ in 0..4 {
-                            let got = match rb.retrieve_interleaved_into(&mut out_block, 1024) {
-                                Ok(g) => g,
-                                Err(_) => 0,
-                            };
+                            let got = rb
+                                .retrieve_interleaved_into(&mut out_block, 1024)
+                                .unwrap_or_default();
                             if got == 0 {
                                 break;
                             }
@@ -483,8 +483,7 @@ pub(crate) fn build_snapshot(
 
                         if !out_block.is_empty() {
                             ring_for_thread.write_interleaved(out_cursor, out_block.as_slice());
-                            out_cursor = out_cursor
-                                .saturating_add((out_block.len() / 2) as u64);
+                            out_cursor = out_cursor.saturating_add((out_block.len() / 2) as u64);
                         }
                     }
                 });
@@ -545,7 +544,9 @@ pub(crate) fn build_snapshot(
         // - ONNX (NSF-HiFiGAN) can be significantly slower; keeping a huge lookahead just burns CPU
         //   and increases perceived latency. Keep it short and allow fallback mixing when needed.
         let cap_frames = match algo {
-            crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx => (out_rate as u64).saturating_mul(2),
+            crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx => {
+                (out_rate as u64).saturating_mul(2)
+            }
             _ => (out_rate as u64).saturating_mul(8),
         };
         let ring = Arc::new(StreamRingStereo::new(cap_frames));
@@ -557,7 +558,11 @@ pub(crate) fn build_snapshot(
             .ok()
             .as_deref()
             != Some("0");
-        if matches!(algo, crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx) && onnx_hard_start {
+        if matches!(
+            algo,
+            crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx
+        ) && onnx_hard_start
+        {
             ring.set_hard_start_enabled(true);
         }
         let ring_for_thread = ring.clone();
@@ -578,17 +583,27 @@ pub(crate) fn build_snapshot(
             crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx => {
                 let curves = crate::pitch_editing::selected_pitch_curves_snapshot(&tl_for_thread);
                 if let Some(curves) = curves {
-                    super::pitch_stream_onnx::spawn_pitch_stream_onnx(
-                        tl_for_thread,
-                        sr,
-                        ring_for_thread,
-                        pos,
-                        playing,
-                        epoch,
-                        my_epoch,
-                        curves,
-                        debug,
-                    );
+                    #[cfg(feature = "onnx")]
+                    {
+                        super::pitch_stream_onnx::spawn_pitch_stream_onnx(
+                            tl_for_thread,
+                            sr,
+                            ring_for_thread,
+                            pos,
+                            playing,
+                            epoch,
+                            my_epoch,
+                            curves,
+                            debug,
+                        );
+                    }
+                    #[cfg(not(feature = "onnx"))]
+                    {
+                        let _ = curves;
+                        if debug {
+                            eprintln!("AudioEngine: pitch_stream ONNX not started (onnx feature disabled)");
+                        }
+                    }
                 } else if debug {
                     eprintln!("AudioEngine: pitch_stream ONNX not started (missing pitch curves)");
                 }
@@ -647,7 +662,8 @@ pub(crate) fn build_snapshot(
                         };
 
                         let t0 = (out_cursor as f64) / (sr.max(1) as f64);
-                        let t1 = ((out_cursor.saturating_add(block_frames)) as f64) / (sr.max(1) as f64);
+                        let t1 =
+                            ((out_cursor.saturating_add(block_frames)) as f64) / (sr.max(1) as f64);
 
                         let stretch = if crate::rubberband::is_available() {
                             StretchAlgorithm::RubberBand
@@ -699,11 +715,7 @@ pub(crate) fn build_snapshot(
         );
     }
 
-    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
-        .ok()
-        .as_deref()
-        == Some("1")
-    {
+    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
         eprintln!(
             "AudioEngine: snapshot built: tracks={} clips_in_timeline={} clips_audible={} duration_frames={} sr={}",
             timeline.tracks.len(),
@@ -741,7 +753,7 @@ pub(crate) fn build_snapshot_for_file(
     offset_sec: f64,
     cache: &Arc<Mutex<HashMap<(PathBuf, u32), ResampledStereo>>>,
 ) -> EngineSnapshot {
-    let src = match get_resampled_stereo(path, out_rate, cache) {
+    let src = match get_resampled_stereo_cached(path, out_rate, cache) {
         Some(v) => v,
         None => return EngineSnapshot::empty(out_rate),
     };

@@ -19,7 +19,7 @@ import {
     saveProjectRemote,
     saveProjectAsRemote,
 } from "../../features/session/sessionSlice";
-import { webApi } from "../../services/webviewApi";
+import { coreApi } from "../../services/api";
 import { useAppTheme } from "../../theme/AppThemeProvider";
 
 export const MenuBar: React.FC = () => {
@@ -59,7 +59,7 @@ export const MenuBar: React.FC = () => {
                         onSelect={() => void dispatch(newProjectRemote())}
                     >
                         {t("menu_new_project")}
-                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             Ctrl+N
                         </div>
                     </DropdownMenu.Item>
@@ -67,7 +67,7 @@ export const MenuBar: React.FC = () => {
                         onSelect={() => void dispatch(openProjectFromDialog())}
                     >
                         {t("menu_open_project")}
-                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             Ctrl+Shift+O
                         </div>
                     </DropdownMenu.Item>
@@ -104,7 +104,7 @@ export const MenuBar: React.FC = () => {
                         onSelect={() => void dispatch(saveProjectRemote())}
                     >
                         {t("menu_save_project")}
-                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             Ctrl+S
                         </div>
                     </DropdownMenu.Item>
@@ -112,7 +112,7 @@ export const MenuBar: React.FC = () => {
                         onSelect={() => void dispatch(saveProjectAsRemote())}
                     >
                         {t("menu_save_project_as")}
-                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             Ctrl+Shift+S
                         </div>
                     </DropdownMenu.Item>
@@ -123,13 +123,13 @@ export const MenuBar: React.FC = () => {
                         onSelect={() => dispatch(importAudioFromDialog())}
                     >
                         {t("menu_import_audio")}{" "}
-                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {t("shortcut_ctrl_o")}
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={handleExport}>
                         {t("menu_export_audio")}{" "}
-                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {t("shortcut_ctrl_e")}
                         </div>
                     </DropdownMenu.Item>
@@ -141,7 +141,7 @@ export const MenuBar: React.FC = () => {
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item
-                        onSelect={() => webApi.closeWindow()}
+                        onSelect={() => coreApi.closeWindow()}
                         color="red"
                     >
                         {t("menu_exit")}
@@ -159,7 +159,7 @@ export const MenuBar: React.FC = () => {
                         onSelect={() => void dispatch(undoRemote())}
                     >
                         {t("menu_undo")}{" "}
-                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             Ctrl+Z
                         </div>
                     </DropdownMenu.Item>
@@ -167,14 +167,14 @@ export const MenuBar: React.FC = () => {
                         onSelect={() => void dispatch(redoRemote())}
                     >
                         {t("menu_redo")}{" "}
-                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             Ctrl+Y
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item>
                         {t("menu_select_all")}{" "}
-                        <div className="ml-auto pl-4 text-xs text-gray-500">
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             Ctrl+A
                         </div>
                     </DropdownMenu.Item>
@@ -224,7 +224,7 @@ export const MenuBar: React.FC = () => {
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item onSelect={() => theme.toggleMode()}>
-                        {t("theme")}:{" "}
+                        {t("theme")}: {" "}
                         {theme.mode === "dark"
                             ? t("theme_dark")
                             : t("theme_light")}
@@ -238,7 +238,7 @@ export const MenuBar: React.FC = () => {
                     <span>{t("menu_help")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
-                    <DropdownMenu.Item>About HiFiShifter</DropdownMenu.Item>
+                    <DropdownMenu.Item>{t("menu_about")}</DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Root>
 

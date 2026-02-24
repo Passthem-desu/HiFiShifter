@@ -24,26 +24,14 @@ fn beat_sec(bpm: f64) -> f64 {
 }
 
 fn clamp01(x: f32) -> f32 {
-    if x < 0.0 {
-        0.0
-    } else if x > 1.0 {
-        1.0
-    } else {
-        x
-    }
+    x.clamp(0.0, 1.0)
 }
 
 fn clamp11(x: f32) -> f32 {
-    if x < -1.0 {
-        -1.0
-    } else if x > 1.0 {
-        1.0
-    } else {
-        x
-    }
+    x.clamp(-1.0, 1.0)
 }
 
-fn linear_resample_interleaved(
+pub(crate) fn linear_resample_interleaved(
     input: &[f32],
     channels: usize,
     in_rate: u32,
@@ -183,10 +171,7 @@ pub fn render_mixdown_interleaved(
     timeline: &TimelineState,
     opts: MixdownOptions,
 ) -> Result<(u32, u16, f64, Vec<f32>), String> {
-    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
-        .ok()
-        .as_deref()
-        == Some("1");
+    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
 
     let mut clips_considered: u32 = 0;
     let mut clips_decoded: u32 = 0;
@@ -261,23 +246,19 @@ pub fn render_mixdown_interleaved(
         };
 
         // Decode audio (WAV fast-path; otherwise Symphonia).
-        let (in_rate, in_channels, pcm) = match crate::audio_utils::decode_audio_f32_interleaved(
-            Path::new(source_path),
-        ) {
-            Ok(v) => v,
-            Err(e) => {
-                if debug {
-                    eprintln!(
-                        "mixdown: decode failed; clip_id={} track_id={} path={} err={}",
-                        clip.id,
-                        clip.track_id,
-                        source_path,
-                        e
-                    );
+        let (in_rate, in_channels, pcm) =
+            match crate::audio_utils::decode_audio_f32_interleaved(Path::new(source_path)) {
+                Ok(v) => v,
+                Err(e) => {
+                    if debug {
+                        eprintln!(
+                            "mixdown: decode failed; clip_id={} track_id={} path={} err={}",
+                            clip.id, clip.track_id, source_path, e
+                        );
+                    }
+                    continue;
                 }
-                continue;
-            }
-        };
+            };
 
         clips_decoded = clips_decoded.saturating_add(1);
 
@@ -314,7 +295,9 @@ pub fn render_mixdown_interleaved(
 
         // Slice source by time in its own rate.
         let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
-        let src_i1 = (src_end_limit_sec * in_rate as f64).ceil().max(src_i0 as f64) as usize;
+        let src_i1 = (src_end_limit_sec * in_rate as f64)
+            .ceil()
+            .max(src_i0 as f64) as usize;
         let src_i1 = src_i1.min(in_frames);
         if src_i1 <= src_i0 + 1 {
             continue;
@@ -351,16 +334,39 @@ pub fn render_mixdown_interleaved(
         let mut segment = segment;
         if (playback_rate - 1.0).abs() > 1e-6 {
             let seg_frames_in = segment.len() / 2;
-            let target_frames = ((seg_frames_in as f64) / playback_rate)
-                .round()
-                .max(2.0) as usize;
-            segment = time_stretch_interleaved(
-                &segment,
-                2,
-                out_rate,
-                target_frames,
-                opts.stretch.clone(),
-            );
+            let target_frames = ((seg_frames_in as f64) / playback_rate).round().max(2.0) as usize;
+            segment = time_stretch_interleaved(&segment, 2, out_rate, target_frames, opts.stretch);
+        }
+
+        // Apply pitch edit per-clip (v2) if enabled.
+        if opts.apply_pitch_edit {
+            let seg_frames = segment.len() / 2;
+            if seg_frames >= 16 {
+                let seg_start_sec = clip_start_sec + pre_silence_sec;
+                let mut seg = segment;
+                let applied = crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
+                    timeline,
+                    clip,
+                    clip_start_sec,
+                    seg_start_sec,
+                    out_rate,
+                    &mut seg,
+                );
+                match applied {
+                    Ok(true) => {
+                        segment = seg;
+                    }
+                    Ok(false) => {
+                        segment = seg;
+                    }
+                    Err(e) => {
+                        if debug {
+                            eprintln!("mixdown: per-clip pitch_edit skipped due to error: {e}");
+                        }
+                        segment = seg;
+                    }
+                }
+            }
         }
 
         // Apply fades (linear) and gain (timeline-referenced).
@@ -429,12 +435,14 @@ pub fn render_mixdown_interleaved(
             mix[oi] += segment[si] * g;
             mix[oi + 1] += segment[si + 1] * g;
         }
-
     }
 
     // Apply pitch edit curve (WORLD or ONNX) if enabled for the selected root track.
     // Best-effort: if pitch edit fails, keep the original mix.
-    if opts.apply_pitch_edit && timeline.tracks.iter().any(|t| t.compose_enabled) {
+    if opts.apply_pitch_edit
+        && timeline.tracks.iter().any(|t| t.compose_enabled)
+        && crate::pitch_editing::is_pitch_edit_mixdown_v1()
+    {
         if let Err(e) = crate::pitch_editing::apply_pitch_edit_to_mixdown(
             timeline,
             start_sec,

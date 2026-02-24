@@ -1,7 +1,9 @@
 mod engine;
 mod io;
 mod mix;
+#[cfg(feature = "onnx")]
 mod pitch_stream_onnx;
+mod resource_manager;
 mod ring;
 mod snapshot;
 mod types;

@@ -134,7 +134,11 @@ fn decode_audio_f32_interleaved_symphonia(path: &Path) -> Result<(u32, u16, Vec<
         out.extend_from_slice(sbuf.samples());
     }
 
-    Ok((if sample_rate == 0 { 44100 } else { sample_rate }, channels as u16, out))
+    Ok((
+        if sample_rate == 0 { 44100 } else { sample_rate },
+        channels as u16,
+        out,
+    ))
 }
 
 pub struct WavInfo {
@@ -160,7 +164,10 @@ pub fn try_read_wav_info(path: &Path, preview_points: usize) -> Option<WavInfo> 
     try_read_audio_info_symphonia(path, preview_points)
 }
 
-pub fn compute_minmax_peaks(path: &Path, hop: usize) -> Result<crate::waveform::CachedPeaks, String> {
+pub fn compute_minmax_peaks(
+    path: &Path,
+    hop: usize,
+) -> Result<crate::waveform::CachedPeaks, String> {
     if hop == 0 {
         return Err("hop must be > 0".to_string());
     }
@@ -179,7 +186,10 @@ pub fn compute_minmax_peaks(path: &Path, hop: usize) -> Result<crate::waveform::
     compute_minmax_peaks_symphonia(path, hop)
 }
 
-fn compute_minmax_peaks_hound(path: &Path, hop: usize) -> Result<crate::waveform::CachedPeaks, String> {
+fn compute_minmax_peaks_hound(
+    path: &Path,
+    hop: usize,
+) -> Result<crate::waveform::CachedPeaks, String> {
     use hound::{SampleFormat, WavReader};
 
     let reader = WavReader::open(path).map_err(|e| e.to_string())?;
@@ -301,7 +311,10 @@ fn compute_minmax_peaks_hound(path: &Path, hop: usize) -> Result<crate::waveform
     })
 }
 
-fn compute_minmax_peaks_symphonia(path: &Path, hop: usize) -> Result<crate::waveform::CachedPeaks, String> {
+fn compute_minmax_peaks_symphonia(
+    path: &Path,
+    hop: usize,
+) -> Result<crate::waveform::CachedPeaks, String> {
     use symphonia::core::codecs::DecoderOptions;
     use symphonia::core::errors::Error;
     use symphonia::core::formats::FormatOptions;
@@ -485,7 +498,7 @@ fn try_read_wav_info_hound(path: &Path, preview_points: usize) -> Option<WavInfo
         }
         (SampleFormat::Float, 32) => {
             for s in reader.samples::<f32>() {
-                let v = s.ok()? as f32;
+                let v = s.ok()?;
                 if !push_abs(v) {
                     break;
                 }
@@ -509,14 +522,14 @@ fn try_read_audio_info_symphonia(path: &Path, preview_points: usize) -> Option<W
     use symphonia::core::meta::MetadataOptions;
     use symphonia::core::probe::Hint;
 
-    fn open(
-        path: &Path,
-    ) -> Option<(
+    type SymphoniaOpen = (
         Box<dyn symphonia::core::formats::FormatReader>,
         Box<dyn symphonia::core::codecs::Decoder>,
         u32,
         usize,
-    )> {
+    );
+
+    fn open(path: &Path) -> Option<SymphoniaOpen> {
         let file = std::fs::File::open(path).ok()?;
         let mss = MediaSourceStream::new(Box::new(file), Default::default());
 

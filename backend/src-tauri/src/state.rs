@@ -1,8 +1,8 @@
-use crate::audio_utils::try_read_wav_info;
 use crate::audio_engine::AudioEngine;
+use crate::audio_utils::try_read_wav_info;
 use crate::models::{
-    ModelConfig, ModelConfigPayload, PitchRange, RuntimeInfoPayload, TimelineClip,
-    ProjectMetaPayload, TimelineStatePayload, TimelineTrack,
+    ModelConfig, ModelConfigPayload, PitchRange, ProjectMetaPayload, RuntimeInfoPayload,
+    TimelineClip, TimelineStatePayload, TimelineTrack,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -14,20 +14,15 @@ fn default_frame_period_ms() -> f64 {
     5.0
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PitchAnalysisAlgo {
+    #[default]
     WorldDll,
     NsfHifiganOnnx,
     None,
     #[serde(other)]
     Unknown,
-}
-
-impl Default for PitchAnalysisAlgo {
-    fn default() -> Self {
-        Self::WorldDll
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -39,6 +34,9 @@ pub struct TrackParamsState {
     pub pitch_orig: Vec<f32>,
     #[serde(default)]
     pub pitch_edit: Vec<f32>,
+
+    #[serde(default)]
+    pub pitch_edit_user_modified: bool,
 
     #[serde(default)]
     pub tension_orig: Vec<f32>,
@@ -87,6 +85,18 @@ pub struct Clip {
     pub playback_rate: f32,
     pub fade_in_beats: f64,
     pub fade_out_beats: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ClipStatePatch {
+    pub length_beats: Option<f64>,
+    pub gain: Option<f32>,
+    pub muted: Option<bool>,
+    pub trim_start_beat: Option<f64>,
+    pub trim_end_beat: Option<f64>,
+    pub playback_rate: Option<f32>,
+    pub fade_in_beats: Option<f64>,
+    pub fade_out_beats: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -233,9 +243,10 @@ impl TimelineState {
 
         entry.frame_period_ms = fp;
 
+        #[allow(clippy::ptr_arg)]
         fn resize_curve(v: &mut Vec<f32>, target: usize, fill: f32) {
             if v.len() < target {
-                v.extend(std::iter::repeat(fill).take(target - v.len()));
+                v.extend(std::iter::repeat_n(fill, target - v.len()));
             } else if v.len() > target {
                 v.truncate(target);
             }
@@ -245,6 +256,29 @@ impl TimelineState {
         resize_curve(&mut entry.pitch_edit, target, 0.0);
         resize_curve(&mut entry.tension_orig, target, 0.0);
         resize_curve(&mut entry.tension_edit, target, 0.0);
+
+        // Backward compatibility: older projects didn't have `pitch_edit_user_modified`.
+        // Infer it if we detect a meaningful difference between edit and orig.
+        if !entry.pitch_edit_user_modified {
+            let len = entry.pitch_orig.len().min(entry.pitch_edit.len());
+            let mut i = 0usize;
+            let stride = 1usize; // keep it simple; curves are not huge.
+            while i < len {
+                let o = entry.pitch_orig[i];
+                let e = entry.pitch_edit[i];
+                if e.is_finite() && e > 0.0 {
+                    if !(o.is_finite() && o > 0.0) {
+                        entry.pitch_edit_user_modified = true;
+                        break;
+                    }
+                    if (e - o).abs() > 1e-3 {
+                        entry.pitch_edit_user_modified = true;
+                        break;
+                    }
+                }
+                i += stride;
+            }
+        }
     }
 }
 
@@ -333,10 +367,7 @@ impl AppState {
             }
         }
 
-        let peaks = crate::waveform::CachedPeaks::compute(
-            std::path::Path::new(source_path),
-            hop,
-        )?;
+        let peaks = crate::waveform::CachedPeaks::compute(std::path::Path::new(source_path), hop)?;
 
         // Save to disk cache (best-effort; ignore failures).
         let _ = crate::waveform_disk_cache::save_peaks(&disk_path, &peaks);
@@ -369,7 +400,11 @@ impl AppState {
     }
 
     pub fn project_meta_payload(&self) -> ProjectMetaPayload {
-        let p = self.project.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let p = self
+            .project
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         ProjectMetaPayload {
             name: p.name,
             path: p.path,
@@ -661,10 +696,7 @@ impl TimelineState {
         let track_id = track_id
             .or_else(|| self.selected_track_id.clone())
             .or_else(|| self.tracks.first().map(|t| t.id.clone()))
-            .unwrap_or_else(|| {
-                let id = self.add_track(Some("Main".to_string()), None, None);
-                id
-            });
+            .unwrap_or_else(|| self.add_track(Some("Main".to_string()), None, None));
 
         if !self.tracks.iter().any(|t| t.id == track_id) {
             // Create missing track.
@@ -689,7 +721,13 @@ impl TimelineState {
             self.clips
                 .iter()
                 .find(|c| c.source_path.as_deref() == Some(sp) && c.waveform_preview.is_some())
-                .map(|c| (c.duration_sec, c.waveform_preview.clone(), c.pitch_range.clone()))
+                .map(|c| {
+                    (
+                        c.duration_sec,
+                        c.waveform_preview.clone(),
+                        c.pitch_range.clone(),
+                    )
+                })
         });
 
         let id = new_id("clip");
@@ -709,7 +747,10 @@ impl TimelineState {
             pitch_range: inherited
                 .as_ref()
                 .and_then(|v| v.2.clone())
-                .or(Some(PitchRange { min: -24.0, max: 24.0 })),
+                .or(Some(PitchRange {
+                    min: -24.0,
+                    max: 24.0,
+                })),
             gain: 1.0,
             muted: false,
             trim_start_beat: 0.0,
@@ -747,6 +788,7 @@ impl TimelineState {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set_clip_state(
         &mut self,
         clip_id: &str,
@@ -759,34 +801,50 @@ impl TimelineState {
         fade_in_beats: Option<f64>,
         fade_out_beats: Option<f64>,
     ) {
+        self.patch_clip_state(
+            clip_id,
+            ClipStatePatch {
+                length_beats,
+                gain,
+                muted,
+                trim_start_beat,
+                trim_end_beat,
+                playback_rate,
+                fade_in_beats,
+                fade_out_beats,
+            },
+        );
+    }
+
+    pub fn patch_clip_state(&mut self, clip_id: &str, patch: ClipStatePatch) {
         let mut end_beat: Option<f64> = None;
         if let Some(c) = self.clips.iter_mut().find(|c| c.id == clip_id) {
-            if let Some(v) = length_beats {
+            if let Some(v) = patch.length_beats {
                 c.length_beats = v.max(0.0);
             }
-            if let Some(v) = gain {
+            if let Some(v) = patch.gain {
                 c.gain = v.clamp(0.0, 2.0);
             }
-            if let Some(v) = muted {
+            if let Some(v) = patch.muted {
                 c.muted = v;
             }
-            if let Some(v) = trim_start_beat {
+            if let Some(v) = patch.trim_start_beat {
                 if v.is_finite() {
                     // Negative values are allowed (slip-edit past the source start -> leading silence).
                     // Keep a reasonable bound to avoid accidental extreme values.
                     c.trim_start_beat = v.clamp(-1_000_000.0, 1_000_000.0);
                 }
             }
-            if let Some(v) = trim_end_beat {
+            if let Some(v) = patch.trim_end_beat {
                 c.trim_end_beat = v.max(0.0);
             }
-            if let Some(v) = playback_rate {
+            if let Some(v) = patch.playback_rate {
                 c.playback_rate = v.clamp(0.1, 10.0);
             }
-            if let Some(v) = fade_in_beats {
+            if let Some(v) = patch.fade_in_beats {
                 c.fade_in_beats = v.max(0.0);
             }
-            if let Some(v) = fade_out_beats {
+            if let Some(v) = patch.fade_out_beats {
                 c.fade_out_beats = v.max(0.0);
             }
 
@@ -833,10 +891,14 @@ impl TimelineState {
         // Preserve the original audio offset: the right clip should continue from where the left ended.
         // trim_* are in beats (source time), while playback_rate scales source progress per timeline time.
         let rate = right.playback_rate as f64;
-        let rate = if rate.is_finite() && rate > 0.0 { rate } else { 1.0 };
+        let rate = if rate.is_finite() && rate > 0.0 {
+            rate
+        } else {
+            1.0
+        };
         if right.trim_start_beat.is_finite() {
-            right.trim_start_beat = (right.trim_start_beat + left_len * rate)
-                .clamp(-1_000_000.0, 1_000_000.0);
+            right.trim_start_beat =
+                (right.trim_start_beat + left_len * rate).clamp(-1_000_000.0, 1_000_000.0);
         }
         self.clips.push(right);
     }
@@ -938,8 +1000,7 @@ impl TimelineState {
                     let exists = Path::new(audio_path).exists();
                     eprintln!(
                         "import_audio_item: audio_info FAILED: path_exists={} path={}",
-                        exists,
-                        audio_path
+                        exists, audio_path
                     );
                 }
             }
@@ -971,10 +1032,7 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
     }
 
     // Roots in order.
-    let roots = by_parent
-        .get(&None)
-        .cloned()
-        .unwrap_or_else(Vec::new);
+    let roots = by_parent.get(&None).cloned().unwrap_or_else(Vec::new);
 
     let mut out: Vec<TimelineTrack> = Vec::with_capacity(tracks.len());
 
