@@ -3,6 +3,9 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 
+#[cfg(feature = "onnx")]
+use crate::audio_engine::pitch_stream_onnx;
+
 use super::types::EngineSnapshot;
 use super::util::clamp11;
 
@@ -11,7 +14,7 @@ fn mix_snapshot_clips_into_scratch(
     snap: &EngineSnapshot,
     pos0: u64,
     pos1: u64,
-    scratch: &mut Vec<f32>,
+    scratch: &mut [f32],
 ) {
     for clip in &snap.clips {
         let clip_start = clip.start_frame;
@@ -27,7 +30,7 @@ fn mix_snapshot_clips_into_scratch(
         }
 
         let out_off = (overlap_start - pos0) as usize;
-        let clip_off = (overlap_start - clip_start) as u64;
+        let clip_off = overlap_start - clip_start;
         let mix_frames = (overlap_end - overlap_start) as usize;
 
         let src_pcm = clip.src.pcm.as_slice();
@@ -74,10 +77,8 @@ fn mix_snapshot_clips_into_scratch(
                         (clip.src_start_frame as f64) + local_adj * clip.playback_rate
                     };
 
-                    if !clip.repeat {
-                        if src_pos + 1.0 >= clip.src_end_frame as f64 {
-                            continue;
-                        }
+                    if !clip.repeat && src_pos + 1.0 >= clip.src_end_frame as f64 {
+                        continue;
                     }
 
                     let i0 = src_pos.floor().max(0.0) as u64;
@@ -118,10 +119,8 @@ fn mix_snapshot_clips_into_scratch(
                     (clip.src_start_frame as f64) + local_adj * clip.playback_rate
                 };
 
-                if !clip.repeat {
-                    if src_pos + 1.0 >= clip.src_end_frame as f64 {
-                        continue;
-                    }
+                if !clip.repeat && src_pos + 1.0 >= clip.src_end_frame as f64 {
+                    continue;
                 }
 
                 let i0 = src_pos.floor().max(0.0) as u64;
@@ -215,7 +214,7 @@ fn mix_into_scratch_stereo(
         } else {
             // Not fully covered yet: mix normally, then override the frames we do have.
             // This also acts as the fallback path when the stream hasn't warmed up.
-            mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch);
+            mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch.as_mut_slice());
             for f in 0..frames {
                 let abs_f = pos0.saturating_add(f as u64);
                 if let Some((l, r)) = stream.read_frame(abs_f) {
@@ -225,7 +224,7 @@ fn mix_into_scratch_stereo(
             }
         }
     } else {
-        mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch);
+        mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch.as_mut_slice());
     }
 
     let new_pos = pos0.saturating_add(frames as u64);

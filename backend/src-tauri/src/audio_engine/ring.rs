@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::atomic::AtomicU32 as AtomicU32Cell;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 #[derive(Debug)]
 pub(crate) struct StreamRingStereo {

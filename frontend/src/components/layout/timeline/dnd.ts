@@ -10,10 +10,12 @@ export function hasFileDrag(dt: DataTransfer): boolean {
 export function extractLocalFilePath(
     dt: DataTransfer,
 ): { path: string; name: string } | null {
+    type MaybePathFile = File & { path?: string };
+
     const itemFile = Array.from(dt.items ?? [])
         .find((it) => it.kind === "file")
-        ?.getAsFile() as any;
-    const file = (dt.files?.[0] as any) ?? itemFile;
+        ?.getAsFile() as MaybePathFile | null;
+    const file = (dt.files?.[0] as MaybePathFile | undefined) ?? itemFile;
 
     const directPath = String(file?.path ?? "").trim();
     if (directPath) {

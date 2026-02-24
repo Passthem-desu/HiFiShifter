@@ -73,7 +73,8 @@ type GetSamplesForHarvestFn =
 
 type InitializeCheapTrickOptionFn = unsafe extern "C" fn(fs: i32, option: *mut CheapTrickOption);
 
-type GetFFTSizeForCheapTrickFn = unsafe extern "C" fn(fs: i32, option: *const CheapTrickOption) -> i32;
+type GetFFTSizeForCheapTrickFn =
+    unsafe extern "C" fn(fs: i32, option: *const CheapTrickOption) -> i32;
 
 type CheapTrickFn = unsafe extern "C" fn(
     x: *const f64,
@@ -161,9 +162,7 @@ fn api() -> Result<&'static WorldVocoderApi, String> {
                 initialize_dio_option: *lib
                     .get(b"InitializeDioOption\0")
                     .map_err(|e| e.to_string())?,
-                get_samples_for_dio: *lib
-                    .get(b"GetSamplesForDIO\0")
-                    .map_err(|e| e.to_string())?,
+                get_samples_for_dio: *lib.get(b"GetSamplesForDIO\0").map_err(|e| e.to_string())?,
                 stone_mask: *lib.get(b"StoneMask\0").map_err(|e| e.to_string())?,
 
                 harvest: *lib.get(b"Harvest\0").map_err(|e| e.to_string())?,
@@ -228,13 +227,7 @@ fn ratio_from_semitones(semitones: f64) -> f64 {
 }
 
 fn clamp11(x: f64) -> f64 {
-    if x < -1.0 {
-        -1.0
-    } else if x > 1.0 {
-        1.0
-    } else {
-        x
-    }
+    x.clamp(-1.0, 1.0)
 }
 
 fn env_f64(name: &str) -> Option<f64> {
@@ -460,23 +453,14 @@ fn vocode_one(
     };
 
     let (temporal_positions, mut f0) = match world_f0_method() {
-        WorldF0Method::Harvest => compute_f0_with_positions_harvest(
-            x_f64,
-            fs,
-            fp,
-            f0_floor,
-            f0_ceil,
-        )
-        .or_else(|_e| {
-            // Fallback to DIO if Harvest symbols or runtime fail.
-            compute_f0_with_positions_dio_stonemask(x_f64, fs, fp, f0_floor, f0_ceil)
-        })?,
+        WorldF0Method::Harvest => {
+            compute_f0_with_positions_harvest(x_f64, fs, fp, f0_floor, f0_ceil).or_else(|_e| {
+                // Fallback to DIO if Harvest symbols or runtime fail.
+                compute_f0_with_positions_dio_stonemask(x_f64, fs, fp, f0_floor, f0_ceil)
+            })?
+        }
         WorldF0Method::Dio => compute_f0_with_positions_dio_stonemask(
-            x_f64,
-            fs,
-            fp,
-            f0_floor,
-            f0_ceil,
+            x_f64, fs, fp, f0_floor, f0_ceil,
         )
         .or_else(|_e| {
             // Fallback to Harvest if DIO fails.
@@ -521,7 +505,8 @@ fn vocode_one(
     unsafe { (api.initialize_cheaptrick_option)(fs, &mut ct_opt as *mut CheapTrickOption) };
     ct_opt.f0_floor = f0_floor.max(20.0);
 
-    let fft_size = unsafe { (api.get_fft_size_for_cheaptrick)(fs, &ct_opt as *const CheapTrickOption) };
+    let fft_size =
+        unsafe { (api.get_fft_size_for_cheaptrick)(fs, &ct_opt as *const CheapTrickOption) };
     if fft_size <= 0 {
         return Err("WORLD: invalid fft_size".to_string());
     }
@@ -531,10 +516,7 @@ fn vocode_one(
 
     // Allocate spectrogram and aperiodicity as 2D arrays.
     let mut spectrogram: Vec<Vec<f64>> = vec![vec![0.0f64; spec_bins]; f0.len()];
-    let mut sp_ptrs: Vec<*mut f64> = spectrogram
-        .iter_mut()
-        .map(|row| row.as_mut_ptr())
-        .collect();
+    let mut sp_ptrs: Vec<*mut f64> = spectrogram.iter_mut().map(|row| row.as_mut_ptr()).collect();
 
     unsafe {
         (api.cheaptrick)(
@@ -610,10 +592,7 @@ fn vocode_one(
 
     let mut out = y;
     if !voiced.is_empty() {
-        let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
-            .ok()
-            .as_deref()
-            == Some("1");
+        let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
         if debug {
             let voiced_n = voiced.iter().filter(|&&b| b).count();
             let ratio = (voiced_n as f64) / (voiced.len().max(1) as f64);
@@ -634,7 +613,11 @@ fn vocode_one(
             // Map sample time -> frame index.
             let t_ms = (si as f64) * 1000.0 / (fs.max(1) as f64);
             let fi = (t_ms / fp).floor().max(0.0) as usize;
-            let target_w = if fi < voiced.len() && voiced[fi] { 1.0f64 } else { 0.0f64 };
+            let target_w = if fi < voiced.len() && voiced[fi] {
+                1.0f64
+            } else {
+                0.0f64
+            };
 
             // Start a new ramp when target changes.
             if ramp_left == 0 && (target_w - w_prev).abs() > 1e-9 && fade_samples > 0 {
@@ -719,31 +702,31 @@ where
 
         let x = &mono_pcm[pad_start..pad_end];
         let mut x_f64 = Vec::with_capacity(x.len());
-            // Preprocessing to reduce artifacts
-            let mut mean = 0.0f64;
-            for &v in x {
-                mean += v as f64;
-            }
-            mean /= x.len().max(1) as f64;
+        // Preprocessing to reduce artifacts
+        let mut mean = 0.0f64;
+        for &v in x {
+            mean += v as f64;
+        }
+        mean /= x.len().max(1) as f64;
 
-            let mut max_abs = 0.0f64;
-            for &v in x {
-                let vv = (v as f64) - mean;
-                let a = vv.abs();
-                if a.is_finite() && a > max_abs {
-                    max_abs = a;
-                }
+        let mut max_abs = 0.0f64;
+        for &v in x {
+            let vv = (v as f64) - mean;
+            let a = vv.abs();
+            if a.is_finite() && a > max_abs {
+                max_abs = a;
             }
-            let scale = if max_abs.is_finite() && max_abs > 1.0 {
-                (1.0 / max_abs).clamp(0.0, 1.0)
-            } else {
-                1.0
-            };
+        }
+        let scale = if max_abs.is_finite() && max_abs > 1.0 {
+            (1.0 / max_abs).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
 
-            for &v in x {
-                let vv = ((v as f64) - mean) * scale;
-                x_f64.push(clamp11(vv));
-            }
+        for &v in x {
+            let vv = ((v as f64) - mean) * scale;
+            x_f64.push(clamp11(vv));
+        }
 
         let abs_time_start_sec = start_sec + (pad_start as f64) / (sample_rate as f64);
         let y_f64 = vocode_one(

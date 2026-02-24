@@ -94,9 +94,8 @@ fn api() -> Result<&'static WorldApi, String> {
             let initialize_dio_option: InitializeDioOptionFn = *lib
                 .get(b"InitializeDioOption\0")
                 .map_err(|e| e.to_string())?;
-            let get_samples_for_dio: GetSamplesForDIOFn = *lib
-                .get(b"GetSamplesForDIO\0")
-                .map_err(|e| e.to_string())?;
+            let get_samples_for_dio: GetSamplesForDIOFn =
+                *lib.get(b"GetSamplesForDIO\0").map_err(|e| e.to_string())?;
 
             let harvest: HarvestFn = *lib.get(b"Harvest\0").map_err(|e| e.to_string())?;
             let initialize_harvest_option: InitializeHarvestOptionFn = *lib
@@ -106,8 +105,7 @@ fn api() -> Result<&'static WorldApi, String> {
                 .get(b"GetSamplesForHarvest\0")
                 .map_err(|e| e.to_string())?;
 
-            let stone_mask: StoneMaskFn =
-                *lib.get(b"StoneMask\0").map_err(|e| e.to_string())?;
+            let stone_mask: StoneMaskFn = *lib.get(b"StoneMask\0").map_err(|e| e.to_string())?;
 
             Ok(WorldApi {
                 _lib: lib,

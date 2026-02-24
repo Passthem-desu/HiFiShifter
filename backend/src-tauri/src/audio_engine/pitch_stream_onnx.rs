@@ -22,13 +22,7 @@ fn env_f64(name: &str) -> Option<f64> {
 }
 
 fn clamp01(x: f32) -> f32 {
-    if x < 0.0 {
-        0.0
-    } else if x > 1.0 {
-        1.0
-    } else {
-        x
-    }
+    x.clamp(0.0, 1.0)
 }
 
 fn compute_voiced_intervals_sec(curves: &PitchCurvesSnapshot, project_sec: f64) -> Vec<(f64, f64)> {
@@ -38,7 +32,9 @@ fn compute_voiced_intervals_sec(curves: &PitchCurvesSnapshot, project_sec: f64) 
         return vec![];
     }
 
-    let pad_ms = env_f64("HIFISHIFTER_ONNX_VAD_PAD_MS").unwrap_or(120.0).max(0.0);
+    let pad_ms = env_f64("HIFISHIFTER_ONNX_VAD_PAD_MS")
+        .unwrap_or(120.0)
+        .max(0.0);
     let pad_frames = ((pad_ms / fp).ceil() as isize).max(0);
 
     let mut raw: Vec<(isize, isize)> = Vec::new();
@@ -239,8 +235,12 @@ pub(crate) fn spawn_pitch_stream_onnx(
         let project_sec = timeline.project_duration_sec();
         let intervals = compute_voiced_intervals_sec(&curves, project_sec);
 
-        let ctx_sec = env_f64("HIFISHIFTER_ONNX_VAD_CTX_SEC").unwrap_or(1.5).max(0.0);
-        let xfade_ms = env_f64("HIFISHIFTER_ONNX_VAD_XFADE_MS").unwrap_or(40.0).max(0.0);
+        let ctx_sec = env_f64("HIFISHIFTER_ONNX_VAD_CTX_SEC")
+            .unwrap_or(1.5)
+            .max(0.0);
+        let xfade_ms = env_f64("HIFISHIFTER_ONNX_VAD_XFADE_MS")
+            .unwrap_or(40.0)
+            .max(0.0);
         let xfade_frames = ((xfade_ms / 1000.0) * (sr as f64)).round().max(0.0) as u64;
 
         let max_infer_sec = match env_f64("HIFISHIFTER_ONNX_VAD_MAX_SEC") {
@@ -320,7 +320,9 @@ pub(crate) fn spawn_pitch_stream_onnx(
                 // Write a small chunk so we never jump too far ahead.
                 let remaining = total_frames.saturating_sub(p.write_offset_frames);
                 let target_extra = need_until.saturating_sub(write);
-                let chunk_frames = remaining.min(target_extra.max(256)).min((sr as u64) / 2 + 256);
+                let chunk_frames = remaining
+                    .min(target_extra.max(256))
+                    .min((sr as u64) / 2 + 256);
                 let start = (p.write_offset_frames as usize) * 2;
                 let end = ((p.write_offset_frames + chunk_frames) as usize) * 2;
                 if end <= p.main.len() {
@@ -386,7 +388,13 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     let render_start = (t0 - pre_sec).max(0.0);
                     let render_end = (seg_end_frame as f64) / (sr as f64);
 
-                    let pcm = match mixdown_base_stereo(&timeline, sr, render_start, render_end, stretch.clone()) {
+                    let pcm = match mixdown_base_stereo(
+                        &timeline,
+                        sr,
+                        render_start,
+                        render_end,
+                        stretch.clone(),
+                    ) {
                         Ok(v) => v,
                         Err(_) => {
                             thread::sleep(std::time::Duration::from_millis(30));
@@ -424,7 +432,13 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     let padded_start = (seg_start_sec - pad_pre).max(0.0);
                     let padded_end = (seg_end_sec + pad_post).min(project_sec.max(seg_end_sec));
 
-                    let pcm = match mixdown_base_stereo(&timeline, sr, padded_start, padded_end, stretch.clone()) {
+                    let pcm = match mixdown_base_stereo(
+                        &timeline,
+                        sr,
+                        padded_start,
+                        padded_end,
+                        stretch.clone(),
+                    ) {
                         Ok(v) => v,
                         Err(_) => {
                             thread::sleep(std::time::Duration::from_millis(30));
@@ -453,8 +467,12 @@ pub(crate) fn spawn_pitch_stream_onnx(
 
                     let inferred_stereo = mono_to_stereo(&inferred);
 
-                    let start_off = ((seg_start_sec - padded_start) * (sr as f64)).round().max(0.0) as u64;
-                    let end_off = ((seg_end_sec - padded_start) * (sr as f64)).round().max(0.0) as u64;
+                    let start_off = ((seg_start_sec - padded_start) * (sr as f64))
+                        .round()
+                        .max(0.0) as u64;
+                    let end_off = ((seg_end_sec - padded_start) * (sr as f64))
+                        .round()
+                        .max(0.0) as u64;
                     let pre_off = start_off.saturating_sub(preroll_frames);
 
                     let total_frames = (inferred_stereo.len() / 2) as u64;

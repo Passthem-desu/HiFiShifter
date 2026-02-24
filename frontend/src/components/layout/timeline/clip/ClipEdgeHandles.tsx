@@ -40,8 +40,8 @@ export const ClipEdgeHandles: React.FC<{
                     e.stopPropagation();
                     const alt = Boolean(
                         altPressed ||
-                        (e as any).altKey ||
-                        (e.nativeEvent as any)?.getModifierState?.("Alt"),
+                        e.altKey ||
+                        e.nativeEvent.getModifierState?.("Alt"),
                     );
                     if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
                         ensureSelected(clipId);
@@ -65,8 +65,8 @@ export const ClipEdgeHandles: React.FC<{
                     e.stopPropagation();
                     const alt = Boolean(
                         altPressed ||
-                        (e as any).altKey ||
-                        (e.nativeEvent as any)?.getModifierState?.("Alt"),
+                        e.altKey ||
+                        e.nativeEvent.getModifierState?.("Alt"),
                     );
                     if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
                         ensureSelected(clipId);

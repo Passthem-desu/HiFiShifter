@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Flex, Box, Text, Separator } from "@radix-ui/themes";
+import { Flex, Box, Text } from "@radix-ui/themes";
 import { MenuBar } from "./components/layout/MenuBar";
 import { ActionBar } from "./components/layout/ActionBar";
 import { TimelinePanel } from "./components/layout/TimelinePanel";
@@ -102,14 +102,29 @@ function App() {
         Failed: "status_failed",
         "Runtime updated": "status_runtime_updated",
         "Runtime update failed": "status_runtime_update_failed",
+        "Clear waveform cache failed": "status_clear_waveform_cache_failed",
         "Import canceled": "status_import_canceled",
         "Pick output canceled": "status_pick_output_canceled",
         "Output path selected": "status_output_path_selected",
+        "New project": "status_new_project",
+        "Open canceled": "status_open_canceled",
+        "Project opened": "status_project_opened",
+        "Save canceled": "status_save_canceled",
+        "Save failed": "status_save_failed",
+        "Save As canceled": "status_save_as_canceled",
+        "Save As failed": "status_save_as_failed",
+        "Project saved": "status_project_saved",
+        "Clips created": "status_clips_created",
+        "Glue done": "status_glue_done",
     };
 
     const statusText = statusKey[s.status]
         ? t(statusKey[s.status] as any)
         : s.status;
+
+    const errorText = s.error
+        ? `${t("status_error_prefix")}：${s.error}`
+        : statusText;
 
     const [rendering, setRendering] = useState<{
         active: boolean;
@@ -310,7 +325,6 @@ function App() {
             className="h-screen w-screen bg-qt-window text-qt-text overflow-hidden font-sans text-sm selection:bg-qt-highlight selection:text-white"
         >
             <MenuBar />
-            <Separator size="4" color="gray" />
             <ActionBar />
 
             {/* Main Splitter Area */}
@@ -329,7 +343,7 @@ function App() {
                     onPointerDown={splitter.startDrag}
                     role="separator"
                     aria-orientation="horizontal"
-                    aria-label="Resize panels"
+                    aria-label={t("aria_resize_panels")}
                 />
 
                 {/* Bottom: Parameter / Piano Roll */}
@@ -345,10 +359,10 @@ function App() {
             <Flex
                 align="center"
                 justify="between"
-                className="h-6 bg-qt-window border-t border-qt-border px-2 select-none"
+                className="h-6 bg-qt-window border-t border-qt-border px-1 select-none gap-2"
             >
-                <Text size="1" color={s.error ? "red" : "gray"}>
-                    {s.error ? `Error: ${s.error}` : statusText}
+                <Text size="1" color={s.error ? "red" : "gray"} className="truncate min-w-0">
+                    {errorText}
                     {rendering.active ? (
                         <>
                             {" | "}
@@ -359,11 +373,11 @@ function App() {
                         </>
                     ) : null}
                 </Text>
-                <Text size="1" color="gray">
-                    {t("status_device")}: {s.runtime.device} |{" "}
-                    {t("status_model")}: {s.runtime.modelLoaded ? "OK" : "—"} |{" "}
-                    {t("status_audio")}: {s.runtime.audioLoaded ? "OK" : "—"} |{" "}
-                    {t("status_synth")}: {s.runtime.hasSynthesized ? "OK" : "—"}
+                <Text size="1" color="gray" className="shrink-0 whitespace-nowrap">
+                    {t("status_device")}: {s.runtime.device} · {t("status_model")}:
+                    {s.runtime.modelLoaded ? t("status_ok") : t("status_na")} ·{" "}
+                    {t("status_audio")}: {s.runtime.audioLoaded ? t("status_ok") : t("status_na")} ·{" "}
+                    {t("status_synth")}: {s.runtime.hasSynthesized ? t("status_ok") : t("status_na")}
                 </Text>
             </Flex>
         </Flex>

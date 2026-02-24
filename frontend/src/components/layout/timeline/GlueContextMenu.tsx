@@ -1,4 +1,5 @@
 import React from "react";
+import { useI18n } from "../../../i18n/I18nProvider";
 
 export const GlueContextMenu: React.FC<{
     x: number;
@@ -6,6 +7,8 @@ export const GlueContextMenu: React.FC<{
     disabled: boolean;
     onGlue: () => void;
 }> = ({ x, y, disabled, onGlue }) => {
+    const { t } = useI18n();
+
     return (
         <div
             data-hs-context-menu="1"
@@ -17,7 +20,7 @@ export const GlueContextMenu: React.FC<{
                 disabled={disabled}
                 onClick={onGlue}
             >
-                胶合
+                {t("glue")}
             </button>
         </div>
     );

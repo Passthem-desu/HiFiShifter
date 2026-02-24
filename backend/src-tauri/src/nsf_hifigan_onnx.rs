@@ -47,15 +47,12 @@ fn env_i32(name: &str) -> Option<i32> {
 }
 
 fn debug_enabled() -> bool {
-    std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
-        .ok()
-        .as_deref()
-        == Some("1")
+    std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
 }
 
 fn build_session_with_ep(onnx_path: &Path) -> Result<Session, String> {
-    let mut builder = Session::builder()
-        .map_err(|e| format!("create ort session builder failed: {e}"))?;
+    let mut builder =
+        Session::builder().map_err(|e| format!("create ort session builder failed: {e}"))?;
 
     let choice = env_ep_choice();
     let device_id = env_i32("HIFISHIFTER_ORT_CUDA_DEVICE_ID").unwrap_or(0);
@@ -75,16 +72,19 @@ fn build_session_with_ep(onnx_path: &Path) -> Result<Session, String> {
         }
         OrtExecutionProviderChoice::Auto => {
             // Try CUDA first, then fall back to CPU.
-            match builder.clone().with_execution_providers([
-                ep::CUDA::default().with_device_id(device_id).build(),
-            ]) {
+            match builder
+                .clone()
+                .with_execution_providers([ep::CUDA::default().with_device_id(device_id).build()])
+            {
                 Ok(b) => {
                     builder = b;
                     selected = "cuda";
                 }
                 Err(e) => {
                     if debug_enabled() {
-                        eprintln!("nsf_hifigan_onnx: CUDA EP unavailable, falling back to CPU: {e}");
+                        eprintln!(
+                            "nsf_hifigan_onnx: CUDA EP unavailable, falling back to CPU: {e}"
+                        );
                     }
                     selected = "cpu";
                 }
@@ -163,8 +163,8 @@ fn resolve_model_paths() -> Result<(PathBuf, PathBuf), String> {
         return Ok((onnx, cfg));
     }
 
-    if let Some(dir) = env_path("HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR")
-        .or_else(default_model_dir_guess)
+    if let Some(dir) =
+        env_path("HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR").or_else(default_model_dir_guess)
     {
         let onnx = dir.join("pc_nsf_hifigan.onnx");
         let cfg = dir.join("config.json");
@@ -634,10 +634,9 @@ impl NsfHifiganOnnx {
     }
 
     fn run_model(&mut self, mel: Vec<f32>, f0: Vec<f32>, t: usize) -> Result<Vec<f32>, String> {
-        let mel_tensor = Tensor::from_array(
-            ([1usize, self.cfg.num_mels, t], mel.into_boxed_slice()),
-        )
-        .map_err(|e| format!("build mel tensor failed: {e}"))?;
+        let mel_tensor =
+            Tensor::from_array(([1usize, self.cfg.num_mels, t], mel.into_boxed_slice()))
+                .map_err(|e| format!("build mel tensor failed: {e}"))?;
         let f0_tensor = Tensor::from_array(([1usize, t], f0.into_boxed_slice()))
             .map_err(|e| format!("build f0 tensor failed: {e}"))?;
 
@@ -695,9 +694,7 @@ impl NsfHifiganOnnx {
             let overlap_frames = overlap_frames.min(seg_frames.saturating_sub(1));
             let step = seg_frames.saturating_sub(overlap_frames).max(1);
 
-            let expected_total = (t as usize)
-                .saturating_mul(self.cfg.hop_size)
-                .max(1);
+            let expected_total = (t as usize).saturating_mul(self.cfg.hop_size).max(1);
             let mut out = vec![0.0f32; expected_total];
             let mut wsum = vec![0.0f32; expected_total];
 
@@ -790,10 +787,7 @@ pub fn is_available() -> bool {
     match guard.as_deref() {
         Some(Ok(_)) => true,
         Some(Err(e)) => {
-            let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS")
-                .ok()
-                .as_deref()
-                == Some("1");
+            let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
             if debug && !LOGGED_UNAVAILABLE.swap(true, Ordering::Relaxed) {
                 eprintln!("nsf_hifigan_onnx: unavailable: {e}");
             }

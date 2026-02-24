@@ -7,6 +7,8 @@ use crate::pitch_editing::PitchEditAlgorithm;
 
 use super::ring::StreamRingStereo;
 
+pub(crate) type AudioKey = (PathBuf, u32);
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct StretchKey {
     pub(crate) path: PathBuf,
@@ -33,9 +35,11 @@ pub struct AudioEngineStateSnapshot {
     pub base_sec: f64,
     pub position_sec: f64,
     pub duration_sec: f64,
+    #[allow(dead_code)]
     pub sample_rate: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct ResampledStereo {
     pub(crate) sample_rate: u32,
@@ -74,6 +78,7 @@ pub(crate) struct EngineClip {
     pub(crate) gain: f32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct EngineSnapshot {
     pub(crate) bpm: f64,
@@ -102,16 +107,28 @@ impl EngineSnapshot {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) enum EngineCommand {
     UpdateTimeline(TimelineState),
-    SeekSec { sec: f64 },
-    SetPlaying { playing: bool, target: Option<String> },
+    SeekSec {
+        sec: f64,
+    },
+    SetPlaying {
+        playing: bool,
+        target: Option<String>,
+    },
     PlayFile {
         path: PathBuf,
         offset_sec: f64,
         target: String,
     },
-    StretchReady { key: StretchKey },
+    StretchReady {
+        key: StretchKey,
+    },
+    AudioReady {
+        #[allow(dead_code)]
+        key: AudioKey,
+    },
     Stop,
     Shutdown,
 }

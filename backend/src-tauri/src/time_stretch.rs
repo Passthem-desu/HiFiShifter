@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StretchAlgorithm {
     /// Current fallback: linear resampling in the time domain.
@@ -28,7 +29,11 @@ pub fn time_stretch_interleaved(
         }
         StretchAlgorithm::RubberBand => {
             // Rubber Band uses time ratio = out / in.
-            let in_frames = if channels == 0 { 0 } else { input.len() / channels };
+            let in_frames = if channels == 0 {
+                0
+            } else {
+                input.len() / channels
+            };
             if in_frames < 2 || out_frames < 2 {
                 return linear_time_stretch_interleaved(input, channels, out_frames);
             }
