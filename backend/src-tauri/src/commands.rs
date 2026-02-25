@@ -11,6 +11,8 @@ mod common;
 mod core;
 #[path = "commands/dialogs.rs"]
 mod dialogs;
+#[path = "commands/debug.rs"]
+mod debug;
 #[path = "commands/params.rs"]
 mod params;
 #[path = "commands/playback.rs"]
@@ -416,4 +418,13 @@ pub fn stop_audio(state: State<'_, AppState>) -> serde_json::Value {
 #[tauri::command(rename_all = "camelCase")]
 pub fn get_playback_state(state: State<'_, AppState>) -> crate::models::PlaybackStatePayload {
     playback::get_playback_state(state)
+}
+
+// ===================== debug =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn debug_realtime_render_stats(
+    state: State<'_, AppState>,
+) -> crate::models::DebugRealtimeRenderStatsPayload {
+    debug::debug_realtime_render_stats(state)
 }

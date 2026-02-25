@@ -82,4 +82,32 @@ impl StreamRingStereo {
         let r = f32::from_bits(self.buf[idx + 1].load(Ordering::Relaxed));
         Some((l, r))
     }
+
+    pub(crate) fn is_window_covered(&self, start_frame: u64, frames: u64) -> bool {
+        if frames == 0 {
+            return true;
+        }
+        let end = start_frame.saturating_add(frames);
+        let base = self.base_frame.load(Ordering::Acquire);
+        let write = self.write_frame.load(Ordering::Acquire);
+        start_frame >= base && end <= write
+    }
+
+    // Reads a contiguous interleaved stereo window. Returns false if not fully covered.
+    pub(crate) fn read_interleaved_into(&self, start_frame: u64, out: &mut [f32]) -> bool {
+        if out.len() % 2 != 0 {
+            return false;
+        }
+        let frames = (out.len() / 2) as u64;
+        if !self.is_window_covered(start_frame, frames) {
+            return false;
+        }
+        for i in 0..(frames as usize) {
+            let f = start_frame.saturating_add(i as u64);
+            let idx = ((f % self.cap_frames) as usize) * 2;
+            out[i * 2] = f32::from_bits(self.buf[idx].load(Ordering::Relaxed));
+            out[i * 2 + 1] = f32::from_bits(self.buf[idx + 1].load(Ordering::Relaxed));
+        }
+        true
+    }
 }

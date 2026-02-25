@@ -5,7 +5,6 @@ import { ActionBar } from "./components/layout/ActionBar";
 import { TimelinePanel } from "./components/layout/TimelinePanel";
 import { PianoRollPanel } from "./components/layout/PianoRollPanel";
 import { useAppDispatch, useAppSelector } from "./app/hooks";
-import type { RootState } from "./app/store";
 import {
     fetchTimeline,
     refreshRuntime,
@@ -22,10 +21,47 @@ import {
 } from "./features/session/sessionSlice";
 import { useI18n } from "./i18n/I18nProvider";
 
+const statusKey: Record<string, string> = {
+    Ready: "status_ready",
+    Failed: "status_failed",
+    "Runtime updated": "status_runtime_updated",
+    "Runtime update failed": "status_runtime_update_failed",
+    "Clear waveform cache failed": "status_clear_waveform_cache_failed",
+    "Import canceled": "status_import_canceled",
+    "Pick output canceled": "status_pick_output_canceled",
+    "Output path selected": "status_output_path_selected",
+    "New project": "status_new_project",
+    "Open canceled": "status_open_canceled",
+    "Project opened": "status_project_opened",
+    "Save canceled": "status_save_canceled",
+    "Save failed": "status_save_failed",
+    "Save As canceled": "status_save_as_canceled",
+    "Save As failed": "status_save_as_failed",
+    "Project saved": "status_project_saved",
+    "Clips created": "status_clips_created",
+    "Glue done": "status_glue_done",
+};
+
 function App() {
     const dispatch = useAppDispatch();
-    const s = useAppSelector((state: RootState) => state.session);
     const { t } = useI18n();
+
+    const status = useAppSelector((state) => state.session.status);
+    const error = useAppSelector((state) => state.session.error);
+
+    const runtimeIsPlaying = useAppSelector(
+        (state) => state.session.runtime.isPlaying,
+    );
+    const runtimeHasSynthesized = useAppSelector(
+        (state) => state.session.runtime.hasSynthesized,
+    );
+    const runtimeDevice = useAppSelector((state) => state.session.runtime.device);
+    const runtimeModelLoaded = useAppSelector(
+        (state) => state.session.runtime.modelLoaded,
+    );
+    const runtimeAudioLoaded = useAppSelector(
+        (state) => state.session.runtime.audioLoaded,
+    );
 
     const containerRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{ pointerId: number } | null>(null);
@@ -97,34 +133,9 @@ function App() {
         return { startDrag };
     }, [splitRatio]);
 
-    const statusKey: Record<string, string> = {
-        Ready: "status_ready",
-        Failed: "status_failed",
-        "Runtime updated": "status_runtime_updated",
-        "Runtime update failed": "status_runtime_update_failed",
-        "Clear waveform cache failed": "status_clear_waveform_cache_failed",
-        "Import canceled": "status_import_canceled",
-        "Pick output canceled": "status_pick_output_canceled",
-        "Output path selected": "status_output_path_selected",
-        "New project": "status_new_project",
-        "Open canceled": "status_open_canceled",
-        "Project opened": "status_project_opened",
-        "Save canceled": "status_save_canceled",
-        "Save failed": "status_save_failed",
-        "Save As canceled": "status_save_as_canceled",
-        "Save As failed": "status_save_as_failed",
-        "Project saved": "status_project_saved",
-        "Clips created": "status_clips_created",
-        "Glue done": "status_glue_done",
-    };
+    const statusText = statusKey[status] ? t(statusKey[status] as any) : status;
 
-    const statusText = statusKey[s.status]
-        ? t(statusKey[s.status] as any)
-        : s.status;
-
-    const errorText = s.error
-        ? `${t("status_error_prefix")}：${s.error}`
-        : statusText;
+    const errorText = error ? `${t("status_error_prefix")}：${error}` : statusText;
 
     const [rendering, setRendering] = useState<{
         active: boolean;
@@ -180,6 +191,8 @@ function App() {
         hasSynthesized: false,
     });
 
+    const playbackSyncInFlightRef = useRef(false);
+
     useEffect(() => {
         void dispatch(fetchTimeline());
         void dispatch(refreshRuntime());
@@ -187,10 +200,10 @@ function App() {
 
     useEffect(() => {
         runtimeRef.current = {
-            isPlaying: Boolean(s.runtime.isPlaying),
-            hasSynthesized: Boolean(s.runtime.hasSynthesized),
+            isPlaying: Boolean(runtimeIsPlaying),
+            hasSynthesized: Boolean(runtimeHasSynthesized),
         };
-    }, [s.runtime.isPlaying, s.runtime.hasSynthesized]);
+    }, [runtimeIsPlaying, runtimeHasSynthesized]);
 
     useEffect(() => {
         function isEditableTarget(target: EventTarget | null): boolean {
@@ -295,13 +308,20 @@ function App() {
     }, [dispatch]);
 
     useEffect(() => {
-        if (!s.runtime.isPlaying) return;
+        if (!runtimeIsPlaying) return;
         // Keep playhead following backend audio clock.
+        // 用 in-flight guard 防止轮询请求堆积；并适度降频以降低 Redux/React 压力。
+        const intervalMs = 80;
         const id = window.setInterval(() => {
-            void dispatch(syncPlaybackState());
-        }, 50);
+            if (playbackSyncInFlightRef.current) return;
+            playbackSyncInFlightRef.current = true;
+            const p = dispatch(syncPlaybackState()) as unknown as Promise<unknown>;
+            p.finally(() => {
+                playbackSyncInFlightRef.current = false;
+            });
+        }, intervalMs);
         return () => window.clearInterval(id);
-    }, [dispatch, s.runtime.isPlaying]);
+    }, [dispatch, runtimeIsPlaying]);
 
     useEffect(() => {
         splitRatioRef.current = splitRatio;
@@ -361,7 +381,7 @@ function App() {
                 justify="between"
                 className="h-6 bg-qt-window border-t border-qt-border px-1 select-none gap-2"
             >
-                <Text size="1" color={s.error ? "red" : "gray"} className="truncate min-w-0">
+                <Text size="1" color={error ? "red" : "gray"} className="truncate min-w-0">
                     {errorText}
                     {rendering.active ? (
                         <>
@@ -374,10 +394,10 @@ function App() {
                     ) : null}
                 </Text>
                 <Text size="1" color="gray" className="shrink-0 whitespace-nowrap">
-                    {t("status_device")}: {s.runtime.device} · {t("status_model")}:
-                    {s.runtime.modelLoaded ? t("status_ok") : t("status_na")} ·{" "}
-                    {t("status_audio")}: {s.runtime.audioLoaded ? t("status_ok") : t("status_na")} ·{" "}
-                    {t("status_synth")}: {s.runtime.hasSynthesized ? t("status_ok") : t("status_na")}
+                    {t("status_device")}: {runtimeDevice} · {t("status_model")}:
+                    {runtimeModelLoaded ? t("status_ok") : t("status_na")} ·{" "}
+                    {t("status_audio")}: {runtimeAudioLoaded ? t("status_ok") : t("status_na")} ·{" "}
+                    {t("status_synth")}: {runtimeHasSynthesized ? t("status_ok") : t("status_na")}
                 </Text>
             </Flex>
         </Flex>

@@ -268,6 +268,8 @@ export const ClipItem: React.FC<{
             ? "rgba(255,255,255,0.75)"
             : "rgba(255,255,255,0.65)";
 
+        const dash = peaks?.isPreview ? "4 3" : undefined;
+
         let topMin: number[] | null = null;
         let topMax: number[] | null = null;
         let botMin: number[] | null = null;
@@ -357,6 +359,7 @@ export const ClipItem: React.FC<{
                         d={topD}
                         fill={fill}
                         stroke={stroke}
+                        strokeDasharray={dash}
                         strokeWidth="1"
                         vectorEffect="non-scaling-stroke"
                         strokeLinejoin="round"
@@ -368,6 +371,7 @@ export const ClipItem: React.FC<{
                         d={botD}
                         fill={fill}
                         stroke={stroke}
+                        strokeDasharray={dash}
                         strokeWidth="1"
                         vectorEffect="non-scaling-stroke"
                         strokeLinejoin="round"
@@ -488,9 +492,12 @@ export const ClipItem: React.FC<{
             >
                 {/* Body (waveform + edit handles) */}
                 <div className="absolute inset-0">
+                    {/* Fade handles: visible grabbers on hover/selected, with larger hit areas */}
                     <div
-                        className="absolute left-0 top-0 w-[14px] h-[14px] z-[70]"
-                        style={{ cursor: "nwse-resize" }}
+                        className={
+                            "absolute left-0 top-0 z-[80] w-[28px] h-[28px] -translate-x-1 -translate-y-1 " +
+                            "cursor-nwse-resize"
+                        }
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -503,10 +510,23 @@ export const ClipItem: React.FC<{
                             selectClipRemote(clip.id);
                             startEditDrag(e, clip.id, "fade_in");
                         }}
-                    />
+                        title={t("fade_in")}
+                    >
+                        <div
+                            className={
+                                "absolute left-[6px] top-[6px] w-[14px] h-[14px] rounded-sm " +
+                                "border border-white/60 bg-white/15 " +
+                                (selected
+                                    ? "opacity-100"
+                                    : "opacity-0 group-hover:opacity-90")
+                            }
+                        />
+                    </div>
                     <div
-                        className="absolute right-0 top-0 w-[14px] h-[14px] z-[70]"
-                        style={{ cursor: "nesw-resize" }}
+                        className={
+                            "absolute right-0 top-0 z-[80] w-[28px] h-[28px] translate-x-1 -translate-y-1 " +
+                            "cursor-nesw-resize"
+                        }
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -519,7 +539,18 @@ export const ClipItem: React.FC<{
                             selectClipRemote(clip.id);
                             startEditDrag(e, clip.id, "fade_out");
                         }}
-                    />
+                        title={t("fade_out")}
+                    >
+                        <div
+                            className={
+                                "absolute right-[6px] top-[6px] w-[14px] h-[14px] rounded-sm " +
+                                "border border-white/60 bg-white/15 " +
+                                (selected
+                                    ? "opacity-100"
+                                    : "opacity-0 group-hover:opacity-90")
+                            }
+                        />
+                    </div>
 
                     <div className="absolute inset-0 pointer-events-none z-30">
                         {showRepeatMarker ? (

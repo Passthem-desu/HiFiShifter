@@ -15,6 +15,7 @@ import {
     setEditParam,
     setTrackStateRemote,
 } from "../../features/session/sessionSlice";
+import { resolveRootTrackId } from "../../features/session/trackUtils";
 
 import {
     BackgroundGrid,
@@ -37,6 +38,8 @@ import type {
     StrokePoint,
     ValueViewport,
 } from "./pianoRoll/types";
+
+import { PitchStatusBadge } from "./PitchStatusBadge";
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -100,18 +103,7 @@ export const PianoRollPanel: React.FC = () => {
     }, [tensionView]);
 
     const rootTrackId = useMemo(() => {
-        const selected = effectiveSelectedTrackId;
-        if (!selected) return null;
-        const byId = new Map(s.tracks.map((tr) => [tr.id, tr] as const));
-        let cur = selected;
-        let guard = 0;
-        while (guard++ < 2048) {
-            const tr = byId.get(cur);
-            const parent = tr?.parentId ?? null;
-            if (!parent) return cur;
-            cur = parent;
-        }
-        return selected;
+        return resolveRootTrackId(s.tracks, effectiveSelectedTrackId);
     }, [effectiveSelectedTrackId, s.tracks]);
 
     const rootTrack = useMemo(() => {
@@ -119,8 +111,15 @@ export const PianoRollPanel: React.FC = () => {
         return s.tracks.find((tr) => tr.id === rootTrackId) ?? null;
     }, [s.tracks, rootTrackId]);
 
-    const pitchEnabled =
-        editParam !== "pitch" || Boolean(rootTrack?.composeEnabled);
+    const pitchHardDisableReason = useMemo(() => {
+        if (editParam !== "pitch") return null;
+        if (!rootTrack) return null;
+        if (!rootTrack.composeEnabled) return t("pitch_requires_compose");
+        if (rootTrack.pitchAnalysisAlgo === "none") return t("pitch_requires_algo");
+        return null;
+    }, [editParam, rootTrack, t]);
+
+    const pitchEnabled = editParam !== "pitch" || pitchHardDisableReason == null;
 
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
     const contentWidth = Math.max(
@@ -334,9 +333,12 @@ export const PianoRollPanel: React.FC = () => {
         isLoading,
         pitchAnalysisPending,
         pitchAnalysisProgress,
+        pitchEditUserModified,
+        pitchEditBackendAvailable,
     } = usePianoRollData({
         editParam,
         pitchEnabled,
+        paramsEpoch: (s as unknown as { paramsEpoch?: number }).paramsEpoch ?? 0,
         rootTrackId,
         selectedTrackId: effectiveSelectedTrackId,
         tracks: s.tracks,
@@ -397,7 +399,7 @@ export const PianoRollPanel: React.FC = () => {
             paramView,
             overlayText:
                 editParam === "pitch" && !pitchEnabled
-                    ? t("pitch_requires_compose")
+                    ? pitchHardDisableReason
                     : null,
             liveEditOverride: liveEditOverrideRef.current,
             selection: selectionRef.current,
@@ -518,6 +520,23 @@ export const PianoRollPanel: React.FC = () => {
                             {t("tension")}
                         </Button>
                     </Flex>
+
+                    {editParam === "pitch" ? (
+                        <PitchStatusBadge
+                            tracks={s.tracks}
+                            selectedTrackId={effectiveSelectedTrackId}
+                            status={
+                                pitchEnabled
+                                    ? {
+                                          analysisPending: pitchAnalysisPending,
+                                          analysisProgress: pitchAnalysisProgress,
+                                          pitchEditUserModified,
+                                          pitchEditBackendAvailable,
+                                      }
+                                    : undefined
+                            }
+                        />
+                    ) : null}
 
                     <Button
                         size="1"
@@ -683,7 +702,7 @@ export const PianoRollPanel: React.FC = () => {
                 </Flex>
 
                 {showOverlay ? (
-                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-qt-base opacity-60">
+                    <div className="absolute inset-0 z-50 flex items-center justify-center qt-overlay">
                         <div className="flex flex-col items-center gap-2">
                             <Text size="2" color="gray">
                                 {showPitchAnalyzingOverlay
@@ -693,10 +712,10 @@ export const PianoRollPanel: React.FC = () => {
                                     : t("loading")}
                             </Text>
                             {showPitchAnalyzingOverlay ? (
-                                <div className="w-64 h-2 bg-qt-button border border-qt-border rounded overflow-hidden">
+                                <div className="w-64 h-2 bg-qt-surface border border-qt-border rounded overflow-hidden">
                                     <div
                                         className={
-                                            "h-full bg-qt-highlight" +
+                                            "h-full bg-qt-highlight transition-[width] duration-150" +
                                             (pitchPercent == null
                                                 ? " animate-pulse"
                                                 : "")

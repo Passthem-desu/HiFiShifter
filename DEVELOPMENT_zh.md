@@ -294,14 +294,39 @@ WORLD-vocoder 内部 F0 清理（缓解“咯痰感/气泡噪声”）：
 当前限制（v1）：
 - 处理以 **mono** 作为输入/输出（对 stereo mix 会折叠为 mono 并写回所有声道），因此暂时会损失立体声像。
 - 实时播放（`play_original`）已接入（best-effort，低延迟优先）：
-  - `backend/src-tauri/src/audio_engine/snapshot.rs` 在检测到“Pitch Edit 启用且后端可用（WORLD DLL / NSF-HiFiGAN ONNX）”时，会启动一个后台 worker 以前向窗口渲染并把输出写入一个 `StreamRingStereo`（绝对时间线帧）。
-    - WORLD：直接调用 `mixdown`（内部应用 pitch-edit）并写入 ring。
-    - ONNX：使用 `backend/src-tauri/src/audio_engine/pitch_stream_onnx.rs`，按发声段（VAD）整段推理（unvoiced 原音直通），避免固定时间窗分片的边界噪声。
-  - 音频回调优先从该 ring buffer 读取；当刚开始播放/刚 seek 时，ring 可能尚未覆盖当前窗口：
-    - **默认（WORLD/大多数场景）**：回调永不阻塞，直接走实时混音并推进 playhead；当 ring 覆盖到的帧可用时，再用已覆盖部分覆盖输出（保证不卡死，但起始可能短暂听到“原声 → 变调”的过渡）。
-    - **ONNX（NSF-HiFiGAN）A 模式**：为避免“先原声后变调”的跳变，ONNX pitch-stream 默认启用 hard-start：起始窗口未覆盖时输出静音且不推进 playhead，直到预缓冲完成再开播。前端会监听 `playback_rendering_state` 并在**左下角状态栏**显示“渲染中...”提示。
-      - 关闭该等待（回退为默认 best-effort）：`HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START=0`
-      - 调参：`HIFISHIFTER_ONNX_STREAM_PRIME_SEC`（默认 0.25）、`HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS`（默认 4000）
+  - `backend/src-tauri/src/audio_engine/snapshot.rs` 会构建两层流式渲染管线（都写入 `StreamRingStereo`，使用**绝对时间线帧**对齐）：
+    - **BaseStream（base_stream）**：后台线程把“当前时间线快照”的**基础混音（不做 Pitch Edit）**持续写入一个 ring（用于把 per-clip mixing 从音频回调线程搬走，同时给 pitch worker 提供稳定 PCM 源）。
+      - 实现位置：`backend/src-tauri/src/audio_engine/base_stream.rs`
+      - 隔离开关：`HIFISHIFTER_REALTIME_BASE_STREAM=0` 可禁用 base_stream（回退到回调线程实时混音，主要用于定位问题）。
+      - 调参（可选，默认值与当前实现一致）：
+        - `HIFISHIFTER_BASE_STREAM_WARMUP_BLOCK_SEC`（默认 0.5）
+        - `HIFISHIFTER_BASE_STREAM_WARMUP_AHEAD_SEC`（默认 0.5）
+        - `HIFISHIFTER_BASE_STREAM_BLOCK_SEC`（默认 2.0）
+        - `HIFISHIFTER_BASE_STREAM_LOOKAHEAD_SEC`（默认 3.0）
+    - **PitchStream（pitch_stream）**：当启用 Pitch Edit 且后端可用（WORLD DLL / NSF-HiFiGAN ONNX）时，启动 pitch worker。
+      - WORLD：从 `base_stream` 读出 PCM block，然后调用 `apply_pitch_edit_to_mixdown(...)` 做后处理，再写入 `pitch_stream` ring。
+      - ONNX：使用 `backend/src-tauri/src/audio_engine/pitch_stream_onnx.rs`；同样从 `base_stream` 读取需要的 PCM（含 VAD 上下文），按发声段（VAD）整段推理（unvoiced 原音直通），再写入 `pitch_stream`。
+  - 音频回调策略（稳定优先）：
+    - **优先读 pitch_stream**；若 pitch_stream 不存在或缺口，则尝试读 base_stream；若仍缺口再回退到实时混音（调试/兜底）。
+    - **默认（WORLD/ONNX，推荐）**：pitch-stream 启用 hard-start：当请求窗口未被 `[base_frame, write_frame)` 覆盖时，回调线程输出静音且**不推进**播放位置，直到预缓冲完成后再开始出声。
+      - 目的：避免“原声 → 变调”的突变，并彻底移除“pitch 不足 → 回调线程实时混音 fallback”导致的 CPU 峰值/卡顿。
+      - 前端会监听 `playback_rendering_state` 并在**左下角状态栏**显示“渲染中...”提示。
+      - 关闭 hard-start（回退为旧 best-effort 行为，仅用于调试）：`HIFISHIFTER_PITCH_STREAM_HARD_START=0`
+      - 调参（所有算法通用）：`HIFISHIFTER_PITCH_STREAM_PRIME_SEC`（默认 0.25）、`HIFISHIFTER_PITCH_STREAM_PRIME_TIMEOUT_MS`（默认 4000）
+    - **ONNX（NSF-HiFiGAN）额外开关**：可单独关闭 ONNX 的 hard-start（仅用于调试/对比）：`HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START=0`
+      - ONNX 调参：`HIFISHIFIFTER_ONNX_STREAM_PRIME_SEC`（默认 0.25）、`HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS`（默认 4000）
+  - 实时渲染统计（用于定位卡顿/欠供，环境变量）：
+    - 开关：`HIFISHIFTER_DEBUG_RENDER_STATS=1`
+    - 位置：`backend/src-tauri/src/audio_engine/realtime_stats.rs` + `backend/src-tauri/src/audio_engine/mix.rs`
+    - 获取方式（调试命令）：
+      - `debugRealtimeRenderStats`（Tauri command，门面：[commands.rs](d:\Code\HiFiShifter\backend\src-tauri\src\commands.rs)，实现：[debug.rs](d:\Code\HiFiShifter\backend\src-tauri\src\commands\debug.rs)）
+      - 返回：`DebugRealtimeRenderStatsPayload { enabled, stats }`（见 [models.rs](d:\Code\HiFiShifter\backend\src-tauri\src\models.rs)）
+      - 说明：当未设置 `HIFISHIFTER_DEBUG_RENDER_STATS=1` 时，命令返回 `enabled=false` 且 `stats=null`。
+    - 计数含义（均为“音频回调次数”级别的轻量计数，不会引入锁）：
+      - `pitch_callbacks_silenced_waiting`：**pitch hard-start 等待覆盖**导致的静音次数（常见于 WORLD/ONNX 渲染跟不上或首次启动预缓冲不足）。
+      - `pitch_callbacks_prime_waiting`：**prime 预缓冲窗口**尚未满足导致的静音次数（通常启动阶段会出现，持续增加说明 write 进度几乎不动）。
+      - `base_callbacks_fallback_mixed`：base_stream 缺口时回退到 legacy 实时混音的次数（持续增加说明 base_stream 供给跟不上，或频繁 seek/reset）。
+      - `legacy_callbacks_mixed`：完全走 legacy 实时混音的次数（意味着 streams 未启用或被关闭）。
   - ONNX 发声段分割与推理调参（环境变量，实时播放路径）：
     - `HIFISHIFTER_ONNX_VAD_PAD_MS`（默认 120）：把 voiced 区间两端扩展，尽量把气声/边缘纳入 voiced。
     - `HIFISHIFTER_ONNX_VAD_CTX_SEC`（默认 1.5）：voiced 推理时额外渲染的上下文长度。

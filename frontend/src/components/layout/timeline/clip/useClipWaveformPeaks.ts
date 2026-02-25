@@ -218,17 +218,11 @@ export function useClipWaveformPeaks(args: {
         const key = `${sourcePath}|${startSec.toFixed(3)}|${segSec.toFixed(3)}|${segmentColumns}`;
         const cached = getCachedSegment(key);
 
-        if (peaksKeyRef.current !== key) {
-            peaksKeyRef.current = key;
-
-            // Prefer immediate, local waveform preview during slip-edit drags.
-            // Otherwise we may keep showing a stale peaks buffer until the backend responds.
-            if (altPressed && hasWaveformPreview && !cached) {
-                setPeaks(null);
-            }
-        }
-
-        const buildOutput = (segMin: number[], segMax: number[]): PeaksRenderState => {
+        const buildOutput = (
+            segMin: number[],
+            segMax: number[],
+            isPreview: boolean,
+        ): PeaksRenderState => {
             const outCols = clamp(Math.floor(outColumns), 16, 8192);
             const segCols = Math.min(segMin.length, segMax.length);
             const segLen = Math.max(1e-9, Number(segmentLenBeatsTimeline) || 0);
@@ -237,7 +231,10 @@ export function useClipWaveformPeaks(args: {
             const outMin: number[] = new Array(outCols);
             const outMax: number[] = new Array(outCols);
 
-            const clipLenBeats = Math.max(1e-9, Number(clip.lengthBeats ?? 0) || 0);
+            const clipLenBeats = Math.max(
+                1e-9,
+                Number(clip.lengthBeats ?? 0) || 0,
+            );
             const lead = Math.max(0, Number(leadSilenceBeats) || 0);
 
             for (let i = 0; i < outCols; i += 1) {
@@ -249,7 +246,12 @@ export function useClipWaveformPeaks(args: {
                     outMax[i] = 0;
                     continue;
                 }
-                const mm = sampleSegmentMinMaxAtBeat(segMin, segMax, segLen, beatInSeg);
+                const mm = sampleSegmentMinMaxAtBeat(
+                    segMin,
+                    segMax,
+                    segLen,
+                    beatInSeg,
+                );
                 outMin[i] = mm.min;
                 outMax[i] = mm.max;
             }
@@ -264,13 +266,31 @@ export function useClipWaveformPeaks(args: {
                 segmentLenBeats: segLen,
                 segmentColumns: segCols,
                 leadSilenceBeats: lead,
-                isPreview: false,
+                isPreview,
             };
         };
 
         if (cached) {
-            setPeaks(buildOutput(cached.min, cached.max));
+            setPeaks(buildOutput(cached.min, cached.max, false));
+            peaksKeyRef.current = key;
             return;
+        }
+
+        const keyChanged = peaksKeyRef.current !== key;
+        if (keyChanged) {
+            peaksKeyRef.current = key;
+
+            // Preview remap: if we already have a base segment from the previous request,
+            // immediately rebuild output with the new timeline mapping while backend peaks load.
+            // This avoids waveform flicker during trim/stretch/slip drags.
+            if (peaks?.ok && peaks.segmentMin.length >= 2 && peaks.segmentMax.length >= 2) {
+                setPeaks(buildOutput(peaks.segmentMin, peaks.segmentMax, true));
+            } else if (altPressed && hasWaveformPreview) {
+                // As a last resort, during slip-edit prefer the import-time waveform preview.
+                setPeaks(null);
+            }
+        } else {
+            // Key unchanged but we still lack cache: keep any previous peaks.
         }
 
         if (peaksDebounceRef.current != null) {
@@ -311,7 +331,7 @@ export function useClipWaveformPeaks(args: {
                     t: performance.now(),
                 });
 
-                setPeaks(buildOutput(segMin, segMax));
+                setPeaks(buildOutput(segMin, segMax, false));
             } catch {
                 // Ignore peaks failures; fallback waveform preview may still render.
             }
@@ -323,7 +343,8 @@ export function useClipWaveformPeaks(args: {
                 peaksDebounceRef.current = null;
             }
         };
-    }, [altPressed, hasWaveformPreview, peaksRequest]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [altPressed, hasWaveformPreview, peaksRequest, peaks?.ok, peaks?.segmentMin, peaks?.segmentMax]);
 
     return peaks;
 }

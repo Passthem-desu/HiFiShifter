@@ -164,4 +164,7 @@ export interface ParamFramesPayload {
 
     analysis_pending?: boolean;
     analysis_progress?: number;
+
+    pitch_edit_user_modified?: boolean;
+    pitch_edit_backend_available?: boolean;
 }

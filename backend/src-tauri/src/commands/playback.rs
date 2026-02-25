@@ -51,24 +51,37 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     None => return,
                 };
 
-                if algo != crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx {
-                    return;
-                }
                 if !hard_start {
                     return;
                 }
 
                 // Configure priming window.
-                let prime_sec: f64 = std::env::var("HIFISHIFTER_ONNX_STREAM_PRIME_SEC")
-                    .ok()
-                    .and_then(|s| s.trim().parse::<f64>().ok())
-                    .filter(|v| v.is_finite() && *v > 0.0)
-                    .unwrap_or(0.25);
-                let timeout_ms: u64 = std::env::var("HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS")
-                    .ok()
-                    .and_then(|s| s.trim().parse::<u64>().ok())
-                    .filter(|v| *v > 0)
-                    .unwrap_or(4000);
+                let prime_sec: f64 = if algo == crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx {
+                    std::env::var("HIFISHIFTER_ONNX_STREAM_PRIME_SEC")
+                        .ok()
+                        .and_then(|s| s.trim().parse::<f64>().ok())
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                        .unwrap_or(0.25)
+                } else {
+                    std::env::var("HIFISHIFTER_PITCH_STREAM_PRIME_SEC")
+                        .ok()
+                        .and_then(|s| s.trim().parse::<f64>().ok())
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                        .unwrap_or(0.25)
+                };
+                let timeout_ms: u64 = if algo == crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx {
+                    std::env::var("HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS")
+                        .ok()
+                        .and_then(|s| s.trim().parse::<u64>().ok())
+                        .filter(|v| *v > 0)
+                        .unwrap_or(4000)
+                } else {
+                    std::env::var("HIFISHIFTER_PITCH_STREAM_PRIME_TIMEOUT_MS")
+                        .ok()
+                        .and_then(|s| s.trim().parse::<u64>().ok())
+                        .filter(|v| *v > 0)
+                        .unwrap_or(4000)
+                };
 
                 let sr = engine.sample_rate_hz() as f64;
                 let prime_frames = (prime_sec * sr).round().max(1.0) as u64;
@@ -95,11 +108,12 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                         break;
                     }
 
-                    let (_, base_now, write_now, hard_start_now) =
+                    let (_algo_now, base_now, write_now, _hard_start_now) =
                         match engine.pitch_stream_priming_info() {
                             Some(v) => v,
                             None => break,
                         };
+                    let _ = (_algo_now, _hard_start_now);
 
                     // If the stream base moved (seek/reset), recompute the target.
                     let need_frame = base_now.saturating_add(prime_frames);
@@ -132,11 +146,9 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     }
 
                     if t0.elapsed().as_millis() as u64 >= timeout_ms {
-                        // Fail-safe: break hard-start so playback can fall back to realtime mix.
-                        // This prevents a permanent "stuck" transport if inference fails.
-                        if hard_start_now {
-                            let _ = engine.set_pitch_stream_hard_start_enabled(false);
-                        }
+                        // Fail-safe: if pitch streaming fails to prime, stop playback instead of
+                        // disabling hard-start (which would leak unpitched realtime fallback).
+                        engine.stop();
                         let _ = app.emit(
                             "playback_rendering_state",
                             PlaybackRenderingStateEvent {

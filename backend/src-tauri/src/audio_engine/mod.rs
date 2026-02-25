@@ -1,3 +1,4 @@
+mod base_stream;
 mod engine;
 mod io;
 mod mix;
@@ -8,6 +9,7 @@ mod ring;
 mod snapshot;
 mod types;
 mod util;
+mod realtime_stats;
 
 pub use engine::AudioEngine;
 #[allow(unused_imports)]

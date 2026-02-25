@@ -254,7 +254,8 @@ pub fn run() {
             commands::play_original,
             commands::play_synthesized,
             commands::stop_audio,
-            commands::get_playback_state
+            commands::get_playback_state,
+            commands::debug_realtime_render_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

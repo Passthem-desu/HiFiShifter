@@ -5,9 +5,10 @@ use ort::value::Tensor;
 use rustfft::Fft;
 use rustfft::FftPlanner;
 use serde::Deserialize;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 static ORT_INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
@@ -263,6 +264,23 @@ fn reflect_pad(y: &[f32], left: usize, right: usize) -> Vec<f32> {
     out
 }
 
+fn reflect_pad_into(y: &[f32], left: usize, right: usize, out: &mut Vec<f32>) {
+    out.clear();
+    if y.is_empty() {
+        out.resize(left + right, 0.0);
+        return;
+    }
+
+    let len = y.len();
+    out.reserve(left + len + right);
+    let start = -(left as isize);
+    let end = (len as isize) + (right as isize);
+    for i in start..end {
+        let idx = reflect_index(i, len);
+        out.push(y[idx]);
+    }
+}
+
 fn hann_window(len: usize) -> Vec<f32> {
     if len == 0 {
         return vec![];
@@ -456,6 +474,33 @@ fn linear_resample_mono(input: &[f32], in_rate: u32, out_rate: u32) -> Vec<f32> 
     out
 }
 
+fn linear_resample_mono_into(input: &[f32], in_rate: u32, out_rate: u32, out: &mut Vec<f32>) {
+    out.clear();
+    if input.is_empty() {
+        return;
+    }
+
+    if in_rate == out_rate || input.len() < 2 {
+        out.extend_from_slice(input);
+        return;
+    }
+
+    let ratio = out_rate as f64 / in_rate as f64;
+    let out_frames = ((input.len() as f64) * ratio).round().max(1.0) as usize;
+    out.resize(out_frames, 0.0);
+
+    for of in 0..out_frames {
+        let t_in = (of as f64) / ratio;
+        let i0 = t_in.floor() as isize;
+        let frac = (t_in - (i0 as f64)) as f32;
+        let i0 = i0.clamp(0, (input.len() - 1) as isize) as usize;
+        let i1 = (i0 + 1).min(input.len() - 1);
+        let a = input[i0];
+        let b = input[i1];
+        out[of] = a + (b - a) * frac;
+    }
+}
+
 pub struct NsfHifiganOnnx {
     cfg: NsfHifiganConfig,
     mel_fb: Vec<Vec<f32>>,
@@ -463,6 +508,8 @@ pub struct NsfHifiganOnnx {
     fft: Arc<dyn Fft<f32>>,
     fft_buf: Vec<Complex32>,
     mag_buf: Vec<f32>,
+    pad_buf: Vec<f32>,
+    audio_resample_buf: Vec<f32>,
     session: Session,
 }
 
@@ -499,6 +546,8 @@ impl NsfHifiganOnnx {
             fft,
             fft_buf,
             mag_buf,
+            pad_buf: Vec::new(),
+            audio_resample_buf: Vec::new(),
             session,
         })
     }
@@ -520,7 +569,8 @@ impl NsfHifiganOnnx {
 
         let pad_left = ((win_size as isize - hop as isize) / 2).max(0) as usize;
         let pad_right = ((win_size as isize - hop as isize + 1) / 2).max(0) as usize;
-        let y = reflect_pad(audio, pad_left, pad_right);
+        reflect_pad_into(audio, pad_left, pad_right, &mut self.pad_buf);
+        let y: &[f32] = self.pad_buf.as_slice();
 
         let n_freqs = n_fft / 2 + 1;
         if self.mag_buf.len() != n_freqs {
@@ -664,11 +714,23 @@ impl NsfHifiganOnnx {
         midi_at_time: impl Fn(f64) -> f64,
     ) -> Result<Vec<f32>, String> {
         let model_sr = self.cfg.sampling_rate;
-        let audio_model = linear_resample_mono(audio_mono, sample_rate, model_sr);
+
+        // Avoid unnecessary allocations when sample rate already matches the model.
+        let audio_model: &[f32] = if sample_rate == model_sr {
+            audio_mono
+        } else {
+            linear_resample_mono_into(
+                audio_mono,
+                sample_rate,
+                model_sr,
+                &mut self.audio_resample_buf,
+            );
+            self.audio_resample_buf.as_slice()
+        };
 
         // Fast path: key_shift=0 is the only mode used by the app currently.
         // This avoids reallocating STFT matrices and re-planning FFT every call.
-        let mel = self.mel_from_audio_fast(&audio_model)?;
+        let mel = self.mel_from_audio_fast(audio_model)?;
 
         // mel is stored as (n_mels, T) contiguous. Build f0 (1, T) in Hz.
         let t = mel.len() / self.cfg.num_mels;
@@ -760,11 +822,14 @@ impl NsfHifiganOnnx {
         };
 
         // Resample back to mixdown rate if needed.
-        let y_mix = linear_resample_mono(&y_vec, model_sr, sample_rate);
+        let mut out = if model_sr == sample_rate {
+            y_vec
+        } else {
+            linear_resample_mono(&y_vec, model_sr, sample_rate)
+        };
 
         // Force length to match input buffer for in-place mixdown.
         let target = audio_mono.len();
-        let mut out = y_mix;
         if out.len() > target {
             out.truncate(target);
         } else if out.len() < target {
@@ -774,26 +839,27 @@ impl NsfHifiganOnnx {
     }
 }
 
-static SESSION: OnceLock<Mutex<Result<NsfHifiganOnnx, String>>> = OnceLock::new();
+static PROBE: OnceLock<Result<(), String>> = OnceLock::new();
 static LOGGED_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 
-fn session() -> &'static Mutex<Result<NsfHifiganOnnx, String>> {
-    SESSION.get_or_init(|| Mutex::new(NsfHifiganOnnx::load()))
+thread_local! {
+    static TLS_SESSION: RefCell<Option<Result<NsfHifiganOnnx, String>>> = RefCell::new(None);
+}
+
+fn probe() -> &'static Result<(), String> {
+    PROBE.get_or_init(|| NsfHifiganOnnx::load().map(|_| ()))
 }
 
 pub fn is_available() -> bool {
-    // Best-effort: treat as available if model can be loaded.
-    let guard = session().lock().ok();
-    match guard.as_deref() {
-        Some(Ok(_)) => true,
-        Some(Err(e)) => {
+    match probe() {
+        Ok(()) => true,
+        Err(e) => {
             let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
             if debug && !LOGGED_UNAVAILABLE.swap(true, Ordering::Relaxed) {
                 eprintln!("nsf_hifigan_onnx: unavailable: {e}");
             }
             false
         }
-        None => false,
     }
 }
 
@@ -803,11 +869,21 @@ pub fn infer_pitch_edit_mono(
     start_sec: f64,
     midi_at_time: impl Fn(f64) -> f64,
 ) -> Result<Vec<f32>, String> {
-    let mut lock = session()
-        .lock()
-        .map_err(|_| "nsf_hifigan: session lock poisoned".to_string())?;
-    let mut binding = lock.as_mut();
-    let sess = binding.as_mut().map_err(|e| (*e).clone())?;
+    if let Err(e) = probe() {
+        return Err(e.clone());
+    }
 
-    sess.infer_from_audio_and_midi(audio_mono, sample_rate, start_sec, midi_at_time)
+    TLS_SESSION.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        if opt.is_none() {
+            *opt = Some(NsfHifiganOnnx::load());
+        }
+        let sess = opt
+            .as_mut()
+            .expect("TLS_SESSION just initialized")
+            .as_mut()
+            .map_err(|e| e.clone())?;
+
+        sess.infer_from_audio_and_midi(audio_mono, sample_rate, start_sec, midi_at_time)
+    })
 }

@@ -20,7 +20,7 @@ pub(super) fn get_param_frames(
             track_id, param, start_frame, frame_count, stride
         );
     }
-    let (root, fp, entry, compose_enabled) = {
+    let (root, fp, entry, compose_enabled, pitch_algo) = {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
 
         let root = match tl.resolve_root_track_id(&track_id) {
@@ -36,25 +36,47 @@ pub(super) fn get_param_frames(
                     edit: vec![],
                     analysis_pending: None,
                     analysis_progress: None,
+                    pitch_edit_user_modified: None,
+                    pitch_edit_backend_available: None,
                 }
             }
         };
 
         tl.ensure_params_for_root(&root);
         let fp = tl.frame_period_ms();
-        let compose_enabled = tl
-            .tracks
-            .iter()
-            .find(|t| t.id == root)
-            .map(|t| t.compose_enabled)
-            .unwrap_or(false);
+
+        let track = tl.tracks.iter().find(|t| t.id == root);
+        let compose_enabled = track.map(|t| t.compose_enabled).unwrap_or(false);
+        let pitch_algo = track
+            .map(|t| t.pitch_analysis_algo.clone())
+            .unwrap_or_default();
+
         let entry = tl
             .params_by_root_track
             .get(&root)
             .cloned()
             .unwrap_or_default();
 
-        (root, fp, entry, compose_enabled)
+        (root, fp, entry, compose_enabled, pitch_algo)
+    };
+
+    let pitch_edit_user_modified =
+        (param == "pitch").then_some(entry.pitch_edit_user_modified);
+
+    let pitch_edit_backend_available = if param == "pitch" {
+        let algo = crate::pitch_editing::PitchEditAlgorithm::from_track_algo(&pitch_algo);
+        let available = match algo {
+            crate::pitch_editing::PitchEditAlgorithm::WorldVocoder => {
+                crate::world_vocoder::is_available()
+            }
+            crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx => {
+                crate::nsf_hifigan_onnx::is_available()
+            }
+            crate::pitch_editing::PitchEditAlgorithm::Bypass => true,
+        };
+        Some(available)
+    } else {
+        None
     };
 
     if param == "pitch" && !compose_enabled {
@@ -68,6 +90,8 @@ pub(super) fn get_param_frames(
             edit: vec![],
             analysis_pending: None,
             analysis_progress: None,
+            pitch_edit_user_modified,
+            pitch_edit_backend_available,
         };
     }
 
@@ -113,6 +137,8 @@ pub(super) fn get_param_frames(
         edit,
         analysis_pending,
         analysis_progress: None,
+        pitch_edit_user_modified,
+        pitch_edit_backend_available,
     }
 }
 

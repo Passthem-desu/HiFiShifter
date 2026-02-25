@@ -16,6 +16,7 @@ import {
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
+import { PitchStatusBadge } from "./PitchStatusBadge";
 import {
     loadModel,
     playOriginal,
@@ -115,6 +116,12 @@ export function ActionBar() {
                         <Select.Item value="breath">{t("breath")}</Select.Item>
                     </Select.Content>
                 </Select.Root>
+
+                <PitchStatusBadge
+                    tracks={s.tracks}
+                    selectedTrackId={s.selectedTrackId}
+                    className="ml-1"
+                />
             </Flex>
 
             <Separator orientation="vertical" size="2" />

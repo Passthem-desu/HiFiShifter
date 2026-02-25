@@ -80,6 +80,18 @@ export const messages = {
         param_editor: "Parameter Editor",
         pitch_requires_compose:
             "Enable Compose (C) on the root track to generate pitch curve",
+        pitch_requires_algo:
+            "Select a non-None pitch algorithm to enable pitch editing",
+        pitch_backend_unavailable:
+            "Pitch backend unavailable (check WORLD DLL / ONNX model)",
+        pitch_edit_not_modified_hint:
+            "No edit yet: curve matches original pitch",
+        pitch_status_label: "Pitch",
+        pitch_status_off: "Off",
+        pitch_status_pending: "Analyzing…",
+        pitch_status_ready: "Ready",
+        pitch_status_no_edit: "No Edit",
+        pitch_status_unavailable: "Unavailable",
         pitch_label: "Pitch (semitones)",
         tension_label: "Tension (0-1)",
         points_help: "Double click add · Drag move · Right click delete",
@@ -130,6 +142,8 @@ export const messages = {
         aria_resize_panels: "Resize panels",
         clip_mute: "Mute",
         clip_unmute: "Unmute",
+        fade_in: "Fade In",
+        fade_out: "Fade Out",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -211,6 +225,15 @@ export const messages = {
 
         param_editor: "参数编辑器",
         pitch_requires_compose: "请在根轨开启 Compose（C）以生成音高曲线",
+        pitch_requires_algo: "请选择非“无”的音高算法以启用音高编辑",
+        pitch_backend_unavailable: "音高后端不可用（请检查 WORLD DLL / ONNX 模型）",
+        pitch_edit_not_modified_hint: "尚未修改曲线：当前等同原始音高",
+        pitch_status_label: "音高",
+        pitch_status_off: "关闭",
+        pitch_status_pending: "分析中…",
+        pitch_status_ready: "可用",
+        pitch_status_no_edit: "未修改",
+        pitch_status_unavailable: "不可用",
         pitch_label: "音高（半音）",
         tension_label: "张力（0-1）",
         points_help: "双击新增 · 拖拽移动 · 右键删除",
@@ -261,6 +284,8 @@ export const messages = {
         aria_resize_panels: "调整面板大小",
         clip_mute: "静音",
         clip_unmute: "取消静音",
+        fade_in: "淡入",
+        fade_out: "淡出",
     },
 } as const;
 

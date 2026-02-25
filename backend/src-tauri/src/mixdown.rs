@@ -437,24 +437,7 @@ pub fn render_mixdown_interleaved(
         }
     }
 
-    // Apply pitch edit curve (WORLD or ONNX) if enabled for the selected root track.
-    // Best-effort: if pitch edit fails, keep the original mix.
-    if opts.apply_pitch_edit
-        && timeline.tracks.iter().any(|t| t.compose_enabled)
-        && crate::pitch_editing::is_pitch_edit_mixdown_v1()
-    {
-        if let Err(e) = crate::pitch_editing::apply_pitch_edit_to_mixdown(
-            timeline,
-            start_sec,
-            out_rate,
-            out_channels as usize,
-            &mut mix,
-        ) {
-            if debug {
-                eprintln!("mixdown: pitch_edit skipped due to error: {e}");
-            }
-        }
-    }
+
 
     if debug {
         let mut max_abs = 0.0f32;

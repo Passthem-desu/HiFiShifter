@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::thread;
 
 use super::ring::StreamRingStereo;
-use crate::mixdown::{render_mixdown_interleaved, MixdownOptions};
 use crate::pitch_editing::PitchCurvesSnapshot;
 use crate::state::TimelineState;
 use crate::time_stretch::StretchAlgorithm;
@@ -107,24 +106,26 @@ fn find_interval_idx(intervals: &[(f64, f64)], t: f64, mut idx: usize) -> usize 
     idx
 }
 
-fn mixdown_base_stereo(
-    timeline: &TimelineState,
+fn read_base_stereo_from_ring(
+    base_ring: &StreamRingStereo,
     sr: u32,
     start_sec: f64,
     end_sec: f64,
-    stretch: StretchAlgorithm,
-) -> Result<Vec<f32>, String> {
-    let (_sr, _ch, _dur, pcm) = render_mixdown_interleaved(
-        timeline,
-        MixdownOptions {
-            sample_rate: sr,
-            start_sec,
-            end_sec: Some(end_sec),
-            stretch,
-            apply_pitch_edit: false,
-        },
-    )?;
-    Ok(pcm)
+    out: &mut Vec<f32>,
+) -> Option<(u64, u64)> {
+    let start_frame = (start_sec.max(0.0) * sr as f64).round().max(0.0) as u64;
+    let end_frame = (end_sec.max(start_sec) * sr as f64).round().max(start_frame as f64) as u64;
+    let frames = end_frame.saturating_sub(start_frame);
+    if frames == 0 {
+        out.clear();
+        return Some((start_frame, end_frame));
+    }
+    let samples = (frames as usize).saturating_mul(2);
+    out.resize(samples, 0.0);
+    if !base_ring.read_interleaved_into(start_frame, out.as_mut_slice()) {
+        return None;
+    }
+    Some((start_frame, end_frame))
 }
 
 fn stereo_to_mono(pcm: &[f32]) -> Vec<f32> {
@@ -151,8 +152,11 @@ struct PendingVoiced {
     start_frame: u64,
     end_frame: u64,
     preroll_frames: u64,
-    preroll: Vec<f32>,
-    main: Vec<f32>,
+    buf: Arc<Vec<f32>>,
+    preroll_range: (usize, usize),
+    main_range: (usize, usize),
+    expected_frames: u64,
+    available_main_frames: u64,
     write_offset_frames: u64,
     tail: Vec<f32>,
 }
@@ -223,6 +227,7 @@ fn crossfade_into_ring(
 pub(crate) fn spawn_pitch_stream_onnx(
     timeline: TimelineState,
     sr: u32,
+    base_ring: Arc<StreamRingStereo>,
     ring: Arc<StreamRingStereo>,
     position_frames: Arc<AtomicU64>,
     is_playing: Arc<AtomicBool>,
@@ -259,6 +264,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
         } else {
             StretchAlgorithm::LinearResample
         };
+        let _ = stretch;
 
         let mut interval_idx: usize = 0;
         let mut out_cursor: u64 = position_frames.load(Ordering::Relaxed);
@@ -307,7 +313,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
 
             // If we already have a pending voiced segment inference result, stream it into the ring.
             if let Some(p) = pending.as_mut() {
-                let total_frames = ((p.main.len() / 2) as u64).max(0);
+                let total_frames = p.expected_frames;
                 if p.write_offset_frames >= total_frames {
                     // Done.
                     prev_kind = Some(SegmentKind::Voiced);
@@ -323,16 +329,35 @@ pub(crate) fn spawn_pitch_stream_onnx(
                 let chunk_frames = remaining
                     .min(target_extra.max(256))
                     .min((sr as u64) / 2 + 256);
-                let start = (p.write_offset_frames as usize) * 2;
-                let end = ((p.write_offset_frames + chunk_frames) as usize) * 2;
-                if end <= p.main.len() {
-                    ring.write_interleaved(out_cursor, &p.main[start..end]);
-                    out_cursor = out_cursor.saturating_add(chunk_frames);
-                    p.write_offset_frames = p.write_offset_frames.saturating_add(chunk_frames);
-                } else {
-                    // Safety: should not happen.
-                    pending = None;
+
+                let mut wrote_frames: u64 = 0;
+
+                // 1) Write available inferred audio.
+                if p.write_offset_frames < p.available_main_frames {
+                    let can = (p.available_main_frames - p.write_offset_frames).min(chunk_frames);
+                    let start = p.main_range.0 + (p.write_offset_frames as usize) * 2;
+                    let end = start + (can as usize) * 2;
+                    if end <= p.main_range.1 && end <= p.buf.len() {
+                        ring.write_interleaved(out_cursor, &p.buf[start..end]);
+                        out_cursor = out_cursor.saturating_add(can);
+                        p.write_offset_frames = p.write_offset_frames.saturating_add(can);
+                        wrote_frames += can;
+                    } else {
+                        // Safety: should not happen.
+                        pending = None;
+                        continue;
+                    }
                 }
+
+                // 2) If expected_frames is longer than available inferred frames, pad zeros.
+                let remain_in_chunk = chunk_frames.saturating_sub(wrote_frames);
+                if remain_in_chunk > 0 {
+                    let zeros = vec![0.0f32; (remain_in_chunk as usize) * 2];
+                    ring.write_interleaved(out_cursor, &zeros);
+                    out_cursor = out_cursor.saturating_add(remain_in_chunk);
+                    p.write_offset_frames = p.write_offset_frames.saturating_add(remain_in_chunk);
+                }
+
                 continue;
             }
 
@@ -388,19 +413,18 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     let render_start = (t0 - pre_sec).max(0.0);
                     let render_end = (seg_end_frame as f64) / (sr as f64);
 
-                    let pcm = match mixdown_base_stereo(
-                        &timeline,
+                    let mut pcm: Vec<f32> = vec![];
+                    let ok = read_base_stereo_from_ring(
+                        base_ring.as_ref(),
                         sr,
                         render_start,
                         render_end,
-                        stretch.clone(),
-                    ) {
-                        Ok(v) => v,
-                        Err(_) => {
-                            thread::sleep(std::time::Duration::from_millis(30));
-                            continue;
-                        }
-                    };
+                        &mut pcm,
+                    );
+                    if ok.is_none() {
+                        thread::sleep(std::time::Duration::from_millis(6));
+                        continue;
+                    }
 
                     let (preroll, mut main) =
                         build_preroll_and_main_from_stereo(&pcm, preroll_frames);
@@ -432,19 +456,18 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     let padded_start = (seg_start_sec - pad_pre).max(0.0);
                     let padded_end = (seg_end_sec + pad_post).min(project_sec.max(seg_end_sec));
 
-                    let pcm = match mixdown_base_stereo(
-                        &timeline,
+                    let mut pcm: Vec<f32> = vec![];
+                    let ok = read_base_stereo_from_ring(
+                        base_ring.as_ref(),
                         sr,
                         padded_start,
                         padded_end,
-                        stretch.clone(),
-                    ) {
-                        Ok(v) => v,
-                        Err(_) => {
-                            thread::sleep(std::time::Duration::from_millis(30));
-                            continue;
-                        }
-                    };
+                        &mut pcm,
+                    );
+                    if ok.is_none() {
+                        thread::sleep(std::time::Duration::from_millis(6));
+                        continue;
+                    }
 
                     let mono = stereo_to_mono(&pcm);
                     let inferred = match crate::nsf_hifigan_onnx::infer_pitch_edit_mono(
@@ -465,7 +488,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
                         continue;
                     }
 
-                    let inferred_stereo = mono_to_stereo(&inferred);
+                    let inferred_stereo = Arc::new(mono_to_stereo(&inferred));
 
                     let start_off = ((seg_start_sec - padded_start) * (sr as f64))
                         .round()
@@ -481,37 +504,66 @@ pub(crate) fn spawn_pitch_stream_onnx(
                         continue;
                     }
 
-                    let preroll = if preroll_frames > 0 {
+                    // Convert frame offsets into interleaved-sample indices.
+                    let preroll_range = if preroll_frames > 0 {
                         let a = (pre_off as usize) * 2;
                         let b = (start_off as usize) * 2;
                         if b <= inferred_stereo.len() {
-                            inferred_stereo[a..b].to_vec()
+                            (a, b)
                         } else {
-                            vec![]
+                            (0, 0)
                         }
                     } else {
-                        vec![]
+                        (0, 0)
                     };
 
-                    let mut main = {
-                        let a = (start_off as usize) * 2;
-                        let b = (end_off as usize) * 2;
-                        inferred_stereo[a..b].to_vec()
-                    };
-
-                    fit_stereo_to_frames(&mut main, expected_frames);
-
-                    if need_xfade && !prev_tail.is_empty() {
-                        crossfade_into_ring(&ring, out_cursor, &prev_tail, &preroll, xfade_frames);
+                    let main_a = (start_off as usize) * 2;
+                    let mut main_b = (end_off as usize) * 2;
+                    if main_b > inferred_stereo.len() {
+                        main_b = inferred_stereo.len();
                     }
 
-                    let tail = take_tail(&main, xfade_frames);
+                    // Align to expected_frames by truncating (or later padding zeros while streaming).
+                    let available_main_frames = ((main_b.saturating_sub(main_a)) / 2) as u64;
+                    let (main_range, available_main_frames) = if available_main_frames > expected_frames {
+                        let b = main_a + (expected_frames as usize) * 2;
+                        ((main_a, b), expected_frames)
+                    } else {
+                        ((main_a, main_b), available_main_frames)
+                    };
+
+                    if need_xfade && !prev_tail.is_empty() && preroll_range.1 > preroll_range.0 {
+                        crossfade_into_ring(
+                            &ring,
+                            out_cursor,
+                            &prev_tail,
+                            &inferred_stereo[preroll_range.0..preroll_range.1],
+                            xfade_frames,
+                        );
+                    }
+
+                    let tail = if expected_frames <= available_main_frames {
+                        take_tail(
+                            &inferred_stereo[main_range.0..main_range.1],
+                            xfade_frames,
+                        )
+                    } else {
+                        // We will pad zeros for the tail; next crossfade should see silence.
+                        vec![
+                            0.0f32;
+                            (xfade_frames.min(expected_frames) as usize) * 2
+                        ]
+                    };
+
                     pending = Some(PendingVoiced {
                         start_frame: out_cursor,
                         end_frame: seg_end_frame,
                         preroll_frames,
-                        preroll,
-                        main,
+                        buf: inferred_stereo,
+                        preroll_range,
+                        main_range,
+                        expected_frames,
+                        available_main_frames,
                         write_offset_frames: 0,
                         tail,
                     });

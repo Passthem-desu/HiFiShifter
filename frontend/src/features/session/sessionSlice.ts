@@ -99,6 +99,11 @@ export interface SessionState {
     projectBeats: number;
     grid: GridSize;
 
+    // Monotonic bump token for invalidating parameter curve caches.
+    // - Not included in undo/redo snapshots.
+    // - Should be bumped on any timeline/undo/redo operation that may affect param rendering.
+    paramsEpoch: number;
+
     playheadBeat: number;
     tracks: TrackInfo[];
     clips: ClipInfo[];
@@ -344,6 +349,9 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
     }
     state.clipWaveforms = nextWaveforms;
     state.clipPitchRanges = nextPitchRanges;
+
+    // Any timeline refresh may change pitch analysis inputs and therefore param curves.
+    state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
 }
 
 function upsertImportedClip(
@@ -427,6 +435,8 @@ const initialState: SessionState = {
     beats: 4,
     projectBeats: 64,
     grid: "1/4",
+
+    paramsEpoch: 0,
 
     playheadBeat: 0,
     tracks: [
@@ -563,6 +573,7 @@ const sessionSlice = createSlice({
     reducers: {
         checkpointHistory(state) {
             pushHistory(state);
+            state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
         },
         setToolMode(state, action: PayloadAction<ToolMode>) {
             if (state.toolMode !== action.payload) {
@@ -853,6 +864,7 @@ const sessionSlice = createSlice({
             }
             state.historyFuture.push(createSnapshot(state));
             applySnapshot(state, snapshot);
+            state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
         },
         redo(state) {
             const snapshot = state.historyFuture.pop();
@@ -861,6 +873,7 @@ const sessionSlice = createSlice({
             }
             state.historyPast.push(createSnapshot(state));
             applySnapshot(state, snapshot);
+            state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
         },
     },
     extraReducers: (builder) => {
@@ -1217,16 +1230,48 @@ const sessionSlice = createSlice({
                     return;
                 }
 
-                state.runtime.isPlaying = Boolean(payload.is_playing);
-                state.runtime.playbackTarget = payload.target ?? null;
-                state.runtime.playbackPositionSec = payload.position_sec ?? 0;
-                state.runtime.playbackDurationSec = payload.duration_sec ?? 0;
+                const nextIsPlaying = Boolean(payload.is_playing);
+                const nextTarget = payload.target ?? null;
+                const nextPositionSec = payload.position_sec ?? 0;
+                const nextDurationSec = payload.duration_sec ?? 0;
 
-                if (state.runtime.isPlaying) {
-                    const absSec =
-                        (payload.base_sec ?? 0) + (payload.position_sec ?? 0);
-                    const beatPos = (absSec * state.bpm) / 60;
-                    state.playheadBeat = Math.max(0, beatPos);
+                // 0.5ms 阈值：避免轮询带来的浮点抖动导致无意义的 Redux 更新。
+                const EPS_SEC = 0.0005;
+                const epsBeat = (state.bpm / 60) * EPS_SEC;
+
+                let nextPlayheadBeat = state.playheadBeat;
+                if (nextIsPlaying) {
+                    const absSec = (payload.base_sec ?? 0) + nextPositionSec;
+                    nextPlayheadBeat = Math.max(0, (absSec * state.bpm) / 60);
+                }
+
+                const shouldUpdatePlaybackFields =
+                    nextIsPlaying !== state.runtime.isPlaying ||
+                    nextTarget !== state.runtime.playbackTarget ||
+                    Math.abs(nextPositionSec - state.runtime.playbackPositionSec) >
+                        EPS_SEC ||
+                    Math.abs(nextDurationSec - state.runtime.playbackDurationSec) >
+                        EPS_SEC ||
+                    (nextIsPlaying &&
+                        Math.abs(nextPlayheadBeat - state.playheadBeat) > epsBeat);
+
+                if (!shouldUpdatePlaybackFields) {
+                    // 即使播放已停止，也避免重复写入相同值（Immer 会把赋值视为 mutation）。
+                    if (!nextIsPlaying) {
+                        if (state.playbackClipId !== null) state.playbackClipId = null;
+                        if (state.playbackAnchorBeat !== 0)
+                            state.playbackAnchorBeat = 0;
+                    }
+                    return;
+                }
+
+                state.runtime.isPlaying = nextIsPlaying;
+                state.runtime.playbackTarget = nextTarget;
+                state.runtime.playbackPositionSec = nextPositionSec;
+                state.runtime.playbackDurationSec = nextDurationSec;
+
+                if (nextIsPlaying) {
+                    state.playheadBeat = nextPlayheadBeat;
                 } else {
                     state.playbackClipId = null;
                     state.playbackAnchorBeat = 0;

@@ -24,10 +24,15 @@ use super::types::{
 
 use crate::pitch_editing::PitchEditAlgorithm;
 
+use super::realtime_stats::RealtimeRenderStats;
+use super::realtime_stats::RealtimeRenderStatsSnapshot;
+
 pub struct AudioEngine {
     tx: mpsc::Sender<EngineCommand>,
 
     snapshot: Arc<ArcSwap<EngineSnapshot>>,
+
+    realtime_stats: Arc<RealtimeRenderStats>,
 
     is_playing: Arc<AtomicBool>,
     target: Arc<Mutex<Option<String>>>,
@@ -42,6 +47,7 @@ impl Clone for AudioEngine {
         Self {
             tx: self.tx.clone(),
             snapshot: self.snapshot.clone(),
+            realtime_stats: self.realtime_stats.clone(),
             is_playing: self.is_playing.clone(),
             target: self.target.clone(),
             base_frames: self.base_frames.clone(),
@@ -56,6 +62,8 @@ impl AudioEngine {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel::<EngineCommand>();
         let tx_for_worker = tx.clone();
+
+        let realtime_stats: Arc<RealtimeRenderStats> = Arc::new(RealtimeRenderStats::default());
 
         let is_playing = Arc::new(AtomicBool::new(false));
         let target = Arc::new(Mutex::new(None));
@@ -77,6 +85,7 @@ impl AudioEngine {
         let sample_rate_thread = sample_rate.clone();
 
         let snapshot_for_thread = snapshot.clone();
+        let realtime_stats_thread = realtime_stats.clone();
         thread::spawn(move || {
             let host = cpal::default_host();
             let device = match host.default_output_device() {
@@ -234,6 +243,7 @@ impl AudioEngine {
             let is_playing_cb = is_playing_thread.clone();
             let position_frames_cb = position_frames_thread.clone();
             let duration_frames_cb = duration_frames_thread.clone();
+            let realtime_stats_cb = realtime_stats_thread.clone();
 
             let err_fn = |err| eprintln!("AudioEngine stream error: {err}");
 
@@ -250,6 +260,7 @@ impl AudioEngine {
                                     is_playing_cb.as_ref(),
                                     position_frames_cb.as_ref(),
                                     duration_frames_cb.as_ref(),
+                                    realtime_stats_cb.as_ref(),
                                     &mut scratch_mix,
                                 );
                             }));
@@ -277,6 +288,7 @@ impl AudioEngine {
                                     is_playing_cb.as_ref(),
                                     position_frames_cb.as_ref(),
                                     duration_frames_cb.as_ref(),
+                                    realtime_stats_cb.as_ref(),
                                     &mut scratch_mix,
                                 );
                             }));
@@ -304,6 +316,7 @@ impl AudioEngine {
                                     is_playing_cb.as_ref(),
                                     position_frames_cb.as_ref(),
                                     duration_frames_cb.as_ref(),
+                                    realtime_stats_cb.as_ref(),
                                     &mut scratch_mix,
                                 );
                             }));
@@ -491,6 +504,7 @@ impl AudioEngine {
         Self {
             tx,
             snapshot,
+            realtime_stats,
             is_playing,
             target,
             base_frames,
@@ -519,6 +533,7 @@ impl AudioEngine {
         Some((algo, base, write, hard_start))
     }
 
+    #[allow(dead_code)]
     pub fn set_pitch_stream_hard_start_enabled(&self, enabled: bool) -> bool {
         let snap = self.snapshot.load();
         let Some(stream) = snap.pitch_stream.as_ref() else {
@@ -569,6 +584,12 @@ impl AudioEngine {
         let base = self.base_frames.load(Ordering::Relaxed);
         let pos = self.position_frames.load(Ordering::Relaxed);
         let dur = self.duration_frames.load(Ordering::Relaxed);
+        let debug_stats = std::env::var("HIFISHIFTER_DEBUG_RENDER_STATS").ok().as_deref() == Some("1");
+        let realtime_stats: Option<RealtimeRenderStatsSnapshot> = if debug_stats {
+            Some(self.realtime_stats.snapshot())
+        } else {
+            None
+        };
         AudioEngineStateSnapshot {
             is_playing: self.is_playing(),
             target: self
@@ -580,6 +601,11 @@ impl AudioEngine {
             position_sec: pos as f64 / sr as f64,
             duration_sec: dur as f64 / sr as f64,
             sample_rate: sr,
+            realtime_stats,
         }
+    }
+
+    pub fn realtime_render_stats_snapshot(&self) -> RealtimeRenderStatsSnapshot {
+        self.realtime_stats.snapshot()
     }
 }

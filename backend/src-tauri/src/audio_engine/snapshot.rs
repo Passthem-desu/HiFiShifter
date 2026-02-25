@@ -6,11 +6,10 @@ use std::sync::{
 };
 use std::thread;
 
-use crate::mixdown::{render_mixdown_interleaved, MixdownOptions};
 use crate::state::{Clip, TimelineState, Track};
-use crate::time_stretch::StretchAlgorithm;
 
 use super::io::{get_resampled_stereo_cached, is_audio_path};
+use super::base_stream;
 use super::ring::StreamRingStereo;
 use super::types::{EngineClip, EngineSnapshot, ResampledStereo, StretchJob, StretchKey};
 use super::util::{clamp01, quantize_i64, quantize_u32};
@@ -500,6 +499,8 @@ pub(crate) fn build_snapshot(
             .max(0.0) as u64;
 
         clips_out.push(EngineClip {
+            clip_id: clip.id.clone(),
+            track_id: clip.track_id.clone(),
             start_frame,
             length_frames,
             src: src_render,
@@ -517,25 +518,73 @@ pub(crate) fn build_snapshot(
 
     clips_out.sort_by_key(|c| c.start_frame);
 
-    // Optional: pitch-edit bus streamer (low latency). It pre-renders forward windows using
-    // mixdown (which applies pitch edits) and lets the audio callback read lock-free.
-    // This is best-effort; if the selected pitch-edit backend isn't available, we keep normal realtime mixing.
-    let mut pitch_stream: Option<Arc<StreamRingStereo>> = None;
-    let mut pitch_stream_algo: Option<crate::pitch_editing::PitchEditAlgorithm> = None;
+    // Decide pitch-stream intent early because pitch streaming depends on a stable PCM source.
     let pitch_stream_enabled = std::env::var("HIFISHIFTER_REALTIME_PITCH_STREAM")
         .ok()
         .as_deref()
         != Some("0");
     let pitch_active = crate::pitch_editing::is_pitch_edit_active(timeline);
     let pitch_backend_ok = crate::pitch_editing::is_pitch_edit_backend_available(timeline);
+    let want_pitch_stream = pitch_stream_enabled && pitch_active && pitch_backend_ok;
     if debug {
         eprintln!(
-            "AudioEngine: pitch_stream_enabled={} pitch_active={} pitch_backend_ok={}",
-            pitch_stream_enabled, pitch_active, pitch_backend_ok
+            "AudioEngine: pitch_stream_enabled={} pitch_active={} pitch_backend_ok={} want_pitch_stream={}",
+            pitch_stream_enabled, pitch_active, pitch_backend_ok, want_pitch_stream
         );
     }
 
-    if pitch_stream_enabled && pitch_active && pitch_backend_ok {
+    // Optional: base mix streamer. This offloads per-clip mixing from the audio callback.
+    // The callback can read from this ring lock-free; when not covered it falls back to legacy mixing.
+    // NOTE: when pitch streaming is requested, we force-enable base_stream because pitch workers read from it.
+    let mut base_stream: Option<Arc<StreamRingStereo>> = None;
+    let base_stream_enabled = std::env::var("HIFISHIFTER_REALTIME_BASE_STREAM")
+        .ok()
+        .as_deref()
+        != Some("0")
+        || want_pitch_stream;
+    if base_stream_enabled {
+        let cap_frames = (out_rate as u64).saturating_mul(8); // keep a few seconds window
+        let ring = Arc::new(StreamRingStereo::new(cap_frames));
+
+        // Start close to current playhead to reduce perceived delay.
+        let now = position_frames.load(Ordering::Relaxed);
+        ring.reset(now);
+
+        let my_epoch = stretch_stream_epoch.load(Ordering::Relaxed);
+        let epoch = stretch_stream_epoch.clone();
+        let playing = is_playing.clone();
+        let pos = position_frames.clone();
+        let sr = out_rate;
+        let dur_frames = duration_frames;
+        let snap_for_thread = EngineSnapshot {
+            bpm,
+            sample_rate: sr,
+            duration_frames: dur_frames,
+            clips: clips_out.clone(),
+            base_stream: None,
+            pitch_stream: None,
+            pitch_stream_algo: None,
+        };
+
+        base_stream::spawn_base_stream(
+            ring.clone(),
+            snap_for_thread,
+            pos,
+            playing,
+            epoch,
+            my_epoch,
+            debug,
+        );
+
+        base_stream = Some(ring);
+    }
+
+    // Optional: pitch-edit bus streamer (low latency). It pre-renders forward windows using
+    // mixdown (which applies pitch edits) and lets the audio callback read lock-free.
+    // This is best-effort; if the selected pitch-edit backend isn't available, we keep normal realtime mixing.
+    let mut pitch_stream: Option<Arc<StreamRingStereo>> = None;
+    let mut pitch_stream_algo: Option<crate::pitch_editing::PitchEditAlgorithm> = None;
+    if want_pitch_stream {
         let algo = crate::pitch_editing::selected_pitch_edit_algorithm(timeline);
         pitch_stream_algo = Some(algo);
 
@@ -550,6 +599,16 @@ pub(crate) fn build_snapshot(
             _ => (out_rate as u64).saturating_mul(8),
         };
         let ring = Arc::new(StreamRingStereo::new(cap_frames));
+
+        // Default: enable hard-start for all pitch-stream algorithms.
+        // Can be disabled for debugging via: HIFISHIFTER_PITCH_STREAM_HARD_START=0
+        let hard_start = std::env::var("HIFISHIFTER_PITCH_STREAM_HARD_START")
+            .ok()
+            .as_deref()
+            != Some("0");
+        if hard_start {
+            ring.set_hard_start_enabled(true);
+        }
 
         // A-mode: for slow ONNX inference, prefer a short prebuffer before advancing.
         // This avoids the audible "original -> pitched" transition at the very beginning.
@@ -585,9 +644,25 @@ pub(crate) fn build_snapshot(
                 if let Some(curves) = curves {
                     #[cfg(feature = "onnx")]
                     {
+                        // Pitch workers read from base_stream.
+                        let Some(base_ring) = base_stream.clone() else {
+                            if debug {
+                                eprintln!("AudioEngine: pitch_stream ONNX not started (missing base_stream)");
+                            }
+                            return EngineSnapshot {
+                                bpm,
+                                sample_rate: out_rate,
+                                duration_frames,
+                                clips: clips_out,
+                                base_stream,
+                                pitch_stream: None,
+                                pitch_stream_algo,
+                            };
+                        };
                         super::pitch_stream_onnx::spawn_pitch_stream_onnx(
                             tl_for_thread,
                             sr,
+                            base_ring,
                             ring_for_thread,
                             pos,
                             playing,
@@ -609,6 +684,16 @@ pub(crate) fn build_snapshot(
                 }
             }
             _ => {
+                let snap_for_pitch = EngineSnapshot {
+                    bpm,
+                    sample_rate: sr,
+                    duration_frames,
+                    clips: clips_out.clone(),
+                    base_stream: None,
+                    pitch_stream: None,
+                    pitch_stream_algo: None,
+                };
+
                 thread::spawn(move || {
                     // Default: prioritize smoothness.
                     let warmup_block_frames = ((sr as u64) / 2).max(256); // ~0.5s
@@ -617,6 +702,7 @@ pub(crate) fn build_snapshot(
                     let lookahead_frames_normal = (sr as u64).saturating_mul(3); // keep ~3s ahead
 
                     let mut out_cursor: u64 = pos.load(Ordering::Relaxed);
+                    let mut pcm: Vec<f32> = vec![];
 
                     loop {
                         if epoch.load(Ordering::Relaxed) != my_epoch {
@@ -661,47 +747,25 @@ pub(crate) fn build_snapshot(
                             block_frames_normal
                         };
 
-                        let t0 = (out_cursor as f64) / (sr.max(1) as f64);
-                        let t1 =
-                            ((out_cursor.saturating_add(block_frames)) as f64) / (sr.max(1) as f64);
+                        let frames_u = block_frames.max(1);
+                        let frames = frames_u as usize;
+                        pcm.resize(frames * 2, 0.0);
+                        pcm.fill(0.0);
 
-                        let stretch = if crate::rubberband::is_available() {
-                            StretchAlgorithm::RubberBand
-                        } else {
-                            StretchAlgorithm::LinearResample
-                        };
-                        if debug {
-                            eprintln!("AudioEngine: pitch_stream stretch={stretch:?}");
-                        }
-
-                        let rendered = render_mixdown_interleaved(
+                        // v2 realtime pitch edit for WORLD: per-clip render + per-clip pitch edit.
+                        let pos0 = out_cursor;
+                        let pos1 = out_cursor.saturating_add(frames_u);
+                        crate::audio_engine::mix::mix_snapshot_clips_pitch_edited_into_scratch(
+                            frames,
                             &tl_for_thread,
-                            MixdownOptions {
-                                sample_rate: sr,
-                                start_sec: t0,
-                                end_sec: Some(t1),
-                                stretch,
-                                apply_pitch_edit: true,
-                            },
+                            &snap_for_pitch,
+                            pos0,
+                            pos1,
+                            pcm.as_mut_slice(),
                         );
 
-                        let (_out_sr, _ch, _dur, pcm) = match rendered {
-                            Ok(v) => v,
-                            Err(_) => {
-                                // Avoid hot-looping on errors.
-                                std::thread::sleep(std::time::Duration::from_millis(30));
-                                continue;
-                            }
-                        };
-
-                        let frames_out = (pcm.len() / 2) as u64;
-                        if frames_out == 0 {
-                            std::thread::sleep(std::time::Duration::from_millis(10));
-                            continue;
-                        }
-
                         ring_for_thread.write_interleaved(out_cursor, pcm.as_slice());
-                        out_cursor = out_cursor.saturating_add(frames_out);
+                        out_cursor = out_cursor.saturating_add(frames_u);
                     }
                 });
             }
@@ -742,6 +806,7 @@ pub(crate) fn build_snapshot(
         sample_rate: out_rate,
         duration_frames,
         clips: clips_out,
+        base_stream,
         pitch_stream,
         pitch_stream_algo,
     }
@@ -771,6 +836,8 @@ pub(crate) fn build_snapshot_for_file(
         sample_rate: out_rate,
         duration_frames: length_frames,
         clips: vec![EngineClip {
+            clip_id: "__file_preview__".to_string(),
+            track_id: "__file_preview__".to_string(),
             start_frame: 0,
             length_frames,
             src,
@@ -784,6 +851,7 @@ pub(crate) fn build_snapshot_for_file(
             fade_out_frames: 0,
             gain: 1.0,
         }],
+        base_stream: None,
         pitch_stream: None,
         pitch_stream_algo: None,
     }

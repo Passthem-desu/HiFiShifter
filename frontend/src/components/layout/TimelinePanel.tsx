@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { batch } from "react-redux";
 import { Flex } from "@radix-ui/themes";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
@@ -35,7 +36,6 @@ import type { ClipTemplate } from "../../features/session/sessionTypes";
 
 import {
     BackgroundGrid,
-    ClipItem,
     DEFAULT_PX_PER_BEAT,
     DEFAULT_ROW_HEIGHT,
     GlueContextMenu,
@@ -45,7 +45,9 @@ import {
     MIN_ROW_HEIGHT,
     TimelineScrollArea,
     TimeRuler,
+    TrackLane,
     TrackList,
+    useTimelineSelectionRect,
     clamp,
     clipSourceBeats,
     dbToGain,
@@ -371,19 +373,20 @@ export const TimelinePanel: React.FC = () => {
         clipId: string;
     } | null>(null);
 
-    const selectionDragRef = useRef<{
-        pointerId: number;
-        startX: number;
-        startY: number;
-        curX: number;
-        curY: number;
-    } | null>(null);
-    const [selectionRect, setSelectionRect] = useState<{
-        x1: number;
-        y1: number;
-        x2: number;
-        y2: number;
-    } | null>(null);
+    const { selectionRect, onPointerDown: onSelectionRectPointerDown } =
+        useTimelineSelectionRect({
+            scrollRef,
+            sessionRef,
+            pxPerBeat,
+            rowHeight,
+            clearContextMenu: () => {
+                setContextMenu(null);
+            },
+            setMultiSelectedClipIds,
+            onSingleSelect: (clipId) => {
+                void dispatch(selectClipRemote(clipId));
+            },
+        });
 
     const editDragRef = useRef<{
         type:
@@ -429,6 +432,28 @@ export const TimelinePanel: React.FC = () => {
         }
         return result;
     }, [s.beats, s.projectBeats]);
+
+    const clipsByTrackId = useMemo(() => {
+        const map = new Map<string, typeof s.clips>();
+        for (const clip of s.clips) {
+            const arr = map.get(clip.trackId);
+            if (arr) {
+                arr.push(clip);
+            } else {
+                map.set(clip.trackId, [clip]);
+            }
+        }
+
+        for (const arr of map.values()) {
+            arr.sort((a, b) => {
+                const d = (a.startBeat ?? 0) - (b.startBeat ?? 0);
+                if (Math.abs(d) > 1e-9) return d;
+                return String(a.id).localeCompare(String(b.id));
+            });
+        }
+
+        return map;
+    }, [s.clips]);
 
     function beatFromClientX(
         clientX: number,
@@ -1147,24 +1172,29 @@ export const TimelinePanel: React.FC = () => {
                 setClipDropNewTrack(false);
             }
 
-            for (const id of drag.clipIds) {
-                const initial = drag.initialById[id];
-                if (!initial) continue;
-                dispatch(
-                    moveClipStart({
-                        clipId: id,
-                        startBeat: Math.max(0, initial.startBeat + deltaBeat),
-                    }),
-                );
-                if (drag.allowTrackMove) {
+            batch(() => {
+                for (const id of drag.clipIds) {
+                    const initial = drag.initialById[id];
+                    if (!initial) continue;
                     dispatch(
-                        moveClipTrack({
+                        moveClipStart({
                             clipId: id,
-                            trackId: nextTrackId ?? NEW_TRACK_SENTINEL,
+                            startBeat: Math.max(
+                                0,
+                                initial.startBeat + deltaBeat,
+                            ),
                         }),
                     );
+                    if (drag.allowTrackMove) {
+                        dispatch(
+                            moveClipTrack({
+                                clipId: id,
+                                trackId: nextTrackId ?? NEW_TRACK_SENTINEL,
+                            }),
+                        );
+                    }
                 }
-            }
+            });
         }
 
         function end() {
@@ -1598,93 +1628,7 @@ export const TimelinePanel: React.FC = () => {
                     onContextMenu={(e) => {
                         e.preventDefault();
                     }}
-                    onPointerDown={(e) => {
-                        if (e.button !== 2) return;
-                        const el = e.currentTarget as HTMLDivElement;
-                        const bounds = el.getBoundingClientRect();
-                        const x = e.clientX - bounds.left + el.scrollLeft;
-                        const y = e.clientY - bounds.top + el.scrollTop;
-                        selectionDragRef.current = {
-                            pointerId: e.pointerId,
-                            startX: x,
-                            startY: y,
-                            curX: x,
-                            curY: y,
-                        };
-                        setSelectionRect({ x1: x, y1: y, x2: x, y2: y });
-                        setContextMenu(null);
-                        e.preventDefault();
-                        e.stopPropagation();
-                        el.setPointerCapture(e.pointerId);
-
-                        function onMove(ev: PointerEvent) {
-                            const drag = selectionDragRef.current;
-                            const current = scrollRef.current;
-                            if (
-                                !drag ||
-                                drag.pointerId !== e.pointerId ||
-                                !current
-                            )
-                                return;
-                            const b = current.getBoundingClientRect();
-                            const cx = ev.clientX - b.left + current.scrollLeft;
-                            const cy = ev.clientY - b.top + current.scrollTop;
-                            drag.curX = cx;
-                            drag.curY = cy;
-                            setSelectionRect({
-                                x1: Math.min(drag.startX, cx),
-                                y1: Math.min(drag.startY, cy),
-                                x2: Math.max(drag.startX, cx),
-                                y2: Math.max(drag.startY, cy),
-                            });
-                        }
-
-                        function end() {
-                            const drag = selectionDragRef.current;
-                            if (!drag || drag.pointerId !== e.pointerId) return;
-                            selectionDragRef.current = null;
-                            const rect = {
-                                x1: Math.min(drag.startX, drag.curX),
-                                y1: Math.min(drag.startY, drag.curY),
-                                x2: Math.max(drag.startX, drag.curX),
-                                y2: Math.max(drag.startY, drag.curY),
-                            };
-                            setSelectionRect(null);
-
-                            const session = sessionRef.current;
-                            const selected: string[] = [];
-                            for (const clip of session.clips) {
-                                const trackIdx = session.tracks.findIndex(
-                                    (t) => t.id === clip.trackId,
-                                );
-                                if (trackIdx < 0) continue;
-                                const cx1 = clip.startBeat * pxPerBeat;
-                                const cx2 =
-                                    (clip.startBeat + clip.lengthBeats) *
-                                    pxPerBeat;
-                                const cy1 = trackIdx * rowHeight;
-                                const cy2 = cy1 + rowHeight;
-                                const hit =
-                                    cx2 >= rect.x1 &&
-                                    cx1 <= rect.x2 &&
-                                    cy2 >= rect.y1 &&
-                                    cy1 <= rect.y2;
-                                if (hit) selected.push(clip.id);
-                            }
-                            setMultiSelectedClipIds(selected);
-                            if (selected.length === 1) {
-                                void dispatch(selectClipRemote(selected[0]));
-                            }
-
-                            window.removeEventListener("pointermove", onMove);
-                            window.removeEventListener("pointerup", end);
-                            window.removeEventListener("pointercancel", end);
-                        }
-
-                        window.addEventListener("pointermove", onMove);
-                        window.addEventListener("pointerup", end);
-                        window.addEventListener("pointercancel", end);
-                    }}
+                    onPointerDown={onSelectionRectPointerDown}
                     onDragOver={(e) => {
                         const dt = e.dataTransfer;
                         const tauriPath = tauriDraggedPathRef.current;
@@ -1904,119 +1848,73 @@ export const TimelinePanel: React.FC = () => {
                         ) : null}
 
                         {s.tracks.map((track) => {
-                            const trackClips = s.clips
-                                .filter((clip) => clip.trackId === track.id)
-                                .slice()
-                                .sort((a, b) => {
-                                    const d =
-                                        (a.startBeat ?? 0) - (b.startBeat ?? 0);
-                                    if (Math.abs(d) > 1e-9) return d;
-                                    return String(a.id).localeCompare(
-                                        String(b.id),
-                                    );
-                                });
+                            const trackClips =
+                                clipsByTrackId.get(track.id) ??
+                                ([] as typeof s.clips);
+
                             return (
-                                <div
+                                <TrackLane
                                     key={track.id}
-                                    className="border-b border-qt-border relative"
-                                    style={{ height: rowHeight }}
-                                >
-                                    {trackClips.map((clip) => {
-                                        const selected =
-                                            multiSelectedClipIds.length > 0
-                                                ? multiSelectedSet.has(clip.id)
-                                                : s.selectedClipId === clip.id;
-                                        const waveform =
-                                            s.clipWaveforms[clip.id];
-                                        return (
-                                            <ClipItem
-                                                key={clip.id}
-                                                clip={clip}
-                                                rowHeight={rowHeight}
-                                                pxPerBeat={pxPerBeat}
-                                                bpm={s.bpm}
-                                                waveform={waveform}
-                                                altPressed={altPressed}
-                                                selected={selected}
-                                                isInMultiSelectedSet={multiSelectedSet.has(
-                                                    clip.id,
-                                                )}
-                                                multiSelectedCount={
-                                                    multiSelectedClipIds.length
-                                                }
-                                                ensureSelected={(clipId) => {
-                                                    if (
-                                                        multiSelectedClipIds.length ===
-                                                            0 ||
-                                                        !multiSelectedSet.has(
-                                                            clipId,
-                                                        )
-                                                    ) {
-                                                        setMultiSelectedClipIds(
-                                                            [clipId],
-                                                        );
-                                                    }
-                                                }}
-                                                selectClipRemote={(clipId) => {
-                                                    void dispatch(
-                                                        selectClipRemote(
-                                                            clipId,
-                                                        ),
-                                                    );
-                                                }}
-                                                openContextMenu={(
-                                                    clipId,
-                                                    clientX,
-                                                    clientY,
-                                                ) => {
-                                                    setContextMenu({
-                                                        x: clientX,
-                                                        y: clientY,
-                                                        clipId,
-                                                    });
-                                                }}
-                                                seekFromClientX={(
-                                                    clientX,
-                                                    commit,
-                                                ) => {
-                                                    const scroller =
-                                                        scrollRef.current;
-                                                    if (!scroller) return;
-                                                    const bounds =
-                                                        scroller.getBoundingClientRect();
-                                                    setPlayheadFromClientX(
-                                                        clientX,
-                                                        bounds,
-                                                        scroller.scrollLeft,
-                                                        commit,
-                                                    );
-                                                }}
-                                                startClipDrag={startClipDrag}
-                                                startEditDrag={startEditDrag}
-                                                toggleClipMuted={(
-                                                    clipId,
-                                                    nextMuted,
-                                                ) => {
-                                                    dispatch(
-                                                        setClipMuted({
-                                                            clipId,
-                                                            muted: nextMuted,
-                                                        }),
-                                                    );
-                                                    void dispatch(
-                                                        setClipStateRemote({
-                                                            clipId,
-                                                            muted: nextMuted,
-                                                        }),
-                                                    );
-                                                }}
-                                                clearContextMenu={() => {
-                                                    setContextMenu(null);
-                                                }}
-                                            />
+                                    track={track}
+                                    trackClips={trackClips}
+                                    rowHeight={rowHeight}
+                                    pxPerBeat={pxPerBeat}
+                                    bpm={s.bpm}
+                                    clipWaveforms={s.clipWaveforms}
+                                    altPressed={altPressed}
+                                    selectedClipId={s.selectedClipId}
+                                    multiSelectedClipIds={multiSelectedClipIds}
+                                    multiSelectedSet={multiSelectedSet}
+                                    ensureSelected={(clipId) => {
+                                        if (
+                                            multiSelectedClipIds.length === 0 ||
+                                            !multiSelectedSet.has(clipId)
+                                        ) {
+                                            setMultiSelectedClipIds([clipId]);
+                                        }
+                                    }}
+                                    selectClipRemote={(clipId) => {
+                                        void dispatch(selectClipRemote(clipId));
+                                    }}
+                                    openContextMenu={(clipId, clientX, clientY) => {
+                                        setContextMenu({
+                                            x: clientX,
+                                            y: clientY,
+                                            clipId,
+                                        });
+                                    }}
+                                    seekFromClientX={(clientX, commit) => {
+                                        const scroller = scrollRef.current;
+                                        if (!scroller) return;
+                                        const bounds =
+                                            scroller.getBoundingClientRect();
+                                        setPlayheadFromClientX(
+                                            clientX,
+                                            bounds,
+                                            scroller.scrollLeft,
+                                            commit,
                                         );
-                                    })}
-                                </div>
+                                    }}
+                                    startClipDrag={startClipDrag}
+                                    startEditDrag={startEditDrag}
+                                    toggleClipMuted={(clipId, nextMuted) => {
+                                        dispatch(
+                                            setClipMuted({
+                                                clipId,
+                                                muted: nextMuted,
+                                            }),
+                                        );
+                                        void dispatch(
+                                            setClipStateRemote({
+                                                clipId,
+                                                muted: nextMuted,
+                                            }),
+                                        );
+                                    }}
+                                    clearContextMenu={() => {
+                                        setContextMenu(null);
+                                    }}
+                                />
                             );
                         })}
 

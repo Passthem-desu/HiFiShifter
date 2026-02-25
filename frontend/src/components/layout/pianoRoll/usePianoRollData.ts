@@ -17,6 +17,7 @@ const paramFramePeriodCache = new Map<string, number>();
 export function usePianoRollData(args: {
     editParam: ParamName;
     pitchEnabled: boolean;
+    paramsEpoch: number;
     rootTrackId: string | null;
     selectedTrackId: string | null;
     tracks: Array<{ id: string; parentId?: string | null }>;
@@ -32,6 +33,7 @@ export function usePianoRollData(args: {
     const {
         editParam,
         pitchEnabled,
+        paramsEpoch,
         rootTrackId,
         selectedTrackId,
         tracks,
@@ -51,6 +53,13 @@ export function usePianoRollData(args: {
     const [pitchAnalysisPending, setPitchAnalysisPending] = useState(false);
     const [pitchAnalysisProgress, setPitchAnalysisProgress] = useState<
         number | null
+    >(null);
+
+    const [pitchEditUserModified, setPitchEditUserModified] = useState<
+        boolean | null
+    >(null);
+    const [pitchEditBackendAvailable, setPitchEditBackendAvailable] = useState<
+        boolean | null
     >(null);
 
     const [isRefreshing, setIsRefreshing] = useState(false);
@@ -74,6 +83,54 @@ export function usePianoRollData(args: {
     const fetchDebounceRef = useRef<number | null>(null);
     const fetchReqIdRef = useRef(0);
     const [refreshToken, setRefreshToken] = useState(0);
+
+    const [forceParamFetchToken, setForceParamFetchToken] = useState(0);
+    const lastAppliedForceParamFetchTokenRef = useRef(0);
+
+    function hasTauriInvoke(): boolean {
+        const w = window as unknown as {
+            __TAURI__?: { core?: { invoke?: unknown }; invoke?: unknown };
+        };
+        return (
+            typeof w.__TAURI__?.core?.invoke === "function" ||
+            typeof w.__TAURI__?.invoke === "function"
+        );
+    }
+
+    // Force parameter refresh when the session state changes meaningfully (undo/redo/timeline edits).
+    useEffect(() => {
+        if (!rootTrackId) return;
+        setForceParamFetchToken((x) => x + 1);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [paramsEpoch, rootTrackId]);
+
+    const pitchPollDelayMsRef = useRef(250);
+
+    // In pywebview (no Tauri events), poll pitch analysis completion while pending.
+    useEffect(() => {
+        if (editParam !== "pitch") return;
+        if (!pitchEnabled) return;
+        if (!rootTrackId) return;
+        if (hasTauriInvoke()) return;
+
+        if (!pitchAnalysisPending) {
+            pitchPollDelayMsRef.current = 250;
+            return;
+        }
+
+        const delay = clamp(pitchPollDelayMsRef.current, 100, 1500);
+        const id = window.setTimeout(() => {
+            setForceParamFetchToken((x) => x + 1);
+            pitchPollDelayMsRef.current = Math.min(
+                1000,
+                Math.round(pitchPollDelayMsRef.current * 1.6),
+            );
+        }, delay);
+
+        return () => {
+            window.clearTimeout(id);
+        };
+    }, [editParam, pitchEnabled, rootTrackId, pitchAnalysisPending]);
 
     // Listen for backend pitch analysis lifecycle notifications (Tauri only).
     useEffect(() => {
@@ -109,6 +166,7 @@ export function usePianoRollData(args: {
 
                         setPitchAnalysisPending(false);
                         setPitchAnalysisProgress(null);
+                        setForceParamFetchToken((x) => x + 1);
                         setRefreshToken((x) => x + 1);
                     },
                 );
@@ -164,6 +222,10 @@ export function usePianoRollData(args: {
         if (editParam !== "pitch") return;
         if (pitchEnabled) return;
         setParamView(null);
+        setPitchAnalysisPending(false);
+        setPitchAnalysisProgress(null);
+        setPitchEditUserModified(null);
+        setPitchEditBackendAvailable(null);
     }, [editParam, pitchEnabled]);
 
     function computeVisibleRequest() {
@@ -304,6 +366,7 @@ export function usePianoRollData(args: {
             stride,
             fpMs,
             fpKey,
+            forceParamFetchToken,
         };
     }
 
@@ -328,6 +391,7 @@ export function usePianoRollData(args: {
             stride,
             fpMs,
             fpKey,
+            forceParamFetchToken: localForceParamFetchToken,
         } = req;
 
         if (waveHit) {
@@ -405,7 +469,12 @@ export function usePianoRollData(args: {
             return;
         }
 
-        if (!paramCoversVisible) {
+        const forceParam =
+            localForceParamFetchToken !==
+            lastAppliedForceParamFetchTokenRef.current;
+        const shouldFetchParam = !paramCoversVisible || forceParam;
+
+        if (shouldFetchParam) {
             void (async () => {
                 beginLoading();
                 try {
@@ -442,6 +511,16 @@ export function usePianoRollData(args: {
                         const pending = Boolean(payload.analysis_pending ?? false);
                         setPitchAnalysisPending(pending);
                         if (!pending) setPitchAnalysisProgress(null);
+
+                        const userModified = payload.pitch_edit_user_modified;
+                        setPitchEditUserModified(
+                            typeof userModified === "boolean" ? userModified : null,
+                        );
+
+                        const backendAvail = payload.pitch_edit_backend_available;
+                        setPitchEditBackendAvailable(
+                            typeof backendAvail === "boolean" ? backendAvail : null,
+                        );
                     }
                     const fpRes = Number(payload.frame_period_ms ?? fpMs) || fpMs;
                     paramFramePeriodCache.set(fpKey, fpRes);
@@ -454,6 +533,8 @@ export function usePianoRollData(args: {
                         orig: (payload.orig ?? []).map((v) => Number(v) || 0),
                         edit: (payload.edit ?? []).map((v) => Number(v) || 0),
                     });
+                    lastAppliedForceParamFetchTokenRef.current =
+                        localForceParamFetchToken;
                     invalidate();
 
                     if (Math.abs(fpRes - fpMs) > 1e-3) {
@@ -550,6 +631,16 @@ export function usePianoRollData(args: {
                     const pending = Boolean(payload.analysis_pending ?? false);
                     setPitchAnalysisPending(pending);
                     if (!pending) setPitchAnalysisProgress(null);
+
+                    const userModified = payload.pitch_edit_user_modified;
+                    setPitchEditUserModified(
+                        typeof userModified === "boolean" ? userModified : null,
+                    );
+
+                    const backendAvail = payload.pitch_edit_backend_available;
+                    setPitchEditBackendAvailable(
+                        typeof backendAvail === "boolean" ? backendAvail : null,
+                    );
                 }
                 const fpRes = Number(payload.frame_period_ms ?? fpMs) || fpMs;
                 paramFramePeriodCache.set(fpKey, fpRes);
@@ -613,6 +704,7 @@ export function usePianoRollData(args: {
         secPerBeat,
         viewWidth,
         refreshToken,
+        forceParamFetchToken,
     ]);
 
     return {
@@ -626,5 +718,7 @@ export function usePianoRollData(args: {
         isLoading,
         pitchAnalysisPending,
         pitchAnalysisProgress,
+        pitchEditUserModified,
+        pitchEditBackendAvailable,
     };
 }

@@ -115,6 +115,33 @@ pub struct PlaybackStatePayload {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+pub struct DebugRealtimeRenderStatsPayload {
+    pub ok: bool,
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stats: Option<RealtimeRenderStatsPayload>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RealtimeRenderStatsPayload {
+    pub callbacks_total: u64,
+    pub callbacks_silenced_not_playing: u64,
+
+    pub pitch_callbacks_total: u64,
+    pub pitch_callbacks_silenced_waiting: u64,
+    pub pitch_callbacks_prime_waiting: u64,
+    pub pitch_callbacks_fallback_mixed: u64,
+
+    pub base_callbacks_total: u64,
+    pub base_callbacks_covered: u64,
+    pub base_callbacks_fallback_mixed: u64,
+
+    pub legacy_callbacks_mixed: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub struct ParamFramesPayload {
     pub ok: bool,
     pub root_track_id: String,
@@ -129,6 +156,12 @@ pub struct ParamFramesPayload {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analysis_progress: Option<f32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pitch_edit_user_modified: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pitch_edit_backend_available: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
