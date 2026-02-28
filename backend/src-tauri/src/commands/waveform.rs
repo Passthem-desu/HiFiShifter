@@ -139,6 +139,9 @@ pub(super) fn get_root_mix_waveform_peaks_segment(
             // (Falls back to LinearResample if RubberBand is unavailable.)
             stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
             apply_pitch_edit: true,
+            // 实时预览使用默认质量（Wav16 + Realtime）。
+            export_format: crate::mixdown::ExportFormat::Wav16,
+            quality_preset: crate::mixdown::QualityPreset::Realtime,
         };
 
         let (sr, ch, _dur, mix) = match crate::mixdown::render_mixdown_interleaved(&tl, opts) {
@@ -287,6 +290,9 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
             // (Falls back to LinearResample if RubberBand is unavailable.)
             stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
             apply_pitch_edit: true,
+            // 实时预览使用默认质量（Wav16 + Realtime）。
+            export_format: crate::mixdown::ExportFormat::Wav16,
+            quality_preset: crate::mixdown::QualityPreset::Realtime,
         };
 
         let (sr, ch, _dur, mix) = match crate::mixdown::render_mixdown_interleaved(&tl, opts) {

@@ -6,7 +6,8 @@ import React, {
     useRef,
     useState,
 } from "react";
-import { Flex, Text, Button, Select, Box } from "@radix-ui/themes";
+import { Flex, Text, Button, Select, Box, IconButton } from "@radix-ui/themes";
+import { EyeOpenIcon, EyeClosedIcon, UpdateIcon } from "@radix-ui/react-icons";
 
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
@@ -83,6 +84,18 @@ export const PianoRollPanel: React.FC = () => {
         },
         [setPxPerBeat],
     );
+
+    // 副参数独立显示开关，默认全部关闭
+    const [secondaryParamVisible, setSecondaryParamVisible] = useState<
+        Partial<Record<ParamName, boolean>>
+    >({});
+
+    const toggleSecondaryParam = useCallback((param: ParamName) => {
+        setSecondaryParamVisible((prev) => ({
+            ...prev,
+            [param]: !(prev[param] ?? false),
+        }));
+    }, []);
 
     const [pitchView, setPitchView] = useState<ValueViewport>(() => ({
         center: (PITCH_MIN_MIDI + PITCH_MAX_MIDI) / 2,
@@ -324,12 +337,18 @@ export const PianoRollPanel: React.FC = () => {
         values: number[];
     } | null>(null);
 
+    // 用于通知 usePianoRollData 当前是否处于 live 编辑状态（pointer down 期间为 true）。
+    // pitch_orig_updated 事件到达时若为 true，则延迟曲线刷新到 pointer-up 后执行。
+    const liveEditActiveRef = useRef(false);
+
     const {
         wavePeaks,
         paramView,
         setParamView,
+        secondaryParamView,
         bumpRefreshToken,
         refreshNow,
+        notifyLiveEditEnded,
         isLoading,
         pitchAnalysisPending,
         pitchAnalysisProgress,
@@ -350,6 +369,7 @@ export const PianoRollPanel: React.FC = () => {
         scrollLeftRef,
         pxPerBeatRef,
         invalidate,
+        liveEditActiveRef,
     });
 
     // Data and viewport changes should always trigger a canvas redraw.
@@ -374,7 +394,7 @@ export const PianoRollPanel: React.FC = () => {
         liveEditOverrideRef,
         ensureLiveEditBase,
         applyDenseToLiveEdit,
-        commitStroke,
+        commitStroke: commitStrokeBase,
     } = useLiveParamEditing({
         rootTrackId,
         editParam,
@@ -385,8 +405,21 @@ export const PianoRollPanel: React.FC = () => {
         invalidate,
     });
 
+    // 包装 commitStroke：在 pointer-up 提交笔画后，清除 liveEditActive 状态，
+    // 并触发可能被延迟的 pitch_orig_updated 曲线刷新。
+    const commitStroke: typeof commitStrokeBase = useCallback(
+        async (points, mode) => {
+            await commitStrokeBase(points, mode);
+            liveEditActiveRef.current = false;
+            notifyLiveEditEnded();
+        },
+        [commitStrokeBase, notifyLiveEditEnded],
+    );
+
     // Keep draw function always up-to-date (invalidate() is stable and calls drawRef.current()).
     drawRef.current = () => {
+        // 确定副参数名称（非当前 editParam 的另一个参数）
+        const secondaryParam: ParamName = editParam === "pitch" ? "tension" : "pitch";
         drawPianoRoll({
             axisCanvas: axisCanvasRef.current,
             canvas: canvasRef.current,
@@ -397,6 +430,8 @@ export const PianoRollPanel: React.FC = () => {
             valueToY,
             wavePeaks,
             paramView,
+            secondaryParamView,
+            showSecondaryParam: secondaryParamVisible[secondaryParam] ?? false,
             overlayText:
                 editParam === "pitch" && !pitchEnabled
                     ? pitchHardDisableReason
@@ -443,6 +478,7 @@ export const PianoRollPanel: React.FC = () => {
         ensureLiveEditBase,
         applyDenseToLiveEdit,
         commitStroke,
+        liveEditActiveRef,
     });
 
     const onScrollerWheelNative = interactions.onScrollerWheelNative;
@@ -500,7 +536,7 @@ export const PianoRollPanel: React.FC = () => {
                 </Text>
 
                 <Flex gap="2" align="center">
-                    <Flex gap="1">
+                    <Flex gap="1" align="center">
                         <Button
                             size="1"
                             variant={editParam === "pitch" ? "solid" : "soft"}
@@ -510,6 +546,19 @@ export const PianoRollPanel: React.FC = () => {
                         >
                             {t("pitch")}
                         </Button>
+                        {/* 当 editParam 不是 pitch 时，显示 pitch 副参数开关 */}
+                        {editParam !== "pitch" && pitchEnabled ? (
+                            <IconButton
+                                size="1"
+                                variant={secondaryParamVisible["pitch"] ? "soft" : "ghost"}
+                                color={secondaryParamVisible["pitch"] ? "blue" : "gray"}
+                                onClick={() => toggleSecondaryParam("pitch")}
+                                style={{ cursor: "pointer" }}
+                                title={secondaryParamVisible["pitch"] ? t("hide_secondary_param") : t("show_secondary_param")}
+                            >
+                                {secondaryParamVisible["pitch"] ? <EyeOpenIcon /> : <EyeClosedIcon />}
+                            </IconButton>
+                        ) : null}
                         <Button
                             size="1"
                             variant={editParam === "tension" ? "solid" : "soft"}
@@ -519,6 +568,19 @@ export const PianoRollPanel: React.FC = () => {
                         >
                             {t("tension")}
                         </Button>
+                        {/* 当 editParam 不是 tension 时，显示 tension 副参数开关 */}
+                        {editParam !== "tension" ? (
+                            <IconButton
+                                size="1"
+                                variant={secondaryParamVisible["tension"] ? "soft" : "ghost"}
+                                color={secondaryParamVisible["tension"] ? "orange" : "gray"}
+                                onClick={() => toggleSecondaryParam("tension")}
+                                style={{ cursor: "pointer" }}
+                                title={secondaryParamVisible["tension"] ? t("hide_secondary_param") : t("show_secondary_param")}
+                            >
+                                {secondaryParamVisible["tension"] ? <EyeOpenIcon /> : <EyeClosedIcon />}
+                            </IconButton>
+                        ) : null}
                     </Flex>
 
                     {editParam === "pitch" ? (
@@ -538,16 +600,17 @@ export const PianoRollPanel: React.FC = () => {
                         />
                     ) : null}
 
-                    <Button
+                    <IconButton
                         size="1"
                         variant="soft"
                         color="gray"
                         disabled={isLoading || showPitchAnalyzingOverlay}
                         onClick={() => void refreshNow()}
                         style={{ cursor: isLoading ? "default" : "pointer" }}
+                        title={t("action_refresh")}
                     >
-                        {t("action_refresh")}
-                    </Button>
+                        <UpdateIcon />
+                    </IconButton>
 
                     {editParam === "pitch" && rootTrack ? (
                         <Flex align="center" gap="2">

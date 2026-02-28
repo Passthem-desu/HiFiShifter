@@ -43,7 +43,7 @@ export const MenuBar: React.FC = () => {
     return (
         <Flex
             align="center"
-            className="h-8 bg-qt-window border-b border-qt-border px-1 select-none z-50 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden min-w-0 custom-scrollbar"
+            className="h-8 bg-qt-panel border-b border-qt-border px-1 select-none z-50 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden min-w-0 custom-scrollbar"
         >
             {/**
              * Note: @radix-ui/themes DropdownMenu.Trigger does not support asChild.

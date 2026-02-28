@@ -144,6 +144,8 @@ export const messages = {
         clip_unmute: "Unmute",
         fade_in: "Fade In",
         fade_out: "Fade Out",
+        show_secondary_param: "Show secondary parameter overlay",
+        hide_secondary_param: "Hide secondary parameter overlay",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -286,6 +288,8 @@ export const messages = {
         clip_unmute: "取消静音",
         fade_in: "淡入",
         fade_out: "淡出",
+        show_secondary_param: "显示副参数叠加曲线",
+        hide_secondary_param: "隐藏副参数叠加曲线",
     },
 } as const;
 

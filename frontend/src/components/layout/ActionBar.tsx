@@ -4,33 +4,29 @@ import {
     Select,
     TextField,
     Button,
+    IconButton,
     Separator,
     Text,
 } from "@radix-ui/themes";
 import {
     PlayIcon,
     StopIcon,
-    LightningBoltIcon,
-    MagnifyingGlassIcon,
+    CursorArrowIcon,
+    Pencil1Icon,
 } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
 import { PitchStatusBadge } from "./PitchStatusBadge";
 import {
-    loadModel,
-    playOriginal,
     playSynthesized,
-    processAudio,
     stopAudioPlayback,
-    synthesizeAudio,
     setBpm,
     updateTransportBpm,
     setBeats,
     setToolMode,
     setEditParam,
     setGrid,
-    importAudioFromDialog,
 } from "../../features/session/sessionSlice";
 
 export function ActionBar() {
@@ -73,54 +69,44 @@ export function ActionBar() {
             className="h-8 bg-qt-window border-b border-qt-border px-1 text-qt-text flex-nowrap overflow-x-auto overflow-y-hidden min-w-0 custom-scrollbar"
         >
             {/* Mode & Param Group */}
-            <Flex align="center" gap="2" className="shrink-0">
-                <Text size="1" className="text-qt-text-muted">
-                    {t("tool_mode")}:
-                </Text>
-                <Select.Root
-                    value={s.toolMode}
+            <Flex align="center" gap="1" className="shrink-0">
+                <IconButton
                     size="1"
-                    onValueChange={(v) =>
-                        dispatch(setToolMode(v as typeof s.toolMode))
-                    }
+                    variant={s.toolMode === "select" ? "solid" : "ghost"}
+                    color="gray"
+                    title={t("select")}
+                    onClick={() => dispatch(setToolMode("select"))}
                 >
-                    <Select.Trigger
-                        style={{ backgroundColor: "var(--qt-base)" }}
-                    />
-                    <Select.Content>
-                        <Select.Item value="select">{t("select")}</Select.Item>
-                        <Select.Item value="draw">{t("draw")}</Select.Item>
-                    </Select.Content>
-                </Select.Root>
+                    <CursorArrowIcon />
+                </IconButton>
+                <IconButton
+                    size="1"
+                    variant={s.toolMode === "draw" ? "solid" : "ghost"}
+                    color="gray"
+                    title={t("draw")}
+                    onClick={() => dispatch(setToolMode("draw"))}
+                >
+                    <Pencil1Icon />
+                </IconButton>
             </Flex>
 
-            <Flex align="center" gap="2" className="shrink-0">
-                <Text size="1" className="text-qt-text-muted">
-                    {t("edit_param")}:
-                </Text>
-                <Select.Root
-                    value={s.editParam}
-                    size="1"
-                    onValueChange={(v) =>
-                        dispatch(setEditParam(v as typeof s.editParam))
-                    }
-                >
-                    <Select.Trigger
-                        style={{ backgroundColor: "var(--qt-base)" }}
-                    />
-                    <Select.Content>
-                        <Select.Item value="pitch">{t("pitch")}</Select.Item>
-                        <Select.Item value="tension">
-                            {t("tension")}
-                        </Select.Item>
-                        <Select.Item value="breath">{t("breath")}</Select.Item>
-                    </Select.Content>
-                </Select.Root>
-
+            <Flex align="center" gap="1" className="shrink-0">
+                {(["pitch", "tension"] as const).map((param, i) => (
+                    <Button
+                        key={param}
+                        size="1"
+                        variant={s.editParam === param ? "solid" : "ghost"}
+                        color="gray"
+                        title={t(param as "pitch" | "tension")}
+                        onClick={() => dispatch(setEditParam(param))}
+                        style={{ minWidth: 20, padding: "0 5px" }}
+                    >
+                        {["P", "T"][i]}
+                    </Button>
+                ))}
                 <PitchStatusBadge
                     tracks={s.tracks}
                     selectedTrackId={s.selectedTrackId}
-                    className="ml-1"
                 />
             </Flex>
 
@@ -218,55 +204,12 @@ export function ActionBar() {
                     <StopIcon />
                 </Button>
                 <Button
-                    variant="soft"
-                    color="gray"
-                    size="1"
-                    onClick={() => dispatch(playOriginal())}
-                    title={t("action_play_src")}
-                >
-                    <PlayIcon /> {t("action_play_src")}
-                </Button>
-                <Button
                     variant="solid"
                     size="1"
                     onClick={() => dispatch(playSynthesized())}
                     title={t("action_play_out")}
                 >
                     <PlayIcon /> {t("action_play_out")}
-                </Button>
-            </Flex>
-
-            <Separator orientation="vertical" size="2" />
-
-            {/* Actions */}
-            <Flex gap="1" className="shrink-0">
-                <Button
-                    variant="surface"
-                    color="gray"
-                    size="1"
-                    onClick={() => dispatch(loadModel(s.modelDir))}
-                >
-                    {t("action_load_model")}
-                </Button>
-                <Button
-                    variant="surface"
-                    color="gray"
-                    size="1"
-                    onClick={() =>
-                        s.audioPath
-                            ? dispatch(processAudio(s.audioPath))
-                            : dispatch(importAudioFromDialog())
-                    }
-                >
-                    <MagnifyingGlassIcon /> {t("action_analyze_audio")}
-                </Button>
-                <Button
-                    variant="classic"
-                    highContrast
-                    size="1"
-                    onClick={() => dispatch(synthesizeAudio())}
-                >
-                    <LightningBoltIcon /> {t("action_synthesize")}
                 </Button>
             </Flex>
         </Flex>

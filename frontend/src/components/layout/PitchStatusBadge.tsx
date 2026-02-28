@@ -61,8 +61,8 @@ export function PitchStatusBadge(props: {
     );
     const [progress, setProgress] = useState<number | null>(null);
 
+    // 仅用于初始查询的请求 ID，防止过期响应覆盖最新状态
     const lastReqIdRef = useRef(0);
-    const pollDelayMsRef = useRef(1500);
 
     const derived = useMemo(() => {
         if (hardDisableReason) {
@@ -105,6 +105,7 @@ export function PitchStatusBadge(props: {
         return { kind: "unknown" as const, progress: null };
     }, [hardDisableReason, status]);
 
+    // 当 upstream 提供 status prop 时，直接同步到本地状态
     useEffect(() => {
         if (derived) {
             setKind(derived.kind);
@@ -112,9 +113,10 @@ export function PitchStatusBadge(props: {
         }
     }, [derived]);
 
+    // 事件驱动：监听后端 pitch 分析生命周期事件（Tauri 环境）
+    // 无 upstream status prop 时才接管状态；有 status prop 时由 derived 驱动
     useEffect(() => {
-        if (derived) return; // Upstream provided state; no need to poll.
-
+        if (derived) return; // upstream 已提供状态，无需自行监听
         if (hardDisableReason) {
             setKind("off");
             setProgress(null);
@@ -127,27 +129,22 @@ export function PitchStatusBadge(props: {
         }
 
         const trackId = rootTrackId;
+        let disposed = false;
+        let unlistenUpdated: (() => void) | null = null;
+        let unlistenStarted: (() => void) | null = null;
+        let unlistenProgress: (() => void) | null = null;
 
-        let cancelled = false;
-        let timer: number | null = null;
-
-        async function tick() {
+        // 辅助：从后端拉取一次当前状态（初始化 + Tauri 不可用时的降级）
+        async function fetchOnce() {
             const reqId = ++lastReqIdRef.current;
             try {
-                const res = await paramsApi.getParamFrames(
-                    trackId,
-                    "pitch",
-                    0,
-                    1,
-                    1,
-                );
-                if (cancelled || reqId !== lastReqIdRef.current) return;
-                if (!res || !res.ok) {
+                const res = await paramsApi.getParamFrames(trackId, "pitch", 0, 1, 1);
+                if (disposed || reqId !== lastReqIdRef.current) return;
+                if (!res?.ok) {
                     setKind("unknown");
                     setProgress(null);
                     return;
                 }
-
                 const pending = Boolean(res.analysis_pending);
                 const backendAvail =
                     res.pitch_edit_backend_available === undefined
@@ -161,56 +158,93 @@ export function PitchStatusBadge(props: {
                 if (backendAvail === false) {
                     setKind("unavailable");
                     setProgress(null);
-                    pollDelayMsRef.current = 4000;
                 } else if (pending) {
                     setKind("pending");
-                    const p =
+                    setProgress(
                         typeof res.analysis_progress === "number"
                             ? res.analysis_progress
-                            : null;
-                    setProgress(p);
-                    pollDelayMsRef.current = Math.min(
-                        3000,
-                        Math.max(500, pollDelayMsRef.current * 1.2),
+                            : null,
                     );
                 } else if (userModified === false) {
                     setKind("no_edit");
                     setProgress(null);
-                    pollDelayMsRef.current = 4000;
                 } else if (userModified === true) {
                     setKind("ready");
                     setProgress(null);
-                    pollDelayMsRef.current = 4000;
                 } else {
                     setKind("unknown");
                     setProgress(null);
-                    pollDelayMsRef.current = 4000;
                 }
             } catch {
-                if (cancelled || reqId !== lastReqIdRef.current) return;
+                if (disposed || reqId !== lastReqIdRef.current) return;
                 setKind("unknown");
                 setProgress(null);
             }
         }
 
-        function schedule() {
-            const delay = pollDelayMsRef.current;
-            timer = window.setTimeout(() => {
-                timer = null;
-                void tick().finally(() => {
-                    if (!cancelled) schedule();
-                });
-            }, delay);
+        async function setup() {
+            // 先做一次初始查询，确保组件挂载时立即显示正确状态
+            await fetchOnce();
+
+            try {
+                const mod = await import("@tauri-apps/api/event");
+
+                type PitchOrigUpdatedPayload = { rootTrackId?: string };
+                type PitchOrigAnalysisStartedPayload = { rootTrackId?: string };
+                type PitchOrigAnalysisProgressPayload = {
+                    rootTrackId?: string;
+                    progress?: number;
+                };
+
+                // 分析完成：立即切换为 ready/no_edit（由下一次 fetchOnce 确认）
+                unlistenUpdated = await mod.listen<PitchOrigUpdatedPayload>(
+                    "pitch_orig_updated",
+                    (event) => {
+                        if (disposed) return;
+                        const payload = event.payload ?? {};
+                        if (payload?.rootTrackId && payload.rootTrackId !== trackId) return;
+                        // 分析完成后拉取最新状态（包含 userModified 等字段）
+                        void fetchOnce();
+                    },
+                );
+
+                // 分析开始：立即切换为 pending
+                unlistenStarted = await mod.listen<PitchOrigAnalysisStartedPayload>(
+                    "pitch_orig_analysis_started",
+                    (event) => {
+                        if (disposed) return;
+                        const payload = event.payload ?? {};
+                        if (payload?.rootTrackId && payload.rootTrackId !== trackId) return;
+                        setKind("pending");
+                        setProgress(0);
+                    },
+                );
+
+                // 分析进度更新
+                unlistenProgress = await mod.listen<PitchOrigAnalysisProgressPayload>(
+                    "pitch_orig_analysis_progress",
+                    (event) => {
+                        if (disposed) return;
+                        const payload = event.payload ?? {};
+                        if (payload?.rootTrackId && payload.rootTrackId !== trackId) return;
+                        const p = Number(payload?.progress);
+                        if (!Number.isFinite(p)) return;
+                        setKind("pending");
+                        setProgress(Math.max(0, Math.min(1, p)));
+                    },
+                );
+            } catch {
+                // 非 Tauri 环境（浏览器/pywebview）：仅依赖初始查询，不注册事件监听
+            }
         }
 
-        pollDelayMsRef.current = 1200;
-        void tick().finally(() => {
-            if (!cancelled) schedule();
-        });
+        void setup();
 
         return () => {
-            cancelled = true;
-            if (timer != null) window.clearTimeout(timer);
+            disposed = true;
+            if (unlistenUpdated) unlistenUpdated();
+            if (unlistenStarted) unlistenStarted();
+            if (unlistenProgress) unlistenProgress();
         };
     }, [derived, hardDisableReason, rootTrackId]);
 

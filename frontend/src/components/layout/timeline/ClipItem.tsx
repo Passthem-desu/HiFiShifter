@@ -4,7 +4,8 @@ import { useI18n } from "../../../i18n/I18nProvider";
 import type { ClipInfo } from "../../../features/session/sessionTypes";
 import { CLIP_BODY_PADDING_Y, CLIP_HEADER_HEIGHT } from "./constants";
 import { clamp } from "./math";
-import { fadeInAreaPath, fadeOutAreaPath } from "./paths";
+import { fadeInAreaPath, fadeOutAreaPath, fadeCurveGain } from "./paths";
+import type { FadeCurveType } from "./paths";
 import { sliceWaveformSamples } from "./clipWaveform";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
@@ -22,6 +23,8 @@ function areaPathFromMinMaxBand(
     lengthBeats: number,
     fadeInBeats: number,
     fadeOutBeats: number,
+    fadeInCurve: FadeCurveType = "sine",
+    fadeOutCurve: FadeCurveType = "sine",
 ): string {
     const srcN = Math.min(min.length, max.length);
     const n = Math.max(1, Math.floor(w));
@@ -57,9 +60,9 @@ function areaPathFromMinMaxBand(
 
         let mul = 1;
         const beatAtX = t * safeLenBeats;
-        if (safeFadeIn > 1e-9) mul *= clamp(beatAtX / safeFadeIn, 0, 1);
+        if (safeFadeIn > 1e-9) mul *= fadeCurveGain(clamp(beatAtX / safeFadeIn, 0, 1), fadeInCurve);
         if (safeFadeOut > 1e-9)
-            mul *= clamp((safeLenBeats - beatAtX) / safeFadeOut, 0, 1);
+            mul *= fadeCurveGain(clamp((safeLenBeats - beatAtX) / safeFadeOut, 0, 1), fadeOutCurve);
 
         const top = clamp(centerY - ma * mul * scale, y0, y1);
         const bot = clamp(centerY - mi * mul * scale, y0, y1);
@@ -132,6 +135,9 @@ export const ClipItem: React.FC<{
     selectClipRemote: (clipId: string) => void;
     openContextMenu: (clipId: string, clientX: number, clientY: number) => void;
 
+    /** 轨道主题色，用于 Clip 背景色和选中边框色 */
+    trackColor?: string;
+
     seekFromClientX: (clientX: number, commit: boolean) => void;
     startClipDrag: (
         e: React.PointerEvent<HTMLDivElement>,
@@ -154,6 +160,12 @@ export const ClipItem: React.FC<{
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
 
     clearContextMenu: () => void;
+
+    /** 外部触发重命名（来自右键菜单） */
+    triggerRename?: boolean;
+    onRenameCommit?: (clipId: string, newName: string) => void;
+    onRenameDone?: () => void;
+    onGainCommit?: (clipId: string, db: number) => void;
 }> = ({
     clip,
     rowHeight,
@@ -172,6 +184,11 @@ export const ClipItem: React.FC<{
     startEditDrag,
     toggleClipMuted,
     clearContextMenu,
+    triggerRename,
+    onRenameCommit,
+    onRenameDone,
+    onGainCommit,
+    trackColor,
 }) => {
     const { t } = useI18n();
 
@@ -259,6 +276,8 @@ export const ClipItem: React.FC<{
         const lenBeats = Number(clip.lengthBeats ?? 0) || 0;
         const fadeIn = Number(clip.fadeInBeats ?? 0) || 0;
         const fadeOut = Number(clip.fadeOutBeats ?? 0) || 0;
+        const fadeInCurve: FadeCurveType = clip.fadeInCurve ?? "sine";
+        const fadeOutCurve: FadeCurveType = clip.fadeOutCurve ?? "sine";
 
         // Keep existing color tokens (no palette adjustments): just change geometry.
         const fill = peaks
@@ -267,8 +286,8 @@ export const ClipItem: React.FC<{
         const stroke = peaks
             ? "rgba(255,255,255,0.75)"
             : "rgba(255,255,255,0.65)";
-
-        const dash = peaks?.isPreview ? "4 3" : undefined;
+        // preview 状态用降低 opacity 表示加载中，不使用虚线
+        const waveformOpacity = peaks?.isPreview ? 0.6 : 1.0;
 
         let topMin: number[] | null = null;
         let topMax: number[] | null = null;
@@ -329,6 +348,8 @@ export const ClipItem: React.FC<{
                       lenBeats,
                       fadeIn,
                       fadeOut,
+                      fadeInCurve,
+                      fadeOutCurve,
                   )
                 : "";
         const botD =
@@ -344,6 +365,8 @@ export const ClipItem: React.FC<{
                       lenBeats,
                       fadeIn,
                       fadeOut,
+                      fadeInCurve,
+                      fadeOutCurve,
                   )
                 : "";
 
@@ -353,13 +376,13 @@ export const ClipItem: React.FC<{
                 viewBox={`0 0 ${w} ${totalH}`}
                 preserveAspectRatio="none"
                 className="w-full h-full"
+                style={{ opacity: waveformOpacity }}
             >
                 {topD ? (
                     <path
                         d={topD}
                         fill={fill}
                         stroke={stroke}
-                        strokeDasharray={dash}
                         strokeWidth="1"
                         vectorEffect="non-scaling-stroke"
                         strokeLinejoin="round"
@@ -371,7 +394,6 @@ export const ClipItem: React.FC<{
                         d={botD}
                         fill={fill}
                         stroke={stroke}
-                        strokeDasharray={dash}
                         strokeWidth="1"
                         vectorEffect="non-scaling-stroke"
                         strokeLinejoin="round"
@@ -385,6 +407,8 @@ export const ClipItem: React.FC<{
         clipForWaveform,
         clip.fadeInBeats,
         clip.fadeOutBeats,
+        clip.fadeInCurve,
+        clip.fadeOutCurve,
         clip.lengthBeats,
         peaks,
         stereo,
@@ -479,78 +503,97 @@ export const ClipItem: React.FC<{
                 toggleClipMuted={toggleClipMuted}
                 isInMultiSelectedSet={isInMultiSelectedSet}
                 multiSelectedCount={multiSelectedCount}
+                triggerRename={triggerRename}
+                onRenameCommit={onRenameCommit}
+                onRenameDone={onRenameDone}
+                onGainCommit={onGainCommit}
             />
 
             {/* Body block (does not fill the entire track row; leaves header lane above) */}
             <div
-                className={`absolute left-0 right-0 bottom-0 rounded-sm shadow-sm overflow-visible border ${selected ? "border-white" : "border-qt-highlight"}`}
+                className={`absolute left-0 right-0 bottom-0 rounded-sm shadow-sm overflow-visible border transition-colors ${
+                    selected
+                        ? "border-white/90"
+                        : "border-transparent group-hover:border-white/30"
+                }`}
                 style={{
                     top: CLIP_HEADER_HEIGHT,
-                    backgroundColor:
-                        "color-mix(in oklab, var(--qt-highlight) 35%, transparent)",
+                    backgroundColor: trackColor
+                        ? `color-mix(in oklab, ${trackColor} 30%, transparent)`
+                        : "color-mix(in oklab, var(--qt-highlight) 35%, transparent)",
                 }}
             >
                 {/* Body (waveform + edit handles) */}
                 <div className="absolute inset-0">
-                    {/* Fade handles: visible grabbers on hover/selected, with larger hit areas */}
-                    <div
-                        className={
-                            "absolute left-0 top-0 z-[80] w-[28px] h-[28px] -translate-x-1 -translate-y-1 " +
-                            "cursor-nwse-resize"
-                        }
-                        onPointerDown={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (
-                                multiSelectedCount === 0 ||
-                                !isInMultiSelectedSet
-                            ) {
-                                ensureSelected(clip.id);
-                            }
-                            selectClipRemote(clip.id);
-                            startEditDrag(e, clip.id, "fade_in");
-                        }}
-                        title={t("fade_in")}
-                    >
+                    {/* Fade handles: 操作区覆盖整个 fade 区域 */}
+                    {(clip.fadeInBeats ?? 0) > 0 && (
                         <div
-                            className={
-                                "absolute left-[6px] top-[6px] w-[14px] h-[14px] rounded-sm " +
-                                "border border-white/60 bg-white/15 " +
-                                (selected
-                                    ? "opacity-100"
-                                    : "opacity-0 group-hover:opacity-90")
-                            }
-                        />
-                    </div>
-                    <div
-                        className={
-                            "absolute right-0 top-0 z-[80] w-[28px] h-[28px] translate-x-1 -translate-y-1 " +
-                            "cursor-nesw-resize"
-                        }
-                        onPointerDown={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (
-                                multiSelectedCount === 0 ||
-                                !isInMultiSelectedSet
-                            ) {
-                                ensureSelected(clip.id);
-                            }
-                            selectClipRemote(clip.id);
-                            startEditDrag(e, clip.id, "fade_out");
-                        }}
-                        title={t("fade_out")}
-                    >
+                            className="absolute left-0 top-0 h-full z-[80] cursor-col-resize"
+                            style={{
+                                width: Math.min(
+                                    width,
+                                    (clip.fadeInBeats ?? 0) * pxPerBeat,
+                                ),
+                            }}
+                            onPointerDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (
+                                    multiSelectedCount === 0 ||
+                                    !isInMultiSelectedSet
+                                ) {
+                                    ensureSelected(clip.id);
+                                }
+                                selectClipRemote(clip.id);
+                                startEditDrag(e, clip.id, "fade_in");
+                            }}
+                            title={t("fade_in")}
+                        >
+                            {/* 全区域条带：与可交互区域完全重合，右边缘竖线表示可拖拽边界 */}
+                            <div
+                                className={
+                                    "absolute inset-0 rounded-l-sm bg-white/8 border-r transition-opacity " +
+                                    (selected
+                                        ? "opacity-100 border-white/70"
+                                        : "opacity-30 border-white/40 group-hover:opacity-100")
+                                }
+                            />
+                        </div>
+                    )}
+                    {(clip.fadeOutBeats ?? 0) > 0 && (
                         <div
-                            className={
-                                "absolute right-[6px] top-[6px] w-[14px] h-[14px] rounded-sm " +
-                                "border border-white/60 bg-white/15 " +
-                                (selected
-                                    ? "opacity-100"
-                                    : "opacity-0 group-hover:opacity-90")
-                            }
-                        />
-                    </div>
+                            className="absolute right-0 top-0 h-full z-[80] cursor-col-resize"
+                            style={{
+                                width: Math.min(
+                                    width,
+                                    (clip.fadeOutBeats ?? 0) * pxPerBeat,
+                                ),
+                            }}
+                            onPointerDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                if (
+                                    multiSelectedCount === 0 ||
+                                    !isInMultiSelectedSet
+                                ) {
+                                    ensureSelected(clip.id);
+                                }
+                                selectClipRemote(clip.id);
+                                startEditDrag(e, clip.id, "fade_out");
+                            }}
+                            title={t("fade_out")}
+                        >
+                            {/* 全区域条带：与可交互区域完全重合，左边缘竖线表示可拖拽边界 */}
+                            <div
+                                className={
+                                    "absolute inset-0 rounded-r-sm bg-white/8 border-l transition-opacity " +
+                                    (selected
+                                        ? "opacity-100 border-white/70"
+                                        : "opacity-30 border-white/40 group-hover:opacity-100")
+                                }
+                            />
+                        </div>
+                    )}
 
                     <div className="absolute inset-0 pointer-events-none z-30">
                         {showRepeatMarker ? (
@@ -588,6 +631,8 @@ export const ClipItem: React.FC<{
                                             ),
                                         ),
                                         Math.max(1, bodyHeight),
+                                        24,
+                                        clip.fadeInCurve ?? "sine",
                                     )}
                                     fill="rgba(255,255,255,0.14)"
                                     stroke="rgba(255,255,255,0.55)"
@@ -617,6 +662,8 @@ export const ClipItem: React.FC<{
                                             ),
                                         ),
                                         Math.max(1, bodyHeight),
+                                        24,
+                                        clip.fadeOutCurve ?? "sine",
                                     )}
                                     fill="rgba(255,255,255,0.14)"
                                     stroke="rgba(255,255,255,0.55)"

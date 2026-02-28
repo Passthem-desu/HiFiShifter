@@ -1,6 +1,33 @@
-use crate::state::TimelineState;
+use crate::state::{SynthPipelineKind, TimelineState};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+
+// ─── 媒体注册表 ────────────────────────────────────────────────────────────────
+
+/// 工程媒体文件注册表条目，用于追踪音频文件的路径和完整性。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaEntry {
+    /// 唯一标识符。
+    pub id: String,
+    /// 导入时的原始绝对路径。
+    pub original_path: String,
+    /// 相对于工程文件的相对路径（保存时写入）。
+    pub relative_path: String,
+    /// 文件内容的 SHA-256 哈希，用于完整性校验。
+    pub sha256: [u8; 32],
+}
+
+// ─── 合成配置 ──────────────────────────────────────────────────────────────────
+
+/// 工程级合成配置。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SynthConfig {
+    /// 工程默认合成管线，`None` 时由 Track 的 `pitch_analysis_algo` 决定。
+    #[serde(default)]
+    pub default_pipeline: Option<SynthPipelineKind>,
+}
+
+// ─── 工程文件 ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -8,17 +35,41 @@ pub struct ProjectFile {
     pub version: u32,
     pub name: String,
     pub timeline: TimelineState,
+    /// 媒体文件注册表（v2 新增，旧工程反序列化时默认为空）。
+    #[serde(default)]
+    pub media_registry: Vec<MediaEntry>,
+    /// 工程级合成配置（v2 新增，旧工程反序列化时使用默认值）。
+    #[serde(default)]
+    pub synth_config: SynthConfig,
 }
 
 impl ProjectFile {
     pub fn new(name: String, timeline: TimelineState) -> Self {
         Self {
-            version: 1,
+            version: 2,
             name,
             timeline,
+            media_registry: Vec::new(),
+            synth_config: SynthConfig::default(),
         }
     }
 }
+
+// ─── 序列化 / 反序列化 ─────────────────────────────────────────────────────────
+
+/// 从字节流加载工程文件，自动检测格式。
+///
+/// 优先尝试 MessagePack 格式（v2），失败后 fallback 到 JSON（v1 兼容）。
+pub fn load_project_file(bytes: &[u8]) -> Result<ProjectFile, String> {
+    // 先尝试 MessagePack（新格式）
+    if let Ok(pf) = rmp_serde::from_slice::<ProjectFile>(bytes) {
+        return Ok(pf);
+    }
+    // fallback：JSON（兼容旧工程文件）
+    serde_json::from_slice(bytes).map_err(|e| format!("无法解析工程文件: {}", e))
+}
+
+// ─── 路径处理 ──────────────────────────────────────────────────────────────────
 
 pub fn project_name_from_path(path: &Path) -> String {
     path.file_stem()

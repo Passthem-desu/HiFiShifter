@@ -226,6 +226,7 @@ pub(crate) fn build_snapshot(
     position_frames: &Arc<AtomicU64>,
     is_playing: &Arc<AtomicBool>,
     stretch_stream_epoch: &Arc<AtomicU64>,
+    clip_stretch_epochs: &HashMap<String, Arc<AtomicU64>>,
 ) -> EngineSnapshot {
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
     let bpm = if timeline.bpm.is_finite() && timeline.bpm > 0.0 {
@@ -346,146 +347,42 @@ pub(crate) fn build_snapshot(
             if (playback_rate_render - 1.0).abs() > 1e-6 && crate::rubberband::is_available() {
                 let cap_frames = (out_rate as u64).saturating_mul(2); // ~2s buffer
                 let ring = Arc::new(StreamRingStereo::new(cap_frames));
-                let ring_for_thread = ring.clone();
 
                 // Start close to current playhead to reduce perceived delay.
                 let now = position_frames.load(Ordering::Relaxed);
                 let local0 = now.saturating_sub(start_frame);
                 ring.reset(local0);
 
-                let my_epoch = stretch_stream_epoch.load(Ordering::Relaxed);
-                let epoch = stretch_stream_epoch.clone();
-                let playing = is_playing.clone();
-                let pos = position_frames.clone();
-
-                let src_for_thread = src_render.clone();
-                let src_start_u = src_start;
-                let src_end_u = src_end;
-                let pr = playback_rate_render;
-                let clip_len = length_frames;
-                let repeat_clip = repeat;
-                let silence_frames: u64 = if local_src_offset_frames < 0 {
+                let my_epoch = clip_stretch_epochs
+                    .get(&clip.id)
+                    .map(|e| e.load(Ordering::Relaxed))
+                    .unwrap_or_else(|| stretch_stream_epoch.load(Ordering::Relaxed));
+                let per_clip_epoch = clip_stretch_epochs
+                    .get(&clip.id)
+                    .cloned()
+                    .unwrap_or_else(|| stretch_stream_epoch.clone());
+                let silence_frames_u: u64 = if local_src_offset_frames < 0 {
                     (-local_src_offset_frames) as u64
                 } else {
                     0
                 };
 
-                thread::spawn(move || {
-                    let time_ratio = 1.0 / pr.max(1e-6);
-                    let mut rb = match crate::rubberband::RubberBandRealtimeStretcher::new(
-                        out_rate, 2, time_ratio,
-                    ) {
-                        Ok(v) => v,
-                        Err(_) => return,
-                    };
-
-                    let src_pcm = src_for_thread.pcm.as_slice();
-                    let src_total = src_for_thread.frames as u64;
-
-                    let mut out_cursor: u64 = local0;
-                    let mut in_cursor: u64 = src_start_u;
-
-                    let mut in_block: Vec<f32> = vec![0.0; 1024 * 2];
-                    let mut out_block: Vec<f32> = Vec::with_capacity(2048 * 2);
-
-                    loop {
-                        if epoch.load(Ordering::Relaxed) != my_epoch {
-                            break;
-                        }
-                        if !playing.load(Ordering::Relaxed) {
-                            std::thread::sleep(std::time::Duration::from_millis(8));
-                            continue;
-                        }
-
-                        let now_abs = pos.load(Ordering::Relaxed);
-                        let local = now_abs.saturating_sub(start_frame);
-                        if local >= clip_len {
-                            std::thread::sleep(std::time::Duration::from_millis(8));
-                            continue;
-                        }
-
-                        // Leading silence region (slip-edit past the source start).
-                        if local < silence_frames {
-                            std::thread::sleep(std::time::Duration::from_millis(4));
-                            continue;
-                        }
-
-                        let local_audio = local.saturating_sub(silence_frames);
-
-                        // Reset on large jumps (seek).
-                        let base = ring_for_thread.base_frame.load(Ordering::Acquire);
-                        let write = ring_for_thread.write_frame.load(Ordering::Acquire);
-                        if local < base || local > write.saturating_add(4096) {
-                            let _ = rb.reset(time_ratio);
-                            ring_for_thread.reset(local);
-                            out_cursor = local;
-
-                            let start_in = (local_audio as f64 * pr).floor().max(0.0) as u64;
-                            if repeat_clip {
-                                let loop_len = src_end_u.saturating_sub(src_start_u).max(1);
-                                in_cursor = src_start_u + (start_in % loop_len);
-                            } else {
-                                in_cursor = (src_start_u + start_in).min(src_end_u);
-                            }
-                        }
-
-                        // Maintain some lookahead.
-                        let ahead = write.saturating_sub(local);
-                        if ahead >= 4096 {
-                            std::thread::sleep(std::time::Duration::from_millis(2));
-                            continue;
-                        }
-
-                        // Fill an input block from the source window.
-                        let mut want_in = 1024usize;
-                        if !repeat_clip {
-                            if in_cursor >= src_end_u {
-                                std::thread::sleep(std::time::Duration::from_millis(4));
-                                continue;
-                            }
-                            let remain = src_end_u.saturating_sub(in_cursor) as usize;
-                            want_in = want_in.min(remain.max(1));
-                        }
-
-                        for i in 0..want_in {
-                            let src_f = if repeat_clip {
-                                let loop_len = src_end_u.saturating_sub(src_start_u).max(1);
-                                let within =
-                                    (in_cursor.saturating_sub(src_start_u) + i as u64) % loop_len;
-                                (src_start_u + within).min(src_total.saturating_sub(1))
-                            } else {
-                                (in_cursor + i as u64).min(src_total.saturating_sub(1))
-                            };
-                            let si = (src_f as usize) * 2;
-                            in_block[i * 2] = src_pcm.get(si).copied().unwrap_or(0.0);
-                            in_block[i * 2 + 1] = src_pcm.get(si + 1).copied().unwrap_or(0.0);
-                        }
-
-                        let _ = rb.process_interleaved(&in_block[..want_in * 2], false);
-                        in_cursor = in_cursor.saturating_add(want_in as u64);
-                        if repeat_clip {
-                            let loop_len = src_end_u.saturating_sub(src_start_u).max(1);
-                            if in_cursor >= src_end_u {
-                                in_cursor = src_start_u + ((in_cursor - src_start_u) % loop_len);
-                            }
-                        }
-
-                        out_block.clear();
-                        for _ in 0..4 {
-                            let got = rb
-                                .retrieve_interleaved_into(&mut out_block, 1024)
-                                .unwrap_or_default();
-                            if got == 0 {
-                                break;
-                            }
-                        }
-
-                        if !out_block.is_empty() {
-                            ring_for_thread.write_interleaved(out_cursor, out_block.as_slice());
-                            out_cursor = out_cursor.saturating_add((out_block.len() / 2) as u64);
-                        }
-                    }
-                });
+                super::stretch_stream::spawn_stretch_stream(
+                    ring.clone(),
+                    src_render.clone(),
+                    src_start,
+                    src_end,
+                    playback_rate_render,
+                    start_frame,
+                    length_frames,
+                    repeat,
+                    silence_frames_u,
+                    out_rate,
+                    position_frames.clone(),
+                    is_playing.clone(),
+                    per_clip_epoch,
+                    my_epoch,
+                );
 
                 stretch_stream = Some(ring);
             }
@@ -560,7 +457,7 @@ pub(crate) fn build_snapshot(
             bpm,
             sample_rate: sr,
             duration_frames: dur_frames,
-            clips: clips_out.clone(),
+            clips: Arc::new(clips_out.clone()),
             base_stream: None,
             pitch_stream: None,
             pitch_stream_algo: None,
@@ -649,11 +546,11 @@ pub(crate) fn build_snapshot(
                             if debug {
                                 eprintln!("AudioEngine: pitch_stream ONNX not started (missing base_stream)");
                             }
-                            return EngineSnapshot {
+                        return EngineSnapshot {
                                 bpm,
                                 sample_rate: out_rate,
                                 duration_frames,
-                                clips: clips_out,
+                                clips: Arc::new(clips_out),
                                 base_stream,
                                 pitch_stream: None,
                                 pitch_stream_algo,
@@ -688,18 +585,19 @@ pub(crate) fn build_snapshot(
                     bpm,
                     sample_rate: sr,
                     duration_frames,
-                    clips: clips_out.clone(),
+                    clips: Arc::new(clips_out.clone()),
                     base_stream: None,
                     pitch_stream: None,
                     pitch_stream_algo: None,
                 };
 
                 thread::spawn(move || {
-                    // Default: prioritize smoothness.
+                    // 使用较小的分块（0.5s）以减少每块处理完成后 ring buffer 停止写入的间隙，
+                    // 避免播放头追上 write_frame 后触发 hard-start 静音造成周期性卡顿。
                     let warmup_block_frames = ((sr as u64) / 2).max(256); // ~0.5s
                     let warmup_ahead_frames = ((sr as u64) / 2).max(256); // keep at least ~0.5s initially
-                    let block_frames_normal = (sr as u64).saturating_mul(2); // 2s blocks
-                    let lookahead_frames_normal = (sr as u64).saturating_mul(3); // keep ~3s ahead
+                    let block_frames_normal = (sr as u64) / 2; // 0.5s blocks（原 2s，缩小以减少卡顿间隙）
+                    let lookahead_frames_normal = (sr as u64).saturating_mul(3) / 2; // keep ~1.5s ahead（原 3s）
 
                     let mut out_cursor: u64 = pos.load(Ordering::Relaxed);
                     let mut pcm: Vec<f32> = vec![];
@@ -805,7 +703,7 @@ pub(crate) fn build_snapshot(
         bpm,
         sample_rate: out_rate,
         duration_frames,
-        clips: clips_out,
+        clips: Arc::new(clips_out),
         base_stream,
         pitch_stream,
         pitch_stream_algo,
@@ -835,7 +733,7 @@ pub(crate) fn build_snapshot_for_file(
         bpm: 120.0,
         sample_rate: out_rate,
         duration_frames: length_frames,
-        clips: vec![EngineClip {
+        clips: Arc::new(vec![EngineClip {
             clip_id: "__file_preview__".to_string(),
             track_id: "__file_preview__".to_string(),
             start_frame: 0,
@@ -850,7 +748,7 @@ pub(crate) fn build_snapshot_for_file(
             fade_in_frames: 0,
             fade_out_frames: 0,
             gain: 1.0,
-        }],
+        }]),
         base_stream: None,
         pitch_stream: None,
         pitch_stream_algo: None,

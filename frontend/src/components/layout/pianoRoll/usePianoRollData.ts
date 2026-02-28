@@ -29,6 +29,9 @@ export function usePianoRollData(args: {
     scrollLeftRef: React.MutableRefObject<number>;
     pxPerBeatRef: React.MutableRefObject<number>;
     invalidate: () => void;
+    /** 外部通知当前是否正在进行 live 编辑（pointer down 期间为 true）。
+     *  为 true 时，pitch_orig_updated 触发的曲线刷新会被推迟到 pointer-up 后执行。 */
+    liveEditActiveRef?: React.MutableRefObject<boolean>;
 }) {
     const {
         editParam,
@@ -45,10 +48,20 @@ export function usePianoRollData(args: {
         scrollLeftRef,
         pxPerBeatRef,
         invalidate,
+        liveEditActiveRef: externalLiveEditActiveRef,
     } = args;
 
+    // 内部 fallback：若外部未传入 liveEditActiveRef，则使用内部 ref（始终为 false）。
+    const internalLiveEditActiveRef = useRef(false);
+    const liveEditActiveRef = externalLiveEditActiveRef ?? internalLiveEditActiveRef;
+
+    // 当 pitch_orig_updated 到达时若正在编辑，将刷新推迟到 pointer-up 后执行。
+    const pendingPitchUpdatedRefreshRef = useRef(false);
     const [wavePeaks, setWavePeaks] = useState<WavePeaksSegment | null>(null);
     const [paramView, setParamView] = useState<ParamViewSegment | null>(null);
+    // 副参数曲线（仅 edit，用于叠加显示）
+    const [secondaryParamView, setSecondaryParamView] = useState<ParamViewSegment | null>(null);
+    const secondaryFetchReqIdRef = useRef(0);
 
     const [pitchAnalysisPending, setPitchAnalysisPending] = useState(false);
     const [pitchAnalysisProgress, setPitchAnalysisProgress] = useState<
@@ -98,8 +111,11 @@ export function usePianoRollData(args: {
     }
 
     // Force parameter refresh when the session state changes meaningfully (undo/redo/timeline edits).
+    // 同时清除旧曲线数据，避免旧数据在新数据到达前短暂显示（也修复初次导入后曲线不显示的问题）。
     useEffect(() => {
         if (!rootTrackId) return;
+        setParamView(null);
+        setSecondaryParamView(null);
         setForceParamFetchToken((x) => x + 1);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [paramsEpoch, rootTrackId]);
@@ -166,8 +182,15 @@ export function usePianoRollData(args: {
 
                         setPitchAnalysisPending(false);
                         setPitchAnalysisProgress(null);
-                        setForceParamFetchToken((x) => x + 1);
-                        setRefreshToken((x) => x + 1);
+
+                        // 若用户正在绘制曲线（pointer down），推迟曲线刷新到 pointer-up 后，
+                        // 避免后端分析结果覆盖用户正在绘制的 liveEditOverride 内容。
+                        if (liveEditActiveRef.current) {
+                            pendingPitchUpdatedRefreshRef.current = true;
+                        } else {
+                            setForceParamFetchToken((x) => x + 1);
+                            setRefreshToken((x) => x + 1);
+                        }
                     },
                 );
 
@@ -228,6 +251,11 @@ export function usePianoRollData(args: {
         setPitchEditBackendAvailable(null);
     }, [editParam, pitchEnabled]);
 
+    // 当 editParam 切换时，清除副参数缓存
+    useEffect(() => {
+        setSecondaryParamView(null);
+    }, [editParam, rootTrackId]);
+
     function computeVisibleRequest() {
         const debug =
             typeof window !== "undefined" &&
@@ -274,7 +302,7 @@ export function usePianoRollData(args: {
             wavePeaks.startSec <= visibleStartSec &&
             wavePeaks.startSec + wavePeaks.durSec >= visibleEndSec;
 
-        const marginSec = visibleDurSec;
+        const marginSec = visibleDurSec * 2;
         const covStartSec = Math.max(0, visibleStartSec - marginSec);
         const covDurSec = visibleDurSec + 2 * marginSec;
         const covCols = clamp(
@@ -349,6 +377,25 @@ export function usePianoRollData(args: {
         const frameCount = viewFrames;
         const paramKey = `${trackId}|${editParam}|${startFrame}|${frameCount}|${stride}`;
 
+        // 副参数：另一个参数（pitch <-> tension）
+        const secondaryParam: ParamName = editParam === "pitch" ? "tension" : "pitch";
+        const secondaryFpKey = `${trackId}|${secondaryParam}`;
+        const secondaryCachedFp = paramFramePeriodCache.get(secondaryFpKey);
+        const secondaryFpMs = Number(secondaryCachedFp ?? 5) || 5;
+        const secondaryStartFrame = Math.max(
+            0,
+            Math.floor((paramStartSecQ * 1000) / Math.max(1e-6, secondaryFpMs)),
+        );
+        const secondaryFrameCount = clamp(
+            Math.max(
+                1,
+                Math.ceil((paramDurSecQ * 1000) / Math.max(1e-6, secondaryFpMs)) + 1,
+            ),
+            1,
+            200_000,
+        );
+        const secondaryParamKey = `${trackId}|${secondaryParam}|${secondaryStartFrame}|${secondaryFrameCount}|${stride}`;
+
         return {
             debug,
             trackId,
@@ -367,6 +414,12 @@ export function usePianoRollData(args: {
             fpMs,
             fpKey,
             forceParamFetchToken,
+            secondaryParam,
+            secondaryFpKey,
+            secondaryFpMs,
+            secondaryStartFrame,
+            secondaryFrameCount,
+            secondaryParamKey,
         };
     }
 
@@ -474,6 +527,44 @@ export function usePianoRollData(args: {
             lastAppliedForceParamFetchTokenRef.current;
         const shouldFetchParam = !paramCoversVisible || forceParam;
 
+        // 副参数异步加载（独立请求，不影响主参数刷新逻辑）
+        void (async () => {
+            const secReqId = ++secondaryFetchReqIdRef.current;
+            // pitch 副参数需要 pitchEnabled（若 editParam 为 tension，pitch 作为副参数时检查）
+            const secondaryPitchEnabled =
+                req.secondaryParam !== "pitch" ||
+                (() => {
+                    // 复用外部 pitchEnabled 逻辑：只要 rootTrack 允许 pitch 分析即可
+                    return pitchEnabled || editParam === "pitch";
+                })();
+            if (!secondaryPitchEnabled && req.secondaryParam === "pitch") return;
+            try {
+                const res = await paramsApi.getParamFrames(
+                    req.trackId,
+                    req.secondaryParam,
+                    req.secondaryStartFrame,
+                    req.secondaryFrameCount,
+                    stride,
+                );
+                if (secondaryFetchReqIdRef.current !== secReqId) return;
+                if (!res?.ok) return;
+                const payload = res as ParamFramesPayload;
+                const fpRes = Number(payload.frame_period_ms ?? req.secondaryFpMs) || req.secondaryFpMs;
+                paramFramePeriodCache.set(req.secondaryFpKey, fpRes);
+                setSecondaryParamView({
+                    key: req.secondaryParamKey,
+                    framePeriodMs: fpRes,
+                    startFrame: Number(payload.start_frame ?? req.secondaryStartFrame) || req.secondaryStartFrame,
+                    stride,
+                    orig: [],
+                    edit: (payload.edit ?? []).map((v) => Number(v) || 0),
+                });
+                invalidate();
+            } catch {
+                // ignore
+            }
+        })();
+
         if (shouldFetchParam) {
             void (async () => {
                 beginLoading();
@@ -576,9 +667,11 @@ export function usePianoRollData(args: {
         setIsRefreshing(true);
         const reqId = ++fetchReqIdRef.current;
         const shouldFetchParam = !(editParam === "pitch" && !pitchEnabled);
+        const secondaryPitchOk = req.secondaryParam !== "pitch" || pitchEnabled || editParam === "pitch";
+        const shouldFetchSecondary = secondaryPitchOk;
         try {
             beginLoading();
-            const [waveRes, paramRes] = await Promise.all([
+            const [waveRes, paramRes, secondaryRes] = await Promise.all([
                 waveformApi.getTrackMixWaveformPeaksSegment(
                     waveTrackId,
                     startSecQ,
@@ -591,6 +684,15 @@ export function usePianoRollData(args: {
                           editParam,
                           startFrame,
                           frameCount,
+                          stride,
+                      )
+                    : Promise.resolve(null),
+                shouldFetchSecondary
+                    ? paramsApi.getParamFrames(
+                          trackId,
+                          req.secondaryParam,
+                          req.secondaryStartFrame,
+                          req.secondaryFrameCount,
                           stride,
                       )
                     : Promise.resolve(null),
@@ -669,6 +771,20 @@ export function usePianoRollData(args: {
                     paramRes,
                 });
             }
+
+            if (shouldFetchSecondary && secondaryRes?.ok) {
+                const secPayload = secondaryRes as ParamFramesPayload;
+                const secFpRes = Number(secPayload.frame_period_ms ?? req.secondaryFpMs) || req.secondaryFpMs;
+                paramFramePeriodCache.set(req.secondaryFpKey, secFpRes);
+                setSecondaryParamView({
+                    key: req.secondaryParamKey,
+                    framePeriodMs: secFpRes,
+                    startFrame: Number(secPayload.start_frame ?? req.secondaryStartFrame) || req.secondaryStartFrame,
+                    stride,
+                    orig: [],
+                    edit: (secPayload.edit ?? []).map((v) => Number(v) || 0),
+                });
+            }
         } finally {
             setIsRefreshing(false);
             endLoading();
@@ -707,13 +823,27 @@ export function usePianoRollData(args: {
         forceParamFetchToken,
     ]);
 
+    /**
+     * 由外部（PianoRollPanel）在 pointer-up 时调用，通知 live 编辑已结束。
+     * 若此前有被推迟的 pitch_orig_updated 刷新，此时立即触发。
+     */
+    function notifyLiveEditEnded() {
+        if (pendingPitchUpdatedRefreshRef.current) {
+            pendingPitchUpdatedRefreshRef.current = false;
+            setForceParamFetchToken((x) => x + 1);
+            setRefreshToken((x) => x + 1);
+        }
+    }
+
     return {
         wavePeaks,
         setWavePeaks,
         paramView,
         setParamView,
+        secondaryParamView,
         bumpRefreshToken: () => setRefreshToken((x) => x + 1),
         refreshNow,
+        notifyLiveEditEnded,
         isRefreshing,
         isLoading,
         pitchAnalysisPending,

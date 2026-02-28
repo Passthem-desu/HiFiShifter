@@ -20,6 +20,26 @@ fn env_f64(name: &str) -> Option<f64> {
         .filter(|v| v.is_finite())
 }
 
+/// 根据 voiced 段时长动态计算 ctx_sec。
+///
+/// - 若用户手动设置了 `HIFISHIFTER_ONNX_VAD_CTX_SEC`，则始终使用该定制値。
+/// - 否则按照 voiced 段时长自适应：
+///   - voiced_dur < 0.5s  → ctx_sec = 0.5（短音节，减少无效帧）
+///   - voiced_dur < 2.0s  → ctx_sec = 1.0
+///   - voiced_dur ≥ 2.0s  → ctx_sec = 1.5（保持原默认値）
+fn compute_adaptive_ctx_sec(voiced_dur_sec: f64, user_override: Option<f64>) -> f64 {
+    if let Some(v) = user_override {
+        return v.max(0.0);
+    }
+    if voiced_dur_sec < 0.5 {
+        0.5
+    } else if voiced_dur_sec < 2.0 {
+        1.0
+    } else {
+        1.5
+    }
+}
+
 fn clamp01(x: f32) -> f32 {
     x.clamp(0.0, 1.0)
 }
@@ -189,6 +209,12 @@ fn build_preroll_and_main_from_stereo(pcm: &[f32], preroll_frames: u64) -> (Vec<
     (preroll, main)
 }
 
+/// 在 voiced/unvoiced 边界处将 prev_tail 与 curr_preroll 做等功率 crossfade，
+/// 并将混合结果写入 ring buffer 的 [boundary_frame - actual_frames, boundary_frame) 区间。
+///
+/// 等功率权重：w_prev = cos(t * π/2)，w_curr = sin(t * π/2)，满足 w_prev² + w_curr² = 1。
+/// 当 prev_tail 或 curr_preroll 的实际长度不足 xfade_frames 时，
+/// 使用两者中较小的可用帧数，避免越界，不产生 panic。
 fn crossfade_into_ring(
     ring: &StreamRingStereo,
     boundary_frame: u64,
@@ -199,29 +225,46 @@ fn crossfade_into_ring(
     if xfade_frames == 0 {
         return;
     }
-    let frames = xfade_frames as usize;
-    if prev_tail.len() < frames * 2 || curr_preroll.len() < frames * 2 {
+
+    // 使用实际可用帧数（取两者最小值），避免越界。
+    let prev_avail = prev_tail.len() / 2;
+    let curr_avail = curr_preroll.len() / 2;
+    let actual_frames = (xfade_frames as usize)
+        .min(prev_avail)
+        .min(curr_avail);
+    if actual_frames == 0 {
         return;
     }
-    if boundary_frame < xfade_frames {
+    if boundary_frame < actual_frames as u64 {
         return;
     }
 
-    let mut blended = vec![0.0f32; frames * 2];
-    for f in 0..frames {
-        let w = if frames <= 1 {
-            1.0
+    // prev_tail 取尾部 actual_frames 帧（最新的部分）。
+    let prev_start = (prev_avail - actual_frames) * 2;
+    let prev_slice = &prev_tail[prev_start..];
+
+    // curr_preroll 取头部 actual_frames 帧。
+    let curr_slice = &curr_preroll[..actual_frames * 2];
+
+    let mut blended = vec![0.0f32; actual_frames * 2];
+    for f in 0..actual_frames {
+        // t ∈ [0, 1]：0 = 边界起点（prev 主导），1 = 边界终点（curr 主导）。
+        let t = if actual_frames <= 1 {
+            1.0f32
         } else {
-            f as f32 / (frames as f32 - 1.0)
+            f as f32 / (actual_frames as f32 - 1.0)
         };
-        let w = clamp01(w);
-        let a = 1.0 - w;
+        let t = clamp01(t);
+        // 等功率权重：cos²(t·π/2) + sin²(t·π/2) = 1，能量守恒。
+        let angle = t * std::f32::consts::FRAC_PI_2;
+        let w_prev = angle.cos();
+        let w_curr = angle.sin();
         let i = f * 2;
-        blended[i] = prev_tail[i] * a + curr_preroll[i] * w;
-        blended[i + 1] = prev_tail[i + 1] * a + curr_preroll[i + 1] * w;
+        blended[i]     = prev_slice[i]     * w_prev + curr_slice[i]     * w_curr;
+        blended[i + 1] = prev_slice[i + 1] * w_prev + curr_slice[i + 1] * w_curr;
     }
 
-    ring.write_interleaved(boundary_frame - xfade_frames, &blended);
+    ring.write_interleaved(boundary_frame - actual_frames as u64, &blended);
 }
 
 pub(crate) fn spawn_pitch_stream_onnx(
@@ -240,11 +283,13 @@ pub(crate) fn spawn_pitch_stream_onnx(
         let project_sec = timeline.project_duration_sec();
         let intervals = compute_voiced_intervals_sec(&curves, project_sec);
 
-        let ctx_sec = env_f64("HIFISHIFTER_ONNX_VAD_CTX_SEC")
-            .unwrap_or(1.5)
-            .max(0.0);
+        // ctx_sec 不再全局固定，改为在每个 voiced 段内根据时长动态计算（见 compute_adaptive_ctx_sec）。
+        // 若用户设置了 HIFISHIFTER_ONNX_VAD_CTX_SEC，则始终使用该值覆盖自适应逻辑。
+        let ctx_sec_override = env_f64("HIFISHIFTER_ONNX_VAD_CTX_SEC");
+        // 默认 80ms：比原来的 40ms 更宽裕，足以掩盖 voiced/unvoiced 过渡噪声。
+        // 可通过环境变量 HIFISHIFTER_ONNX_VAD_XFADE_MS 覆盖。
         let xfade_ms = env_f64("HIFISHIFTER_ONNX_VAD_XFADE_MS")
-            .unwrap_or(40.0)
+            .unwrap_or(80.0)
             .max(0.0);
         let xfade_frames = ((xfade_ms / 1000.0) * (sr as f64)).round().max(0.0) as u64;
 
@@ -444,6 +489,9 @@ pub(crate) fn spawn_pitch_stream_onnx(
                 }
                 SegmentKind::Voiced => {
                     let expected_frames = seg_end_frame.saturating_sub(out_cursor);
+                    // 根据 voiced 段时长动态计算 ctx_sec，减少短 voiced 段的无效推理帧。
+                    let voiced_dur_sec = seg_end_sec - t0;
+                    let ctx_sec = compute_adaptive_ctx_sec(voiced_dur_sec, ctx_sec_override);
                     // We infer the entire remaining voiced segment (bounded by max_infer_sec),
                     // then stream the result into the ring in small chunks.
                     let pre_sec = (preroll_frames as f64) / (sr as f64);

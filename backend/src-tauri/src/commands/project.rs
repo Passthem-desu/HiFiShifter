@@ -1,5 +1,6 @@
 use crate::project::{
-    make_paths_relative, project_name_from_path, resolve_paths_relative, ProjectFile,
+    load_project_file, make_paths_relative, project_name_from_path, resolve_paths_relative,
+    ProjectFile,
 };
 use crate::state::AppState;
 use std::fs;
@@ -37,8 +38,9 @@ pub(crate) fn save_project_to_path_inner(
         .clone();
     let tl_rel = make_paths_relative(tl, &path);
     let pf = ProjectFile::new(name.clone(), tl_rel);
-    let txt = serde_json::to_string_pretty(&pf).map_err(|e| e.to_string())?;
-    fs::write(&path, txt).map_err(|e| e.to_string())?;
+    // 使用 MessagePack 格式保存（v2），体积更小、解析更快。
+    let bytes = rmp_serde::to_vec_named(&pf).map_err(|e| e.to_string())?;
+    fs::write(&path, bytes).map_err(|e| e.to_string())?;
 
     {
         let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
@@ -107,8 +109,9 @@ pub(super) fn open_project(
     project_path: String,
 ) -> crate::models::TimelineStatePayload {
     let path = PathBuf::from(&project_path);
-    let txt = fs::read_to_string(&path).unwrap_or_else(|_| "".to_string());
-    let parsed: Result<ProjectFile, _> = serde_json::from_str(&txt);
+    // 读取字节流，自动检测 MessagePack（v2）或 JSON（v1 兼容）格式。
+    let bytes = fs::read(&path).unwrap_or_default();
+    let parsed = load_project_file(&bytes);
     let Ok(mut pf) = parsed else {
         let mut payload = get_timeline_state(state);
         payload.ok = false;

@@ -1,4 +1,4 @@
-use crate::state::{PitchAnalysisAlgo, TimelineState};
+use crate::state::{PitchAnalysisAlgo, SynthPipelineKind, TimelineState};
 use std::cell::RefCell;
 
 thread_local! {
@@ -434,85 +434,24 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             mono[f] = pcm_stereo[f * 2];
         }
 
-        match algo {
-            PitchEditAlgorithm::WorldVocoder => {
-                if !crate::world_vocoder::is_available() {
-                    return Ok(None);
-                }
-                let f0_floor = 40.0;
-                let f0_ceil = 1600.0;
-                let out = crate::world_vocoder::vocode_pitch_shift_chunked(
-                    mono.as_slice(),
-                    sample_rate,
-                    seg_start_sec,
-                    frame_period_ms,
-                    f0_floor,
-                    f0_ceil,
-                    |abs_time_sec| {
-                        let orig = clip_midi_at_time(
-                            frame_period_ms,
-                            clip_start_sec,
-                            &clip_pitch.midi,
-                            abs_time_sec,
-                        );
-                        if !(orig.is_finite() && orig > 0.0) {
-                            return 0.0;
-                        }
-                        let target = match edit_midi_at_time_or_none(
-                            frame_period_ms,
-                            pitch_edit,
-                            abs_time_sec,
-                        ) {
-                            Some(v) => v,
-                            None => orig,
-                        };
-                        let shift = (target - orig).clamp(-24.0, 24.0);
-                        if shift.is_finite() {
-                            shift
-                        } else {
-                            0.0
-                        }
-                    },
-                )?;
-                Ok(Some(out))
-            }
-            PitchEditAlgorithm::NsfHifiganOnnx => {
-                if !crate::nsf_hifigan_onnx::is_available() {
-                    return Ok(None);
-                }
-                let out = crate::nsf_hifigan_onnx::infer_pitch_edit_mono(
-                    mono.as_slice(),
-                    sample_rate,
-                    seg_start_sec,
-                    |abs_time_sec| {
-                        let orig = clip_midi_at_time(
-                            frame_period_ms,
-                            clip_start_sec,
-                            &clip_pitch.midi,
-                            abs_time_sec,
-                        );
-                        if !(orig.is_finite() && orig > 0.0) {
-                            return 0.0;
-                        }
-                        let target = match edit_midi_at_time_or_none(
-                            frame_period_ms,
-                            pitch_edit,
-                            abs_time_sec,
-                        ) {
-                            Some(v) => v,
-                            None => orig,
-                        };
-                        if target.is_finite() && target > 0.0 {
-                            target
-                        } else {
-                            0.0
-                        }
-                    },
-                )?;
-                Ok(Some(out))
-            }
-            PitchEditAlgorithm::Bypass => Ok(None),
+        // 通过 VocoderPipeline trait 调用，解耦合成链路。
+        let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+        let pipeline = crate::vocoder_pipeline::get_pipeline(kind);
+        if !pipeline.is_available() {
+            return Ok(None);
         }
+
+        let ctx = crate::vocoder_pipeline::VocoderContext {
+            mono_pcm: mono.as_slice(),
+            sample_rate,
+            seg_start_sec,
+            clip_start_sec,
+            frame_period_ms,
+            pitch_edit,
+            clip_midi: &clip_pitch.midi,
+        };
+        let out = pipeline.process(&ctx)?;
+        Ok(Some(out))
     })?;
 
     let Some(processed) = processed else {

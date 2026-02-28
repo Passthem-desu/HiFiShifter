@@ -23,6 +23,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rmp-serde = "1"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 rfd = "0.15"
@@ -40,7 +41,8 @@ libloading = "0.8"
 ort = { version = "2.0.0-rc.11", optional = true, default-features = false, features = ["std", "download-binaries", "tls-native", "cuda"] }
 rustfft = "6"
 num-complex = "0.4"
+ndarray = { version = "0.16", optional = true }
 
 [features]
 default = []
-onnx = ["dep:ort"]
+onnx = ["dep:ort", "dep:ndarray"]

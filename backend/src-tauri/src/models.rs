@@ -30,6 +30,10 @@ pub struct TimelineTrack {
 
     pub compose_enabled: bool,
     pub pitch_analysis_algo: String,
+
+    /// 轨道主题色，hex 字符串，如 "#4f8ef7"
+    #[serde(default)]
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

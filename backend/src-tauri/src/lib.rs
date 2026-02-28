@@ -6,6 +6,7 @@ mod models;
 mod pitch_analysis;
 mod pitch_clip;
 mod pitch_editing;
+mod vocoder_pipeline;
 
 #[cfg(feature = "onnx")]
 mod nsf_hifigan_onnx;

@@ -7,10 +7,12 @@ mod pitch_stream_onnx;
 mod resource_manager;
 mod ring;
 mod snapshot;
-mod types;
+pub(crate) mod stretch_stream;
+pub(crate) mod types;
 mod util;
 mod realtime_stats;
 
 pub use engine::AudioEngine;
 #[allow(unused_imports)]
 pub use types::AudioEngineStateSnapshot;
+pub(crate) use types::EngineCommand;

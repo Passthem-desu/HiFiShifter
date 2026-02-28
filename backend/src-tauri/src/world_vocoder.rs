@@ -746,31 +746,40 @@ where
         // Copy central (non-padded) part back.
         let central_start = chunk_start - pad_start;
 
-        // Crossfade with previous chunk in the overlap region.
+        // 等功率 crossfade（equal-power crossfade）写回策略：
+        //
+        // 分块边界处使用 cos/sin 曲线，保证 cos²(w) + sin²(w) = 1，能量守恒。
+        //
+        // 区域划分（以当前块为视角）：
+        //   [chunk_start, chunk_start+overlap_len)  → fade-in 区：读取前一块已写入值，做等功率混合
+        //   [chunk_start+overlap_len, chunk_end-overlap_len) → 中间区：直接覆盖写入
+        //   [chunk_end-overlap_len, chunk_end)       → fade-out 区：直接写入（下一块 fade-in 时会读取并混合）
+        //
+        // 注意：fade-in 区必须先读取 out[dst_idx]（前一块的 fade-out 值），再做等功率混合。
+        // fade-out 区直接写入当前块的值，等待下一块来做 fade-in 混合。
+
         let dst_start = chunk_start;
         let dst_end = chunk_end;
 
         for i in 0..(dst_end - dst_start) {
             let src_idx = central_start + i;
             let v = clamp11(y_f64[src_idx]) as f32;
-
             let dst_idx = dst_start + i;
 
-            // Fade in/out around chunk boundaries to reduce clicks.
-            let mut w = 1.0f32;
-            if overlap_len > 0 {
-                if dst_idx < chunk_start + overlap_len && chunk_start > 0 {
-                    let k = (dst_idx - chunk_start) as f32 / overlap_len as f32;
-                    w = k.clamp(0.0, 1.0);
-                }
-                if dst_idx >= chunk_end.saturating_sub(overlap_len) && chunk_end < total_frames {
-                    let k = (chunk_end - dst_idx).max(1) as f32 / overlap_len as f32;
-                    w = w.min(k.clamp(0.0, 1.0));
-                }
+            if overlap_len > 0 && chunk_start > 0 && dst_idx < chunk_start + overlap_len {
+                // fade-in 区：等功率混合前一块（已写入）与当前块
+                // w_curr = sin(t * π/2)，w_prev = cos(t * π/2)，满足 w_curr² + w_prev² = 1
+                let t = (dst_idx - chunk_start) as f32 / overlap_len as f32;
+                let angle = t.clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2;
+                let w_curr = angle.sin();
+                let w_prev = angle.cos();
+                let prev_val = out[dst_idx]; // 前一块在此位置写入的 fade-out 值
+                out[dst_idx] = prev_val * w_prev + v * w_curr;
+            } else {
+                // 中间区 & fade-out 区：直接覆盖写入当前块的值
+                // fade-out 区的值会在下一块的 fade-in 阶段被读取并做等功率混合
+                out[dst_idx] = v;
             }
-
-            // Overlap-add: blend with existing content.
-            out[dst_idx] = out[dst_idx] * (1.0 - w) + v * w;
         }
 
         pos = chunk_end;

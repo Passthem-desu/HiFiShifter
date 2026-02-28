@@ -10,6 +10,58 @@ use crate::state::TimelineState;
 use super::types::EngineSnapshot;
 use super::util::clamp11;
 use super::realtime_stats::RealtimeRenderStats;
+use super::types::EngineClip;
+
+/// 采样 clip 在 local 帧处的原始 PCM（不含 gain/fade）。
+/// 返回 None 表示该帧应静音（越界、leading silence 等）。
+#[inline]
+fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32, f32)> {
+    let src_pcm = clip.src.pcm.as_slice();
+    let src_frames = clip.src.frames as u64;
+    let loop_len = clip.src_end_frame.saturating_sub(clip.src_start_frame) as f64;
+
+    // Fast path: stretch_stream ring 已覆盖该帧
+    if let Some(stream) = clip.stretch_stream.as_ref() {
+        if let Some((sl, sr)) = stream.read_frame(local) {
+            return Some((sl, sr));
+        }
+    }
+
+    // Fallback: 线性插值采样
+    let src_pos = if clip.repeat {
+        if loop_len <= 1.0 {
+            return None;
+        }
+        let within = (local_adj * clip.playback_rate).rem_euclid(loop_len);
+        (clip.src_start_frame as f64) + within
+    } else {
+        (clip.src_start_frame as f64) + local_adj * clip.playback_rate
+    };
+
+    if !clip.repeat && src_pos + 1.0 >= clip.src_end_frame as f64 {
+        return None;
+    }
+
+    let i0 = src_pos.floor().max(0.0) as u64;
+    if i0 >= src_frames {
+        return None;
+    }
+    let mut i1 = i0.saturating_add(1);
+    if clip.repeat {
+        if i1 >= clip.src_end_frame {
+            i1 = clip.src_start_frame;
+        }
+    } else if i1 >= src_frames {
+        return None;
+    }
+
+    let frac = (src_pos - i0 as f64) as f32;
+    let i0u = i0 as usize;
+    let i1u = i1 as usize;
+    let l = src_pcm[i0u * 2] + (src_pcm[i1u * 2] - src_pcm[i0u * 2]) * frac;
+    let r = src_pcm[i0u * 2 + 1] + (src_pcm[i1u * 2 + 1] - src_pcm[i0u * 2 + 1]) * frac;
+    Some((l, r))
+}
 
 pub(crate) fn mix_snapshot_clips_into_scratch(
     _frames: usize,
@@ -18,7 +70,7 @@ pub(crate) fn mix_snapshot_clips_into_scratch(
     pos1: u64,
     scratch: &mut [f32],
 ) {
-    for clip in &snap.clips {
+    for clip in snap.clips.iter() {
         let clip_start = clip.start_frame;
         let clip_end = clip.start_frame.saturating_add(clip.length_frames);
         if clip_end <= pos0 || clip_start >= pos1 {
@@ -34,10 +86,6 @@ pub(crate) fn mix_snapshot_clips_into_scratch(
         let out_off = (overlap_start - pos0) as usize;
         let clip_off = overlap_start - clip_start;
         let mix_frames = (overlap_end - overlap_start) as usize;
-
-        let src_pcm = clip.src.pcm.as_slice();
-        let src_frames = clip.src.frames as u64;
-        let loop_len = clip.src_end_frame.saturating_sub(clip.src_start_frame) as f64;
 
         for f in 0..mix_frames {
             let local = clip_off + f as u64;
@@ -65,97 +113,13 @@ pub(crate) fn mix_snapshot_clips_into_scratch(
                 continue;
             }
 
-            let (l, r) = if let Some(stream) = clip.stretch_stream.as_ref() {
-                if let Some((sl, sr)) = stream.read_frame(local) {
-                    (sl * g, sr * g)
-                } else {
-                    let src_pos = if clip.repeat {
-                        if loop_len <= 1.0 {
-                            continue;
-                        }
-                        let within = (local_adj * clip.playback_rate).rem_euclid(loop_len);
-                        (clip.src_start_frame as f64) + within
-                    } else {
-                        (clip.src_start_frame as f64) + local_adj * clip.playback_rate
-                    };
-
-                    if !clip.repeat && src_pos + 1.0 >= clip.src_end_frame as f64 {
-                        continue;
-                    }
-
-                    let i0 = src_pos.floor().max(0.0) as u64;
-                    if i0 >= src_frames {
-                        continue;
-                    }
-                    let mut i1 = i0.saturating_add(1);
-                    if clip.repeat {
-                        if i1 >= clip.src_end_frame {
-                            i1 = clip.src_start_frame;
-                        }
-                    } else if i1 >= src_frames {
-                        continue;
-                    }
-
-                    let frac = (src_pos - (i0 as f64)) as f32;
-
-                    let i0u = i0 as usize;
-                    let i1u = i1 as usize;
-
-                    let l0 = src_pcm[i0u * 2];
-                    let r0 = src_pcm[i0u * 2 + 1];
-                    let l1 = src_pcm[i1u * 2];
-                    let r1 = src_pcm[i1u * 2 + 1];
-
-                    let l = l0 + (l1 - l0) * frac;
-                    let r = r0 + (r1 - r0) * frac;
-                    (l * g, r * g)
-                }
-            } else {
-                let src_pos = if clip.repeat {
-                    if loop_len <= 1.0 {
-                        continue;
-                    }
-                    let within = (local_adj * clip.playback_rate).rem_euclid(loop_len);
-                    (clip.src_start_frame as f64) + within
-                } else {
-                    (clip.src_start_frame as f64) + local_adj * clip.playback_rate
-                };
-
-                if !clip.repeat && src_pos + 1.0 >= clip.src_end_frame as f64 {
-                    continue;
-                }
-
-                let i0 = src_pos.floor().max(0.0) as u64;
-                if i0 >= src_frames {
-                    continue;
-                }
-                let mut i1 = i0.saturating_add(1);
-                if clip.repeat {
-                    if i1 >= clip.src_end_frame {
-                        i1 = clip.src_start_frame;
-                    }
-                } else if i1 >= src_frames {
-                    continue;
-                }
-
-                let frac = (src_pos - (i0 as f64)) as f32;
-
-                let i0u = i0 as usize;
-                let i1u = i1 as usize;
-
-                let l0 = src_pcm[i0u * 2];
-                let r0 = src_pcm[i0u * 2 + 1];
-                let l1 = src_pcm[i1u * 2];
-                let r1 = src_pcm[i1u * 2 + 1];
-
-                let l = l0 + (l1 - l0) * frac;
-                let r = r0 + (r1 - r0) * frac;
-                (l * g, r * g)
+            let Some((l, r)) = sample_clip_pcm(clip, local, local_adj) else {
+                continue;
             };
 
             let oi = (out_off + f) * 2;
-            scratch[oi] += l;
-            scratch[oi + 1] += r;
+            scratch[oi] += l * g;
+            scratch[oi + 1] += r * g;
         }
     }
 }
@@ -178,7 +142,7 @@ pub(crate) fn mix_snapshot_clips_pitch_edited_into_scratch(
     // Temporary per-clip render buffer.
     let mut seg: Vec<f32> = vec![];
 
-    for clip in &snap.clips {
+    for clip in snap.clips.iter() {
         let clip_start = clip.start_frame;
         let clip_end = clip.start_frame.saturating_add(clip.length_frames);
         if clip_end <= pos0 || clip_start >= pos1 {
@@ -203,10 +167,6 @@ pub(crate) fn mix_snapshot_clips_pitch_edited_into_scratch(
         seg.resize(mix_frames * 2, 0.0);
         seg.fill(0.0);
 
-        let src_pcm = clip.src.pcm.as_slice();
-        let src_frames = clip.src.frames as u64;
-        let loop_len = clip.src_end_frame.saturating_sub(clip.src_start_frame) as f64;
-
         for f in 0..mix_frames {
             let local = clip_off + f as u64;
 
@@ -221,90 +181,8 @@ pub(crate) fn mix_snapshot_clips_pitch_edited_into_scratch(
             }
             let local_adj = local_adj_i64 as f64;
 
-            let (l, r) = if let Some(stream) = clip.stretch_stream.as_ref() {
-                if let Some((sl, sr)) = stream.read_frame(local) {
-                    (sl, sr)
-                } else {
-                    let src_pos = if clip.repeat {
-                        if loop_len <= 1.0 {
-                            continue;
-                        }
-                        let within = (local_adj * clip.playback_rate).rem_euclid(loop_len);
-                        (clip.src_start_frame as f64) + within
-                    } else {
-                        (clip.src_start_frame as f64) + local_adj * clip.playback_rate
-                    };
-
-                    if !clip.repeat && src_pos + 1.0 >= clip.src_end_frame as f64 {
-                        continue;
-                    }
-
-                    let i0 = src_pos.floor().max(0.0) as u64;
-                    if i0 >= src_frames {
-                        continue;
-                    }
-                    let mut i1 = i0.saturating_add(1);
-                    if clip.repeat {
-                        if i1 >= clip.src_end_frame {
-                            i1 = clip.src_start_frame;
-                        }
-                    } else if i1 >= src_frames {
-                        continue;
-                    }
-
-                    let frac = (src_pos - (i0 as f64)) as f32;
-                    let i0u = i0 as usize;
-                    let i1u = i1 as usize;
-
-                    let l0 = src_pcm[i0u * 2];
-                    let r0 = src_pcm[i0u * 2 + 1];
-                    let l1 = src_pcm[i1u * 2];
-                    let r1 = src_pcm[i1u * 2 + 1];
-
-                    let l = l0 + (l1 - l0) * frac;
-                    let r = r0 + (r1 - r0) * frac;
-                    (l, r)
-                }
-            } else {
-                let src_pos = if clip.repeat {
-                    if loop_len <= 1.0 {
-                        continue;
-                    }
-                    let within = (local_adj * clip.playback_rate).rem_euclid(loop_len);
-                    (clip.src_start_frame as f64) + within
-                } else {
-                    (clip.src_start_frame as f64) + local_adj * clip.playback_rate
-                };
-
-                if !clip.repeat && src_pos + 1.0 >= clip.src_end_frame as f64 {
-                    continue;
-                }
-
-                let i0 = src_pos.floor().max(0.0) as u64;
-                if i0 >= src_frames {
-                    continue;
-                }
-                let mut i1 = i0.saturating_add(1);
-                if clip.repeat {
-                    if i1 >= clip.src_end_frame {
-                        i1 = clip.src_start_frame;
-                    }
-                } else if i1 >= src_frames {
-                    continue;
-                }
-
-                let frac = (src_pos - (i0 as f64)) as f32;
-                let i0u = i0 as usize;
-                let i1u = i1 as usize;
-
-                let l0 = src_pcm[i0u * 2];
-                let r0 = src_pcm[i0u * 2 + 1];
-                let l1 = src_pcm[i1u * 2];
-                let r1 = src_pcm[i1u * 2 + 1];
-
-                let l = l0 + (l1 - l0) * frac;
-                let r = r0 + (r1 - r0) * frac;
-                (l, r)
+            let Some((l, r)) = sample_clip_pcm(clip, local, local_adj) else {
+                continue;
             };
 
             seg[f * 2] = l;

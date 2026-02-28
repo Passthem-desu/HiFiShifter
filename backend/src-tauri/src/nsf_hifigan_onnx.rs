@@ -1,3 +1,4 @@
+use ndarray::Array2;
 use num_complex::Complex32;
 use ort::ep;
 use ort::session::Session;
@@ -332,7 +333,7 @@ fn mel_filterbank_slaney(
     n_mels: usize,
     fmin: f32,
     fmax: f32,
-) -> Vec<Vec<f32>> {
+) -> Array2<f32> {
     let n_freqs = n_fft / 2 + 1;
 
     let mel_min = hz_to_mel_slaney(fmin.max(0.0));
@@ -354,7 +355,7 @@ fn mel_filterbank_slaney(
         fftfreqs.push((i as f32) * (sr as f32) / (n_fft as f32));
     }
 
-    let mut weights = vec![vec![0.0f32; n_freqs]; n_mels];
+    let mut weights = Array2::<f32>::zeros((n_mels, n_freqs));
     for m in 0..n_mels {
         let f_left = hz_points[m];
         let f_center = hz_points[m + 1];
@@ -366,14 +367,13 @@ fn mel_filterbank_slaney(
         for (i, &f) in fftfreqs.iter().enumerate() {
             let lower = (f - f_left) / fdiff_left;
             let upper = (f_right - f) / fdiff_right;
-            let v = lower.min(upper).max(0.0);
-            weights[m][i] = v;
+            weights[[m, i]] = lower.min(upper).max(0.0);
         }
 
         // Slaney normalization.
         let enorm = 2.0 / (f_right - f_left).max(1e-6);
         for i in 0..n_freqs {
-            weights[m][i] *= enorm;
+            weights[[m, i]] *= enorm;
         }
     }
 
@@ -501,29 +501,49 @@ fn linear_resample_mono_into(input: &[f32], in_rate: u32, out_rate: u32, out: &m
     }
 }
 
+/// 进程级全局共享的 ORT Session。
+/// ORT Session::run() 是线程安全的，多线程可并发调用，无需 Mutex。
+static SHARED_SESSION: OnceLock<Arc<Session>> = OnceLock::new();
+
+/// 初始化（或获取已有的）全局 Session。
+fn get_or_init_shared_session() -> Result<Arc<Session>, String> {
+    if let Some(s) = SHARED_SESSION.get() {
+        return Ok(Arc::clone(s));
+    }
+    ensure_ort_init()?;
+    let (onnx_path, _cfg_path) = resolve_model_paths()?;
+    let session = build_session_with_ep(&onnx_path)?;
+    let arc = Arc::new(session);
+    // get_or_init 保证只有一个线程真正写入，其余线程拿到同一个 Arc。
+    Ok(Arc::clone(SHARED_SESSION.get_or_init(|| Arc::clone(&arc))))
+}
+
 pub struct NsfHifiganOnnx {
     cfg: NsfHifiganConfig,
-    mel_fb: Vec<Vec<f32>>,
+    /// Mel 滤波器组矩阵，shape: [n_mels, n_freqs]，预计算后只读。
+    mel_fb_matrix: Array2<f32>,
     window: Vec<f32>,
     fft: Arc<dyn Fft<f32>>,
     fft_buf: Vec<Complex32>,
-    mag_buf: Vec<f32>,
     pad_buf: Vec<f32>,
     audio_resample_buf: Vec<f32>,
-    session: Session,
+    /// 共享的 ORT Session，Arc 保证多线程安全复用。
+    session: Arc<Session>,
 }
 
 impl NsfHifiganOnnx {
     fn load() -> Result<Self, String> {
-        ensure_ort_init()?;
-        let (onnx_path, cfg_path) = resolve_model_paths()?;
+        let (_onnx_path, cfg_path) = resolve_model_paths()?;
         let cfg = read_config(&cfg_path)?;
 
         if cfg.sampling_rate == 0 || cfg.num_mels == 0 || cfg.hop_size == 0 || cfg.n_fft == 0 {
             return Err("invalid NSF-HiFiGAN config.json".to_string());
         }
 
-        let mel_fb = mel_filterbank_slaney(
+        // 获取（或初始化）全局共享 Session，消除每线程冷启动。
+        let session = get_or_init_shared_session()?;
+
+        let mel_fb_matrix = mel_filterbank_slaney(
             cfg.sampling_rate,
             cfg.n_fft,
             cfg.num_mels,
@@ -535,17 +555,13 @@ impl NsfHifiganOnnx {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(cfg.n_fft);
         let fft_buf: Vec<Complex32> = vec![Complex32::new(0.0, 0.0); cfg.n_fft];
-        let mag_buf: Vec<f32> = vec![0.0f32; cfg.n_fft / 2 + 1];
-
-        let session = build_session_with_ep(&onnx_path)?;
 
         Ok(Self {
             cfg,
-            mel_fb,
+            mel_fb_matrix,
             window,
             fft,
             fft_buf,
-            mag_buf,
             pad_buf: Vec::new(),
             audio_resample_buf: Vec::new(),
             session,
@@ -573,21 +589,19 @@ impl NsfHifiganOnnx {
         let y: &[f32] = self.pad_buf.as_slice();
 
         let n_freqs = n_fft / 2 + 1;
-        if self.mag_buf.len() != n_freqs {
-            self.mag_buf.resize(n_freqs, 0.0);
-        }
 
         if y.len() < win_size {
+            // 空音频：返回全零（经 log 压缩后为 ln(1e-9)）的 mel 矩阵。
             let n_frames = 1usize;
-            let mut mel = vec![0.0f32; self.cfg.num_mels * n_frames];
-            for m in 0..self.cfg.num_mels {
-                mel[m * n_frames] = dynamic_range_compression_ln(0.0);
-            }
-            return Ok(mel);
+            let fill = dynamic_range_compression_ln(0.0);
+            return Ok(vec![fill; self.cfg.num_mels * n_frames]);
         }
 
         let n_frames = 1 + (y.len().saturating_sub(win_size)) / hop;
-        let mut mel = vec![0.0f32; self.cfg.num_mels * n_frames];
+
+        // 将所有帧的幅度谱累积为矩阵 mag_matrix: [n_freqs, n_frames]，
+        // 然后用一次矩阵乘法替代双重循环，利用 SIMD 自动向量化。
+        let mut mag_matrix = Array2::<f32>::zeros((n_freqs, n_frames));
 
         for frame in 0..n_frames {
             let start = frame * hop;
@@ -604,18 +618,18 @@ impl NsfHifiganOnnx {
 
             for f in 0..n_freqs {
                 let c = self.fft_buf[f];
-                self.mag_buf[f] = (c.re * c.re + c.im * c.im).sqrt();
-            }
-
-            for m in 0..self.cfg.num_mels {
-                let fb = &self.mel_fb[m];
-                let mut acc = 0.0f32;
-                for f in 0..n_freqs {
-                    acc += fb[f] * self.mag_buf[f];
-                }
-                mel[m * n_frames + frame] = dynamic_range_compression_ln(acc);
+                mag_matrix[[f, frame]] = (c.re * c.re + c.im * c.im).sqrt();
             }
         }
+
+        // mel_result: [n_mels, n_frames] = mel_fb_matrix [n_mels, n_freqs] · mag_matrix [n_freqs, n_frames]
+        let mel_result = self.mel_fb_matrix.dot(&mag_matrix);
+
+        // 对每个元素应用动态范围压缩，并展平为 [n_mels * n_frames] 的 Vec<f32>。
+        let mel: Vec<f32> = mel_result
+            .iter()
+            .map(|&v| dynamic_range_compression_ln(v))
+            .collect();
 
         Ok(mel)
     }
@@ -652,7 +666,7 @@ impl NsfHifiganOnnx {
             }
         }
 
-        // Mel projection.
+    // Mel projection.
         let n_freqs = self.cfg.n_fft / 2 + 1;
         if spec.len() != n_freqs {
             return Err(format!(
@@ -662,17 +676,18 @@ impl NsfHifiganOnnx {
             ));
         }
         let n_frames = spec[0].len();
-        let mut mel = vec![0.0f32; self.cfg.num_mels * n_frames];
-        for m in 0..self.cfg.num_mels {
-            let fb = &self.mel_fb[m];
+        // 将 spec（Vec<Vec<f32>>，[n_freqs][n_frames]）转为 Array2 后做矩阵乘法。
+        let mut mag_matrix = Array2::<f32>::zeros((n_freqs, n_frames));
+        for f in 0..n_freqs {
             for t in 0..n_frames {
-                let mut acc = 0.0f32;
-                for f in 0..n_freqs {
-                    acc += fb[f] * spec[f][t];
-                }
-                mel[m * n_frames + t] = dynamic_range_compression_ln(acc);
+                mag_matrix[[f, t]] = spec[f][t];
             }
         }
+        let mel_result = self.mel_fb_matrix.dot(&mag_matrix);
+        let mel: Vec<f32> = mel_result
+            .iter()
+            .map(|&v| dynamic_range_compression_ln(v))
+            .collect();
         Ok(mel)
     }
 
@@ -690,6 +705,7 @@ impl NsfHifiganOnnx {
         let f0_tensor = Tensor::from_array(([1usize, t], f0.into_boxed_slice()))
             .map_err(|e| format!("build f0 tensor failed: {e}"))?;
 
+        // 通过 Arc<Session> 调用 run()，Session 线程安全，无需 &mut self。
         let outputs = self
             .session
             .run(ort::inputs![mel_tensor, f0_tensor])
@@ -847,7 +863,11 @@ thread_local! {
 }
 
 fn probe() -> &'static Result<(), String> {
-    PROBE.get_or_init(|| NsfHifiganOnnx::load().map(|_| ()))
+    PROBE.get_or_init(|| {
+        // probe() 同时触发 SHARED_SESSION 的初始化，
+        // 确保后续 TLS load() 直接复用，不再重复加载 ONNX 文件。
+        get_or_init_shared_session().map(|_| ())
+    })
 }
 
 pub fn is_available() -> bool {

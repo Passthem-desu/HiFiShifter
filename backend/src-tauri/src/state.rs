@@ -25,6 +25,24 @@ pub enum PitchAnalysisAlgo {
     Unknown,
 }
 
+/// 合成链路类型，独立于 PitchAnalysisAlgo，面向声码器选择。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SynthPipelineKind {
+    WorldVocoder,
+    NsfHifiganOnnx,
+}
+
+impl SynthPipelineKind {
+    /// 从 Track 的分析算法推断合成链路类型。
+    pub fn from_track_algo(algo: &PitchAnalysisAlgo) -> Self {
+        match algo {
+            PitchAnalysisAlgo::NsfHifiganOnnx => Self::NsfHifiganOnnx,
+            _ => Self::WorldVocoder,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TrackParamsState {
     #[serde(default = "default_frame_period_ms")]
@@ -62,6 +80,10 @@ pub struct Track {
 
     #[serde(default)]
     pub pitch_analysis_algo: PitchAnalysisAlgo,
+
+    /// 轨道主题色，hex 字符串，如 "#4f8ef7"
+    #[serde(default)]
+    pub color: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,6 +189,7 @@ impl Default for TimelineState {
 
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
+                color: String::new(),
             }],
             clips: vec![],
             selected_track_id: Some(track_id),
@@ -549,6 +572,20 @@ impl TimelineState {
         let order = self.next_track_order;
         self.next_track_order += 1;
 
+        // 预设轨道颜色调色板，循环分配
+        const TRACK_COLORS: &[&str] = &[
+            "#4f8ef7", // 蓝
+            "#a78bfa", // 紫
+            "#34d399", // 绿
+            "#fb923c", // 橙
+            "#f472b6", // 粉
+            "#38bdf8", // 天蓝
+            "#facc15", // 黄
+            "#f87171", // 红
+        ];
+        let color_index = self.tracks.len() % TRACK_COLORS.len();
+        let color = TRACK_COLORS[color_index].to_string();
+
         let track = Track {
             id: id.clone(),
             name: name.unwrap_or_else(|| "Track".to_string()),
@@ -560,6 +597,7 @@ impl TimelineState {
 
             compose_enabled: false,
             pitch_analysis_algo: PitchAnalysisAlgo::default(),
+            color,
         };
         self.tracks.push(track);
 
@@ -711,6 +749,7 @@ impl TimelineState {
 
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
+                color: String::new(),
             });
             self.next_track_order += 1;
         }
@@ -1068,6 +1107,7 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
             volume: t.volume,
             compose_enabled: t.compose_enabled,
             pitch_analysis_algo: algo_name(&t.pitch_analysis_algo),
+            color: t.color.clone(),
         });
 
         for c in children {
@@ -1103,6 +1143,7 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
                         PitchAnalysisAlgo::None => "none".to_string(),
                         PitchAnalysisAlgo::Unknown => "unknown".to_string(),
                     },
+                    color: t.color.clone(),
                 });
             }
         }

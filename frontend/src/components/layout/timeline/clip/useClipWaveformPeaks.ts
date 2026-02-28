@@ -62,13 +62,79 @@ const peaksSegmentInflight = new Map<
     Promise<WaveformPeaksSegmentPayload>
 >();
 const PEAKS_CACHE_LIMIT = 256;
+const SS_KEY_PREFIX = "hs_peaks_v1|";
+const SS_CACHE_LIMIT = 512;
+
+/**
+ * 模块级 Set，记录已写入 sessionStorage 的完整 key（含前缀）。
+ * 避免 ssSet 每次写入都遍历 sessionStorage.length（O(n)），改为 O(1) 查找。
+ * 页面刷新后会重建，但重建成本极低（仅在首次 ssGet 命中时回填）。
+ */
+const ssKeySet = new Set<string>();
+
+/** 从 sessionStorage 读取缓存条目（反序列化失败时静默忽略） */
+function ssGet(key: string): CachedSegment | null {
+    try {
+        const fullKey = SS_KEY_PREFIX + key;
+        const raw = sessionStorage.getItem(fullKey);
+        if (!raw) return null;
+        // 回填 ssKeySet，保证刷新后 Set 与 sessionStorage 保持同步
+        ssKeySet.add(fullKey);
+        return JSON.parse(raw) as CachedSegment;
+    } catch {
+        return null;
+    }
+}
+
+/** 写入 sessionStorage，超出 SS_CACHE_LIMIT 时删除最旧条目（O(1) key 查找） */
+function ssSet(key: string, seg: CachedSegment) {
+    try {
+        const fullKey = SS_KEY_PREFIX + key;
+        if (ssKeySet.size >= SS_CACHE_LIMIT && !ssKeySet.has(fullKey)) {
+            // 按 t 升序排序，删除最旧的一批
+            const entries: { k: string; t: number }[] = [];
+            for (const k of ssKeySet) {
+                try {
+                    const v = JSON.parse(sessionStorage.getItem(k) ?? "{}") as { t?: number };
+                    entries.push({ k, t: v.t ?? 0 });
+                } catch {
+                    entries.push({ k, t: 0 });
+                }
+            }
+            entries.sort((a, b) => a.t - b.t);
+            const toDelete = entries.slice(0, ssKeySet.size - SS_CACHE_LIMIT + 1);
+            for (const { k } of toDelete) {
+                sessionStorage.removeItem(k);
+                ssKeySet.delete(k);
+            }
+        }
+        sessionStorage.setItem(fullKey, JSON.stringify(seg));
+        ssKeySet.add(fullKey);
+    } catch {
+        // 写入失败（如隐私模式或存储已满）静默忽略
+    }
+}
 
 function getCachedSegment(key: string): CachedSegment | null {
+    // 先查内存 Map
     const hit = peaksSegmentCache.get(key);
-    if (!hit) return null;
-    peaksSegmentCache.delete(key);
-    peaksSegmentCache.set(key, hit);
-    return hit;
+    if (hit) {
+        peaksSegmentCache.delete(key);
+        peaksSegmentCache.set(key, hit);
+        return hit;
+    }
+    // 未命中则查 sessionStorage，命中后回填内存 Map
+    const ssHit = ssGet(key);
+    if (ssHit) {
+        peaksSegmentCache.set(key, ssHit);
+        while (peaksSegmentCache.size > PEAKS_CACHE_LIMIT) {
+            const oldest = peaksSegmentCache.keys().next().value as string | undefined;
+            if (!oldest) break;
+            peaksSegmentCache.delete(oldest);
+        }
+        return ssHit;
+    }
+    return null;
 }
 
 function setCachedSegment(key: string, seg: CachedSegment) {
@@ -80,6 +146,8 @@ function setCachedSegment(key: string, seg: CachedSegment) {
         if (!oldest) break;
         peaksSegmentCache.delete(oldest);
     }
+    // 同步写入 sessionStorage 实现跨页面刷新持久化
+    ssSet(key, seg);
 }
 
 function hasTauriInvoke(): boolean {

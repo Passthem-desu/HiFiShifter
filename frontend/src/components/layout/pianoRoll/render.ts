@@ -59,7 +59,10 @@ function drawCurveTimed(args: {
             continue;
         }
         const x = ((tSec - visibleStartSec) / denom) * w;
-        const y = valueToY(param, values[i] ?? 0, h);
+        // pitch 曲线：MIDI 值 N 应绘制在 N 键中心（N 到 N+1 区间的中点），加 0.5 偏移
+        const rawValue = values[i] ?? 0;
+        const mappedValue = param === "pitch" ? rawValue + 0.5 : rawValue;
+        const y = valueToY(param, mappedValue, h);
         if (!started) {
             ctx.moveTo(x, y);
             started = true;
@@ -80,6 +83,8 @@ export function drawPianoRoll(args: {
     valueToY: (param: ParamName, v: number, h: number) => number;
     wavePeaks: WavePeaksSegment | null;
     paramView: ParamViewSegment | null;
+    secondaryParamView: ParamViewSegment | null;
+    showSecondaryParam: boolean;
     overlayText?: string | null;
     liveEditOverride: { key: string; edit: number[] } | null;
     selection: { aBeat: number; bBeat: number } | null;
@@ -98,6 +103,8 @@ export function drawPianoRoll(args: {
         valueToY,
         wavePeaks,
         paramView,
+        secondaryParamView,
+        showSecondaryParam,
         overlayText,
         liveEditOverride,
         selection,
@@ -106,7 +113,6 @@ export function drawPianoRoll(args: {
         secPerBeat,
         playheadBeat,
     } = args;
-
     // Draw axis (left labels)
     if (axisCanvas) {
         const ctx = axisCanvas.getContext("2d");
@@ -151,31 +157,44 @@ export function drawPianoRoll(args: {
                     const bottom = Math.max(y0, y1);
                     const keyH = Math.max(1, bottom - top);
 
-                    // White key bed
-                    ctx.fillStyle = "rgb(255,255,255)";
-                    ctx.fillRect(0, top, w, keyH);
-
-                    // Black key overlay (shorter)
-                    if (isBlackKey(midi)) {
-                        ctx.fillStyle = "rgb(0,0,0)";
-                        ctx.fillRect(0, top, w * 0.72, keyH);
-                    }
-
+                    const black = isBlackKey(midi);
                     const pc = ((midi % 12) + 12) % 12;
-                    if (pc === 0) {
-                        ctx.fillStyle = "rgba(0,0,0,0.85)";
-                        ctx.font = "10px sans-serif";
-                        ctx.textBaseline = "middle";
-                        ctx.fillText(midiToLabel(midi), 6, top + keyH / 2);
+
+                    // 白键：中性浅灰色
+                    if (!black) {
+                        ctx.fillStyle = "#e8e8e8";
+                        ctx.fillRect(0, top, w, keyH);
                     }
 
-                    // horizontal separators in axis
+                    // 黑键：深色覆盖，宽度 72%
+                    if (black) {
+                        ctx.fillStyle = "#1a1a1a";
+                        ctx.fillRect(0, top, w * 0.72, keyH);
+                        // 黑键右侧渐变边缘
+                        const grad = ctx.createLinearGradient(w * 0.62, 0, w * 0.72, 0);
+                        grad.addColorStop(0, "rgba(0,0,0,0)");
+                        grad.addColorStop(1, "rgba(0,0,0,0.35)");
+                        ctx.fillStyle = grad;
+                        ctx.fillRect(w * 0.62, top, w * 0.10, keyH);
+                    }
+
+                    // C 音名标注：使用高亮蓝色
+                    if (pc === 0) {
+                        ctx.fillStyle = "#3b82f6";
+                        ctx.font = "bold 9px sans-serif";
+                        ctx.textBaseline = "middle";
+                        ctx.fillText(midiToLabel(midi), 5, top + keyH / 2);
+                    }
+
+                    // 分隔线：C 音用较深的线，其他用浅线
                     ctx.strokeStyle =
-                        pc === 0 ? "rgba(0,0,0,0.22)" : "rgba(0,0,0,0.12)";
+                        pc === 0 ? "rgba(100,100,100,0.45)" : "rgba(160,160,160,0.20)";
+                    ctx.lineWidth = pc === 0 ? 1 : 0.5;
                     ctx.beginPath();
                     ctx.moveTo(0, top + 0.5);
                     ctx.lineTo(w, top + 0.5);
                     ctx.stroke();
+                    ctx.lineWidth = 1;
                 }
             } else {
                 // tension axis labels
@@ -230,7 +249,7 @@ export function drawPianoRoll(args: {
         const startMidi = clamp(Math.floor(min), absMin, absMax);
         const endMidi = clamp(Math.ceil(max), absMin, absMax);
         for (let midi = startMidi; midi <= endMidi; midi += 1) {
-            const y = valueToY("pitch", midi, h);
+            const y = valueToY("pitch", midi + 0.5, h);
             const pc = ((midi % 12) + 12) % 12;
             ctx.strokeStyle =
                 pc === 0 ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.05)";
@@ -291,6 +310,38 @@ export function drawPianoRoll(args: {
     }
 
     // Curves
+    // 副参数曲线（半透明、细线，绘制在主参数曲线下方）
+    if (
+        showSecondaryParam &&
+        secondaryParamView &&
+        secondaryParamView.edit.length >= 2
+    ) {
+        // 根据副参数类型选择颜色：pitch 用蓝色，tension 用橙色
+        const secondaryParam: ParamName = secondaryParamView.key.includes("|pitch|") ? "pitch" : "tension";
+        const secondaryColor =
+            secondaryParam === "pitch"
+                ? "rgba(100, 200, 255, 0.45)"
+                : "rgba(255, 180, 60, 0.45)";
+        ctx.save();
+        ctx.strokeStyle = secondaryColor;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([]);
+        drawCurveTimed({
+            ctx,
+            values: secondaryParamView.edit,
+            param: secondaryParam,
+            w,
+            h,
+            startFrame: secondaryParamView.startFrame,
+            stride: secondaryParamView.stride,
+            framePeriodMs: secondaryParamView.framePeriodMs,
+            visibleStartSec,
+            visibleDurSec,
+            valueToY,
+        });
+        ctx.restore();
+    }
+
     if (paramView && paramView.orig.length >= 2 && paramView.edit.length >= 2) {
         const editValues =
             liveEditOverride && liveEditOverride.key === paramView.key

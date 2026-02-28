@@ -9,6 +9,7 @@ import type {
     ClipInfo,
     ClipTemplate,
     EditParam,
+    FadeCurveType,
     GridSize,
     ToolMode,
     TrackInfo,
@@ -83,6 +84,7 @@ export type {
     ClipInfo,
     ClipTemplate,
     EditParam,
+    FadeCurveType,
     GridSize,
     ToolMode,
     TrackInfo,
@@ -114,7 +116,6 @@ export interface SessionState {
         {
             pitch: AutomationPoint[];
             tension: AutomationPoint[];
-            breath: AutomationPoint[];
         }
     >;
     selectedPointId: string | null;
@@ -194,12 +195,7 @@ function createDefaultAutomation() {
             { id: createId("pt_t"), beat: 8, value: 0.42 },
             { id: createId("pt_t"), beat: 12, value: 0.6 },
         ],
-        breath: [
-            { id: createId("pt_b"), beat: 0, value: 0.1 },
-            { id: createId("pt_b"), beat: 4, value: 0.18 },
-            { id: createId("pt_b"), beat: 8, value: 0.12 },
-            { id: createId("pt_b"), beat: 12, value: 0.2 },
-        ],
+
     };
 }
 
@@ -298,6 +294,8 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
         fadeInBeats: Math.max(0, Number(clip.fade_in_beats ?? 0)),
         fadeOutBeats: Math.max(0, Number(clip.fade_out_beats ?? 0)),
+        fadeInCurve: "sine" as FadeCurveType,
+        fadeOutCurve: "sine" as FadeCurveType,
     }));
 
     state.selectedTrackId = timeline.selected_track_id;
@@ -416,6 +414,8 @@ function upsertImportedClip(
         playbackRate: 1,
         fadeInBeats: 0,
         fadeOutBeats: 0,
+        fadeInCurve: "sine" as FadeCurveType,
+        fadeOutCurve: "sine" as FadeCurveType,
     });
     state.selectedClipId = newClipId;
     state.playheadBeat = startBeat;
@@ -689,6 +689,8 @@ const sessionSlice = createSlice({
                 clipId: string;
                 fadeInBeats?: number;
                 fadeOutBeats?: number;
+                fadeInCurve?: FadeCurveType;
+                fadeOutCurve?: FadeCurveType;
             }>,
         ) {
             const clip = state.clips.find(
@@ -700,6 +702,12 @@ const sessionSlice = createSlice({
             }
             if (action.payload.fadeOutBeats !== undefined) {
                 clip.fadeOutBeats = Math.max(0, action.payload.fadeOutBeats);
+            }
+            if (action.payload.fadeInCurve !== undefined) {
+                clip.fadeInCurve = action.payload.fadeInCurve;
+            }
+            if (action.payload.fadeOutCurve !== undefined) {
+                clip.fadeOutCurve = action.payload.fadeOutCurve;
             }
         },
         setClipGain(
@@ -722,6 +730,28 @@ const sessionSlice = createSlice({
             if (!clip) return;
             clip.muted = Boolean(action.payload.muted);
         },
+        /** 乐观更新 clip 颜色（立即反映到 UI，后端确认前先行生效） */
+        optimisticUpdateClipColor(
+            state,
+            action: PayloadAction<{ clipId: string; color: ClipColor }>,
+        ) {
+            const clip = state.clips.find(
+                (entry) => entry.id === action.payload.clipId,
+            );
+            if (!clip) return;
+            clip.color = normalizeClipColor(action.payload.color);
+        },
+        /** 回滚 clip 颜色（后端失败时恢复到旧值） */
+        rollbackClipColor(
+            state,
+            action: PayloadAction<{ clipId: string; color: ClipColor }>,
+        ) {
+            const clip = state.clips.find(
+                (entry) => entry.id === action.payload.clipId,
+            );
+            if (!clip) return;
+            clip.color = normalizeClipColor(action.payload.color);
+        },
         addClip(state, action: PayloadAction<{ trackId: string }>) {
             pushHistory(state);
             const newClipId = createId("clip");
@@ -739,6 +769,8 @@ const sessionSlice = createSlice({
                 playbackRate: 1,
                 fadeInBeats: 0,
                 fadeOutBeats: 0,
+                fadeInCurve: "sine" as FadeCurveType,
+                fadeOutCurve: "sine" as FadeCurveType,
             });
             state.selectedClipId = newClipId;
             state.selectedTrackId = action.payload.trackId;
@@ -1620,6 +1652,8 @@ export const {
     setClipFades,
     setClipGain,
     setClipMuted,
+    optimisticUpdateClipColor,
+    rollbackClipColor,
     addClip,
     removeSelectedClip,
     toggleTrackMute,

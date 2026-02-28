@@ -93,7 +93,7 @@ pub(crate) struct EngineSnapshot {
     pub(crate) bpm: f64,
     pub(crate) sample_rate: u32,
     pub(crate) duration_frames: u64,
-    pub(crate) clips: Vec<EngineClip>,
+    pub(crate) clips: Arc<Vec<EngineClip>>,
 
     // Optional: base mixdown streamer (low latency). It pre-renders the mix (without pitch edits)
     // into this ring buffer in absolute timeline frames.
@@ -113,7 +113,7 @@ impl EngineSnapshot {
             bpm: 120.0,
             sample_rate,
             duration_frames: 0,
-            clips: vec![],
+            clips: Arc::new(vec![]),
             base_stream: None,
             pitch_stream: None,
             pitch_stream_algo: None,
@@ -142,6 +142,10 @@ pub(crate) enum EngineCommand {
     AudioReady {
         #[allow(dead_code)]
         key: AudioKey,
+    },
+    /// clip pitch MIDI 异步预计算完成，触发 snapshot rebuild。
+    ClipPitchReady {
+        clip_id: String,
     },
     Stop,
     Shutdown,

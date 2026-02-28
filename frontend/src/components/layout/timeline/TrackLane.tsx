@@ -21,6 +21,9 @@ export const TrackLane = React.memo(function TrackLane(props: {
     multiSelectedClipIds: string[];
     multiSelectedSet: Set<string>;
 
+    /** 轨道主题色，用于 Clip 背景色和选中边框色 */
+    trackColor?: string;
+
     ensureSelected: (clipId: string) => void;
     selectClipRemote: (clipId: string) => void;
     openContextMenu: (clipId: string, clientX: number, clientY: number) => void;
@@ -47,6 +50,12 @@ export const TrackLane = React.memo(function TrackLane(props: {
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
 
     clearContextMenu: () => void;
+
+    /** 当前正在重命名的 clipId（来自右键菜单触发） */
+    renamingClipId?: string | null;
+    onRenameCommit?: (clipId: string, newName: string) => void;
+    onRenameDone?: () => void;
+    onGainCommit?: (clipId: string, db: number) => void;
 }) {
     const {
         track,
@@ -59,6 +68,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         selectedClipId,
         multiSelectedClipIds,
         multiSelectedSet,
+        trackColor,
         ensureSelected,
         selectClipRemote,
         openContextMenu,
@@ -67,6 +77,10 @@ export const TrackLane = React.memo(function TrackLane(props: {
         startEditDrag,
         toggleClipMuted,
         clearContextMenu,
+        renamingClipId,
+        onRenameCommit,
+        onRenameDone,
+        onGainCommit,
     } = props;
 
     return (
@@ -94,6 +108,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         selected={selected}
                         isInMultiSelectedSet={multiSelectedSet.has(clip.id)}
                         multiSelectedCount={multiSelectedClipIds.length}
+                        trackColor={trackColor}
                         ensureSelected={ensureSelected}
                         selectClipRemote={selectClipRemote}
                         openContextMenu={openContextMenu}
@@ -102,6 +117,10 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         startEditDrag={startEditDrag}
                         toggleClipMuted={toggleClipMuted}
                         clearContextMenu={clearContextMenu}
+                        triggerRename={renamingClipId === clip.id}
+                        onRenameCommit={onRenameCommit}
+                        onRenameDone={onRenameDone}
+                        onGainCommit={onGainCommit}
                     />
                 );
             })}

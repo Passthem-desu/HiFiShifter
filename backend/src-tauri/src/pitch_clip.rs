@@ -1,7 +1,7 @@
 use crate::state::{Clip, TimelineState};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
 
 #[derive(Debug, Clone)]
 struct ClipPitchKey {
@@ -188,6 +188,10 @@ fn build_clip_pitch_key(
     })
 }
 
+/// 查询 clip pitch MIDI 缓存。
+/// - 缓存命中：直接返回 `Some`。
+/// - 缓存未命中：**不再同步计算**，直接返回 `None`。
+///   调用方应提前通过 `schedule_clip_pitch_jobs` 触发异步预计算。
 pub fn get_or_compute_clip_pitch_midi_global(
     tl: &TimelineState,
     clip: &Clip,
@@ -196,61 +200,123 @@ pub fn get_or_compute_clip_pitch_midi_global(
 ) -> Option<CachedClipPitch> {
     let ck = build_clip_pitch_key(tl, clip, root_track_id, frame_period_ms)?;
 
-    {
-        let cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(found) = cache.get(&ck.clip_id) {
-            if found.key == ck.key {
-                return Some(found.clone());
+    let cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(found) = cache.get(&ck.clip_id) {
+        if found.key == ck.key {
+            return Some(found.clone());
+        }
+    }
+    // 缓存未命中，返回 None，等待异步预计算完成后由 ClipPitchReady 触发 snapshot rebuild。
+    None
+}
+
+/// 将计算结果写入全局缓存（供异步 worker 调用）。
+fn store_clip_pitch_cache(clip_id: &str, cached: CachedClipPitch) {
+    let mut cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
+    cache.insert(clip_id.to_string(), cached);
+
+    const MAX: usize = 256;
+    if cache.len() > MAX {
+        let keys: Vec<String> = cache
+            .keys()
+            .take(cache.len().saturating_sub(MAX))
+            .cloned()
+            .collect();
+        for k in keys {
+            cache.remove(&k);
+        }
+    }
+}
+
+/// 遍历 timeline 中所有可见 clip，对缓存未命中的 clip 异步提交 pitch MIDI 计算任务。
+/// 任务完成后通过 `engine_tx` 发送 `EngineCommand::ClipPitchReady`，触发 snapshot rebuild。
+///
+/// 利用 `GLOBAL_CLIP_PITCH_INFLIGHT` 去重，同一 clip 不会重复提交。
+pub fn schedule_clip_pitch_jobs(
+    tl: &TimelineState,
+    engine_tx: &mpsc::Sender<crate::audio_engine::types::EngineCommand>,
+) {
+    if !crate::world::is_available() {
+        return;
+    }
+
+    // 收集需要计算的 clip 快照（避免持锁期间做耗时操作）
+    let frame_period_ms = 5.0f64;
+
+    for clip in &tl.clips {
+        // 跳过无效 clip
+        let source_path = match clip.source_path.as_deref() {
+            Some(p) if !p.is_empty() => p,
+            _ => continue,
+        };
+        if !Path::new(source_path).exists() {
+            continue;
+        }
+
+        // 尝试构建 key
+        let ck = match build_clip_pitch_key(tl, clip, &tl.resolve_root_track_id(&clip.track_id).unwrap_or_default(), frame_period_ms) {
+            Some(k) => k,
+            None => continue,
+        };
+
+        // 缓存命中则跳过
+        {
+            let cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(found) = cache.get(&ck.clip_id) {
+                if found.key == ck.key {
+                    continue;
+                }
             }
         }
-    }
 
-    let inflight_key = format!("{}|{}", ck.clip_id, ck.key);
-    let should_compute = {
-        let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
-        if set.contains(&inflight_key) {
-            false
-        } else {
-            set.insert(inflight_key.clone());
-            true
-        }
-    };
-    if !should_compute {
-        return None;
-    }
-
-    let res = compute_clip_pitch_midi(tl, clip, root_track_id, frame_period_ms);
-
-    {
-        let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
-        set.remove(&inflight_key);
-    }
-
-    let midi = res?;
-
-    let cached = CachedClipPitch {
-        key: ck.key.clone(),
-        midi,
-    };
-
-    {
-        let mut cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
-        cache.insert(ck.clip_id.clone(), cached.clone());
-
-        const MAX: usize = 256;
-        if cache.len() > MAX {
-            let keys: Vec<String> = cache
-                .keys()
-                .take(cache.len().saturating_sub(MAX))
-                .cloned()
-                .collect();
-            for k in keys {
-                cache.remove(&k);
+        // inflight 去重
+        let inflight_key = format!("{}|{}", ck.clip_id, ck.key);
+        let should_spawn = {
+            let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
+            if set.contains(&inflight_key) {
+                false
+            } else {
+                set.insert(inflight_key.clone());
+                true
             }
+        };
+        if !should_spawn {
+            continue;
         }
-    }
 
-    Some(cached)
+        // 克隆必要数据，在独立线程中异步计算
+        let tl_clone = tl.clone();
+        let clip_clone = clip.clone();
+        let root_track_id = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+        let tx = engine_tx.clone();
+
+        std::thread::spawn(move || {
+            let midi = compute_clip_pitch_midi(
+                &tl_clone,
+                &clip_clone,
+                &root_track_id,
+                frame_period_ms,
+            );
+
+            // 无论成功与否，先清除 inflight 标记
+            {
+                let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
+                set.remove(&inflight_key);
+            }
+
+            if let Some(midi_data) = midi {
+                let cached = CachedClipPitch {
+                    key: ck.key.clone(),
+                    midi: midi_data,
+                };
+                store_clip_pitch_cache(&ck.clip_id, cached);
+                // 通知引擎缓存已就绪，触发 snapshot rebuild
+                let _ = tx.send(crate::audio_engine::types::EngineCommand::ClipPitchReady {
+                    clip_id: ck.clip_id.clone(),
+                });
+            }
+        });
+    }
 }
 
 pub fn compute_clip_pitch_midi(

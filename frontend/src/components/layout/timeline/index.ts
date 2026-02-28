@@ -8,6 +8,7 @@ export * from "./TrackList";
 export * from "./TimeRuler";
 export * from "./BackgroundGrid";
 export * from "./GlueContextMenu";
+export * from "./ClipContextMenu";
 export * from "./ClipItem";
 export * from "./TimelineScrollArea";
 export * from "./TrackLane";

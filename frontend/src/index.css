@@ -10,27 +10,27 @@
 
 .qt-theme.dark {
   --qt-window: #353535;
-  --qt-base: #303030;
-  --qt-panel: #2b2b2b;
-  --qt-surface: #3a3a3a;
-  --qt-text: #cccccc;
-  --qt-text-muted: #a1a1aa;
-  --qt-highlight: #2a82da;
-  --qt-playhead: #e04444;
-  --qt-button: #303030;
-  --qt-button-hover: #404040;
-  --qt-border: #444444;
-  --qt-danger-bg: #7f1d1d;
-  --qt-danger-text: #fecaca;
+  --qt-base: #2d2d2d;
+  --qt-panel: #2a2a2a;
+  --qt-surface: #404040;
+  --qt-text: #d0d0d0;
+  --qt-text-muted: #909090;
+  --qt-highlight: #3b82f6;
+  --qt-playhead: #f05a5a;
+  --qt-button: #3d3d3d;
+  --qt-button-hover: #484848;
+  --qt-border: #505050;
+  --qt-danger-bg: #4a1a1a;
+  --qt-danger-text: #fca5a5;
   --qt-danger-border: #ef4444;
-  --qt-warning-bg: #78350f;
-  --qt-warning-text: #fde68a;
+  --qt-warning-bg: #3d2a0a;
+  --qt-warning-text: #fcd34d;
   --qt-warning-border: #f59e0b;
-  --qt-graph-bg: #1e1e1e;
-  --qt-graph-grid-strong: #2d2d2d;
-  --qt-graph-grid-weak: #252525;
+  --qt-graph-bg: #252525;
+  --qt-graph-grid-strong: #303030;
+  --qt-graph-grid-weak: #2a2a2a;
   --qt-scrollbar-thumb: #555555;
-  --qt-scrollbar-thumb-hover: #777777;
+  --qt-scrollbar-thumb-hover: #707070;
 }
 
 .qt-theme.light {

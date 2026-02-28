@@ -70,63 +70,70 @@ export const createClipsRemote = createAsyncThunk(
         { getState, rejectWithValue },
     ) => {
         const state0 = getState() as { session: SessionState };
-        let knownIds = new Set(state0.session.clips.map((c) => c.id));
-        let lastTimeline: TimelineState | null = null;
-        const createdClipIds: string[] = [];
+        const knownIds = new Set(state0.session.clips.map((c) => c.id));
 
-        for (const tpl of payload.templates) {
-            const added = await webApi.addClip({
-                trackId: tpl.trackId,
-                name: tpl.name,
-                startBeat: tpl.startBeat,
-                lengthBeats: tpl.lengthBeats,
-                sourcePath: tpl.sourcePath,
-            });
-            if (!(added as { ok?: boolean }).ok) {
-                return rejectWithValue(
-                    (added as { error?: { message?: string } }).error?.message ??
-                        "add_clip_failed",
-                );
-            }
+        // 并行创建所有 clip，提升批量操作性能
+        const results = await Promise.all(
+            payload.templates.map(async (tpl) => {
+                const added = await webApi.addClip({
+                    trackId: tpl.trackId,
+                    name: tpl.name,
+                    startBeat: tpl.startBeat,
+                    lengthBeats: tpl.lengthBeats,
+                    sourcePath: tpl.sourcePath,
+                });
+                if (!(added as { ok?: boolean }).ok) {
+                    throw new Error(
+                        (added as { error?: { message?: string } }).error?.message ??
+                            "add_clip_failed",
+                    );
+                }
 
-            const createdId =
-                (added as TimelineState).clips.find((c) => !knownIds.has(c.id))
-                    ?.id ?? null;
-            if (!createdId) {
-                return rejectWithValue("add_clip_failed");
-            }
+                const createdId =
+                    (added as TimelineState).clips.find((c) => !knownIds.has(c.id))
+                        ?.id ?? null;
+                if (!createdId) {
+                    throw new Error("add_clip_failed");
+                }
 
-            createdClipIds.push(createdId);
+                const updated = await webApi.setClipState({
+                    clipId: createdId,
+                    lengthBeats: tpl.lengthBeats,
+                    gain: tpl.gain,
+                    muted: tpl.muted,
+                    trimStartBeat: tpl.trimStartBeat,
+                    trimEndBeat: tpl.trimEndBeat,
+                    playbackRate: tpl.playbackRate,
+                    fadeInBeats: tpl.fadeInBeats,
+                    fadeOutBeats: tpl.fadeOutBeats,
+                });
+                if (!(updated as { ok?: boolean }).ok) {
+                    throw new Error(
+                        (updated as { error?: { message?: string } }).error?.message ??
+                            "set_clip_state_failed",
+                    );
+                }
 
-            knownIds = new Set((added as TimelineState).clips.map((c) => c.id));
+                return { createdId, timeline: updated as TimelineState };
+            }),
+        ).catch((err: unknown) => {
+            return rejectWithValue(
+                err instanceof Error ? err.message : "create_clips_failed",
+            );
+        });
 
-            const updated = await webApi.setClipState({
-                clipId: createdId,
-                lengthBeats: tpl.lengthBeats,
-                gain: tpl.gain,
-                muted: tpl.muted,
-                trimStartBeat: tpl.trimStartBeat,
-                trimEndBeat: tpl.trimEndBeat,
-                playbackRate: tpl.playbackRate,
-                fadeInBeats: tpl.fadeInBeats,
-                fadeOutBeats: tpl.fadeOutBeats,
-            });
-            if (!(updated as { ok?: boolean }).ok) {
-                return rejectWithValue(
-                    (updated as { error?: { message?: string } }).error?.message ??
-                        "set_clip_state_failed",
-                );
-            }
-
-            knownIds = new Set((updated as TimelineState).clips.map((c) => c.id));
-            lastTimeline = updated as TimelineState;
+        if (!results || !Array.isArray(results)) {
+            return results as ReturnType<typeof rejectWithValue>;
         }
 
+        const createdClipIds = results.map((r) => r.createdId);
+        // 取最后一个 timeline 作为最终状态（各 clip 的 setClipState 结果）
+        const lastTimeline = results[results.length - 1]?.timeline ?? null;
         if (!lastTimeline) {
             return rejectWithValue("create_clips_failed");
         }
         return {
-            ...(lastTimeline as any),
+            ...(lastTimeline as object),
             createdClipIds,
         } as TimelineState & { createdClipIds: string[] };
     },

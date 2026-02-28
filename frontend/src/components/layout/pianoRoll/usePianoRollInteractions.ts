@@ -89,6 +89,10 @@ export function usePianoRollInteractions(args: {
     ) => void;
 
     commitStroke: (points: StrokePoint[], mode: StrokeMode) => Promise<void>;
+
+    /** pointer down 期间设为 true，pointer up 后由 commitStroke 包装层重置为 false。
+     *  用于保护 pitch_orig_updated 事件触发的曲线刷新不覆盖正在绘制的内容。 */
+    liveEditActiveRef?: MutableRefObject<boolean>;
 }) {
     const {
         dispatch,
@@ -123,6 +127,7 @@ export function usePianoRollInteractions(args: {
         ensureLiveEditBase,
         applyDenseToLiveEdit,
         commitStroke,
+        liveEditActiveRef,
     } = args;
 
     const pointerBeat = useCallback(
@@ -296,7 +301,7 @@ export function usePianoRollInteractions(args: {
                     const nextSpan = cur.span * factor;
                     const next = clampViewport("pitch", {
                         span: nextSpan,
-                        center: valueAtPointer - (t - 0.5) * nextSpan,
+                        center: valueAtPointer - (0.5 - t) * nextSpan,
                     });
                     setPitchView(next);
                 } else {
@@ -304,7 +309,7 @@ export function usePianoRollInteractions(args: {
                     const nextSpan = cur.span * factor;
                     const next = clampViewport(editParam, {
                         span: nextSpan,
-                        center: valueAtPointer - (t - 0.5) * nextSpan,
+                        center: valueAtPointer - (0.5 - t) * nextSpan,
                     });
                     setTensionView(next);
                 }
@@ -359,12 +364,7 @@ export function usePianoRollInteractions(args: {
     const onCanvasPointerDown = useCallback(
         (e: ReactPointerEvent<HTMLCanvasElement>) => {
             if (!rootTrackId) return;
-            if (
-                editParam !== "pitch" &&
-                editParam !== "tension" &&
-                editParam !== "breath"
-            )
-                return;
+            if (editParam !== "pitch" && editParam !== "tension") return;
 
             // Middle mouse: pan (time axis)
             if (e.button === 1) {
@@ -470,6 +470,8 @@ export function usePianoRollInteractions(args: {
                 param: editParam,
                 points: [{ frame, value }],
             };
+            // 标记 live 编辑开始，阻止 pitch_orig_updated 事件立即刷新曲线。
+            if (liveEditActiveRef) liveEditActiveRef.current = true;
 
             const pv0 = paramViewRef.current;
             if (pv0) {
@@ -550,6 +552,7 @@ export function usePianoRollInteractions(args: {
                 window.removeEventListener("pointerup", onUp);
                 window.removeEventListener("pointercancel", onUp);
                 invalidate();
+                // commitStroke 包装层会在完成后重置 liveEditActiveRef 并触发延迟刷新。
                 void commitStroke(st.points, st.mode);
             };
 

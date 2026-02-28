@@ -78,6 +78,9 @@ pub(crate) fn render_timeline_to_wav(
             end_sec,
             stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
             apply_pitch_edit: true,
+            // 导出时使用最高质量：32-bit float + Export 预设。
+            export_format: crate::mixdown::ExportFormat::Wav32f,
+            quality_preset: crate::mixdown::QualityPreset::Export,
         },
     )
 }

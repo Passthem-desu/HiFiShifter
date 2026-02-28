@@ -17,6 +17,7 @@ use super::resource_manager::ResourceManager;
 use super::snapshot::{
     build_snapshot, build_snapshot_for_file, schedule_stretch_jobs, source_bounds_frames,
 };
+use crate::pitch_clip::schedule_clip_pitch_jobs;
 use super::types::{
     AudioEngineStateSnapshot, EngineCommand, EngineSnapshot, ResampledStereo, StretchJob,
     StretchKey,
@@ -348,154 +349,55 @@ impl AudioEngine {
             let mut last_timeline: Option<TimelineState> = None;
             let mut last_play_file: Option<(PathBuf, f64, String)> = None;
             let stretch_stream_epoch: Arc<AtomicU64> = Arc::new(AtomicU64::new(1));
+            // per-clip stretch epoch map（方案 D）
+            let mut clip_stretch_epochs: HashMap<String, Arc<AtomicU64>> = HashMap::new();
 
             loop {
                 match rx.recv() {
                     Ok(EngineCommand::Shutdown) | Err(_) => break,
-                    Ok(EngineCommand::Stop) => {
-                        is_playing_thread.store(false, Ordering::Relaxed);
-                        *target_thread.lock().unwrap_or_else(|e| e.into_inner()) = None;
-                        base_frames_thread.store(0, Ordering::Relaxed);
-                        last_play_file = None;
-                    }
-                    Ok(EngineCommand::SeekSec { sec }) => {
-                        let sec = sec.max(0.0);
-                        let frame = (sec * sr as f64).round().max(0.0) as u64;
-                        // Timeline playback reports absolute position via position_frames.
-                        base_frames_thread.store(0, Ordering::Relaxed);
-                        position_frames_thread.store(frame, Ordering::Relaxed);
-                    }
-                    Ok(EngineCommand::SetPlaying { playing, target }) => {
-                        is_playing_thread.store(playing, Ordering::Relaxed);
-                        *target_thread.lock().unwrap_or_else(|e| e.into_inner()) = target;
-                    }
-                    Ok(EngineCommand::UpdateTimeline(tl)) => {
-                        last_timeline = Some(tl.clone());
-                        last_play_file = None;
-
-                        // Cancel any existing streamers; the new snapshot will respawn them.
-                        stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
-
-                        // Pre-request decoded PCM for all audible clips (async, non-blocking).
-                        {
-                            let track_gain = super::snapshot::compute_track_gains(&tl.tracks);
-                            let mut audible_tracks: std::collections::HashSet<String> =
-                                std::collections::HashSet::new();
-                            for (tid, (_gain, muted, solo_ok)) in &track_gain {
-                                if !*muted && *solo_ok {
-                                    audible_tracks.insert(tid.clone());
-                                }
-                            }
-                            for clip in &tl.clips {
-                                if clip.muted {
-                                    continue;
-                                }
-                                if !audible_tracks.contains(&clip.track_id) {
-                                    continue;
-                                }
-                                let Some(source_path) = clip.source_path.as_ref() else {
-                                    continue;
-                                };
-                                let path = Path::new(source_path);
-                                if !super::io::is_audio_path(path) {
-                                    continue;
-                                }
-                                let _ = resources.get_or_request(path, sr);
-                            }
-                        }
-
-                        // Schedule stretch work in background (do not block snapshot build).
-                        if crate::rubberband::is_available() {
-                            schedule_stretch_jobs(
-                                &tl,
-                                sr,
-                                &stretch_tx,
-                                stretch_inflight_for_cmd.as_ref(),
-                                &stretch_cache_for_cmd,
-                            );
-                        }
-
-                        let snap = build_snapshot(
-                            &tl,
+                    Ok(cmd) => {
+                        let mut state = EngineWorkerState {
                             sr,
-                            &cache_for_cmd,
-                            &stretch_cache_for_cmd,
-                            &position_frames_thread,
-                            &is_playing_thread,
-                            &stretch_stream_epoch,
-                        );
-                        duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
-                        snapshot_for_thread.store(Arc::new(snap));
-                    }
-                    Ok(EngineCommand::StretchReady { key }) => {
-                        if let Ok(mut s) = stretch_inflight_for_cmd.lock() {
-                            s.remove(&key);
+                            is_playing: &is_playing_thread,
+                            target: &target_thread,
+                            base_frames: &base_frames_thread,
+                            position_frames: &position_frames_thread,
+                            duration_frames: &duration_frames_thread,
+                            snapshot: &snapshot_for_thread,
+                            cache: &cache_for_cmd,
+                            stretch_cache: &stretch_cache_for_cmd,
+                            stretch_inflight: &stretch_inflight_for_cmd,
+                            stretch_tx: &stretch_tx,
+                            stretch_stream_epoch: &stretch_stream_epoch,
+                            clip_stretch_epochs: &mut clip_stretch_epochs,
+                            resources: &resources,
+                            tx: &tx_for_worker,
+                            last_timeline: &mut last_timeline,
+                            last_play_file: &mut last_play_file,
+                        };
+                        match cmd {
+                            EngineCommand::Stop => handle_stop(&mut state),
+                            EngineCommand::SeekSec { sec } => handle_seek_sec(&mut state, sec),
+                            EngineCommand::SetPlaying { playing, target } => {
+                                handle_set_playing(&mut state, playing, target)
+                            }
+                            EngineCommand::UpdateTimeline(tl) => {
+                                handle_update_timeline(&mut state, tl)
+                            }
+                            EngineCommand::StretchReady { key } => {
+                                handle_stretch_ready(&mut state, key)
+                            }
+                            EngineCommand::ClipPitchReady { clip_id } => {
+                                handle_clip_pitch_ready(&mut state, clip_id)
+                            }
+                            EngineCommand::AudioReady { key } => handle_audio_ready(&mut state, key),
+                            EngineCommand::PlayFile {
+                                path,
+                                offset_sec,
+                                target,
+                            } => handle_play_file(&mut state, path, offset_sec, target),
+                            EngineCommand::Shutdown => unreachable!(),
                         }
-                        // Switch to cache-backed buffers; stop any streaming workers.
-                        stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
-                        if let Some(tl) = last_timeline.as_ref() {
-                            let snap = build_snapshot(
-                                tl,
-                                sr,
-                                &cache_for_cmd,
-                                &stretch_cache_for_cmd,
-                                &position_frames_thread,
-                                &is_playing_thread,
-                                &stretch_stream_epoch,
-                            );
-                            duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
-                            snapshot_for_thread.store(Arc::new(snap));
-                        }
-                    }
-                    Ok(EngineCommand::AudioReady { .. }) => {
-                        // A decoded/resampled buffer became available.
-                        // Rebuild the snapshot so missing clips can be attached.
-                        if let Some(tl) = last_timeline.as_ref() {
-                            let snap = build_snapshot(
-                                tl,
-                                sr,
-                                &cache_for_cmd,
-                                &stretch_cache_for_cmd,
-                                &position_frames_thread,
-                                &is_playing_thread,
-                                &stretch_stream_epoch,
-                            );
-                            duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
-                            snapshot_for_thread.store(Arc::new(snap));
-                        } else if let Some((path, offset_sec, _target)) = last_play_file.as_ref() {
-                            let snap = build_snapshot_for_file(
-                                path.as_path(),
-                                sr,
-                                *offset_sec,
-                                &cache_for_cmd,
-                            );
-                            duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
-                            snapshot_for_thread.store(Arc::new(snap));
-                        }
-                    }
-                    Ok(EngineCommand::PlayFile {
-                        path,
-                        offset_sec,
-                        target,
-                    }) => {
-                        last_timeline = None;
-                        last_play_file = Some((path.clone(), offset_sec, target.clone()));
-
-                        // Request decode asynchronously (snapshot building is cache-only).
-                        let _ = resources.get_or_request(path.as_path(), sr);
-
-                        // Snapshot will be replaced; stop any timeline streamers.
-                        stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
-                        // Represent the file as a single clip in a snapshot.
-                        let snap = build_snapshot_for_file(&path, sr, offset_sec, &cache_for_cmd);
-                        duration_frames_thread.store(snap.duration_frames, Ordering::Relaxed);
-                        snapshot_for_thread.store(Arc::new(snap));
-                        // File playback reports absolute position via base_sec + position_sec.
-                        let base = (offset_sec.max(0.0) * sr as f64).round().max(0.0) as u64;
-                        base_frames_thread.store(base, Ordering::Relaxed);
-                        position_frames_thread.store(0, Ordering::Relaxed);
-                        is_playing_thread.store(true, Ordering::Relaxed);
-                        *target_thread.lock().unwrap_or_else(|e| e.into_inner()) = Some(target);
                     }
                 }
             }
@@ -608,4 +510,233 @@ impl AudioEngine {
     pub fn realtime_render_stats_snapshot(&self) -> RealtimeRenderStatsSnapshot {
         self.realtime_stats.snapshot()
     }
+}
+
+// ─── Worker 状态结构体 ────────────────────────────────────────────────────────
+
+/// Worker 线程的所有可变状态，按命令处理函数传递。
+struct EngineWorkerState<'a> {
+    sr: u32,
+    is_playing: &'a Arc<AtomicBool>,
+    target: &'a Arc<Mutex<Option<String>>>,
+    base_frames: &'a Arc<AtomicU64>,
+    position_frames: &'a Arc<AtomicU64>,
+    duration_frames: &'a Arc<AtomicU64>,
+    snapshot: &'a Arc<ArcSwap<EngineSnapshot>>,
+    cache: &'a Arc<Mutex<HashMap<(PathBuf, u32), ResampledStereo>>>,
+    stretch_cache: &'a Arc<Mutex<HashMap<StretchKey, ResampledStereo>>>,
+    stretch_inflight: &'a Arc<Mutex<HashSet<StretchKey>>>,
+    stretch_tx: &'a mpsc::Sender<StretchJob>,
+    stretch_stream_epoch: &'a Arc<AtomicU64>,
+    /// per-clip stretch epoch map，用于细化 cancel 粒度（方案 D）
+    clip_stretch_epochs: &'a mut HashMap<String, Arc<AtomicU64>>,
+    resources: &'a ResourceManager,
+    tx: &'a mpsc::Sender<EngineCommand>,
+    last_timeline: &'a mut Option<TimelineState>,
+    last_play_file: &'a mut Option<(PathBuf, f64, String)>,
+}
+
+// ─── 命令处理函数 ─────────────────────────────────────────────────────────────
+
+fn handle_stop(s: &mut EngineWorkerState) {
+    s.is_playing.store(false, Ordering::Relaxed);
+    *s.target.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    s.base_frames.store(0, Ordering::Relaxed);
+    *s.last_play_file = None;
+}
+
+fn handle_seek_sec(s: &mut EngineWorkerState, sec: f64) {
+    let sec = sec.max(0.0);
+    let frame = (sec * s.sr as f64).round().max(0.0) as u64;
+    // Timeline playback reports absolute position via position_frames.
+    s.base_frames.store(0, Ordering::Relaxed);
+    s.position_frames.store(frame, Ordering::Relaxed);
+}
+
+fn handle_set_playing(s: &mut EngineWorkerState, playing: bool, target: Option<String>) {
+    s.is_playing.store(playing, Ordering::Relaxed);
+    *s.target.lock().unwrap_or_else(|e| e.into_inner()) = target;
+}
+
+fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
+    // 对参数变化的 clip 递增其 per-clip epoch（方案 D）。
+    // 新增 clip 也会初始化 epoch；已删除 clip 的 epoch 在最后清理。
+    for clip in &tl.clips {
+        let changed = s
+            .last_timeline
+            .as_ref()
+            .and_then(|old_tl| old_tl.clips.iter().find(|c| c.id == clip.id))
+            .map(|old| clip_stretch_params_changed(old, clip))
+            .unwrap_or(true); // 新 clip 视为"已变化"
+        if changed {
+            s.clip_stretch_epochs
+                .entry(clip.id.clone())
+                .or_insert_with(|| Arc::new(AtomicU64::new(1)))
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    // 清理已删除 clip 的 epoch
+    s.clip_stretch_epochs
+        .retain(|id, _| tl.clips.iter().any(|c| &c.id == id));
+
+    *s.last_timeline = Some(tl.clone());
+    *s.last_play_file = None;
+
+    // 全局 epoch 仍然递增（用于 base_stream / pitch_stream）。
+    s.stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
+
+    // Pre-request decoded PCM for all audible clips (async, non-blocking).
+    {
+        let track_gain = super::snapshot::compute_track_gains(&tl.tracks);
+        let mut audible_tracks: HashSet<String> = HashSet::new();
+        for (tid, (_gain, muted, solo_ok)) in &track_gain {
+            if !*muted && *solo_ok {
+                audible_tracks.insert(tid.clone());
+            }
+        }
+        for clip in &tl.clips {
+            if clip.muted {
+                continue;
+            }
+            if !audible_tracks.contains(&clip.track_id) {
+                continue;
+            }
+            let Some(source_path) = clip.source_path.as_ref() else {
+                continue;
+            };
+            let path = Path::new(source_path);
+            if !super::io::is_audio_path(path) {
+                continue;
+            }
+            let _ = s.resources.get_or_request(path, s.sr);
+        }
+    }
+
+    // Schedule stretch work in background (do not block snapshot build).
+    if crate::rubberband::is_available() {
+        schedule_stretch_jobs(
+            &tl,
+            s.sr,
+            s.stretch_tx,
+            s.stretch_inflight.as_ref(),
+            s.stretch_cache,
+        );
+    }
+
+    // 异步预计算所有可见 clip 的 pitch MIDI（缓存未命中时后台计算，
+    // 完成后发送 ClipPitchReady 触发 snapshot rebuild，不阻塞当前构建）。
+    schedule_clip_pitch_jobs(&tl, s.tx);
+
+    let snap = build_snapshot(
+        &tl,
+        s.sr,
+        s.cache,
+        s.stretch_cache,
+        s.position_frames,
+        s.is_playing,
+        s.stretch_stream_epoch,
+        s.clip_stretch_epochs,
+    );
+    s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
+    s.snapshot.store(Arc::new(snap));
+}
+
+fn handle_stretch_ready(s: &mut EngineWorkerState, key: StretchKey) {
+    if let Ok(mut inflight) = s.stretch_inflight.lock() {
+        inflight.remove(&key);
+    }
+    // Switch to cache-backed buffers; stop any streaming workers.
+    s.stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
+    if let Some(tl) = s.last_timeline.as_ref() {
+        let snap = build_snapshot(
+            tl,
+            s.sr,
+            s.cache,
+            s.stretch_cache,
+            s.position_frames,
+            s.is_playing,
+            s.stretch_stream_epoch,
+            s.clip_stretch_epochs,
+        );
+        s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
+        s.snapshot.store(Arc::new(snap));
+    }
+}
+
+fn handle_clip_pitch_ready(s: &mut EngineWorkerState, _clip_id: String) {
+    // clip pitch MIDI 异步预计算完成，缓存已就绪，重建 snapshot 以接入 pitch edit。
+    // 无需停止 stretch streamer，pitch stream 会在 build_snapshot 内重建。
+    if let Some(tl) = s.last_timeline.as_ref() {
+        let snap = build_snapshot(
+            tl,
+            s.sr,
+            s.cache,
+            s.stretch_cache,
+            s.position_frames,
+            s.is_playing,
+            s.stretch_stream_epoch,
+            s.clip_stretch_epochs,
+        );
+        s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
+        s.snapshot.store(Arc::new(snap));
+    }
+}
+
+fn handle_audio_ready(s: &mut EngineWorkerState, _key: super::types::AudioKey) {
+    // A decoded/resampled buffer became available.
+    // Rebuild the snapshot so missing clips can be attached.
+    if let Some(tl) = s.last_timeline.as_ref() {
+        let snap = build_snapshot(
+            tl,
+            s.sr,
+            s.cache,
+            s.stretch_cache,
+            s.position_frames,
+            s.is_playing,
+            s.stretch_stream_epoch,
+            s.clip_stretch_epochs,
+        );
+        s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
+        s.snapshot.store(Arc::new(snap));
+    } else if let Some((path, offset_sec, _target)) = s.last_play_file.as_ref() {
+        let snap = build_snapshot_for_file(path.as_path(), s.sr, *offset_sec, s.cache);
+        s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
+        s.snapshot.store(Arc::new(snap));
+    }
+}
+
+fn handle_play_file(
+    s: &mut EngineWorkerState,
+    path: PathBuf,
+    offset_sec: f64,
+    target: String,
+) {
+    *s.last_timeline = None;
+    *s.last_play_file = Some((path.clone(), offset_sec, target.clone()));
+
+    // Request decode asynchronously (snapshot building is cache-only).
+    let _ = s.resources.get_or_request(path.as_path(), s.sr);
+
+    // Snapshot will be replaced; stop any timeline streamers.
+    s.stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
+    // Represent the file as a single clip in a snapshot.
+    let snap = build_snapshot_for_file(&path, s.sr, offset_sec, s.cache);
+    s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
+    s.snapshot.store(Arc::new(snap));
+    // File playback reports absolute position via base_sec + position_sec.
+    let base = (offset_sec.max(0.0) * s.sr as f64).round().max(0.0) as u64;
+    s.base_frames.store(base, Ordering::Relaxed);
+    s.position_frames.store(0, Ordering::Relaxed);
+    s.is_playing.store(true, Ordering::Relaxed);
+    *s.target.lock().unwrap_or_else(|e| e.into_inner()) = Some(target);
+}
+
+// ─── 辅助函数 ───────────────────────────────────────────────────────────────
+
+/// 判断 clip 的 stretch 相关参数是否发生变化。
+/// 只有这些参数变化时才需要 cancel 并重建该 clip 的 stretch_stream worker。
+fn clip_stretch_params_changed(old: &crate::state::Clip, new: &crate::state::Clip) -> bool {
+    (old.playback_rate - new.playback_rate).abs() > 1e-6
+        || (old.trim_start_beat - new.trim_start_beat).abs() > 1e-6
+        || (old.trim_end_beat - new.trim_end_beat).abs() > 1e-6
 }

@@ -4,6 +4,30 @@ use hound::{SampleFormat, WavSpec, WavWriter};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+// ─── 导出格式与质量预设 ────────────────────────────────────────────────────────
+
+/// 导出音频格式（位深）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExportFormat {
+    /// 16-bit 整型（默认，向后兼容，用于实时预览）。
+    #[default]
+    Wav16,
+    /// 24-bit 整型（高质量存档）。
+    Wav24,
+    /// 32-bit 浮点（最高质量，用于最终导出）。
+    Wav32f,
+}
+
+/// 质量预设，区分实时预览和最终导出场景。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum QualityPreset {
+    /// 快速模式，用于播放预览（默认）。
+    #[default]
+    Realtime,
+    /// 最高质量模式，用于最终导出。
+    Export,
+}
+
 #[derive(Debug, Clone)]
 pub struct MixdownOptions {
     pub sample_rate: u32,
@@ -11,6 +35,10 @@ pub struct MixdownOptions {
     pub end_sec: Option<f64>,
     pub stretch: StretchAlgorithm,
     pub apply_pitch_edit: bool,
+    /// 导出格式（位深），默认 [`ExportFormat::Wav16`]。
+    pub export_format: ExportFormat,
+    /// 质量预设，默认 [`QualityPreset::Realtime`]。
+    pub quality_preset: QualityPreset,
 }
 
 #[derive(Debug, Clone)]
@@ -145,19 +173,51 @@ pub fn render_mixdown_wav(
     let (out_rate, out_channels, duration_sec, mix) =
         render_mixdown_interleaved(timeline, opts.clone())?;
 
-    // Write WAV 16-bit.
-    let spec = WavSpec {
-        channels: out_channels,
-        sample_rate: out_rate,
-        bits_per_sample: 16,
-        sample_format: SampleFormat::Int,
+    // 根据 export_format 选择 WavSpec。
+    let spec = match opts.export_format {
+        ExportFormat::Wav16 => WavSpec {
+            channels: out_channels,
+            sample_rate: out_rate,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        },
+        ExportFormat::Wav24 => WavSpec {
+            channels: out_channels,
+            sample_rate: out_rate,
+            bits_per_sample: 24,
+            sample_format: SampleFormat::Int,
+        },
+        ExportFormat::Wav32f => WavSpec {
+            channels: out_channels,
+            sample_rate: out_rate,
+            bits_per_sample: 32,
+            sample_format: SampleFormat::Float,
+        },
     };
     let mut writer = WavWriter::create(output_path, spec).map_err(|e| e.to_string())?;
 
-    for s in mix {
-        let v = clamp11(s);
-        let i = (v * i16::MAX as f32) as i16;
-        writer.write_sample(i).map_err(|e| e.to_string())?;
+    match opts.export_format {
+        ExportFormat::Wav16 => {
+            for s in mix {
+                let v = clamp11(s);
+                let i = (v * i16::MAX as f32) as i16;
+                writer.write_sample(i).map_err(|e| e.to_string())?;
+            }
+        }
+        ExportFormat::Wav24 => {
+            // hound 的 24-bit int 写入使用 i32，有效范围 [-8388608, 8388607]。
+            const MAX24: f32 = 8_388_607.0;
+            for s in mix {
+                let v = clamp11(s);
+                let i = (v * MAX24) as i32;
+                writer.write_sample(i).map_err(|e| e.to_string())?;
+            }
+        }
+        ExportFormat::Wav32f => {
+            for s in mix {
+                writer.write_sample(s).map_err(|e| e.to_string())?;
+            }
+        }
     }
     writer.finalize().map_err(|e| e.to_string())?;
 

@@ -383,7 +383,8 @@ export const TrackList: React.FC<{
                         >
                             {/* Always-visible left accent bar (pinned to list edge) */}
                             <div
-                                className={`absolute left-0 top-0 bottom-0 w-1 bg-qt-highlight transition-opacity ${selected ? "opacity-100" : "opacity-80 group-hover:opacity-90"}`}
+                                className={`absolute left-0 top-0 bottom-0 w-1 transition-opacity ${selected ? "opacity-100" : "opacity-80 group-hover:opacity-90"}`}
+                                style={{ backgroundColor: track.color || "var(--qt-highlight)" }}
                             />
 
                             {/* Left gutter: makes nesting depth visible at a glance */}
@@ -417,7 +418,8 @@ export const TrackList: React.FC<{
                             >
                                 {/* Keep a subtle in-row bar too, but don't rely on it */}
                                 <div
-                                    className={`absolute left-0 top-0 bottom-0 w-1 bg-qt-highlight transition-opacity ${selected ? "opacity-100" : "opacity-10 group-hover:opacity-30"}`}
+                                    className={`absolute left-0 top-0 bottom-0 w-1 transition-opacity ${selected ? "opacity-100" : "opacity-10 group-hover:opacity-30"}`}
+                                    style={{ backgroundColor: track.color || "var(--qt-highlight)" }}
                                 />
 
                                 {isOver && dragUi?.mode === "nest" ? (
@@ -466,8 +468,10 @@ export const TrackList: React.FC<{
 
                                     <Flex gap="2" align="center">
                                         {isRoot ? (
-                                            <button
-                                                className={`w-6 h-5 rounded text-[10px] border transition-all ${composeEnabled ? "bg-qt-highlight text-white border-transparent" : "bg-qt-button text-qt-text border-transparent hover:border-qt-highlight hover:bg-qt-button-hover"}`}
+                                            <IconButton
+                                                size="1"
+                                                variant={composeEnabled ? "solid" : "ghost"}
+                                                color={composeEnabled ? "blue" : "gray"}
                                                 title={t("compose")}
                                                 onPointerDown={(e) =>
                                                     e.stopPropagation()
@@ -479,12 +483,16 @@ export const TrackList: React.FC<{
                                                         !composeEnabled,
                                                     );
                                                 }}
+                                                style={{ fontWeight: 700, fontSize: 11, width: 20, height: 20 }}
                                             >
                                                 C
-                                            </button>
+                                            </IconButton>
                                         ) : null}
-                                        <button
-                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${muted ? "bg-qt-danger-bg text-qt-danger-text border-qt-danger-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-danger-border hover:bg-qt-danger-bg hover:text-qt-danger-text"}`}
+                                        <IconButton
+                                            size="1"
+                                            variant={muted ? "solid" : "ghost"}
+                                            color={muted ? "red" : "gray"}
+                                            title={muted ? t("clip_unmute") : t("clip_mute")}
                                             onPointerDown={(e) =>
                                                 e.stopPropagation()
                                             }
@@ -492,11 +500,15 @@ export const TrackList: React.FC<{
                                                 e.stopPropagation();
                                                 onToggleMute(track.id, !muted);
                                             }}
+                                            style={{ fontWeight: 700, fontSize: 11, width: 20, height: 20 }}
                                         >
                                             M
-                                        </button>
-                                        <button
-                                            className={`w-6 h-5 rounded text-[10px] border transition-all ${solo ? "bg-qt-warning-bg text-qt-warning-text border-qt-warning-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-warning-border hover:bg-qt-warning-bg hover:text-qt-warning-text"}`}
+                                        </IconButton>
+                                        <IconButton
+                                            size="1"
+                                            variant={solo ? "solid" : "ghost"}
+                                            color={solo ? "amber" : "gray"}
+                                            title={t("solo")}
                                             onPointerDown={(e) =>
                                                 e.stopPropagation()
                                             }
@@ -504,9 +516,10 @@ export const TrackList: React.FC<{
                                                 e.stopPropagation();
                                                 onToggleSolo(track.id, !solo);
                                             }}
+                                            style={{ fontWeight: 700, fontSize: 11, width: 20, height: 20 }}
                                         >
                                             S
-                                        </button>
+                                        </IconButton>
                                         <Box flexGrow="1" />
                                         <Text size="1" color="gray">
                                             {Math.round(volume * 100)}%
