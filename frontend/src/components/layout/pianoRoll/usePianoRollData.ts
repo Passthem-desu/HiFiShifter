@@ -12,6 +12,7 @@ import {
     rootMixPeaksCache,
     rootMixPeaksInflight,
 } from "./peaksCache";
+import { framesToTime, timeToFrame } from "./utils";
 const paramFramePeriodCache = new Map<string, number>();
 
 export function usePianoRollData(args: {
@@ -53,14 +54,16 @@ export function usePianoRollData(args: {
 
     // 内部 fallback：若外部未传入 liveEditActiveRef，则使用内部 ref（始终为 false）。
     const internalLiveEditActiveRef = useRef(false);
-    const liveEditActiveRef = externalLiveEditActiveRef ?? internalLiveEditActiveRef;
+    const liveEditActiveRef =
+        externalLiveEditActiveRef ?? internalLiveEditActiveRef;
 
     // 当 pitch_orig_updated 到达时若正在编辑，将刷新推迟到 pointer-up 后执行。
     const pendingPitchUpdatedRefreshRef = useRef(false);
     const [wavePeaks, setWavePeaks] = useState<WavePeaksSegment | null>(null);
     const [paramView, setParamView] = useState<ParamViewSegment | null>(null);
     // 副参数曲线（仅 edit，用于叠加显示）
-    const [secondaryParamView, setSecondaryParamView] = useState<ParamViewSegment | null>(null);
+    const [secondaryParamView, setSecondaryParamView] =
+        useState<ParamViewSegment | null>(null);
     const secondaryFetchReqIdRef = useRef(0);
 
     const [pitchAnalysisPending, setPitchAnalysisPending] = useState(false);
@@ -188,44 +191,48 @@ export function usePianoRollData(args: {
                         if (liveEditActiveRef.current) {
                             pendingPitchUpdatedRefreshRef.current = true;
                         } else {
+                            // 清空波形缓存，强制重新拉取以同步音高分析后的数据
+                            setWavePeaks(null);
                             setForceParamFetchToken((x) => x + 1);
                             setRefreshToken((x) => x + 1);
                         }
                     },
                 );
 
-                unlistenStarted = await mod.listen<PitchOrigAnalysisStartedPayload>(
-                    "pitch_orig_analysis_started",
-                    (event) => {
-                        if (disposed) return;
-                        const payload = event.payload ?? {};
-                        if (
-                            payload?.rootTrackId &&
-                            payload.rootTrackId !== rootTrackId
-                        )
-                            return;
-                        setPitchAnalysisPending(true);
-                        setPitchAnalysisProgress(0);
-                    },
-                );
+                unlistenStarted =
+                    await mod.listen<PitchOrigAnalysisStartedPayload>(
+                        "pitch_orig_analysis_started",
+                        (event) => {
+                            if (disposed) return;
+                            const payload = event.payload ?? {};
+                            if (
+                                payload?.rootTrackId &&
+                                payload.rootTrackId !== rootTrackId
+                            )
+                                return;
+                            setPitchAnalysisPending(true);
+                            setPitchAnalysisProgress(0);
+                        },
+                    );
 
-                unlistenProgress = await mod.listen<PitchOrigAnalysisProgressPayload>(
-                    "pitch_orig_analysis_progress",
-                    (event) => {
-                        if (disposed) return;
-                        const payload = event.payload ?? {};
-                        if (
-                            payload?.rootTrackId &&
-                            payload.rootTrackId !== rootTrackId
-                        )
-                            return;
-                        const p = Number(payload?.progress);
-                        if (!Number.isFinite(p)) return;
-                        const pp = Math.max(0, Math.min(1, p));
-                        setPitchAnalysisPending(true);
-                        setPitchAnalysisProgress(pp);
-                    },
-                );
+                unlistenProgress =
+                    await mod.listen<PitchOrigAnalysisProgressPayload>(
+                        "pitch_orig_analysis_progress",
+                        (event) => {
+                            if (disposed) return;
+                            const payload = event.payload ?? {};
+                            if (
+                                payload?.rootTrackId &&
+                                payload.rootTrackId !== rootTrackId
+                            )
+                                return;
+                            const p = Number(payload?.progress);
+                            if (!Number.isFinite(p)) return;
+                            const pp = Math.max(0, Math.min(1, p));
+                            setPitchAnalysisPending(true);
+                            setPitchAnalysisProgress(pp);
+                        },
+                    );
             } catch {
                 // Safe no-op: browser/pywebview builds won't have the Tauri API.
             }
@@ -344,12 +351,13 @@ export function usePianoRollData(args: {
         const paramCoversVisible = (() => {
             const pv = paramViewRef.current;
             if (!pv) return false;
-            if (!pv.key.startsWith(`${trackId}|${editParam}|`)) return false;
+            // Check version to invalidate old cache with wrong coordinate calculations
+            if (!pv.key.startsWith(`v2|${trackId}|${editParam}|`)) return false;
             const fp = Math.max(1e-6, pv.framePeriodMs);
             const step = Math.max(1, Math.floor(pv.stride));
-            const startSecPv = (pv.startFrame * fp) / 1000;
+            const startSecPv = framesToTime(pv.startFrame, fp);
             const endFramePv = pv.startFrame + (pv.orig.length - 1) * step;
-            const endSecPv = (endFramePv * fp) / 1000;
+            const endSecPv = framesToTime(endFramePv, fp);
             return startSecPv <= visibleStartSec && endSecPv >= visibleEndSec;
         })();
 
@@ -359,42 +367,70 @@ export function usePianoRollData(args: {
         const paramStartSecQ = Math.max(0, q(covParamStartSec));
         const paramDurSecQ = Math.max(quantStepSec, q(covParamDurSec));
 
-        const startFrame = Math.max(
-            0,
-            Math.floor((paramStartSecQ * 1000) / Math.max(1e-6, fpMs)),
-        );
+        // DEBUG: Log data request parameters
+        const debugEnabled =
+            typeof window !== "undefined" &&
+            window.localStorage?.getItem("hifishifter.debugPianoRoll") === "1";
+
+        if (debugEnabled) {
+            console.log("[usePianoRollData] Request params:", {
+                trackId,
+                editParam,
+                visibleStartSec,
+                visibleDurSec,
+                visibleEndSec,
+                paramMarginSec,
+                covParamStartSec,
+                covParamDurSec,
+                paramStartSecQ,
+                paramDurSecQ,
+                framePeriodMs: fpMs,
+            });
+        }
+
+        // CRITICAL FIX: Use unquantized time for precise frame calculation
+        // Quantization is only for cache alignment, not coordinate calculation
+        const startFrame = Math.max(0, timeToFrame(covParamStartSec, fpMs));
         // Request full-resolution curve by default.
         // With fp=5ms, even tens of seconds are only a few thousand samples.
         const viewFrames = clamp(
             Math.max(
                 1,
-                Math.ceil((paramDurSecQ * 1000) / Math.max(1e-6, fpMs)) + 1,
+                // Use unquantized duration for frame count calculation
+                timeToFrame(covParamStartSec + covParamDurSec, fpMs) -
+                    startFrame +
+                    1,
             ),
             1,
             200_000,
         );
         const stride = 1;
         const frameCount = viewFrames;
-        const paramKey = `${trackId}|${editParam}|${startFrame}|${frameCount}|${stride}`;
+        // Version 2: Fixed coordinate calculation to use unquantized time
+        const paramKey = `v2|${trackId}|${editParam}|${startFrame}|${frameCount}|${stride}`;
 
         // 副参数：另一个参数（pitch <-> tension）
-        const secondaryParam: ParamName = editParam === "pitch" ? "tension" : "pitch";
+        const secondaryParam: ParamName =
+            editParam === "pitch" ? "tension" : "pitch";
         const secondaryFpKey = `${trackId}|${secondaryParam}`;
         const secondaryCachedFp = paramFramePeriodCache.get(secondaryFpKey);
         const secondaryFpMs = Number(secondaryCachedFp ?? 5) || 5;
+        // CRITICAL FIX: Use unquantized time for secondary param as well
         const secondaryStartFrame = Math.max(
             0,
-            Math.floor((paramStartSecQ * 1000) / Math.max(1e-6, secondaryFpMs)),
+            timeToFrame(covParamStartSec, secondaryFpMs),
         );
         const secondaryFrameCount = clamp(
             Math.max(
                 1,
-                Math.ceil((paramDurSecQ * 1000) / Math.max(1e-6, secondaryFpMs)) + 1,
+                timeToFrame(covParamStartSec + covParamDurSec, secondaryFpMs) -
+                    secondaryStartFrame +
+                    1,
             ),
             1,
             200_000,
         );
-        const secondaryParamKey = `${trackId}|${secondaryParam}|${secondaryStartFrame}|${secondaryFrameCount}|${stride}`;
+        const secondaryParamKey = `v2|${trackId}|${secondaryParam}|${secondaryStartFrame}|${secondaryFrameCount}|${stride}`;
 
         return {
             debug,
@@ -493,6 +529,18 @@ export function usePianoRollData(args: {
                     }
                     const min = (res.min ?? []).map((v) => Number(v) || 0);
                     const max = (res.max ?? []).map((v) => Number(v) || 0);
+
+                    // DEBUG: 验证返回数据长度
+                    console.log("[WavePeaks] API response:", {
+                        requestedStartSec: startSecQ,
+                        requestedDurSec: durSecQ,
+                        requestedColumns: covCols,
+                        actualMinLength: min.length,
+                        actualMaxLength: max.length,
+                        mismatch:
+                            min.length !== covCols || max.length !== covCols,
+                    });
+
                     lruSet(
                         rootMixPeaksCache,
                         waveKey,
@@ -537,7 +585,8 @@ export function usePianoRollData(args: {
                     // 复用外部 pitchEnabled 逻辑：只要 rootTrack 允许 pitch 分析即可
                     return pitchEnabled || editParam === "pitch";
                 })();
-            if (!secondaryPitchEnabled && req.secondaryParam === "pitch") return;
+            if (!secondaryPitchEnabled && req.secondaryParam === "pitch")
+                return;
             try {
                 const res = await paramsApi.getParamFrames(
                     req.trackId,
@@ -549,12 +598,17 @@ export function usePianoRollData(args: {
                 if (secondaryFetchReqIdRef.current !== secReqId) return;
                 if (!res?.ok) return;
                 const payload = res as ParamFramesPayload;
-                const fpRes = Number(payload.frame_period_ms ?? req.secondaryFpMs) || req.secondaryFpMs;
+                const fpRes =
+                    Number(payload.frame_period_ms ?? req.secondaryFpMs) ||
+                    req.secondaryFpMs;
                 paramFramePeriodCache.set(req.secondaryFpKey, fpRes);
                 setSecondaryParamView({
                     key: req.secondaryParamKey,
                     framePeriodMs: fpRes,
-                    startFrame: Number(payload.start_frame ?? req.secondaryStartFrame) || req.secondaryStartFrame,
+                    startFrame:
+                        Number(
+                            payload.start_frame ?? req.secondaryStartFrame,
+                        ) || req.secondaryStartFrame,
                     stride,
                     orig: [],
                     edit: (payload.edit ?? []).map((v) => Number(v) || 0),
@@ -567,8 +621,31 @@ export function usePianoRollData(args: {
 
         if (shouldFetchParam) {
             void (async () => {
+                const debugEnabled =
+                    typeof window !== "undefined" &&
+                    window.localStorage?.getItem(
+                        "hifishifter.debugPianoRoll",
+                    ) === "1";
                 beginLoading();
                 try {
+                    if (debugEnabled) {
+                        console.log(
+                            "[usePianoRollData] Fetching param frames:",
+                            {
+                                trackId,
+                                editParam,
+                                startFrame,
+                                frameCount,
+                                stride,
+                                startTimeSec: framesToTime(startFrame, fpMs),
+                                endTimeSec: framesToTime(
+                                    startFrame + frameCount - 1,
+                                    fpMs,
+                                ),
+                            },
+                        );
+                    }
+
                     const res = await paramsApi.getParamFrames(
                         trackId,
                         editParam,
@@ -599,27 +676,65 @@ export function usePianoRollData(args: {
                     const payload = res as ParamFramesPayload;
 
                     if (editParam === "pitch") {
-                        const pending = Boolean(payload.analysis_pending ?? false);
+                        const pending = Boolean(
+                            payload.analysis_pending ?? false,
+                        );
                         setPitchAnalysisPending(pending);
                         if (!pending) setPitchAnalysisProgress(null);
 
                         const userModified = payload.pitch_edit_user_modified;
                         setPitchEditUserModified(
-                            typeof userModified === "boolean" ? userModified : null,
+                            typeof userModified === "boolean"
+                                ? userModified
+                                : null,
                         );
 
-                        const backendAvail = payload.pitch_edit_backend_available;
+                        const backendAvail =
+                            payload.pitch_edit_backend_available;
                         setPitchEditBackendAvailable(
-                            typeof backendAvail === "boolean" ? backendAvail : null,
+                            typeof backendAvail === "boolean"
+                                ? backendAvail
+                                : null,
                         );
                     }
-                    const fpRes = Number(payload.frame_period_ms ?? fpMs) || fpMs;
+                    const fpRes =
+                        Number(payload.frame_period_ms ?? fpMs) || fpMs;
                     paramFramePeriodCache.set(fpKey, fpRes);
+
+                    const receivedStartFrame =
+                        Number(payload.start_frame ?? startFrame) || startFrame;
+                    const receivedOrigLen = (payload.orig ?? []).length;
+                    const receivedEditLen = (payload.edit ?? []).length;
+
+                    if (debugEnabled) {
+                        console.log("[usePianoRollData] Received param data:", {
+                            trackId,
+                            editParam,
+                            requestedStartFrame: startFrame,
+                            requestedFrameCount: frameCount,
+                            receivedStartFrame,
+                            receivedOrigLen,
+                            receivedEditLen,
+                            framePeriodMs: fpRes,
+                            receivedStartSec: framesToTime(
+                                receivedStartFrame,
+                                fpRes,
+                            ),
+                            receivedEndSec: framesToTime(
+                                receivedStartFrame + receivedEditLen - 1,
+                                fpRes,
+                            ),
+                            receivedDurSec: framesToTime(
+                                receivedEditLen - 1,
+                                fpRes,
+                            ),
+                        });
+                    }
 
                     setParamView({
                         key: paramKey,
                         framePeriodMs: fpRes,
-                        startFrame: Number(payload.start_frame ?? startFrame) || startFrame,
+                        startFrame: receivedStartFrame,
                         stride,
                         orig: (payload.orig ?? []).map((v) => Number(v) || 0),
                         edit: (payload.edit ?? []).map((v) => Number(v) || 0),
@@ -667,7 +782,10 @@ export function usePianoRollData(args: {
         setIsRefreshing(true);
         const reqId = ++fetchReqIdRef.current;
         const shouldFetchParam = !(editParam === "pitch" && !pitchEnabled);
-        const secondaryPitchOk = req.secondaryParam !== "pitch" || pitchEnabled || editParam === "pitch";
+        const secondaryPitchOk =
+            req.secondaryParam !== "pitch" ||
+            pitchEnabled ||
+            editParam === "pitch";
         const shouldFetchSecondary = secondaryPitchOk;
         try {
             beginLoading();
@@ -749,7 +867,8 @@ export function usePianoRollData(args: {
                 setParamView({
                     key: paramKey,
                     framePeriodMs: fpRes,
-                    startFrame: Number(payload.start_frame ?? startFrame) || startFrame,
+                    startFrame:
+                        Number(payload.start_frame ?? startFrame) || startFrame,
                     stride,
                     orig: (payload.orig ?? []).map((v) => Number(v) || 0),
                     edit: (payload.edit ?? []).map((v) => Number(v) || 0),
@@ -774,12 +893,17 @@ export function usePianoRollData(args: {
 
             if (shouldFetchSecondary && secondaryRes?.ok) {
                 const secPayload = secondaryRes as ParamFramesPayload;
-                const secFpRes = Number(secPayload.frame_period_ms ?? req.secondaryFpMs) || req.secondaryFpMs;
+                const secFpRes =
+                    Number(secPayload.frame_period_ms ?? req.secondaryFpMs) ||
+                    req.secondaryFpMs;
                 paramFramePeriodCache.set(req.secondaryFpKey, secFpRes);
                 setSecondaryParamView({
                     key: req.secondaryParamKey,
                     framePeriodMs: secFpRes,
-                    startFrame: Number(secPayload.start_frame ?? req.secondaryStartFrame) || req.secondaryStartFrame,
+                    startFrame:
+                        Number(
+                            secPayload.start_frame ?? req.secondaryStartFrame,
+                        ) || req.secondaryStartFrame,
                     stride,
                     orig: [],
                     edit: (secPayload.edit ?? []).map((v) => Number(v) || 0),

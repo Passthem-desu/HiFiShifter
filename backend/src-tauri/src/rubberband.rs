@@ -1,7 +1,4 @@
-use libloading::Library;
 use std::ffi::c_int;
-use std::path::PathBuf;
-use std::sync::OnceLock;
 
 #[allow(non_upper_case_globals)]
 mod opts {
@@ -27,52 +24,56 @@ struct RubberBandStateOpaque {
 
 type RubberBandState = *mut RubberBandStateOpaque;
 
-type RubberbandNew = unsafe extern "C" fn(
-    sample_rate: u32,
-    channels: u32,
-    options: i32,
-    initial_time_ratio: f64,
-    initial_pitch_scale: f64,
-) -> RubberBandState;
-
-type RubberbandDelete = unsafe extern "C" fn(state: RubberBandState);
-type RubberbandReset = unsafe extern "C" fn(state: RubberBandState);
-type RubberbandSetTimeRatio = unsafe extern "C" fn(state: RubberBandState, ratio: f64);
-type RubberbandSetPitchScale = unsafe extern "C" fn(state: RubberBandState, scale: f64);
-type RubberbandSetExpectedInputDuration =
-    unsafe extern "C" fn(state: RubberBandState, samples: u32);
-type RubberbandSetMaxProcessSize = unsafe extern "C" fn(state: RubberBandState, samples: u32);
-type RubberbandStudy = unsafe extern "C" fn(
-    state: RubberBandState,
-    input: *const *const f32,
-    samples: u32,
-    final_: c_int,
-);
-type RubberbandProcess = unsafe extern "C" fn(
-    state: RubberBandState,
-    input: *const *const f32,
-    samples: u32,
-    final_: c_int,
-);
-type RubberbandAvailable = unsafe extern "C" fn(state: RubberBandState) -> c_int;
-type RubberbandRetrieve =
-    unsafe extern "C" fn(state: RubberBandState, output: *const *mut f32, samples: u32) -> u32;
-type RubberbandCalculateStretch = unsafe extern "C" fn(state: RubberBandState);
-
-struct RubberBandApi {
-    _lib: Library,
-    rubberband_new: RubberbandNew,
-    rubberband_delete: RubberbandDelete,
-    rubberband_reset: RubberbandReset,
-    rubberband_set_time_ratio: RubberbandSetTimeRatio,
-    rubberband_set_pitch_scale: RubberbandSetPitchScale,
-    rubberband_set_expected_input_duration: RubberbandSetExpectedInputDuration,
-    rubberband_set_max_process_size: RubberbandSetMaxProcessSize,
-    rubberband_study: RubberbandStudy,
-    rubberband_process: RubberbandProcess,
-    rubberband_available: RubberbandAvailable,
-    rubberband_retrieve: RubberbandRetrieve,
-    rubberband_calculate_stretch: RubberbandCalculateStretch,
+// Static FFI declarations for Rubber Band C API
+// Since v2026.03, Rubber Band is statically linked at compile time
+extern "C" {
+    fn rubberband_new(
+        sample_rate: u32,
+        channels: u32,
+        options: i32,
+        initial_time_ratio: f64,
+        initial_pitch_scale: f64,
+    ) -> RubberBandState;
+    
+    fn rubberband_delete(state: RubberBandState);
+    
+    fn rubberband_reset(state: RubberBandState);
+    
+    fn rubberband_set_time_ratio(state: RubberBandState, ratio: f64);
+    
+    fn rubberband_set_pitch_scale(state: RubberBandState, scale: f64);
+    
+    fn rubberband_get_pitch_scale(state: RubberBandState) -> f64;
+    
+    fn rubberband_get_time_ratio(state: RubberBandState) -> f64;
+    
+    fn rubberband_set_expected_input_duration(state: RubberBandState, samples: u32);
+    
+    fn rubberband_set_max_process_size(state: RubberBandState, samples: u32);
+    
+    fn rubberband_study(
+        state: RubberBandState,
+        input: *const *const f32,
+        samples: u32,
+        final_: c_int,
+    );
+    
+    fn rubberband_process(
+        state: RubberBandState,
+        input: *const *const f32,
+        samples: u32,
+        final_: c_int,
+    );
+    
+    fn rubberband_available(state: RubberBandState) -> c_int;
+    
+    fn rubberband_retrieve(
+        state: RubberBandState,
+        output: *const *mut f32,
+        samples: u32,
+    ) -> u32;
+    
+    fn rubberband_calculate_stretch(state: RubberBandState);
 }
 
 pub struct RubberBandRealtimeStretcher {
@@ -88,93 +89,10 @@ pub struct RubberBandRealtimeStretcher {
 
 unsafe impl Send for RubberBandRealtimeStretcher {}
 
-fn try_load_library() -> Result<Library, String> {
-    // 1) Explicit override
-    if let Ok(p) = std::env::var("HIFISHIFTER_RUBBERBAND_DLL") {
-        let pb = PathBuf::from(p);
-        return unsafe { Library::new(&pb) }.map_err(|e| e.to_string());
-    }
-
-    // 2) Adjacent to current executable (Tauri bundles usually place DLLs here)
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let cand = dir.join("rubberband.dll");
-            if cand.exists() {
-                return unsafe { Library::new(&cand) }.map_err(|e| e.to_string());
-            }
-        }
-    }
-
-    // 3) PATH search (Library::new will use OS loader paths)
-    unsafe { Library::new("rubberband.dll") }.map_err(|e| e.to_string())
-}
-
-fn api() -> Result<&'static RubberBandApi, String> {
-    static API: OnceLock<Result<RubberBandApi, String>> = OnceLock::new();
-    let v = API.get_or_init(|| {
-        let lib = try_load_library()?;
-
-        unsafe {
-            // Store raw function pointers so we don't keep Symbol borrows alive.
-            let rubberband_new: RubberbandNew =
-                *lib.get(b"rubberband_new\0").map_err(|e| e.to_string())?;
-            let rubberband_delete: RubberbandDelete =
-                *lib.get(b"rubberband_delete\0").map_err(|e| e.to_string())?;
-            let rubberband_reset: RubberbandReset =
-                *lib.get(b"rubberband_reset\0").map_err(|e| e.to_string())?;
-            let rubberband_set_time_ratio: RubberbandSetTimeRatio = *lib
-                .get(b"rubberband_set_time_ratio\0")
-                .map_err(|e| e.to_string())?;
-            let rubberband_set_pitch_scale: RubberbandSetPitchScale = *lib
-                .get(b"rubberband_set_pitch_scale\0")
-                .map_err(|e| e.to_string())?;
-            let rubberband_set_expected_input_duration: RubberbandSetExpectedInputDuration = *lib
-                .get(b"rubberband_set_expected_input_duration\0")
-                .map_err(|e| e.to_string())?;
-            let rubberband_set_max_process_size: RubberbandSetMaxProcessSize = *lib
-                .get(b"rubberband_set_max_process_size\0")
-                .map_err(|e| e.to_string())?;
-            let rubberband_study: RubberbandStudy =
-                *lib.get(b"rubberband_study\0").map_err(|e| e.to_string())?;
-            let rubberband_process: RubberbandProcess = *lib
-                .get(b"rubberband_process\0")
-                .map_err(|e| e.to_string())?;
-            let rubberband_available: RubberbandAvailable = *lib
-                .get(b"rubberband_available\0")
-                .map_err(|e| e.to_string())?;
-            let rubberband_retrieve: RubberbandRetrieve = *lib
-                .get(b"rubberband_retrieve\0")
-                .map_err(|e| e.to_string())?;
-            let rubberband_calculate_stretch: RubberbandCalculateStretch = *lib
-                .get(b"rubberband_calculate_stretch\0")
-                .map_err(|e| e.to_string())?;
-
-            Ok(RubberBandApi {
-                _lib: lib,
-                rubberband_new,
-                rubberband_delete,
-                rubberband_reset,
-                rubberband_set_time_ratio,
-                rubberband_set_pitch_scale,
-                rubberband_set_expected_input_duration,
-                rubberband_set_max_process_size,
-                rubberband_study,
-                rubberband_process,
-                rubberband_available,
-                rubberband_retrieve,
-                rubberband_calculate_stretch,
-            })
-        }
-    });
-
-    match v {
-        Ok(api) => Ok(api),
-        Err(e) => Err(e.clone()),
-    }
-}
-
+/// Check if Rubber Band API is available.
+/// Since static linking, this always returns true.
 pub fn is_available() -> bool {
-    api().is_ok()
+    true
 }
 
 impl RubberBandRealtimeStretcher {
@@ -185,7 +103,6 @@ impl RubberBandRealtimeStretcher {
         if channels > 2 {
             return Err("rubberband: channels > 2 not supported yet".to_string());
         }
-        let api = api()?;
 
         let time_ratio = if time_ratio.is_finite() && time_ratio > 1e-6 {
             time_ratio
@@ -202,8 +119,15 @@ impl RubberBandRealtimeStretcher {
             | opts::RubberBandOptionDetectorSoft
             | opts::RubberBandOptionPhaseLaminar;
 
+        eprintln!("[RubberBand DEBUG] Creating with sample_rate={}, channels={}, time_ratio={:.6}, pitch_scale=1.0", 
+                 sample_rate, channels, time_ratio);
+        eprintln!("[RubberBand DEBUG] Options: ProcessRealTime={}, EngineFiner={}, PitchHighQuality={}",
+                 (options & opts::RubberBandOptionProcessRealTime) != 0,
+                 (options & opts::RubberBandOptionEngineFiner) != 0,
+                 (options & opts::RubberBandOptionPitchHighQuality) != 0);
+
         let state = unsafe {
-            (api.rubberband_new)(
+            rubberband_new(
                 sample_rate.max(1),
                 channels as u32,
                 options,
@@ -212,15 +136,26 @@ impl RubberBandRealtimeStretcher {
             )
         };
         if state.is_null() {
+            eprintln!("[RubberBand ERROR] rubberband_new returned null!");
             return Err("rubberband_new returned null".to_string());
         }
 
         // Keep processing blocks reasonably small.
         const BLOCK: usize = 1024;
         unsafe {
-            (api.rubberband_set_max_process_size)(state, BLOCK as u32);
-            (api.rubberband_set_time_ratio)(state, time_ratio);
-            (api.rubberband_set_pitch_scale)(state, 1.0);
+            rubberband_set_max_process_size(state, BLOCK as u32);
+            rubberband_set_time_ratio(state, time_ratio);
+            rubberband_set_pitch_scale(state, 1.0);
+            
+            // Debug: verify pitch scale is set correctly
+            let actual_pitch = rubberband_get_pitch_scale(state);
+            let actual_time = rubberband_get_time_ratio(state);
+            eprintln!("[RubberBand] ✓ Created successfully: time_ratio={:.6}, pitch_scale={:.6} (pitch should be 1.0 for constant pitch)",
+                     actual_time, actual_pitch);
+            
+            if (actual_pitch - 1.0).abs() > 0.001 {
+                eprintln!("[RubberBand WARNING] pitch_scale is NOT 1.0! Got {:.6}, this will cause pitch changes!", actual_pitch);
+            }
         }
 
         Ok(Self {
@@ -234,17 +169,16 @@ impl RubberBandRealtimeStretcher {
     }
 
     pub fn reset(&mut self, time_ratio: f64) -> Result<(), String> {
-        let api = api()?;
         let time_ratio = if time_ratio.is_finite() && time_ratio > 1e-6 {
             time_ratio
         } else {
             1.0
         };
         unsafe {
-            (api.rubberband_reset)(self.state);
-            (api.rubberband_set_max_process_size)(self.state, self.max_block as u32);
-            (api.rubberband_set_time_ratio)(self.state, time_ratio);
-            (api.rubberband_set_pitch_scale)(self.state, 1.0);
+            rubberband_reset(self.state);
+            rubberband_set_max_process_size(self.state, self.max_block as u32);
+            rubberband_set_time_ratio(self.state, time_ratio);
+            rubberband_set_pitch_scale(self.state, 1.0);
         }
         Ok(())
     }
@@ -261,8 +195,6 @@ impl RubberBandRealtimeStretcher {
         if frames == 0 {
             return Ok(());
         }
-
-        let api = api()?;
 
         let mut i = 0usize;
         while i < frames {
@@ -283,7 +215,7 @@ impl RubberBandRealtimeStretcher {
             }
 
             unsafe {
-                (api.rubberband_process)(
+                rubberband_process(
                     self.state,
                     ptrs.as_ptr(),
                     count as u32,
@@ -303,8 +235,7 @@ impl RubberBandRealtimeStretcher {
         out_interleaved: &mut Vec<f32>,
         max_frames: usize,
     ) -> Result<usize, String> {
-        let api = api()?;
-        let avail = unsafe { (api.rubberband_available)(self.state) };
+        let avail = unsafe { rubberband_available(self.state) };
         if avail <= 0 {
             return Ok(0);
         }
@@ -319,7 +250,7 @@ impl RubberBandRealtimeStretcher {
         }
 
         let got = unsafe {
-            (api.rubberband_retrieve)(self.state, out_ptrs.as_ptr(), req as u32) as usize
+            rubberband_retrieve(self.state, out_ptrs.as_ptr(), req as u32) as usize
         };
         if got == 0 {
             return Ok(0);
@@ -347,11 +278,9 @@ impl Drop for RubberBandRealtimeStretcher {
         if self.state.is_null() {
             return;
         }
-        if let Ok(api) = api() {
-            unsafe {
-                (api.rubberband_reset)(self.state);
-                (api.rubberband_delete)(self.state);
-            }
+        unsafe {
+            rubberband_reset(self.state);
+            rubberband_delete(self.state);
         }
         self.state = std::ptr::null_mut();
     }
@@ -370,8 +299,6 @@ pub fn try_time_stretch_interleaved_offline(
     if channels > 2 {
         return Err("rubberband: channels > 2 not supported yet".to_string());
     }
-
-    let api = api()?;
 
     let in_frames = input_interleaved.len() / channels;
     if in_frames < 2 {
@@ -401,19 +328,19 @@ pub fn try_time_stretch_interleaved_offline(
     }
 
     unsafe {
-        let state = (api.rubberband_new)(sample_rate, channels as u32, options, time_ratio, 1.0);
+        let state = rubberband_new(sample_rate, channels as u32, options, time_ratio, 1.0);
         if state.is_null() {
             return Err("rubberband_new returned null".to_string());
         }
 
         // Help the library make better choices.
-        (api.rubberband_set_expected_input_duration)(state, in_frames as u32);
-        (api.rubberband_set_time_ratio)(state, time_ratio);
-        (api.rubberband_set_pitch_scale)(state, 1.0);
+        rubberband_set_expected_input_duration(state, in_frames as u32);
+        rubberband_set_time_ratio(state, time_ratio);
+        rubberband_set_pitch_scale(state, 1.0);
 
         // Keep processing blocks reasonably small.
         const BLOCK: usize = 4096;
-        (api.rubberband_set_max_process_size)(state, BLOCK as u32);
+        rubberband_set_max_process_size(state, BLOCK as u32);
 
         // Study pass.
         let mut i = 0;
@@ -423,11 +350,11 @@ pub fn try_time_stretch_interleaved_offline(
             let final_ = if end >= in_frames { 1 } else { 0 };
 
             let ptrs: Vec<*const f32> = ch_buf.iter().map(|b| b.as_ptr().add(i)).collect();
-            (api.rubberband_study)(state, ptrs.as_ptr(), count as u32, final_);
+            rubberband_study(state, ptrs.as_ptr(), count as u32, final_);
             i = end;
         }
 
-        (api.rubberband_calculate_stretch)(state);
+        rubberband_calculate_stretch(state);
 
         // Process pass.
         let mut i = 0;
@@ -437,7 +364,7 @@ pub fn try_time_stretch_interleaved_offline(
             let final_ = if end >= in_frames { 1 } else { 0 };
 
             let ptrs: Vec<*const f32> = ch_buf.iter().map(|b| b.as_ptr().add(i)).collect();
-            (api.rubberband_process)(state, ptrs.as_ptr(), count as u32, final_);
+            rubberband_process(state, ptrs.as_ptr(), count as u32, final_);
             i = end;
         }
 
@@ -448,7 +375,7 @@ pub fn try_time_stretch_interleaved_offline(
         let mut temp: Vec<Vec<f32>> = (0..channels).map(|_| vec![0.0f32; BLOCK]).collect();
 
         loop {
-            let avail = (api.rubberband_available)(state);
+            let avail = rubberband_available(state);
             if avail <= 0 {
                 break;
             }
@@ -456,7 +383,7 @@ pub fn try_time_stretch_interleaved_offline(
 
             let out_ptrs: Vec<*mut f32> = temp.iter_mut().map(|t| t.as_mut_ptr()).collect();
 
-            let got = (api.rubberband_retrieve)(state, out_ptrs.as_ptr(), req as u32) as usize;
+            let got = rubberband_retrieve(state, out_ptrs.as_ptr(), req as u32) as usize;
             if got == 0 {
                 break;
             }
@@ -465,8 +392,8 @@ pub fn try_time_stretch_interleaved_offline(
             }
         }
 
-        (api.rubberband_reset)(state);
-        (api.rubberband_delete)(state);
+        rubberband_reset(state);
+        rubberband_delete(state);
 
         let out_frames = out_ch
             .first()

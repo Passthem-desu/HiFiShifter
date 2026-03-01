@@ -10,71 +10,65 @@ import { sliceWaveformSamples } from "./clipWaveform";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
 import { useClipWaveformPeaks } from "./clip/useClipWaveformPeaks";
+import { renderWaveformSvg } from "../../../utils/waveformRenderer";
+import { useAppTheme } from "../../../theme/AppThemeProvider";
+import { getWaveformColors } from "../../../theme/waveformColors";
 
 type WaveformPreview = number[] | { l: number[]; r: number[] };
-function areaPathFromMinMaxBand(
+
+/**
+ * 对波形peaks数据应用淡入淡出增益曲线
+ *
+ * @param min - 最小值数组
+ * @param max - 最大值数组
+ * @param ampScale - 振幅缩放系数
+ * @param lengthBeats - Clip长度（beats）
+ * @param fadeInBeats - 淡入长度（beats）
+ * @param fadeOutBeats - 淡出长度（beats）
+ * @param fadeInCurve - 淡入曲线类型
+ * @param fadeOutCurve - 淡出曲线类型
+ * @returns 应用淡入淡出后的 min/max 数组
+ */
+function applyFadeGainToPeaks(
     min: number[],
     max: number[],
-    w: number,
-    totalH: number,
-    centerY: number,
-    halfH: number,
     ampScale: number,
     lengthBeats: number,
     fadeInBeats: number,
     fadeOutBeats: number,
-    fadeInCurve: FadeCurveType = "sine",
-    fadeOutCurve: FadeCurveType = "sine",
-): string {
+    fadeInCurve: FadeCurveType,
+    fadeOutCurve: FadeCurveType,
+): { min: number[]; max: number[] } {
     const srcN = Math.min(min.length, max.length);
-    const n = Math.max(1, Math.floor(w));
-    if (srcN <= 0 || n <= 0) return "";
+    if (srcN === 0) return { min: [], max: [] };
 
-    const bandHalf = Math.max(0.5, Number(halfH) || 0);
-    const y0 = centerY - bandHalf;
-    const y1 = centerY + bandHalf;
-    const scale = bandHalf * Math.max(0, ampScale);
-
-    const denom = Math.max(1, n - 1);
-    const srcDenom = Math.max(1, srcN - 1);
     const safeLenBeats = Math.max(1e-9, Number(lengthBeats) || 0);
     const safeFadeIn = Math.max(0, Number(fadeInBeats) || 0);
     const safeFadeOut = Math.max(0, Number(fadeOutBeats) || 0);
 
-    const yMax: number[] = new Array(n);
-    const yMin: number[] = new Array(n);
+    const resultMin = new Array<number>(srcN);
+    const resultMax = new Array<number>(srcN);
 
-    for (let x = 0; x < n; x += 1) {
-        const t = x / denom;
-        const srcT = t * srcDenom;
-        const i0 = Math.floor(srcT);
-        const i1 = Math.min(srcN - 1, i0 + 1);
-        const f = srcT - i0;
+    for (let i = 0; i < srcN; i++) {
+        const t = i / Math.max(1, srcN - 1);
+        const beatAt = t * safeLenBeats;
 
-        const mi0 = Number(min[i0] ?? 0);
-        const mi1 = Number(min[i1] ?? 0);
-        const ma0 = Number(max[i0] ?? 0);
-        const ma1 = Number(max[i1] ?? 0);
-        const mi = mi0 + (mi1 - mi0) * f;
-        const ma = ma0 + (ma1 - ma0) * f;
+        let mul = ampScale;
+        if (safeFadeIn > 1e-9) {
+            mul *= fadeCurveGain(clamp(beatAt / safeFadeIn, 0, 1), fadeInCurve);
+        }
+        if (safeFadeOut > 1e-9) {
+            mul *= fadeCurveGain(
+                clamp((safeLenBeats - beatAt) / safeFadeOut, 0, 1),
+                fadeOutCurve,
+            );
+        }
 
-        let mul = 1;
-        const beatAtX = t * safeLenBeats;
-        if (safeFadeIn > 1e-9) mul *= fadeCurveGain(clamp(beatAtX / safeFadeIn, 0, 1), fadeInCurve);
-        if (safeFadeOut > 1e-9)
-            mul *= fadeCurveGain(clamp((safeLenBeats - beatAtX) / safeFadeOut, 0, 1), fadeOutCurve);
-
-        const top = clamp(centerY - ma * mul * scale, y0, y1);
-        const bot = clamp(centerY - mi * mul * scale, y0, y1);
-        yMax[x] = clamp(top, 0, totalH);
-        yMin[x] = clamp(bot, 0, totalH);
+        resultMin[i] = (min[i] ?? 0) * mul;
+        resultMax[i] = (max[i] ?? 0) * mul;
     }
 
-    let d = `M0 ${yMax[0]}`;
-    for (let x = 1; x < n; x += 1) d += `L${x} ${yMax[x]}`;
-    for (let x = n - 1; x >= 0; x -= 1) d += `L${x} ${yMin[x]}`;
-    d += "Z";
-    return d;
+    return { min: resultMin, max: resultMax };
 }
 
 function minMaxEnvelopeFromSamples(
@@ -191,6 +185,11 @@ export const ClipItem: React.FC<{
     trackColor,
 }) => {
     const { t } = useI18n();
+    const { mode: themeMode } = useAppTheme();
+    const waveformColors = React.useMemo(
+        () => getWaveformColors(themeMode),
+        [themeMode],
+    );
 
     const left = Math.max(0, clip.startBeat * pxPerBeat);
     const width = Math.max(1, clip.lengthBeats * pxPerBeat);
@@ -279,13 +278,9 @@ export const ClipItem: React.FC<{
         const fadeInCurve: FadeCurveType = clip.fadeInCurve ?? "sine";
         const fadeOutCurve: FadeCurveType = clip.fadeOutCurve ?? "sine";
 
-        // Keep existing color tokens (no palette adjustments): just change geometry.
-        const fill = peaks
-            ? "rgba(255,255,255,0.22)"
-            : "rgba(255,255,255,0.18)";
-        const stroke = peaks
-            ? "rgba(255,255,255,0.75)"
-            : "rgba(255,255,255,0.65)";
+        // 统一样式：从主题配置读取波形颜色
+        const fill = waveformColors.fill;
+        const stroke = waveformColors.stroke;
         // preview 状态用降低 opacity 表示加载中，不使用虚线
         const waveformOpacity = peaks?.isPreview ? 0.6 : 1.0;
 
@@ -335,40 +330,60 @@ export const ClipItem: React.FC<{
             return null;
         }
 
-        const topD =
-            topMin && topMax
-                ? areaPathFromMinMaxBand(
-                      topMin,
-                      topMax,
-                      w,
-                      totalH,
-                      centerTop,
-                      halfH,
-                      waveformVisualAmpScale,
-                      lenBeats,
-                      fadeIn,
-                      fadeOut,
-                      fadeInCurve,
-                      fadeOutCurve,
-                  )
-                : "";
-        const botD =
-            botMin && botMax
-                ? areaPathFromMinMaxBand(
-                      botMin,
-                      botMax,
-                      w,
-                      totalH,
-                      centerBot,
-                      halfH,
-                      waveformVisualAmpScale,
-                      lenBeats,
-                      fadeIn,
-                      fadeOut,
-                      fadeInCurve,
-                      fadeOutCurve,
-                  )
-                : "";
+        // 应用淡入淡出效果到波形数据
+        const topFaded = applyFadeGainToPeaks(
+            topMin,
+            topMax,
+            waveformVisualAmpScale,
+            lenBeats,
+            fadeIn,
+            fadeOut,
+            fadeInCurve,
+            fadeOutCurve,
+        );
+        const botFaded = applyFadeGainToPeaks(
+            botMin,
+            botMax,
+            waveformVisualAmpScale,
+            lenBeats,
+            fadeIn,
+            fadeOut,
+            fadeInCurve,
+            fadeOutCurve,
+        );
+
+        // 使用共享渲染函数生成 SVG 路径
+        const topD = renderWaveformSvg(
+            {
+                min: topFaded.min,
+                max: topFaded.max,
+                timestamps: [], // 空数组表示使用均匀分布
+                stride: 1,
+            },
+            {
+                width: w,
+                height: totalH,
+                centerY: centerTop,
+                halfHeight: halfH,
+                amplitudeScale: 1.0, // 振幅已在 applyFadeGainToPeaks 中处理
+            },
+        );
+
+        const botD = renderWaveformSvg(
+            {
+                min: botFaded.min,
+                max: botFaded.max,
+                timestamps: [],
+                stride: 1,
+            },
+            {
+                width: w,
+                height: totalH,
+                centerY: centerBot,
+                halfHeight: halfH,
+                amplitudeScale: 1.0,
+            },
+        );
 
         if (!topD && !botD) return null;
         return (

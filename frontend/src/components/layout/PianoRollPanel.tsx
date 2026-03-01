@@ -12,11 +12,15 @@ import { EyeOpenIcon, EyeClosedIcon, UpdateIcon } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
+import type { OnnxDiagnosticResult, OnnxStatusResult } from "../../types/api";
+import { coreApi } from "../../services/api";
 import {
     setEditParam,
     setTrackStateRemote,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
+import { useAppTheme } from "../../theme/AppThemeProvider";
+import { getWaveformColors } from "../../theme/waveformColors";
 
 import {
     BackgroundGrid,
@@ -41,12 +45,50 @@ import type {
 } from "./pianoRoll/types";
 
 import { PitchStatusBadge } from "./PitchStatusBadge";
+import { useAsyncPitchRefresh } from "../../hooks/useAsyncPitchRefresh";
+import { ProgressBar } from "../ProgressBar";
+import { PitchAnalysisProgressBar } from "../PitchAnalysisProgressBar";
+import { LoadingSpinner } from "../LoadingSpinner";
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
     const { t } = useI18n();
     const s = useAppSelector((state: RootState) => state.session);
     const editParam = s.editParam as ParamName;
+    const { mode: themeMode } = useAppTheme();
+    const waveformColors = useMemo(
+        () => getWaveformColors(themeMode),
+        [themeMode],
+    );
+
+    // Task 6.3: 集成 useAsyncPitchRefresh Hook
+    const asyncRefresh = useAsyncPitchRefresh();
+    const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+
+    const [onnxStatus, setOnnxStatus] = useState<OnnxStatusResult | null>(null);
+    const [onnxDiagnostic, setOnnxDiagnostic] =
+        useState<OnnxDiagnosticResult | null>(null);
+
+    // Task 1.9: 调用诊断API
+    useEffect(() => {
+        coreApi
+            .getOnnxStatus()
+            .then((result) => {
+                setOnnxStatus(result);
+            })
+            .catch(() => {
+                // Non-Tauri env (storybook/tests), ignore.
+            });
+
+        coreApi
+            .getOnnxDiagnostic()
+            .then((result) => {
+                setOnnxDiagnostic(result);
+            })
+            .catch(() => {
+                // Non-Tauri env, ignore.
+            });
+    }, []);
 
     const effectiveSelectedTrackId = useMemo(() => {
         if (s.selectedTrackId) return s.selectedTrackId;
@@ -128,11 +170,44 @@ export const PianoRollPanel: React.FC = () => {
         if (editParam !== "pitch") return null;
         if (!rootTrack) return null;
         if (!rootTrack.composeEnabled) return t("pitch_requires_compose");
-        if (rootTrack.pitchAnalysisAlgo === "none") return t("pitch_requires_algo");
+        if (rootTrack.pitchAnalysisAlgo === "none")
+            return t("pitch_requires_algo");
         return null;
     }, [editParam, rootTrack, t]);
 
-    const pitchEnabled = editParam !== "pitch" || pitchHardDisableReason == null;
+    const pitchEnabled =
+        editParam !== "pitch" || pitchHardDisableReason == null;
+
+    const onnxUnavailable = Boolean(onnxStatus && !onnxStatus.available);
+
+    // Task 1.10: 根据诊断信息构建tolltip内容
+    const onnxCompileHint = useMemo(() => {
+        if (!onnxDiagnostic) {
+            return onnxStatus && !onnxStatus.compiled
+                ? t("onnx_compile_required")
+                : undefined;
+        }
+
+        if (onnxDiagnostic.isAvailable) {
+            return undefined;
+        }
+
+        const hints: string[] = [];
+        if (onnxDiagnostic.errorDetails) {
+            hints.push(onnxDiagnostic.errorDetails);
+        }
+        if (!onnxDiagnostic.ortLibraryLoaded) {
+            hints.push("ONNX Runtime library not loaded");
+        }
+        if (onnxDiagnostic.epStatus) {
+            hints.push(`EP: ${onnxDiagnostic.epStatus}`);
+        }
+        hints.push("Run: cargo tauri dev --features onnx");
+
+        return hints.join(" | ");
+    }, [onnxDiagnostic, onnxStatus, t]);
+
+    const onnxLabelSuffix = onnxUnavailable ? t("onnx_unavailable_label") : "";
 
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
     const contentWidth = Math.max(
@@ -357,7 +432,8 @@ export const PianoRollPanel: React.FC = () => {
     } = usePianoRollData({
         editParam,
         pitchEnabled,
-        paramsEpoch: (s as unknown as { paramsEpoch?: number }).paramsEpoch ?? 0,
+        paramsEpoch:
+            (s as unknown as { paramsEpoch?: number }).paramsEpoch ?? 0,
         rootTrackId,
         selectedTrackId: effectiveSelectedTrackId,
         tracks: s.tracks,
@@ -383,9 +459,9 @@ export const PianoRollPanel: React.FC = () => {
         invalidate();
     }, [pitchView, tensionView, editParam, invalidate]);
 
-    const paramViewRef = useRef<import("./pianoRoll/types").ParamViewSegment | null>(
-        null,
-    );
+    const paramViewRef = useRef<
+        import("./pianoRoll/types").ParamViewSegment | null
+    >(null);
     useEffect(() => {
         paramViewRef.current = paramView;
     }, [paramView]);
@@ -419,7 +495,8 @@ export const PianoRollPanel: React.FC = () => {
     // Keep draw function always up-to-date (invalidate() is stable and calls drawRef.current()).
     drawRef.current = () => {
         // 确定副参数名称（非当前 editParam 的另一个参数）
-        const secondaryParam: ParamName = editParam === "pitch" ? "tension" : "pitch";
+        const secondaryParam: ParamName =
+            editParam === "pitch" ? "tension" : "pitch";
         drawPianoRoll({
             axisCanvas: axisCanvasRef.current,
             canvas: canvasRef.current,
@@ -442,6 +519,7 @@ export const PianoRollPanel: React.FC = () => {
             scrollLeft: scrollLeftRef.current,
             secPerBeat,
             playheadBeat: s.playheadBeat,
+            waveformColors,
         });
     };
 
@@ -550,13 +628,29 @@ export const PianoRollPanel: React.FC = () => {
                         {editParam !== "pitch" && pitchEnabled ? (
                             <IconButton
                                 size="1"
-                                variant={secondaryParamVisible["pitch"] ? "soft" : "ghost"}
-                                color={secondaryParamVisible["pitch"] ? "blue" : "gray"}
+                                variant={
+                                    secondaryParamVisible["pitch"]
+                                        ? "soft"
+                                        : "ghost"
+                                }
+                                color={
+                                    secondaryParamVisible["pitch"]
+                                        ? "blue"
+                                        : "gray"
+                                }
                                 onClick={() => toggleSecondaryParam("pitch")}
                                 style={{ cursor: "pointer" }}
-                                title={secondaryParamVisible["pitch"] ? t("hide_secondary_param") : t("show_secondary_param")}
+                                title={
+                                    secondaryParamVisible["pitch"]
+                                        ? t("hide_secondary_param")
+                                        : t("show_secondary_param")
+                                }
                             >
-                                {secondaryParamVisible["pitch"] ? <EyeOpenIcon /> : <EyeClosedIcon />}
+                                {secondaryParamVisible["pitch"] ? (
+                                    <EyeOpenIcon />
+                                ) : (
+                                    <EyeClosedIcon />
+                                )}
                             </IconButton>
                         ) : null}
                         <Button
@@ -572,13 +666,29 @@ export const PianoRollPanel: React.FC = () => {
                         {editParam !== "tension" ? (
                             <IconButton
                                 size="1"
-                                variant={secondaryParamVisible["tension"] ? "soft" : "ghost"}
-                                color={secondaryParamVisible["tension"] ? "orange" : "gray"}
+                                variant={
+                                    secondaryParamVisible["tension"]
+                                        ? "soft"
+                                        : "ghost"
+                                }
+                                color={
+                                    secondaryParamVisible["tension"]
+                                        ? "orange"
+                                        : "gray"
+                                }
                                 onClick={() => toggleSecondaryParam("tension")}
                                 style={{ cursor: "pointer" }}
-                                title={secondaryParamVisible["tension"] ? t("hide_secondary_param") : t("show_secondary_param")}
+                                title={
+                                    secondaryParamVisible["tension"]
+                                        ? t("hide_secondary_param")
+                                        : t("show_secondary_param")
+                                }
                             >
-                                {secondaryParamVisible["tension"] ? <EyeOpenIcon /> : <EyeClosedIcon />}
+                                {secondaryParamVisible["tension"] ? (
+                                    <EyeOpenIcon />
+                                ) : (
+                                    <EyeClosedIcon />
+                                )}
                             </IconButton>
                         ) : null}
                     </Flex>
@@ -591,7 +701,8 @@ export const PianoRollPanel: React.FC = () => {
                                 pitchEnabled
                                     ? {
                                           analysisPending: pitchAnalysisPending,
-                                          analysisProgress: pitchAnalysisProgress,
+                                          analysisProgress:
+                                              pitchAnalysisProgress,
                                           pitchEditUserModified,
                                           pitchEditBackendAvailable,
                                       }
@@ -600,16 +711,43 @@ export const PianoRollPanel: React.FC = () => {
                         />
                     ) : null}
 
+                    {/* Task 6.4: 刷新按钮修改为调用 startRefresh() */}
                     <IconButton
                         size="1"
                         variant="soft"
                         color="gray"
-                        disabled={isLoading || showPitchAnalyzingOverlay}
-                        onClick={() => void refreshNow()}
-                        style={{ cursor: isLoading ? "default" : "pointer" }}
+                        disabled={
+                            isLoading ||
+                            showPitchAnalyzingOverlay ||
+                            asyncRefresh.isLoading
+                        }
+                        onClick={async () => {
+                            if (!rootTrackId) return;
+                            await asyncRefresh.startRefresh(rootTrackId);
+                            // Task 6.7: 任务完成后显示 1 秒成功提示
+                            if (asyncRefresh.status === "completed") {
+                                setShowSuccessMessage(true);
+                                setTimeout(
+                                    () => setShowSuccessMessage(false),
+                                    1000,
+                                );
+                            }
+                            // 同时触发传统刷新以更新 UI（后续可优化为由后端事件驱动）
+                            void refreshNow();
+                        }}
+                        style={{
+                            cursor:
+                                isLoading || asyncRefresh.isLoading
+                                    ? "default"
+                                    : "pointer",
+                        }}
                         title={t("action_refresh")}
                     >
-                        <UpdateIcon />
+                        {asyncRefresh.isLoading ? (
+                            <LoadingSpinner size="sm" />
+                        ) : (
+                            <UpdateIcon />
+                        )}
                     </IconButton>
 
                     {editParam === "pitch" && rootTrack ? (
@@ -643,7 +781,17 @@ export const PianoRollPanel: React.FC = () => {
                                         WORLD (DLL)
                                     </Select.Item>
                                     <Select.Item value="nsf_hifigan_onnx">
-                                        NSF-HiFiGAN (ONNX)
+                                        <span
+                                            className={
+                                                onnxUnavailable
+                                                    ? "text-yellow-400"
+                                                    : undefined
+                                            }
+                                            title={onnxCompileHint}
+                                        >
+                                            NSF-HiFiGAN (ONNX)
+                                            {onnxLabelSuffix}
+                                        </span>
                                     </Select.Item>
                                     <Select.Item value="none">
                                         {t("none")}
@@ -654,6 +802,64 @@ export const PianoRollPanel: React.FC = () => {
                     ) : null}
                 </Flex>
             </Flex>
+
+            {/* Task 6.5: 参数面板顶部添加进度条区域 */}
+            {asyncRefresh.isLoading && (
+                <Flex className="px-3 py-2 bg-qt-base border-b border-qt-border">
+                    <ProgressBar
+                        percentage={asyncRefresh.progress}
+                        label={
+                            (t as any)("refreshing_pitch_data") ||
+                            "Refreshing pitch data"
+                        }
+                        showCancel={true}
+                        onCancel={async () => {
+                            // Task 6.6: 取消按钮点击时调用 cancelRefresh()
+                            await asyncRefresh.cancelRefresh();
+                        }}
+                        estimatedRemaining={asyncRefresh.estimatedRemaining}
+                    />
+                </Flex>
+            )}
+
+            {/* Task 3.11: 检测到分析任务时自动显示进度条 */}
+            <PitchAnalysisProgressBar className="mx-3 mt-2" />
+
+            {/* Task 6.7: 任务完成后显示成功提示 */}
+            {showSuccessMessage && (
+                <Flex
+                    align="center"
+                    gap="2"
+                    className="px-3 py-2 bg-green-900/20 border-b border-green-700 text-green-300 text-sm"
+                >
+                    <span>✓</span>
+                    <span>
+                        {(t as any)("refresh_completed") || "Refresh completed"}
+                    </span>
+                </Flex>
+            )}
+
+            {/* Task 6.8: 任务失败时显示错误消息和重试按钮 */}
+            {asyncRefresh.status === "failed" && asyncRefresh.error && (
+                <Flex
+                    align="center"
+                    justify="between"
+                    className="px-3 py-2 bg-red-900/20 border-b border-red-700 text-red-300 text-sm"
+                >
+                    <span>{asyncRefresh.error}</span>
+                    <Button
+                        size="1"
+                        variant="soft"
+                        color="red"
+                        onClick={() =>
+                            rootTrackId &&
+                            void asyncRefresh.startRefresh(rootTrackId)
+                        }
+                    >
+                        {(t as any)("retry") || "Retry"}
+                    </Button>
+                </Flex>
+            )}
 
             {/* Note/Curve Editor Area */}
             <Flex className="flex-1 overflow-hidden relative">

@@ -907,3 +907,76 @@ pub fn infer_pitch_edit_mono(
         sess.infer_from_audio_and_midi(audio_mono, sample_rate, start_sec, midi_at_time)
     })
 }
+
+// Helper functions for diagnostics
+pub fn compiled() -> bool {
+    true
+}
+
+pub fn model_load_error() -> Option<String> {
+    match probe() {
+        Ok(()) => None,
+        Err(e) => Some(e.clone()),
+    }
+}
+
+pub fn ep_choice() -> String {
+    match env_ep_choice() {
+        OrtExecutionProviderChoice::Auto => "auto".to_string(),
+        OrtExecutionProviderChoice::Cpu => "cpu".to_string(),
+        OrtExecutionProviderChoice::Cuda => "cuda".to_string(),
+    }
+}
+
+// Task 1.9: ONNX diagnostic info
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnnxDiagnosticInfo {
+    pub compiled: bool,
+    pub available: bool,
+    pub error: Option<String>,
+    pub ep_choice: String,
+    pub onnx_version: Option<String>,
+    pub providers: Option<Vec<String>>,
+}
+
+pub fn diagnose_onnx_availability() -> OnnxDiagnosticInfo {
+    let compiled = compiled();
+    let ep_choice_val = ep_choice();
+    
+    if !compiled {
+        return OnnxDiagnosticInfo {
+            compiled: false,
+            available: false,
+            error: Some("ONNX feature not compiled".to_string()),
+            ep_choice: "disabled".to_string(),
+            onnx_version: None,
+            providers: None,
+        };
+    }
+
+    let available = is_available();
+    let error = if !available {
+        model_load_error()
+    } else {
+        None
+    };
+
+    // Try to get ONNX runtime version and available providers
+    let (onnx_version, providers) = if let Ok(()) = ensure_ort_init() {
+        let version = Some(format!("ort {}", env!("CARGO_PKG_VERSION")));
+        let providers_list = Some(vec![ep_choice_val.clone()]);
+        (version, providers_list)
+    } else {
+        (None, None)
+    };
+
+    OnnxDiagnosticInfo {
+        compiled,
+        available,
+        error,
+        ep_choice: ep_choice_val,
+        onnx_version,
+        providers,
+    }
+}

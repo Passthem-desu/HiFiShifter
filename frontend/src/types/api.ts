@@ -168,3 +168,32 @@ export interface ParamFramesPayload {
     pitch_edit_user_modified?: boolean;
     pitch_edit_backend_available?: boolean;
 }
+
+export interface PitchProgressPayload {
+    root_track_id: string;
+    progress: number;
+    eta_seconds?: number;
+}
+
+export interface OnnxStatusResult {
+    compiled: boolean;
+    available: boolean;
+    error: string | null;
+    ep_choice: string;
+}
+
+export interface OnnxDiagnosticResult {
+    compiled: boolean;
+    available: boolean;
+    error: string | null;
+    ep_choice: string;
+    onnx_version?: string;
+    providers?: string[];
+}
+
+export interface PitchTaskStatusPayload {
+    status: "running" | "completed" | "failed" | "cancelled";
+    progress: number;
+    error?: string | null;
+    result_key?: string | null;
+}

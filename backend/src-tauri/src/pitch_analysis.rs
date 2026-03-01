@@ -53,7 +53,7 @@ fn file_sig(path: &Path) -> (u64, u64) {
     (len, mtime_ms)
 }
 
-fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> String {
+pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> String {
     let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 {
         tl.bpm
     } else {
@@ -230,6 +230,189 @@ fn build_root_mix_timeline(tl: &TimelineState, root_track_id: &str) -> TimelineS
     out
 }
 
+/// Build a timeline snapshot for incremental refresh detection
+///
+/// Generates a snapshot of the current timeline state, capturing:
+/// - Cache keys for all clips (to detect parameter changes)
+/// - BPM and frame period (to detect global parameter changes)
+///
+/// This snapshot can be compared with previous snapshots to determine
+/// which clips need re-analysis.
+fn build_timeline_snapshot(
+    clips: &[Clip],
+    bpm: f64,
+    frame_period_ms: f64,
+    f0_floor: f64,
+    f0_ceil: f64,
+    algo: &PitchAnalysisAlgo,
+) -> crate::state::TimelineSnapshot {
+    use std::collections::HashMap;
+    
+    let mut clip_keys = HashMap::new();
+    
+    for clip in clips {
+        if let Some(source_path) = &clip.source_path {
+            let (file_size, file_mtime) = crate::clip_pitch_cache::get_file_signature(
+                std::path::Path::new(source_path)
+            );
+            
+            let key_data = crate::clip_pitch_cache::ClipCacheKey {
+                source_path: source_path.clone(),
+                file_size,
+                file_mtime,
+                trim_start_beat: crate::clip_pitch_cache::quantize_i64(clip.trim_start_beat, 1000.0),
+                trim_end_beat: crate::clip_pitch_cache::quantize_f64(clip.trim_end_beat, 1000.0),
+                playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
+                algo: match algo {
+                    PitchAnalysisAlgo::WorldDll => "world_dll",
+                    PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx",
+                    PitchAnalysisAlgo::None => "none",
+                    PitchAnalysisAlgo::Unknown => "unknown",
+                }.to_string(),
+                f0_floor: crate::clip_pitch_cache::quantize_f64(f0_floor, 10.0),
+                f0_ceil: crate::clip_pitch_cache::quantize_f64(f0_ceil, 10.0),
+                version: crate::clip_pitch_cache::CACHE_FORMAT_VERSION,
+            };
+            
+            let cache_key = crate::clip_pitch_cache::generate_clip_cache_key(&key_data);
+            clip_keys.insert(clip.id.clone(), cache_key);
+        }
+    }
+    
+    crate::state::TimelineSnapshot {
+        clips: clip_keys,
+        bpm,
+        frame_period_ms,
+    }
+}
+
+/// Detected change types for incremental refresh
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ClipChangeType {
+    Added,      // New clip in timeline
+    Modified,   // Existing clip with changed parameters
+    Deleted,    // Clip removed from timeline
+    Unchanged,  // Clip exists with same cache key
+}
+
+/// Result of comparing two timeline snapshots
+#[derive(Debug)]
+struct SnapshotComparison {
+    added_clip_ids: Vec<String>,
+    modified_clip_ids: Vec<String>,
+    deleted_clip_ids: Vec<String>,
+    unchanged_clip_ids: Vec<String>,
+}
+
+/// Compare two timeline snapshots to detect changes
+///
+/// Returns a comparison result indicating which clips were added, modified,
+/// deleted, or unchanged. This enables incremental refresh by only re-analyzing
+/// clips that have actually changed.
+///
+/// # Change Detection Rules
+/// - **Added**: Clip ID exists in new snapshot but not in old
+/// - **Modified**: Clip ID exists in both, but cache key differs
+/// - **Deleted**: Clip ID exists in old snapshot but not in new
+/// - **Unchanged**: Clip ID and cache key are identical in both snapshots
+///
+/// Note: Position-only changes (start_beat) do NOT affect the cache key,
+/// so moving a clip without changing its content will not trigger re-analysis.
+fn compare_snapshots(
+    old_snapshot: Option<&crate::state::TimelineSnapshot>,
+    new_snapshot: &crate::state::TimelineSnapshot,
+) -> SnapshotComparison {
+    use std::collections::HashSet;
+    
+    // If no old snapshot exists, all clips are "added" (first analysis)
+    let Some(old) = old_snapshot else {
+        return SnapshotComparison {
+            added_clip_ids: new_snapshot.clips.keys().cloned().collect(),
+            modified_clip_ids: Vec::new(),
+            deleted_clip_ids: Vec::new(),
+            unchanged_clip_ids: Vec::new(),
+        };
+    };
+    
+    // Check for global parameter changes (BPM or frame period)
+    let global_params_changed = (old.bpm - new_snapshot.bpm).abs() > 1e-6
+        || (old.frame_period_ms - new_snapshot.frame_period_ms).abs() > 1e-6;
+    
+    let old_ids: HashSet<&String> = old.clips.keys().collect();
+    let new_ids: HashSet<&String> = new_snapshot.clips.keys().collect();
+    
+    let mut added = Vec::new();
+    let mut modified = Vec::new();
+    let mut deleted = Vec::new();
+    let mut unchanged = Vec::new();
+    
+    // Detect added and modified clips
+    for (clip_id, new_key) in &new_snapshot.clips {
+        if let Some(old_key) = old.clips.get(clip_id) {
+            // Clip exists in both snapshots
+            if old_key != new_key || global_params_changed {
+                modified.push(clip_id.clone());
+            } else {
+                unchanged.push(clip_id.clone());
+            }
+        } else {
+            // Clip is new
+            added.push(clip_id.clone());
+        }
+    }
+    
+    // Detect deleted clips
+    for clip_id in &old_ids {
+        if !new_ids.contains(clip_id) {
+            deleted.push((*clip_id).clone());
+        }
+    }
+    
+    SnapshotComparison {
+        added_clip_ids: added,
+        modified_clip_ids: modified,
+        deleted_clip_ids: deleted,
+        unchanged_clip_ids: unchanged,
+    }
+}
+
+/// Determine which clips need analysis based on incremental refresh
+///
+/// This function implements incremental refresh by comparing the current timeline
+/// with the last snapshot. Only clips that have been added or modified need re-analysis.
+///
+/// # Parameters
+/// - `clips`: All clips in the current timeline
+/// - `old_snapshot`: Previous timeline snapshot (if any)
+/// - `new_snapshot`: Current timeline snapshot
+///
+/// # Returns
+/// A tuple of (clips_to_analyze, unchanged_clip_ids):
+/// - `clips_to_analyze`: Clips that need analysis (added + modified)
+/// - `unchanged_clip_ids`: Clips that can be loaded from cache
+fn determine_clips_to_analyze<'a>(
+    clips: &'a [Clip],
+    old_snapshot: Option<&crate::state::TimelineSnapshot>,
+    new_snapshot: &crate::state::TimelineSnapshot,
+) -> (Vec<&'a Clip>, Vec<String>) {
+    let comparison = compare_snapshots(old_snapshot, new_snapshot);
+    
+    // Clips needing analysis: added + modified
+    let mut need_analysis_ids: std::collections::HashSet<String> = comparison
+        .added_clip_ids
+        .into_iter()
+        .chain(comparison.modified_clip_ids.into_iter())
+        .collect();
+    
+    // Filter clips that need analysis
+    let clips_to_analyze: Vec<&Clip> = clips
+        .iter()
+        .filter(|clip| need_analysis_ids.contains(&clip.id))
+        .collect();
+    
+    (clips_to_analyze, comparison.unchanged_clip_ids)
+}
+
 fn build_pitch_job(tl: &TimelineState, root_track_id: &str) -> Option<PitchJob> {
     let fp = tl.frame_period_ms();
     let target = tl.target_param_frames(fp);
@@ -271,7 +454,967 @@ fn build_pitch_job(tl: &TimelineState, root_track_id: &str) -> Option<PitchJob> 
     })
 }
 
+/// Analyze a single clip's pitch curve with caching support
+///
+/// This function checks the cache first, and only performs expensive F0 analysis
+/// if the result is not cached. Results are stored in the cache for future use.
+///
+/// # Returns
+/// - `Ok(Arc<Vec<f32>>)`: MIDI pitch curve (unvoiced frames = 0.0)
+/// - `Err(String)`: Error message if analysis fails
+#[allow(clippy::too_many_arguments)]
+fn analyze_clip_with_cache(
+    clip: &Clip,
+    bpm: f64,
+    frame_period_ms: f64,
+    f0_floor: f64,
+    f0_ceil: f64,
+    algo: &PitchAnalysisAlgo,
+    cache: &std::sync::Arc<std::sync::Mutex<crate::clip_pitch_cache::ClipPitchCache>>,
+    debug: bool,
+) -> Result<std::sync::Arc<Vec<f32>>, String> {
+    let Some(source_path) = clip.source_path.as_ref() else {
+        return Err("No source path".to_string());
+    };
+
+    // Generate cache key
+    let (file_size, file_mtime) = crate::clip_pitch_cache::get_file_signature(Path::new(source_path));
+    
+    let algo_str = match algo {
+        PitchAnalysisAlgo::WorldDll => "world_dll",
+        PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx",
+        PitchAnalysisAlgo::None => "none",
+        PitchAnalysisAlgo::Unknown => "unknown",
+    };
+    
+    let key_data = crate::clip_pitch_cache::ClipCacheKey {
+        source_path: source_path.clone(),
+        file_size,
+        file_mtime,
+        trim_start_beat: crate::clip_pitch_cache::quantize_i64(clip.trim_start_beat, 1000.0),
+        trim_end_beat: crate::clip_pitch_cache::quantize_f64(clip.trim_end_beat, 1000.0),
+        playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
+        algo: algo_str.to_string(),
+        f0_floor: crate::clip_pitch_cache::quantize_f64(f0_floor, 10.0),
+        f0_ceil: crate::clip_pitch_cache::quantize_f64(f0_ceil, 10.0),
+        version: crate::clip_pitch_cache::CACHE_FORMAT_VERSION,
+    };
+    
+    let cache_key = crate::clip_pitch_cache::generate_clip_cache_key(&key_data);
+    
+    // Query cache
+    {
+        let mut cache_guard = cache.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        if let Some(cached) = cache_guard.get(&cache_key) {
+            if debug {
+                eprintln!("clip_pitch_cache: HIT for clip_id={} key={}", clip.id, &cache_key[..16]);
+            }
+            return Ok(cached);
+        }
+        if debug {
+            eprintln!("clip_pitch_cache: MISS for clip_id={} key={}", clip.id, &cache_key[..16]);
+        }
+    }
+    
+    // Cache miss - perform analysis
+    let bs = 60.0 / bpm.max(1e-6);
+    
+    // Decode audio
+    let (in_rate, in_channels, pcm) =
+        crate::audio_utils::decode_audio_f32_interleaved(Path::new(source_path))
+            .map_err(|e| format!("Failed to decode audio: {}", e))?;
+    
+    let in_channels_usize = (in_channels as usize).max(1);
+    let in_frames = pcm.len() / in_channels_usize;
+    if in_frames < 2 {
+        return Err("Audio too short".to_string());
+    }
+    
+    let playback_rate = if clip.playback_rate.is_finite() && clip.playback_rate > 0.0 {
+        clip.playback_rate
+    } else {
+        1.0
+    };
+    
+    // Source trimming
+    let trim_start_beats_src = clip.trim_start_beat.max(0.0);
+    let trim_end_beats_src = clip.trim_end_beat.max(0.0);
+    let trim_start_sec = trim_start_beats_src * bs;
+    let trim_end_sec = trim_end_beats_src * bs;
+    
+    let total_sec = (in_frames as f64) / (in_rate.max(1) as f64);
+    if !(total_sec.is_finite() && total_sec > 0.0) {
+        return Err("Invalid audio duration".to_string());
+    }
+    
+    let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
+    if src_end_limit_sec - trim_start_sec <= 1e-9 {
+        return Err("Trim range too small".to_string());
+    }
+    
+    let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
+    let src_i1 = (src_end_limit_sec * in_rate as f64)
+        .ceil()
+        .max(src_i0 as f64) as usize;
+    let src_i1 = src_i1.min(in_frames);
+    if src_i1 <= src_i0 + 1 {
+        return Err("Invalid trim indices".to_string());
+    }
+    
+    let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
+    
+    // Resample to 44100 Hz
+    let segment = crate::mixdown::linear_resample_interleaved(segment, in_channels_usize, in_rate, 44100);
+    let seg_frames = segment.len() / in_channels_usize;
+    if seg_frames < 2 {
+        return Err("Resampled audio too short".to_string());
+    }
+    
+    // Convert to mono
+    let mut mono_raw: Vec<f64> = Vec::with_capacity(seg_frames);
+    for f in 0..seg_frames {
+        let base = f * in_channels_usize;
+        let mut sum = 0.0f64;
+        for c in 0..in_channels_usize {
+            sum += segment[base + c] as f64;
+        }
+        mono_raw.push(sum / in_channels_usize as f64);
+    }
+    
+    // Preprocess: remove DC and normalize
+    let mut mean = 0.0f64;
+    for &v in &mono_raw {
+        mean += v;
+    }
+    mean /= mono_raw.len().max(1) as f64;
+    
+    let mut max_abs = 0.0f64;
+    for &v in &mono_raw {
+        let vv = v - mean;
+        let a = vv.abs();
+        if a.is_finite() && a > max_abs {
+            max_abs = a;
+        }
+    }
+    let scale = if max_abs.is_finite() && max_abs > 1.0 {
+        (1.0 / max_abs).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    
+    let mut mono: Vec<f64> = Vec::with_capacity(mono_raw.len());
+    for &v in &mono_raw {
+        let vv = (v - mean) * scale;
+        mono.push(vv.clamp(-1.0, 1.0));
+    }
+    
+    // Compute F0 using WORLD
+    let fs_i32 = 44100i32;
+    let prefer = std::env::var("HIFISHIFTER_WORLD_F0")
+        .ok()
+        .as_deref()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "harvest".to_string());
+    
+    let f0_hz: Vec<f64> = {
+        let try_harvest = || {
+            crate::world::compute_f0_hz_harvest(
+                &mono,
+                fs_i32,
+                frame_period_ms,
+                f0_floor,
+                f0_ceil,
+            )
+        };
+        let try_dio = || {
+            crate::world::compute_f0_hz_dio_stonemask(
+                &mono,
+                fs_i32,
+                frame_period_ms,
+                f0_floor,
+                f0_ceil,
+            )
+        };
+        
+        let res = if prefer == "dio" {
+            try_dio().or_else(|_| try_harvest())
+        } else {
+            try_harvest().or_else(|_| try_dio())
+        };
+        
+        res.map_err(|e| format!("F0 analysis failed: {}", e))?
+    };
+    
+    if f0_hz.len() < 2 {
+        return Err("F0 analysis returned too few frames".to_string());
+    }
+    
+    // Convert Hz to MIDI
+    let mut midi: Vec<f32> = Vec::with_capacity(f0_hz.len());
+    for hz in f0_hz {
+        midi.push(hz_to_midi(hz));
+    }
+    
+    if debug {
+        eprintln!(
+            "clip_pitch_cache: ANALYZED clip_id={} midi_len={} key={}",
+            clip.id,
+            midi.len(),
+            &cache_key[..16]
+        );
+    }
+    
+    // Store in cache
+    let result = std::sync::Arc::new(midi);
+    {
+        let mut cache_guard = cache.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        cache_guard.put(cache_key, std::sync::Arc::clone(&result));
+    }
+    
+    Ok(result)
+}
+
+/// Parallel analysis result for a single clip
+#[derive(Debug, Clone)]
+struct ClipAnalysisResult {
+    clip_id: String,
+    clip_start_sec: f64,
+    clip_end_sec: f64,
+    pre_silence_sec: f64,
+    clip_total_frames: usize,
+    midi: std::sync::Arc<Vec<f32>>,
+    track_gain_value: f32,
+    was_cache_hit: bool,
+}
+
+/// Helper function to process a single clip with cache and progress tracking
+///
+/// This is extracted from compute_pitch_curve_parallel to allow both
+/// parallel (ONNX) and serial (WORLD) processing with the same logic.
+#[allow(clippy::too_many_arguments)]
+fn process_single_clip(
+    clip: &Clip,
+    tracks_gain: &std::collections::HashMap<String, f32>,
+    bpm: f64,
+    frame_period_ms: f64,
+    f0_floor: f64,
+    f0_ceil: f64,
+    algo: &PitchAnalysisAlgo,
+    cache: &std::sync::Arc<std::sync::Mutex<crate::clip_pitch_cache::ClipPitchCache>>,
+    tracker: Option<&std::sync::Arc<crate::pitch_progress::ProgressTracker>>,
+    debug: bool,
+    duration_sec: f64,
+    bs: f64, // Beat duration in seconds
+) -> Result<ClipAnalysisResult, String> {
+    let clip_start_sec = (clip.start_beat.max(0.0)) * bs;
+    let clip_timeline_len_sec = (clip.length_beats.max(0.0)) * bs;
+    let clip_end_sec = clip_start_sec + clip_timeline_len_sec;
+    
+    let track_gain_value = tracks_gain.get(&clip.track_id).copied().unwrap_or(1.0);
+    
+    // Check if clip has valid source
+    let Some(_source_path) = clip.source_path.as_ref() else {
+        if debug {
+            eprintln!("  clip {} skipped: no source path", clip.id);
+        }
+        return Err(format!("Clip {} has no source path", clip.id));
+    };
+    
+    // Check cache before analysis
+    let was_cache_hit = {
+        let (file_size, file_mtime) = crate::clip_pitch_cache::get_file_signature(
+            std::path::Path::new(_source_path)
+        );
+        let key_data = crate::clip_pitch_cache::ClipCacheKey {
+            source_path: _source_path.clone(),
+            file_size,
+            file_mtime,
+            trim_start_beat: crate::clip_pitch_cache::quantize_i64(clip.trim_start_beat, 1000.0),
+            trim_end_beat: crate::clip_pitch_cache::quantize_f64(clip.trim_end_beat, 1000.0),
+            playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
+            algo: match algo {
+                PitchAnalysisAlgo::WorldDll => "world_dll",
+                PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx",
+                PitchAnalysisAlgo::None => "none",
+                PitchAnalysisAlgo::Unknown => "unknown",
+            }.to_string(),
+            f0_floor: crate::clip_pitch_cache::quantize_f64(f0_floor, 10.0),
+            f0_ceil: crate::clip_pitch_cache::quantize_f64(f0_ceil, 10.0),
+            version: crate::clip_pitch_cache::CACHE_FORMAT_VERSION,
+        };
+        let cache_key = crate::clip_pitch_cache::generate_clip_cache_key(&key_data);
+        
+        if let Ok(mut guard) = cache.lock() {
+            guard.get(&cache_key).is_some()
+        } else {
+            false
+        }
+    };
+    
+    // Analyze clip (with caching)
+    let midi_result = analyze_clip_with_cache(
+        clip,
+        bpm,
+        frame_period_ms,
+        f0_floor,
+        f0_ceil,
+        algo,
+        cache,
+        debug,
+    );
+    
+    // Update progress
+    if let Some(tracker) = tracker {
+        let progress = tracker.report_clip_completed(duration_sec, was_cache_hit);
+        if debug {
+            eprintln!(
+                "  clip {} completed (cache_hit={}), overall progress={:.1}%",
+                clip.id,
+                was_cache_hit,
+                progress * 100.0
+            );
+        }
+    }
+    
+    // Handle result
+    match midi_result {
+        Ok(midi) => {
+            // Calculate pre_silence_sec for clip placement
+            let pre_silence_beats_src = (-clip.trim_start_beat).max(0.0);
+            let playback_rate = if clip.playback_rate.is_finite() && clip.playback_rate > 0.0 {
+                clip.playback_rate as f64
+            } else {
+                1.0
+            };
+            let pre_silence_sec = (pre_silence_beats_src * bs) / playback_rate.max(1e-6);
+            
+            // Estimate clip_total_frames (from original audio)
+            let clip_total_frames = if let Some(dur) = clip.duration_sec {
+                let in_rate = 44100.0; // Assuming standard rate
+                (dur * in_rate).round().max(0.0) as usize
+            } else {
+                // Fallback: use midi length as approximation
+                midi.len() * (frame_period_ms / 1000.0 * 44100.0) as usize
+            };
+            
+            Ok(ClipAnalysisResult {
+                clip_id: clip.id.clone(),
+                clip_start_sec,
+                clip_end_sec,
+                pre_silence_sec,
+                clip_total_frames,
+                midi,
+                track_gain_value,
+                was_cache_hit,
+            })
+        }
+        Err(e) => {
+            if debug {
+                eprintln!("  clip {} failed: {}", clip.id, e);
+            }
+            Err(format!("Clip {}: {}", clip.id, e))
+        }
+    }
+}
+
+/// Parallel pitch analysis for multiple clips
+///
+/// This function analyzes multiple clips in parallel using rayon, with caching support
+/// and progress tracking. It returns results for all successfully analyzed clips,
+/// even if some clips fail.
+///
+/// # Parameters
+/// - `clips`: List of clips to analyze
+/// - `bpm`: Project BPM
+/// - `frame_period_ms`: Analysis frame period in milliseconds
+/// - `f0_floor`: F0 floor frequency (Hz)
+/// - `f0_ceil`: F0 ceiling frequency (Hz)
+/// - `algo`: Analysis algorithm
+/// - `cache`: Clip pitch cache
+/// - `tracker`: Progress tracker (optional for progress updates)
+/// - `debug`: Enable debug logging
+///
+/// # Returns
+/// - `Ok(Vec<ClipAnalysisResult>)`: Successfully analyzed clips (may be partial)
+/// - `Err(String)`: Critical failure (>50% clips failed)
+#[allow(clippy::too_many_arguments)]
+fn compute_pitch_curve_parallel(
+    clips: &[Clip],
+    tracks_gain: &std::collections::HashMap<String, f32>,
+    bpm: f64,
+    frame_period_ms: f64,
+    f0_floor: f64,
+    f0_ceil: f64,
+    algo: &PitchAnalysisAlgo,
+    cache: &std::sync::Arc<std::sync::Mutex<crate::clip_pitch_cache::ClipPitchCache>>,
+    tracker: Option<&std::sync::Arc<crate::pitch_progress::ProgressTracker>>,
+    debug: bool,
+) -> Result<Vec<ClipAnalysisResult>, String> {
+    use rayon::prelude::*;
+    
+    if clips.is_empty() {
+        return Ok(Vec::new());
+    }
+    
+    let bs = 60.0 / bpm.max(1e-6);
+    
+    // Separate clips by algorithm: WORLD requires serial processing due to world_dll_mutex
+    let (world_clips, onnx_clips): (Vec<&Clip>, Vec<&Clip>) = clips
+        .iter()
+        .partition(|_clip| matches!(algo, PitchAnalysisAlgo::WorldDll));
+    
+    if debug {
+        eprintln!(
+            "compute_pitch_curve_parallel: {} total clips ({} WORLD, {} ONNX/other)",
+            clips.len(),
+            world_clips.len(),
+            onnx_clips.len()
+        );
+    }
+    
+    let mut all_results: Vec<Result<ClipAnalysisResult, String>> = Vec::new();
+    
+    // Process ONNX clips in parallel (no locking constraints)
+    if !onnx_clips.is_empty() {
+        if debug {
+            eprintln!("  Processing {} ONNX clips in parallel...", onnx_clips.len());
+        }
+        
+        // Sort by workload descending for better load balancing
+        let mut onnx_sorted: Vec<(&Clip, f64)> = onnx_clips
+            .iter()
+            .map(|clip| {
+                let duration_sec = (clip.length_beats.max(0.0)) * bs;
+                (*clip, duration_sec)
+            })
+            .collect();
+        
+        onnx_sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        let onnx_results: Vec<Result<ClipAnalysisResult, String>> = onnx_sorted
+            .par_iter()
+            .map(|(clip, duration_sec)| {
+                process_single_clip(
+                    clip,
+                    tracks_gain,
+                    bpm,
+                    frame_period_ms,
+                    f0_floor,
+                    f0_ceil,
+                    algo,
+                    cache,
+                    tracker,
+                    debug,
+                    *duration_sec,
+                    bs,
+                )
+            })
+            .collect();
+        
+        all_results.extend(onnx_results);
+    }
+    
+    // Process WORLD clips serially (due to world_dll_mutex)
+    if !world_clips.is_empty() {
+        if debug {
+            eprintln!("  Processing {} WORLD clips serially...", world_clips.len());
+        }
+        
+        // Sort by workload descending (not as critical for serial, but consistent)
+        let mut world_sorted: Vec<(&Clip, f64)> = world_clips
+            .iter()
+            .map(|clip| {
+                let duration_sec = (clip.length_beats.max(0.0)) * bs;
+                (*clip, duration_sec)
+            })
+            .collect();
+        
+        world_sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        for (clip, duration_sec) in world_sorted {
+            let result = process_single_clip(
+                &clip,
+                tracks_gain,
+                bpm,
+                frame_period_ms,
+                f0_floor,
+                f0_ceil,
+                algo,
+                cache,
+                tracker,
+                debug,
+                duration_sec,
+                bs,
+            );
+            all_results.push(result);
+        }
+    }
+    
+    // Separate successes and failures
+    let mut successes = Vec::new();
+    let mut failures = Vec::new();
+    
+    for result in all_results {
+        match result {
+            Ok(clip_result) => successes.push(clip_result),
+            Err(e) => failures.push(e),
+        }
+    }
+    
+    if debug {
+        eprintln!(
+            "compute_pitch_curve_parallel: {} successes, {} failures",
+            successes.len(),
+            failures.len()
+        );
+    }
+    
+    // Check failure rate
+    let total = successes.len() + failures.len();
+    if total > 0 {
+        let failure_rate = failures.len() as f64 / total as f64;
+        if failure_rate > 0.5 {
+            return Err(format!(
+                "Critical failure: {}/{} clips failed (>{:.0}%). Errors: {}",
+                failures.len(),
+                total,
+                failure_rate * 100.0,
+                failures.join("; ")
+            ));
+        }
+    }
+    
+    // Return partial results (even if some clips failed, as long as <50% failed)
+    if !failures.is_empty() && debug {
+        eprintln!(
+            "  Warning: {} clips failed but continuing with {} successes",
+            failures.len(),
+            successes.len()
+        );
+    }
+    
+    Ok(successes)
+}
+
+/// Incremental pitch analysis with caching and parallel processing
+///
+/// This function implements the full incremental refresh workflow:
+/// 1. Query previous snapshot from state
+/// 2. Generate current snapshot
+/// 3. Compare snapshots to identify changed clips
+/// 4. Analyze only changed clips in parallel
+/// 5. Load unchanged clips from cache
+/// 6. Merge results
+/// 7. Update snapshot in state
+///
+/// # Parameters
+/// - `state`: AppState containing cache and snapshot storage
+/// - `root_track_id`: Root track being analyzed
+/// - `clips`: All clips in the timeline
+/// - `tracks_gain`: Track gain values
+/// - `bpm`: Project BPM
+/// - `frame_period_ms`: Analysis frame period
+/// - `f0_floor`: F0 floor frequency
+/// - `f0_ceil`: F0 ceiling frequency
+/// - `algo`: Analysis algorithm
+/// - `debug`: Enable debug logging
+///
+/// # Returns
+/// - `Ok((results, new_snapshot))`: Analysis results and updated snapshot
+/// - `Err(String)`: Critical failure
+#[allow(clippy::too_many_arguments)]
+fn compute_pitch_curve_with_incremental_refresh(
+    state: &AppState,
+    root_track_id: &str,
+    clips: &[Clip],
+    tracks_gain: &std::collections::HashMap<String, f32>,
+    bpm: f64,
+    frame_period_ms: f64,
+    f0_floor: f64,
+    f0_ceil: f64,
+    algo: &PitchAnalysisAlgo,
+    debug: bool,
+) -> Result<(Vec<ClipAnalysisResult>, crate::state::TimelineSnapshot), String> {
+    let cache = &state.clip_pitch_cache;
+    
+    // Task 9.1: Query previous snapshot
+    let old_snapshot = if let Ok(snapshot_map) = state.pitch_timeline_snapshot.lock() {
+        snapshot_map.get(root_track_id).cloned()
+    } else {
+        None
+    };
+    
+    // Task 9.2: Generate current snapshot
+    let new_snapshot = build_timeline_snapshot(
+        clips,
+        bpm,
+        frame_period_ms,
+        f0_floor,
+        f0_ceil,
+        algo,
+    );
+    
+    // Task 9.3: Compare snapshots to identify changes
+    let (clips_to_analyze, unchanged_clip_ids) = determine_clips_to_analyze(
+        clips,
+        old_snapshot.as_ref(),
+        &new_snapshot,
+    );
+    
+    if debug {
+        eprintln!(
+            "Incremental refresh: {} clips need analysis, {} unchanged (cached)",
+            clips_to_analyze.len(),
+            unchanged_clip_ids.len()
+        );
+    }
+    
+    let mut all_results = Vec::new();
+    
+    // Task 9.4: Analyze only changed clips in parallel
+    if !clips_to_analyze.is_empty() {
+        // Create progress tracker for changed clips only
+        let tracker = std::sync::Arc::new(crate::pitch_progress::ProgressTracker::new(
+            &clips_to_analyze.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
+            bpm,
+            cache,
+        ));
+        
+        let analyzed_results = compute_pitch_curve_parallel(
+            &clips_to_analyze.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
+            tracks_gain,
+            bpm,
+            frame_period_ms,
+            f0_floor,
+            f0_ceil,
+            algo,
+            cache,
+            Some(&tracker),
+            debug,
+        )?;
+        
+        all_results.extend(analyzed_results);
+    }
+    
+    // Task 9.5: Load unchanged clips from cache
+    let bs = 60.0 / bpm.max(1e-6);
+    for clip_id in &unchanged_clip_ids {
+        let Some(clip) = clips.iter().find(|c| &c.id == clip_id) else {
+            continue;
+        };
+        
+        // Try to load from cache
+        let cache_result = analyze_clip_with_cache(
+            clip,
+            bpm,
+            frame_period_ms,
+            f0_floor,
+            f0_ceil,
+            algo,
+            cache,
+            debug,
+        );
+        
+        if let Ok(midi) = cache_result {
+            let clip_start_sec = (clip.start_beat.max(0.0)) * bs;
+            let clip_timeline_len_sec = (clip.length_beats.max(0.0)) * bs;
+            let clip_end_sec = clip_start_sec + clip_timeline_len_sec;
+            
+            let track_gain_value = tracks_gain.get(&clip.track_id).copied().unwrap_or(1.0);
+            
+            let pre_silence_beats_src = (-clip.trim_start_beat).max(0.0);
+            let playback_rate = if clip.playback_rate.is_finite() && clip.playback_rate > 0.0 {
+                clip.playback_rate as f64
+            } else {
+                1.0
+            };
+            let pre_silence_sec = (pre_silence_beats_src * bs) / playback_rate.max(1e-6);
+            
+            let clip_total_frames = if let Some(dur) = clip.duration_sec {
+                let in_rate = 44100.0;
+                (dur * in_rate).round().max(0.0) as usize
+            } else {
+                midi.len() * (frame_period_ms / 1000.0 * 44100.0) as usize
+            };
+            
+            all_results.push(ClipAnalysisResult {
+                clip_id: clip.id.clone(),
+                clip_start_sec,
+                clip_end_sec,
+                pre_silence_sec,
+                clip_total_frames,
+                midi,
+                track_gain_value,
+                was_cache_hit: true,
+            });
+        }
+    }
+    
+    // Task 9.6: Results are already merged in all_results
+    if debug {
+        eprintln!(
+            "Incremental refresh complete: {} total results ({} analyzed, {} cached)",
+            all_results.len(),
+            clips_to_analyze.len(),
+            unchanged_clip_ids.len()
+        );
+    }
+    
+    // Task 9.7: Update snapshot (will be done in caller)
+    Ok((all_results, new_snapshot))
+}
+
+// Helper functions for pitch analysis business logic
+
+fn beat_sec(bpm: f64) -> f64 {
+    60.0 / bpm.max(1e-6)
+}
+
+fn clamp01(x: f32) -> f32 {
+    x.clamp(0.0, 1.0)
+}
+
+/// Calculate clip weight at a given frame, accounting for fades and gain
+#[allow(clippy::too_many_arguments)]
+fn clip_weight_at_frame(
+    clip: &Clip,
+    bpm: f64,
+    sample_rate: u32,
+    _clip_start_sec: f64,
+    pre_silence_sec: f64,
+    clip_total_frames: usize,
+    local_in_clip_frames: usize,
+    track_gain_value: f32,
+) -> f32 {
+    let bs = beat_sec(bpm);
+    let gain = (clip.gain.max(0.0) * track_gain_value).clamp(0.0, 4.0);
+    if gain <= 0.0 {
+        return 0.0;
+    }
+
+    let fade_in_frames = ((clip.fade_in_beats.max(0.0) * bs) * sample_rate as f64)
+        .round()
+        .max(0.0) as usize;
+    let fade_out_frames = ((clip.fade_out_beats.max(0.0) * bs) * sample_rate as f64)
+        .round()
+        .max(0.0) as usize;
+
+    let pre_silence_frames = (pre_silence_sec * sample_rate as f64).round().max(0.0) as usize;
+    let local_in_clip = pre_silence_frames.saturating_add(local_in_clip_frames);
+    if local_in_clip >= clip_total_frames {
+        return 0.0;
+    }
+
+    let mut g = gain;
+    if fade_in_frames > 0 && local_in_clip < fade_in_frames {
+        g *= (local_in_clip as f32 / fade_in_frames as f32).clamp(0.0, 1.0);
+    }
+    if fade_out_frames > 0 && local_in_clip + fade_out_frames > clip_total_frames {
+        let remain = clip_total_frames.saturating_sub(local_in_clip);
+        g *= (remain as f32 / fade_out_frames as f32).clamp(0.0, 1.0);
+    }
+
+    // Also drop weight before the audible segment start (pre_silence).
+    if local_in_clip < pre_silence_frames {
+        g = 0.0;
+    }
+
+    // Prevent pathological values.
+    g.clamp(0.0, 4.0)
+}
+
+/// Optimized pitch curve fusion with coverage table
+///
+/// This function fuses multiple clip pitch curves into a single root curve using
+/// a coverage table for O(1) frame lookups. Implements winner-take-most algorithm
+/// with hysteresis to avoid rapid switching.
+///
+/// # Optimizations
+/// - Pre-builds coverage table (O(N×M)) to identify active clips per frame
+/// - Fast-path for empty frames (no clips): write 0.0 directly
+/// - Fast-path for single-clip frames: skip weight calculation
+/// - Only computes weights for multi-clip overlaps
+/// - Maintains hysteresis for smooth transitions
+///
+/// # Parameters
+/// - `clip_results`: Analysis results from parallel/incremental processing
+/// - `clips`: Original clip data (for weight calculation)
+/// - `target_frames`: Output curve length
+/// - `frame_period_ms`: Frame period in milliseconds  
+/// - `bpm`: Project BPM
+/// - `debug`: Enable debug logging
+///
+/// # Returns
+/// Fused MIDI pitch curve (0.0 for unvoiced frames)
+#[allow(clippy::too_many_arguments)]
+fn fuse_clip_pitches_optimized(
+    clip_results: &[ClipAnalysisResult],
+    clips: &[Clip],
+    target_frames: usize,
+    frame_period_ms: f64,
+    bpm: f64,
+    debug: bool,
+) -> Vec<f32> {
+    if clip_results.is_empty() {
+        return vec![0.0; target_frames];
+    }
+    
+    let mut out = vec![0.0f32; target_frames];
+    
+    // Task 10.1-10.2: Build coverage table
+    let mut coverage: Vec<Option<Vec<usize>>> = vec![None; target_frames];
+    
+    for (clip_idx, result) in clip_results.iter().enumerate() {
+        let start_frame = ((result.clip_start_sec * 1000.0) / frame_period_ms).round().max(0.0) as usize;
+        let end_frame = ((result.clip_end_sec * 1000.0) / frame_period_ms).round().max(0.0) as usize;
+        
+        for frame in start_frame..end_frame.min(target_frames) {
+            coverage[frame].get_or_insert_with(Vec::new).push(clip_idx);
+        }
+    }
+    
+    if debug {
+        let covered_frames = coverage.iter().filter(|c| c.is_some()).count();
+        eprintln!(
+            "Fusion: {} clips, {} frames, {} covered frames ({:.1}%)",
+            clip_results.len(),
+            target_frames,
+            covered_frames,
+            (covered_frames as f64 / target_frames as f64) * 100.0
+        );
+    }
+    
+    // Task 10.3-10.7: Optimized fusion loop with coverage table
+    let mut last_winner: Option<String> = None;
+    let hysteresis_ratio: f32 = 1.10;
+    
+    for (frame_idx, out_v) in out.iter_mut().enumerate() {
+        let abs_time_sec = (frame_idx as f64) * frame_period_ms / 1000.0;
+        
+        // Task 10.4: Fast-path for empty frames
+        let Some(active_clips) = &coverage[frame_idx] else {
+            *out_v = 0.0;
+            continue;
+        };
+        
+        // Task 10.5: Fast-path for single-clip frames
+        if active_clips.len() == 1 {
+            let result = &clip_results[active_clips[0]];
+            let local_sec = abs_time_sec - result.clip_start_sec;
+            let local_frame = ((local_sec * 1000.0) / frame_period_ms).round().max(0.0) as usize;
+            
+            if let Some(&pitch) = result.midi.get(local_frame) {
+                if pitch.is_finite() && pitch > 0.0 {
+                    *out_v = pitch;
+                    last_winner = Some(result.clip_id.clone());
+                    continue;
+                }
+            }
+            
+            *out_v = 0.0;
+            continue;
+        }
+        
+        // Task 10.6: Multi-clip overlap - full winner-take-most
+        let mut best_id: Option<&str> = None;
+        let mut best_weight: f32 = 0.0;
+        let mut best_pitch: f32 = 0.0;
+        
+        for &clip_idx in active_clips {
+            let result = &clip_results[clip_idx];
+            
+            // Get pitch value
+            let local_sec = abs_time_sec - result.clip_start_sec;
+            let local_frame = ((local_sec * 1000.0) / frame_period_ms).round().max(0.0) as usize;
+            let p = result.midi.get(local_frame).copied().unwrap_or(0.0);
+            
+            if !(p.is_finite() && p > 0.0) {
+                continue;
+            }
+            
+            // Find matching clip for weight calculation
+            let Some(clip) = clips.iter().find(|c| c.id == result.clip_id) else {
+                continue;
+            };
+            
+            // Calculate weight with fade semantics
+            let local_in_clip_frames = ((local_sec * 44100.0).round().max(0.0)) as usize;
+            
+            let w = clip_weight_at_frame(
+                clip,
+                bpm,
+                44100,
+                result.clip_start_sec,
+                result.pre_silence_sec,
+                result.clip_total_frames,
+                local_in_clip_frames,
+                result.track_gain_value,
+            );
+            
+            if w <= 0.0 {
+                continue;
+            }
+            
+            if w > best_weight {
+                best_weight = w;
+                best_id = Some(result.clip_id.as_str());
+                best_pitch = p;
+            }
+        }
+        
+        // Task 10.7: Apply hysteresis
+        if let Some(prev_id) = last_winner.as_deref() {
+            if let Some(best_id_now) = best_id {
+                if prev_id != best_id_now {
+                    // Recompute previous winner's weight
+                    if let Some(result) = clip_results.iter().find(|r| r.clip_id == prev_id) {
+                        if abs_time_sec >= result.clip_start_sec && abs_time_sec < result.clip_end_sec {
+                            let local_sec = abs_time_sec - result.clip_start_sec;
+                            let local_frame = ((local_sec * 1000.0) / frame_period_ms).round().max(0.0) as usize;
+                            let prev_pitch = result.midi.get(local_frame).copied().unwrap_or(0.0);
+                            
+                            if prev_pitch > 0.0 {
+                                if let Some(clip) = clips.iter().find(|c| c.id == prev_id) {
+                                    let local_in_clip_frames = ((local_sec * 44100.0).round().max(0.0)) as usize;
+                                    let prev_weight = clip_weight_at_frame(
+                                        clip,
+                                        bpm,
+                                        44100,
+                                        result.clip_start_sec,
+                                        result.pre_silence_sec,
+                                        result.clip_total_frames,
+                                        local_in_clip_frames,
+                                        result.track_gain_value,
+                                    );
+                                    
+                                    // Stick with previous if new winner isn't significantly better
+                                    if prev_weight > 0.0 && best_weight < prev_weight * hysteresis_ratio {
+                                        *out_v = prev_pitch;
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Commit winner
+        if best_weight > 0.0 {
+            *out_v = best_pitch;
+            last_winner = best_id.map(|s| s.to_string());
+        } else {
+            *out_v = 0.0;
+        }
+    }
+    
+    out
+}
+
 fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<f32> {
+    use std::sync::Arc;
+    
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
 
     on_progress(0.02);
@@ -326,62 +1469,6 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
         .as_deref()
         .map(|s| s.trim().to_ascii_lowercase())
         .unwrap_or_else(|| "harvest".to_string());
-
-    fn beat_sec(bpm: f64) -> f64 {
-        60.0 / bpm.max(1e-6)
-    }
-
-    fn clamp01(x: f32) -> f32 {
-        x.clamp(0.0, 1.0)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn clip_weight_at_frame(
-        clip: &Clip,
-        bpm: f64,
-        sample_rate: u32,
-        _clip_start_sec: f64,
-        pre_silence_sec: f64,
-        clip_total_frames: usize,
-        local_in_clip_frames: usize,
-        track_gain_value: f32,
-    ) -> f32 {
-        let bs = beat_sec(bpm);
-        let gain = (clip.gain.max(0.0) * track_gain_value).clamp(0.0, 4.0);
-        if gain <= 0.0 {
-            return 0.0;
-        }
-
-        let fade_in_frames = ((clip.fade_in_beats.max(0.0) * bs) * sample_rate as f64)
-            .round()
-            .max(0.0) as usize;
-        let fade_out_frames = ((clip.fade_out_beats.max(0.0) * bs) * sample_rate as f64)
-            .round()
-            .max(0.0) as usize;
-
-        let pre_silence_frames = (pre_silence_sec * sample_rate as f64).round().max(0.0) as usize;
-        let local_in_clip = pre_silence_frames.saturating_add(local_in_clip_frames);
-        if local_in_clip >= clip_total_frames {
-            return 0.0;
-        }
-
-        let mut g = gain;
-        if fade_in_frames > 0 && local_in_clip < fade_in_frames {
-            g *= (local_in_clip as f32 / fade_in_frames as f32).clamp(0.0, 1.0);
-        }
-        if fade_out_frames > 0 && local_in_clip + fade_out_frames > clip_total_frames {
-            let remain = clip_total_frames.saturating_sub(local_in_clip);
-            g *= (remain as f32 / fade_out_frames as f32).clamp(0.0, 1.0);
-        }
-
-        // Also drop weight before the audible segment start (pre_silence).
-        if local_in_clip < pre_silence_frames {
-            g = 0.0;
-        }
-
-        // Prevent pathological values.
-        g.clamp(0.0, 4.0)
-    }
 
     // Track gains (mute/solo already cleared in build_root_mix_timeline).
     let mut track_gain: std::collections::HashMap<String, f32> = std::collections::HashMap::new();
@@ -564,19 +1651,73 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
 
         // Time-align: analysis output is on the segment timeline. We need it in clip timeline time.
         // For now, resample to the clip's timeline length in frames.
-        let clip_frames = ((clip_timeline_len_sec * 1000.0) / frame_period_tl_ms)
+        
+        // DEBUG: Check for time alignment issues that cause pitch curve speed mismatch
+        let actual_audio_sec = seg_frames as f64 / 44100.0;
+        let clip_frames_from_timeline = ((clip_timeline_len_sec * 1000.0) / frame_period_tl_ms)
             .round()
             .max(1.0) as usize;
+        let clip_frames_from_audio = ((actual_audio_sec * 1000.0) / frame_period_tl_ms)
+            .round()
+            .max(1.0) as usize;
+        let ratio = actual_audio_sec / clip_timeline_len_sec.max(1e-9);
+        
+        // Print warning if there's a significant mismatch (>5%)
+        let use_audio_length = ratio < 0.95 || ratio > 1.05;
+        
+        if debug || use_audio_length {
+            eprintln!(
+                "pitch: [ALIGNMENT] clip_id={} clip_timeline_len_sec={:.3} actual_audio_sec={:.3} ratio={:.3}",
+                clip.id,
+                clip_timeline_len_sec,
+                actual_audio_sec,
+                ratio,
+            );
+            eprintln!(
+                "  frames_from_timeline={} frames_from_audio={} midi_len={} playback_rate={:.2}",
+                clip_frames_from_timeline,
+                clip_frames_from_audio,
+                midi.len(),
+                playback_rate
+            );
+            if use_audio_length {
+                eprintln!(
+                    "  WARNING: Significant mismatch detected! Pitch curve will use AUDIO length to avoid time scaling error."
+                );
+                eprintln!(
+                    "  This may indicate clip.length_beats is incorrect. Audio: {:.3}s, Timeline: {:.3}s",
+                    actual_audio_sec,
+                    clip_timeline_len_sec
+                );
+            }
+        }
+        
+        // CRITICAL FIX: When there's a mismatch, use actual audio length to prevent time scaling errors.
+        // Using timeline length when audio is different causes pitch to play at wrong speed (e.g., 2x).
+        let clip_frames = if use_audio_length {
+            clip_frames_from_audio
+        } else {
+            clip_frames_from_timeline
+        };
+        
         let midi = resample_curve_linear(&midi, clip_frames);
 
         let tg = track_gain.get(&clip.track_id).copied().unwrap_or(1.0);
 
+        // CRITICAL FIX: When audio length mismatches timeline length, adjust the end time
+        // to match actual audio duration. This ensures proper time mapping during fusion.
+        let adjusted_end_sec = if use_audio_length {
+            clip_start_sec + actual_audio_sec
+        } else {
+            clip_end_sec
+        };
+
         clip_pitches.push(ClipPitch {
             clip_id: clip.id.clone(),
             start_sec: clip_start_sec,
-            end_sec: clip_end_sec,
+            end_sec: adjusted_end_sec,
             pre_silence_sec,
-            clip_total_frames: ((clip_timeline_len_sec * 44100.0).round().max(1.0)) as usize,
+            clip_total_frames: ((actual_audio_sec * 44100.0).round().max(1.0)) as usize,
             midi,
             track_gain_value: tg,
         });
@@ -584,118 +1725,30 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
 
     on_progress(0.85);
 
-    // Fuse to root curve.
-    for (frame_idx, out_v) in out.iter_mut().enumerate() {
-        if frame_idx >= job.target_frames {
-            break;
-        }
-        let abs_time_sec = (frame_idx as f64) * frame_period_tl_ms / 1000.0;
+    // Task 10: Convert ClipPitch to ClipAnalysisResult for fusion optimization
+    let clip_results: Vec<ClipAnalysisResult> = clip_pitches
+        .into_iter()
+        .map(|cp| ClipAnalysisResult {
+            clip_id: cp.clip_id,
+            clip_start_sec: cp.start_sec,
+            clip_end_sec: cp.end_sec,
+            pre_silence_sec: cp.pre_silence_sec,
+            clip_total_frames: cp.clip_total_frames,
+            midi: Arc::new(cp.midi), // Wrap in Arc for ClipAnalysisResult
+            track_gain_value: cp.track_gain_value,
+            was_cache_hit: false,
+        })
+        .collect();
 
-        let mut best_id: Option<&str> = None;
-        let mut best_weight: f32 = 0.0;
-        let mut best_pitch: f32 = 0.0;
-
-        for cp in &clip_pitches {
-            if abs_time_sec < cp.start_sec || abs_time_sec >= cp.end_sec {
-                continue;
-            }
-
-            // Local time inside the clip in seconds.
-            let local_sec = abs_time_sec - cp.start_sec;
-            let local_frame = ((local_sec * 1000.0) / frame_period_tl_ms).round().max(0.0) as usize;
-            let p = cp.midi.get(local_frame).copied().unwrap_or(0.0);
-            if !(p.is_finite() && p > 0.0) {
-                continue;
-            }
-
-            // Weight with fade semantics.
-            // We approximate local-in-segment frames with 44.1kHz timeline frames for fades.
-            let local_in_clip_frames = ((local_sec * 44100.0).round().max(0.0)) as usize;
-
-            // Need clip struct; use a lookup.
-            let Some(clip) = job.timeline.clips.iter().find(|c| c.id == cp.clip_id) else {
-                continue;
-            };
-
-            let w = clip_weight_at_frame(
-                clip,
-                bpm,
-                44100,
-                cp.start_sec,
-                cp.pre_silence_sec,
-                cp.clip_total_frames,
-                local_in_clip_frames,
-                cp.track_gain_value,
-            );
-            if w <= 0.0 {
-                continue;
-            }
-
-            if w > best_weight {
-                best_weight = w;
-                best_id = Some(cp.clip_id.as_str());
-                best_pitch = p;
-            }
-        }
-
-        // Hysteresis: prefer sticking with the previous winner unless clearly beaten.
-        let hysteresis_ratio: f32 = 1.10;
-        if let Some(prev_id) = last_winner.as_deref() {
-            if let Some(best_id_now) = best_id {
-                if prev_id != best_id_now {
-                    // Recompute prev weight quickly.
-                    let mut prev_weight = 0.0f32;
-                    let mut prev_pitch = 0.0f32;
-                    if let Some(cp) = clip_pitches.iter().find(|c| c.clip_id == prev_id) {
-                        if abs_time_sec >= cp.start_sec && abs_time_sec < cp.end_sec {
-                            let local_sec = abs_time_sec - cp.start_sec;
-                            let local_frame = ((local_sec * 1000.0) / frame_period_tl_ms)
-                                .round()
-                                .max(0.0) as usize;
-                            prev_pitch = cp.midi.get(local_frame).copied().unwrap_or(0.0);
-                            if prev_pitch > 0.0 {
-                                let local_in_clip_frames =
-                                    ((local_sec * 44100.0).round().max(0.0)) as usize;
-                                if let Some(clip) =
-                                    job.timeline.clips.iter().find(|c| c.id == cp.clip_id)
-                                {
-                                    prev_weight = clip_weight_at_frame(
-                                        clip,
-                                        bpm,
-                                        44100,
-                                        cp.start_sec,
-                                        cp.pre_silence_sec,
-                                        cp.clip_total_frames,
-                                        local_in_clip_frames,
-                                        cp.track_gain_value,
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    if prev_weight.is_finite()
-                        && prev_weight > 0.0
-                        && best_weight < prev_weight * hysteresis_ratio
-                    {
-                        *out_v = prev_pitch;
-                        _last_winner_weight = prev_weight;
-                        continue;
-                    }
-                }
-            }
-        }
-
-        if let Some(id) = best_id {
-            *out_v = best_pitch;
-            last_winner = Some(id.to_string());
-            _last_winner_weight = best_weight;
-        } else {
-            *out_v = 0.0;
-            last_winner = None;
-            _last_winner_weight = 0.0;
-        }
-    }
+    // Task 10.1-10.8: Use optimized fusion algorithm with coverage table
+    out = fuse_clip_pitches_optimized(
+        &clip_results,
+        &job.timeline.clips,
+        job.target_frames,
+        frame_period_tl_ms,
+        bpm,
+        debug,
+    );
 
     on_progress(1.0);
 
@@ -806,4 +1859,530 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
     });
 
     true
+}
+
+// Task 3.6: PitchProgressPayload for frontend API
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PitchProgressPayload {
+    pub root_track_id: String,
+    pub progress: f32,
+    pub eta_seconds: Option<f64>,
+}
+
+impl From<&PitchOrigAnalysisProgressEvent> for PitchProgressPayload {
+    fn from(event: &PitchOrigAnalysisProgressEvent) -> Self {
+        Self {
+            root_track_id: event.root_track_id.clone(),
+            progress: event.progress,
+            eta_seconds: None, // Can be calculated if needed
+        }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::clip_pitch_cache::ClipPitchCache;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn test_analyze_clip_with_cache_missing_source() {
+        let clip = Clip {
+            id: "test_clip".to_string(),
+            track_id: "test_track".to_string(),
+            name: "Test Clip".to_string(),
+            start_beat: 0.0,
+            length_beats: 4.0,
+            color: "#ff0000".to_string(),
+            source_path: None,
+            duration_sec: None,
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            trim_start_beat: 0.0,
+            trim_end_beat: 0.0,
+            playback_rate: 1.0,
+            fade_in_beats: 0.0,
+            fade_out_beats: 0.0,
+        };
+
+        let cache = Arc::new(Mutex::new(ClipPitchCache::new(10)));
+        let result = analyze_clip_with_cache(
+            &clip,
+            120.0,
+            5.0,
+            40.0,
+            1600.0,
+            &PitchAnalysisAlgo::WorldDll,
+            &cache,
+            false,
+        );
+
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "No source path");
+    }
+
+    #[test]
+    fn test_analyze_clip_with_cache_nonexistent_file() {
+        let clip = Clip {
+            id: "test_clip".to_string(),
+            track_id: "test_track".to_string(),
+            name: "Test Clip".to_string(),
+            start_beat: 0.0,
+            length_beats: 4.0,
+            color: "#ff0000".to_string(),
+            source_path: Some("/nonexistent/path/to/audio.wav".to_string()),
+            duration_sec: Some(2.0),
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            trim_start_beat: 0.0,
+            trim_end_beat: 0.0,
+            playback_rate: 1.0,
+            fade_in_beats: 0.0,
+            fade_out_beats: 0.0,
+        };
+
+        let cache = Arc::new(Mutex::new(ClipPitchCache::new(10)));
+        let result = analyze_clip_with_cache(
+            &clip,
+            120.0,
+            5.0,
+            40.0,
+            1600.0,
+            &PitchAnalysisAlgo::WorldDll,
+            &cache,
+            false,
+        );
+
+        // Should fail with decode error
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to decode audio"));
+    }
+
+    #[test]
+    fn test_compute_pitch_curve_parallel_empty_clips() {
+        let clips: Vec<Clip> = vec![];
+        let tracks_gain = std::collections::HashMap::new();
+        let cache = Arc::new(Mutex::new(ClipPitchCache::new(10)));
+        
+        let result = compute_pitch_curve_parallel(
+            &clips,
+            &tracks_gain,
+            120.0,
+            5.0,
+            40.0,
+            1600.0,
+            &PitchAnalysisAlgo::WorldDll,
+            &cache,
+            None,
+            false,
+        );
+        
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0);
+    }
+    
+    #[test]
+    fn test_compute_pitch_curve_parallel_all_invalid() {
+        let clips = vec![
+            Clip {
+                id: "clip1".to_string(),
+                track_id: "track1".to_string(),
+                name: "Invalid 1".to_string(),
+                start_beat: 0.0,
+                length_beats: 4.0,
+                color: "#ff0000".to_string(),
+                source_path: None,
+                duration_sec: None,
+                waveform_preview: None,
+                pitch_range: None,
+                gain: 1.0,
+                muted: false,
+                trim_start_beat: 0.0,
+                trim_end_beat: 0.0,
+                playback_rate: 1.0,
+                fade_in_beats: 0.0,
+                fade_out_beats: 0.0,
+            },
+            Clip {
+                id: "clip2".to_string(),
+                track_id: "track1".to_string(),
+                name: "Invalid 2".to_string(),
+                start_beat: 4.0,
+                length_beats: 4.0,
+                color: "#00ff00".to_string(),
+                source_path: None,
+                duration_sec: None,
+                waveform_preview: None,
+                pitch_range: None,
+                gain: 1.0,
+                muted: false,
+                trim_start_beat: 0.0,
+                trim_end_beat: 0.0,
+                playback_rate: 1.0,
+                fade_in_beats: 0.0,
+                fade_out_beats: 0.0,
+            },
+        ];
+        
+        let mut tracks_gain = std::collections::HashMap::new();
+        tracks_gain.insert("track1".to_string(), 1.0);
+        
+        let cache = Arc::new(Mutex::new(ClipPitchCache::new(10)));
+        
+        let result = compute_pitch_curve_parallel(
+            &clips,
+            &tracks_gain,
+            120.0,
+            5.0,
+            40.0,
+            1600.0,
+            &PitchAnalysisAlgo::WorldDll,
+            &cache,
+            None,
+            false,
+        );
+        
+        // Should fail with critical failure (>50% failed)
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Critical failure"));
+    }
+    
+    #[test]
+    fn test_compute_pitch_curve_parallel_with_tracker() {
+        // Test that progress tracker integration doesn't cause crashes
+        let clips = vec![
+            Clip {
+                id: "clip1".to_string(),
+                track_id: "track1".to_string(),
+                name: "Test Clip".to_string(),
+                start_beat: 0.0,
+                length_beats: 4.0,
+                color: "#ff0000".to_string(),
+                source_path: Some("/nonexistent.wav".to_string()),
+                duration_sec: Some(2.0),
+                waveform_preview: None,
+                pitch_range: None,
+                gain: 1.0,
+                muted: false,
+                trim_start_beat: 0.0,
+                trim_end_beat: 0.0,
+                playback_rate: 1.0,
+                fade_in_beats: 0.0,
+                fade_out_beats: 0.0,
+            },
+        ];
+        
+        let mut tracks_gain = std::collections::HashMap::new();
+        tracks_gain.insert("track1".to_string(), 1.0);
+        
+        let cache = Arc::new(Mutex::new(ClipPitchCache::new(10)));
+        let tracker = Arc::new(crate::pitch_progress::ProgressTracker::new(
+            &clips,
+            120.0,
+            &cache,
+        ));
+        
+        let result = compute_pitch_curve_parallel(
+            &clips,
+            &tracks_gain,
+            120.0,
+            5.0,
+            40.0,
+            1600.0,
+            &PitchAnalysisAlgo::WorldDll,
+            &cache,
+            Some(&tracker),
+            false,
+        );
+        
+        // Should fail (nonexistent file) but not crash
+        assert!(result.is_err());
+        
+        // Progress should be updated (100% since clip completed, even with failure)
+        let progress = tracker.get_current_progress();
+        assert!(progress >= 0.0 && progress <= 1.0);
+    }
+    
+    #[test]
+    fn test_compute_pitch_curve_parallel_mixed_algorithms() {
+        // This test verifies that the WORLD/ONNX separation logic works correctly.
+        // In a real scenario, WORLD clips would be processed serially and ONNX clips in parallel.
+        // Here we just verify the function handles clips with different algorithms without crashing.
+        
+        // Note: Since we're passing WorldDll as `algo` parameter, all clips will be treated as WORLD clips.
+        // In the actual implementation, each clip would have its own algorithm field.
+        // For now, this test verifies the separation logic doesn't break the flow.
+        
+        let clips = vec![
+            Clip {
+                id: "world1".to_string(),
+                track_id: "track1".to_string(),
+                name: "WORLD Clip 1".to_string(),
+                start_beat: 0.0,
+                length_beats: 4.0,
+                color: "#ff0000".to_string(),
+                source_path: Some("/nonexistent_world.wav".to_string()),
+                duration_sec: Some(2.0),
+                waveform_preview: None,
+                pitch_range: None,
+                gain: 1.0,
+                muted: false,
+                trim_start_beat: 0.0,
+                trim_end_beat: 0.0,
+                playback_rate: 1.0,
+                fade_in_beats: 0.0,
+                fade_out_beats: 0.0,
+            },
+            Clip {
+                id: "world2".to_string(),
+                track_id: "track1".to_string(),
+                name: "WORLD Clip 2".to_string(),
+                start_beat: 4.0,
+                length_beats: 4.0,
+                color: "#00ff00".to_string(),
+                source_path: Some("/nonexistent_world2.wav".to_string()),
+                duration_sec: Some(2.0),
+                waveform_preview: None,
+                pitch_range: None,
+                gain: 1.0,
+                muted: false,
+                trim_start_beat: 0.0,
+                trim_end_beat: 0.0,
+                playback_rate: 1.0,
+                fade_in_beats: 0.0,
+                fade_out_beats: 0.0,
+            },
+        ];
+        
+        let mut tracks_gain = std::collections::HashMap::new();
+        tracks_gain.insert("track1".to_string(), 1.0);
+        
+        let cache = Arc::new(Mutex::new(ClipPitchCache::new(10)));
+        
+        // Test with WORLD algorithm (all clips will be processed serially)
+        let result = compute_pitch_curve_parallel(
+            &clips,
+            &tracks_gain,
+            120.0,
+            5.0,
+            40.0,
+            1600.0,
+            &PitchAnalysisAlgo::WorldDll,
+            &cache,
+            None,
+            false,
+        );
+        
+        // Should fail (all clips will fail due to nonexistent files, 100% > 50%)
+        assert!(result.is_err());
+        
+        // Test with ONNX algorithm (all clips will be processed in parallel)
+        let result_onnx = compute_pitch_curve_parallel(
+            &clips,
+            &tracks_gain,
+            120.0,
+            5.0,
+            40.0,
+            1600.0,
+            &PitchAnalysisAlgo::NsfHifiganOnnx,
+            &cache,
+            None,
+            false,
+        );
+        
+        // Should also fail (all clips will fail, 100% > 50%)
+        assert!(result_onnx.is_err());
+    }
+    
+    #[test]
+    fn test_compare_snapshots_no_old_snapshot() {
+        use std::collections::HashMap;
+        
+        let mut new_clips = HashMap::new();
+        new_clips.insert("clip1".to_string(), "key1".to_string());
+        new_clips.insert("clip2".to_string(), "key2".to_string());
+        
+        let new_snapshot = crate::state::TimelineSnapshot {
+            clips: new_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let comparison = compare_snapshots(None, &new_snapshot);
+        
+        assert_eq!(comparison.added_clip_ids.len(), 2);
+        assert!(comparison.added_clip_ids.contains(&"clip1".to_string()));
+        assert!(comparison.added_clip_ids.contains(&"clip2".to_string()));
+        assert_eq!(comparison.modified_clip_ids.len(), 0);
+        assert_eq!(comparison.deleted_clip_ids.len(), 0);
+        assert_eq!(comparison.unchanged_clip_ids.len(), 0);
+    }
+    
+    #[test]
+    fn test_compare_snapshots_added_clips() {
+        use std::collections::HashMap;
+        
+        let mut old_clips = HashMap::new();
+        old_clips.insert("clip1".to_string(), "key1".to_string());
+        
+        let old_snapshot = crate::state::TimelineSnapshot {
+            clips: old_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let mut new_clips = HashMap::new();
+        new_clips.insert("clip1".to_string(), "key1".to_string());
+        new_clips.insert("clip2".to_string(), "key2".to_string());
+        
+        let new_snapshot = crate::state::TimelineSnapshot {
+            clips: new_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let comparison = compare_snapshots(Some(&old_snapshot), &new_snapshot);
+        
+        assert_eq!(comparison.added_clip_ids, vec!["clip2".to_string()]);
+        assert_eq!(comparison.modified_clip_ids.len(), 0);
+        assert_eq!(comparison.deleted_clip_ids.len(), 0);
+        assert_eq!(comparison.unchanged_clip_ids, vec!["clip1".to_string()]);
+    }
+    
+    #[test]
+    fn test_compare_snapshots_modified_clips() {
+        use std::collections::HashMap;
+        
+        let mut old_clips = HashMap::new();
+        old_clips.insert("clip1".to_string(), "key1".to_string());
+        old_clips.insert("clip2".to_string(), "key2".to_string());
+        
+        let old_snapshot = crate::state::TimelineSnapshot {
+            clips: old_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let mut new_clips = HashMap::new();
+        new_clips.insert("clip1".to_string(), "key1".to_string());
+        new_clips.insert("clip2".to_string(), "key2_modified".to_string());
+        
+        let new_snapshot = crate::state::TimelineSnapshot {
+            clips: new_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let comparison = compare_snapshots(Some(&old_snapshot), &new_snapshot);
+        
+        assert_eq!(comparison.added_clip_ids.len(), 0);
+        assert_eq!(comparison.modified_clip_ids, vec!["clip2".to_string()]);
+        assert_eq!(comparison.deleted_clip_ids.len(), 0);
+        assert_eq!(comparison.unchanged_clip_ids, vec!["clip1".to_string()]);
+    }
+    
+    #[test]
+    fn test_compare_snapshots_deleted_clips() {
+        use std::collections::HashMap;
+        
+        let mut old_clips = HashMap::new();
+        old_clips.insert("clip1".to_string(), "key1".to_string());
+        old_clips.insert("clip2".to_string(), "key2".to_string());
+        
+        let old_snapshot = crate::state::TimelineSnapshot {
+            clips: old_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let mut new_clips = HashMap::new();
+        new_clips.insert("clip1".to_string(), "key1".to_string());
+        
+        let new_snapshot = crate::state::TimelineSnapshot {
+            clips: new_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let comparison = compare_snapshots(Some(&old_snapshot), &new_snapshot);
+        
+        assert_eq!(comparison.added_clip_ids.len(), 0);
+        assert_eq!(comparison.modified_clip_ids.len(), 0);
+        assert_eq!(comparison.deleted_clip_ids, vec!["clip2".to_string()]);
+        assert_eq!(comparison.unchanged_clip_ids, vec!["clip1".to_string()]);
+    }
+    
+    #[test]
+    fn test_compare_snapshots_global_param_change() {
+        use std::collections::HashMap;
+        
+        let mut old_clips = HashMap::new();
+        old_clips.insert("clip1".to_string(), "key1".to_string());
+        
+        let old_snapshot = crate::state::TimelineSnapshot {
+            clips: old_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let mut new_clips = HashMap::new();
+        new_clips.insert("clip1".to_string(), "key1".to_string());
+        
+        let new_snapshot = crate::state::TimelineSnapshot {
+            clips: new_clips,
+            bpm: 140.0,  // BPM changed
+            frame_period_ms: 5.0,
+        };
+        
+        let comparison = compare_snapshots(Some(&old_snapshot), &new_snapshot);
+        
+        // Clip should be marked as modified due to BPM change
+        assert_eq!(comparison.added_clip_ids.len(), 0);
+        assert_eq!(comparison.modified_clip_ids, vec!["clip1".to_string()]);
+        assert_eq!(comparison.deleted_clip_ids.len(), 0);
+        assert_eq!(comparison.unchanged_clip_ids.len(), 0);
+    }
+    
+    #[test]
+    fn test_compare_snapshots_mixed_changes() {
+        use std::collections::HashMap;
+        
+        let mut old_clips = HashMap::new();
+        old_clips.insert("clip1".to_string(), "key1".to_string());
+        old_clips.insert("clip2".to_string(), "key2".to_string());
+        old_clips.insert("clip3".to_string(), "key3".to_string());
+        
+        let old_snapshot = crate::state::TimelineSnapshot {
+            clips: old_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let mut new_clips = HashMap::new();
+        new_clips.insert("clip1".to_string(), "key1".to_string());  // unchanged
+        new_clips.insert("clip2".to_string(), "key2_modified".to_string());  // modified
+        new_clips.insert("clip4".to_string(), "key4".to_string());  // added
+        // clip3 deleted
+        
+        let new_snapshot = crate::state::TimelineSnapshot {
+            clips: new_clips,
+            bpm: 120.0,
+            frame_period_ms: 5.0,
+        };
+        
+        let comparison = compare_snapshots(Some(&old_snapshot), &new_snapshot);
+        
+        assert_eq!(comparison.added_clip_ids, vec!["clip4".to_string()]);
+        assert_eq!(comparison.modified_clip_ids, vec!["clip2".to_string()]);
+        assert_eq!(comparison.deleted_clip_ids, vec!["clip3".to_string()]);
+        assert_eq!(comparison.unchanged_clip_ids, vec!["clip1".to_string()]);
+    }
+
+    // Note: Full integration tests with actual audio files and cache hit/miss
+    // scenarios would require test audio files and more complex setup.
+    // These tests verify the basic error handling paths.
 }

@@ -48,11 +48,17 @@ pub(crate) fn spawn_stretch_stream(
     thread::spawn(move || {
         let pr = playback_rate;
         let time_ratio = 1.0 / pr.max(1e-6);
+        eprintln!("[StretchStream] Starting worker: playback_rate={:.3}, time_ratio={:.6}", pr, time_ratio);
+        eprintln!("[StretchStream] Interpretation: playback_rate={:.3}x means audio plays {:.3}x faster", pr, pr);
+        eprintln!("[StretchStream] Rubberband time_ratio={:.6} means stretched duration is {:.6}x original", time_ratio, time_ratio);
         let mut rb = match crate::rubberband::RubberBandRealtimeStretcher::new(
             out_rate, 2, time_ratio,
         ) {
             Ok(v) => v,
-            Err(_) => return,
+            Err(e) => {
+                eprintln!("[StretchStream ERROR] Failed to create RubberBand: {}", e);
+                return;
+            },
         };
 
         let src_pcm = src.pcm.as_slice();

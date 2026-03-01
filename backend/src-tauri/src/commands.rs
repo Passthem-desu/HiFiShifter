@@ -25,6 +25,12 @@ mod synth;
 mod timeline;
 #[path = "commands/waveform.rs"]
 mod waveform;
+#[path = "commands/pitch_progress.rs"]
+mod pitch_progress;
+#[path = "commands/onnx_status.rs"]
+mod onnx_status;
+#[path = "commands/pitch_cache.rs"]
+mod pitch_cache;
 
 use crate::state::AppState;
 use tauri::{State, Window};
@@ -427,4 +433,37 @@ pub fn debug_realtime_render_stats(
     state: State<'_, AppState>,
 ) -> crate::models::DebugRealtimeRenderStatsPayload {
     debug::debug_realtime_render_stats(state)
+}
+
+// ===================== pitch_progress =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_pitch_analysis_progress(
+    state: State<'_, AppState>,
+) -> Result<Option<crate::pitch_analysis::PitchProgressPayload>, String> {
+    pitch_progress::get_pitch_analysis_progress(state)
+}
+
+// ===================== onnx_status =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_onnx_status() -> onnx_status::OnnxStatusPayload {
+    onnx_status::get_onnx_status()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_onnx_diagnostic() -> crate::nsf_hifigan_onnx::OnnxDiagnosticInfo {
+    onnx_status::get_onnx_diagnostic_info()
+}
+
+// ===================== pitch_cache =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn clear_pitch_cache(state: State<'_, AppState>) -> serde_json::Value {
+    pitch_cache::clear_pitch_cache(state)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_pitch_cache_stats(state: State<'_, AppState>) -> pitch_cache::PitchCacheStatsPayload {
+    pitch_cache::get_pitch_cache_stats(state)
 }

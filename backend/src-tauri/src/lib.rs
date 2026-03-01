@@ -6,6 +6,8 @@ mod models;
 mod pitch_analysis;
 mod pitch_clip;
 mod pitch_editing;
+mod clip_pitch_cache;
+mod pitch_progress;
 mod vocoder_pipeline;
 
 #[cfg(feature = "onnx")]
@@ -22,7 +24,6 @@ mod time_stretch;
 mod waveform;
 mod waveform_disk_cache;
 mod world;
-mod world_lock;
 mod world_vocoder;
 
 use std::path::PathBuf;
@@ -256,7 +257,12 @@ pub fn run() {
             commands::play_synthesized,
             commands::stop_audio,
             commands::get_playback_state,
-            commands::debug_realtime_render_stats
+            commands::debug_realtime_render_stats,
+            commands::get_pitch_analysis_progress,
+            commands::get_onnx_status,
+            commands::get_onnx_diagnostic,
+            commands::clear_pitch_cache,
+            commands::get_pitch_cache_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

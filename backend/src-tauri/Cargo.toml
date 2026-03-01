@@ -17,6 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1.0"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -33,7 +34,8 @@ cpal = "0.15"
 arc-swap = "1.7"
 symphonia = { version = "0.5", features = ["aac", "flac", "isomp4", "mp3", "ogg", "vorbis", "wav"] }
 blake3 = "1"
-libloading = "0.8"
+rayon = "1.7"
+lru = "0.12"
 
 # ONNX inference + feature extraction helpers
 # Use prebuilt ONNX Runtime binaries (downloaded at build time) to avoid relying on a system-installed onnxruntime.dll.

@@ -6,6 +6,11 @@ import type {
 } from "./types";
 import { clamp } from "../timeline";
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./constants";
+import { framesToTime, timeToPixel } from "./utils";
+import {
+    processWaveformPeaks,
+    renderWaveformCanvas,
+} from "../../../utils/waveformRenderer";
 
 function isBlackKey(midi: number): boolean {
     const pc = ((midi % 12) + 12) % 12;
@@ -47,18 +52,59 @@ function drawCurveTimed(args: {
     if (values.length < 2) return;
     const fp = Math.max(1e-6, framePeriodMs);
     const step = Math.max(1, Math.floor(stride));
-    const denom = Math.max(1e-9, visibleDurSec);
+
+    // Check debug flag
+    const debugEnabled =
+        typeof window !== "undefined" &&
+        window.localStorage?.getItem("hifishifter.debugPianoRoll") === "1";
+
+    // DEBUG: 验证曲线时间参数（使用统一转换函数）
+    const curveStartSec = framesToTime(startFrame, fp);
+    const curveEndSec = framesToTime(
+        startFrame + (values.length - 1) * step,
+        fp,
+    );
+    const curveTotalDurSec = curveEndSec - curveStartSec;
+
+    if (debugEnabled) {
+        console.log("[drawCurveTimed] Params:", {
+            param,
+            visibleStartSec,
+            visibleDurSec,
+            visibleEndSec: visibleStartSec + visibleDurSec,
+            startFrame,
+            stride: step,
+            framePeriodMs: fp,
+            valuesLength: values.length,
+            firstValue: values[0],
+            lastValue: values[values.length - 1],
+            curveStartSec,
+            curveEndSec,
+            curveTotalDurSec,
+            canvasWidth: w,
+        });
+    }
 
     let started = false;
+    let firstPoint: { frame: number; tSec: number; x: number } | null = null;
+    let lastPoint: { frame: number; tSec: number; x: number } | null = null;
+
     ctx.beginPath();
     for (let i = 0; i < values.length; i += 1) {
         const frame = startFrame + i * step;
-        const tSec = (frame * fp) / 1000;
+        const tSec = framesToTime(frame, fp);
         if (tSec < visibleStartSec || tSec > visibleStartSec + visibleDurSec) {
             started = false;
             continue;
         }
-        const x = ((tSec - visibleStartSec) / denom) * w;
+        const x = timeToPixel(tSec, visibleStartSec, visibleDurSec, w);
+
+        // Track first and last points for debugging
+        if (!firstPoint && started === false) {
+            firstPoint = { frame, tSec, x };
+        }
+        lastPoint = { frame, tSec, x };
+
         // pitch 曲线：MIDI 值 N 应绘制在 N 键中心（N 到 N+1 区间的中点），加 0.5 偏移
         const rawValue = values[i] ?? 0;
         const mappedValue = param === "pitch" ? rawValue + 0.5 : rawValue;
@@ -70,6 +116,45 @@ function drawCurveTimed(args: {
             ctx.lineTo(x, y);
         }
     }
+
+    // DEBUG: Log first and last rendered points
+    if (debugEnabled && firstPoint && lastPoint) {
+        console.log("[drawCurveTimed] Rendered points:", {
+            param,
+            firstPoint: {
+                frame: firstPoint.frame,
+                tSec: firstPoint.tSec,
+                x: firstPoint.x,
+                // Verify conversion
+                verifyTime: framesToTime(firstPoint.frame, fp),
+                verifyPixel: timeToPixel(
+                    firstPoint.tSec,
+                    visibleStartSec,
+                    visibleDurSec,
+                    w,
+                ),
+            },
+            lastPoint: {
+                frame: lastPoint.frame,
+                tSec: lastPoint.tSec,
+                x: lastPoint.x,
+                // Verify conversion
+                verifyTime: framesToTime(lastPoint.frame, fp),
+                verifyPixel: timeToPixel(
+                    lastPoint.tSec,
+                    visibleStartSec,
+                    visibleDurSec,
+                    w,
+                ),
+            },
+            pixelSpan: lastPoint.x - firstPoint.x,
+            timeSpan: lastPoint.tSec - firstPoint.tSec,
+            pxPerSec:
+                (lastPoint.x - firstPoint.x) /
+                (lastPoint.tSec - firstPoint.tSec),
+        });
+    }
+
     ctx.stroke();
 }
 
@@ -92,6 +177,8 @@ export function drawPianoRoll(args: {
     scrollLeft: number;
     secPerBeat: number;
     playheadBeat: number;
+    pitchAnalysisPending?: boolean;
+    waveformColors?: { fill: string; stroke: string };
 }) {
     const {
         axisCanvas,
@@ -112,6 +199,11 @@ export function drawPianoRoll(args: {
         scrollLeft,
         secPerBeat,
         playheadBeat,
+        pitchAnalysisPending,
+        waveformColors = {
+            fill: "rgba(255,255,255,0.2)",
+            stroke: "rgba(255,255,255,0.7)",
+        },
     } = args;
     // Draw axis (left labels)
     if (axisCanvas) {
@@ -171,11 +263,16 @@ export function drawPianoRoll(args: {
                         ctx.fillStyle = "#1a1a1a";
                         ctx.fillRect(0, top, w * 0.72, keyH);
                         // 黑键右侧渐变边缘
-                        const grad = ctx.createLinearGradient(w * 0.62, 0, w * 0.72, 0);
+                        const grad = ctx.createLinearGradient(
+                            w * 0.62,
+                            0,
+                            w * 0.72,
+                            0,
+                        );
                         grad.addColorStop(0, "rgba(0,0,0,0)");
                         grad.addColorStop(1, "rgba(0,0,0,0.35)");
                         ctx.fillStyle = grad;
-                        ctx.fillRect(w * 0.62, top, w * 0.10, keyH);
+                        ctx.fillRect(w * 0.62, top, w * 0.1, keyH);
                     }
 
                     // C 音名标注：使用高亮蓝色
@@ -188,7 +285,9 @@ export function drawPianoRoll(args: {
 
                     // 分隔线：C 音用较深的线，其他用浅线
                     ctx.strokeStyle =
-                        pc === 0 ? "rgba(100,100,100,0.45)" : "rgba(160,160,160,0.20)";
+                        pc === 0
+                            ? "rgba(100,100,100,0.45)"
+                            : "rgba(160,160,160,0.20)";
                     ctx.lineWidth = pc === 0 ? 1 : 0.5;
                     ctx.beginPath();
                     ctx.moveTo(0, top + 0.5);
@@ -238,6 +337,36 @@ export function drawPianoRoll(args: {
     const visibleStartSec = visibleStartBeat * secPerBeat;
     const visibleDurSec = visibleDurBeats * secPerBeat;
 
+    // DEBUG: 验证时间参数
+    console.log("[PianoRoll] Visible time range:", {
+        visibleStartSec,
+        visibleDurSec,
+        scrollLeft,
+        pxPerBeat,
+        secPerBeat,
+        w,
+        // CRITICAL: Show the conversion chain
+        calculation: {
+            scrollLeftPx: scrollLeft,
+            widthPx: w,
+            pxPerBeat: pxPerBeat,
+            visibleStartBeat: visibleStartBeat,
+            visibleDurBeats: visibleDurBeats,
+            secPerBeat: secPerBeat,
+            visibleStartSec: visibleStartSec,
+            visibleDurSec: visibleDurSec,
+            // Derived values
+            pxPerSec: pxPerBeat / secPerBeat,
+            expectedVisibleDurSec: w / (pxPerBeat / secPerBeat),
+        },
+        wavePeaksTime: wavePeaks
+            ? `${wavePeaks.startSec} to ${wavePeaks.startSec + wavePeaks.durSec}s`
+            : "N/A",
+        paramViewTime: paramView
+            ? `startFrame: ${paramView.startFrame}, period: ${paramView.framePeriodMs}ms, length: ${paramView.orig.length}`
+            : "N/A",
+    });
+
     // Horizontal pitch grid
     if (editParam === "pitch") {
         const absMin = PITCH_MIN_MIDI;
@@ -261,40 +390,27 @@ export function drawPianoRoll(args: {
         }
     }
 
-    // Background waveform
+    // Background waveform (using shared renderer)
     if (wavePeaks && wavePeaks.min.length >= 2 && wavePeaks.max.length >= 2) {
-        const mid = h * 0.6;
-        const amp = h * 0.35;
-        ctx.strokeStyle = "rgba(255,255,255,0.10)";
-        ctx.lineWidth = 1;
-        const n = Math.max(
-            0,
-            Math.min(wavePeaks.min.length, wavePeaks.max.length),
-        );
-        const denom = Math.max(1, n);
-        const v0 = visibleStartSec;
-        const v1 = visibleStartSec + Math.max(1e-9, visibleDurSec);
-        for (let i = 0; i < n; i += 1) {
-            const t =
-                wavePeaks.startSec + ((i + 0.5) * wavePeaks.durSec) / denom;
-            if (t < v0 || t > v1) continue;
-            const x =
-                ((t - visibleStartSec) / Math.max(1e-9, visibleDurSec)) * w;
-            const mi = wavePeaks.min[i] ?? 0;
-            const ma = wavePeaks.max[i] ?? 0;
-            const y0 = mid - ma * amp;
-            let y1 = mid - mi * amp;
-            // If the segment is (near-)silent, y0≈y1 and the stroke can become
-            // visually imperceptible. Draw a tiny line to keep the background
-            // reference visible.
-            if (Math.abs(y1 - y0) < 0.75) {
-                y1 = y0 + (y1 >= y0 ? 0.75 : -0.75);
-            }
-            ctx.beginPath();
-            ctx.moveTo(x + 0.5, y0);
-            ctx.lineTo(x + 0.5, y1);
-            ctx.stroke();
-        }
+        const processed = processWaveformPeaks({
+            min: wavePeaks.min,
+            max: wavePeaks.max,
+            startSec: wavePeaks.startSec,
+            durSec: wavePeaks.durSec,
+            visibleStartSec,
+            visibleDurSec,
+            targetWidth: w,
+        });
+
+        renderWaveformCanvas(ctx, processed, {
+            width: w,
+            height: h,
+            fillColor: waveformColors.fill,
+            strokeColor: waveformColors.stroke,
+            barWidth: 1.5,
+            centerY: h * 0.5,
+            amplitude: h * 0.45,
+        });
     }
 
     // Selection (time band)
@@ -309,6 +425,11 @@ export function drawPianoRoll(args: {
         ctx.strokeRect(x0 + 0.5, 0.5, Math.max(0, x1 - x0 - 1), h - 1);
     }
 
+    // 若音高分析进行中，跳过曲线绘制（进度条已显示状态）
+    if (pitchAnalysisPending) {
+        return;
+    }
+
     // Curves
     // 副参数曲线（半透明、细线，绘制在主参数曲线下方）
     if (
@@ -317,7 +438,11 @@ export function drawPianoRoll(args: {
         secondaryParamView.edit.length >= 2
     ) {
         // 根据副参数类型选择颜色：pitch 用蓝色，tension 用橙色
-        const secondaryParam: ParamName = secondaryParamView.key.includes("|pitch|") ? "pitch" : "tension";
+        const secondaryParam: ParamName = secondaryParamView.key.includes(
+            "|pitch|",
+        )
+            ? "pitch"
+            : "tension";
         const secondaryColor =
             secondaryParam === "pitch"
                 ? "rgba(100, 200, 255, 0.45)"

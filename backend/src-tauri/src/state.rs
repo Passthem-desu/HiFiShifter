@@ -1,5 +1,6 @@
 use crate::audio_engine::AudioEngine;
 use crate::audio_utils::try_read_wav_info;
+use crate::clip_pitch_cache::ClipPitchCache;
 use crate::models::{
     ModelConfig, ModelConfigPayload, PitchRange, ProjectMetaPayload, RuntimeInfoPayload,
     TimelineClip, TimelineStatePayload, TimelineTrack,
@@ -7,7 +8,7 @@ use crate::models::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use uuid::Uuid;
 
 fn default_frame_period_ms() -> f64 {
@@ -256,6 +257,10 @@ impl TimelineState {
     pub fn ensure_params_for_root(&mut self, root_track_id: &str) {
         let fp = self.frame_period_ms();
         let target = self.target_param_frames(fp);
+        
+        // Calculate expected cache key to detect when timeline changed
+        let expected_key = crate::pitch_analysis::build_root_pitch_key(self, root_track_id);
+        
         let entry = self
             .params_by_root_track
             .entry(root_track_id.to_string())
@@ -265,6 +270,25 @@ impl TimelineState {
             });
 
         entry.frame_period_ms = fp;
+        
+        // CRITICAL FIX: Detect stale pitch curves and clear them when clip/timeline changes.
+        // This prevents old pitch data from being displayed after clip replacement or timeline edits.
+        let key_changed = entry.pitch_orig_key.as_deref() != Some(&expected_key);
+        
+        if key_changed && entry.pitch_orig_key.is_some() {
+            // Timeline/clip configuration changed - clear curves to force re-analysis
+            entry.pitch_orig.clear();
+            entry.pitch_edit.clear();
+            entry.pitch_orig_key = None;
+            entry.pitch_edit_user_modified = false;
+            
+            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                eprintln!(
+                    "state: [INVALIDATE] Cleared stale pitch curves for root_track={} (key changed)",
+                    root_track_id
+                );
+            }
+        }
 
         #[allow(clippy::ptr_arg)]
         fn resize_curve(v: &mut Vec<f32>, target: usize, fill: f32) {
@@ -305,6 +329,20 @@ impl TimelineState {
     }
 }
 
+/// Timeline snapshot for incremental pitch refresh
+///
+/// Stores a snapshot of the timeline state at the time of last pitch analysis
+/// to enable detection of which clips have changed and need re-analysis.
+#[derive(Debug, Clone)]
+pub struct TimelineSnapshot {
+    /// Mapping from clip ID to cache key
+    pub clips: HashMap<String, String>,
+    /// BPM at the time of analysis
+    pub bpm: f64,
+    /// Frame period used for analysis
+    pub frame_period_ms: f64,
+}
+
 pub struct AppState {
     pub timeline: std::sync::Mutex<TimelineState>,
     pub timeline_history: std::sync::Mutex<TimelineHistory>,
@@ -320,6 +358,15 @@ pub struct AppState {
 
     // De-dup background pitch analysis jobs (keyed by rootTrackId + analysis key).
     pub pitch_inflight: std::sync::Mutex<std::collections::HashSet<String>>,
+    
+    // Current pitch analysis progress (for polling from frontend)
+    pub pitch_analysis_progress: std::sync::RwLock<Option<crate::pitch_analysis::PitchOrigAnalysisProgressEvent>>,
+
+    // Clip-level pitch analysis cache for performance optimization
+    pub clip_pitch_cache: Arc<Mutex<ClipPitchCache>>,
+    
+    // Timeline snapshot for incremental pitch refresh (keyed by root_track_id)
+    pub pitch_timeline_snapshot: Mutex<HashMap<String, TimelineSnapshot>>,
 
     pub audio_engine: AudioEngine,
 }
@@ -342,6 +389,9 @@ impl Default for AppState {
 
             app_handle: OnceLock::new(),
             pitch_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
+            pitch_analysis_progress: std::sync::RwLock::new(None),
+            clip_pitch_cache: Arc::new(Mutex::new(ClipPitchCache::new(100))),
+            pitch_timeline_snapshot: Mutex::new(HashMap::new()),
 
             audio_engine: AudioEngine::new(),
         }

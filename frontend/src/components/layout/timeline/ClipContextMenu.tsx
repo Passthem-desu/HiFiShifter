@@ -1,14 +1,17 @@
-import React, { useRef, useState } from "react";
-import type { ClipInfo, FadeCurveType } from "../../../features/session/sessionTypes";
+import React from "react";
+import type {
+    ClipInfo,
+    FadeCurveType,
+} from "../../../features/session/sessionTypes";
 import { useI18n } from "../../../i18n/I18nProvider";
 
 export type ClipColor = "emerald" | "blue" | "violet" | "amber";
 
 const COLOR_OPTIONS: { value: ClipColor; label: string; bg: string }[] = [
     { value: "emerald", label: "绿", bg: "bg-emerald-500" },
-    { value: "blue",    label: "蓝", bg: "bg-blue-500" },
-    { value: "violet",  label: "紫", bg: "bg-violet-500" },
-    { value: "amber",   label: "橙", bg: "bg-amber-500" },
+    { value: "blue", label: "蓝", bg: "bg-blue-500" },
+    { value: "violet", label: "紫", bg: "bg-violet-500" },
+    { value: "amber", label: "橙", bg: "bg-amber-500" },
 ];
 
 // ── 单条菜单项 ──────────────────────────────────────────────────────────────
@@ -20,15 +23,19 @@ const MenuItem: React.FC<{
 }> = ({ label, disabled, danger, onClick }) => (
     <button
         className={`px-3 py-1.5 text-left w-full text-[12px] transition-colors
-            ${disabled
-                ? "opacity-40 cursor-default"
-                : danger
-                    ? "hover:bg-red-500/20 text-red-400"
-                    : "hover:bg-qt-button-hover"
+            ${
+                disabled
+                    ? "opacity-40 cursor-default"
+                    : danger
+                      ? "hover:bg-red-500/20 text-red-400"
+                      : "hover:bg-qt-button-hover"
             }`}
         disabled={disabled}
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => { e.stopPropagation(); onClick(); }}
+        onClick={(e) => {
+            e.stopPropagation();
+            onClick();
+        }}
     >
         {label}
     </button>
@@ -40,11 +47,11 @@ const Divider: React.FC = () => (
 
 // ── 渐变曲线选项 ────────────────────────────────────────────────────────────
 const CURVE_OPTIONS: { value: FadeCurveType; label: string }[] = [
-    { value: "linear",      label: "线性" },
-    { value: "sine",        label: "正弦" },
+    { value: "linear", label: "线性" },
+    { value: "sine", label: "正弦" },
     { value: "exponential", label: "指数" },
     { value: "logarithmic", label: "对数" },
-    { value: "scurve",      label: "S形" },
+    { value: "scurve", label: "S形" },
 ];
 
 const FadeCurveRow: React.FC<{
@@ -53,18 +60,24 @@ const FadeCurveRow: React.FC<{
     onSelect: (c: FadeCurveType) => void;
 }> = ({ label, current, onSelect }) => (
     <div className="px-3 py-1.5 flex items-center gap-1.5 flex-wrap">
-        <span className="text-[11px] text-qt-text/60 mr-1 shrink-0">{label}</span>
+        <span className="text-[11px] text-qt-text/60 mr-1 shrink-0">
+            {label}
+        </span>
         {CURVE_OPTIONS.map((opt) => (
             <button
                 key={opt.value}
                 title={opt.label}
                 className={`px-1.5 py-0.5 rounded text-[10px] transition-colors
-                    ${ current === opt.value
-                        ? "bg-qt-highlight text-white"
-                        : "bg-qt-button hover:bg-qt-button-hover text-qt-text/80"
+                    ${
+                        current === opt.value
+                            ? "bg-qt-highlight text-white"
+                            : "bg-qt-button hover:bg-qt-button-hover text-qt-text/80"
                     }`}
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => { e.stopPropagation(); onSelect(opt.value); }}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onSelect(opt.value);
+                }}
             >
                 {opt.label}
             </button>
@@ -86,7 +99,10 @@ const ColorRow: React.FC<{
                 className={`w-4 h-4 rounded-full ${opt.bg} transition-transform
                     ${currentColor === opt.value ? "ring-2 ring-white/80 scale-110" : "hover:scale-110"}`}
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => { e.stopPropagation(); onSelect(opt.value); }}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    onSelect(opt.value);
+                }}
             />
         ))}
     </div>
@@ -110,9 +126,14 @@ export const ClipContextMenu: React.FC<{
     onSplit: (clipId: string) => void;
     onGlue: (ids: string[]) => void;
     onColorChange: (clipId: string, color: ClipColor) => void;
-    onFadeCurveChange?: (clipId: string, target: "in" | "out", curve: FadeCurveType) => void;
-}>}> = ({
-    x, y,
+    onFadeCurveChange?: (
+        clipId: string,
+        target: "in" | "out",
+        curve: FadeCurveType,
+    ) => void;
+}> = ({
+    x,
+    y,
     clip,
     selectedClips,
     playheadInClip,
@@ -125,23 +146,25 @@ export const ClipContextMenu: React.FC<{
     onGlue,
     onColorChange,
     onFadeCurveChange,
-})}) => {
+}) => {
     const { t } = useI18n();
     const isMulti = selectedClips.length >= 2;
     const ids = isMulti ? selectedClips.map((c) => c.id) : [clip.id];
 
     // 胶合：仅同轨且多选时可用
-    const glueDisabled = !isMulti || (() => {
-        const trackId = selectedClips[0]?.trackId;
-        return !trackId || selectedClips.some((c) => c.trackId !== trackId);
-    })();
+    const glueDisabled =
+        !isMulti ||
+        (() => {
+            const trackId = selectedClips[0]?.trackId;
+            return !trackId || selectedClips.some((c) => c.trackId !== trackId);
+        })();
 
     // 多选中是否全部静音
-    const allMuted = isMulti
-        ? selectedClips.every((c) => c.muted)
-        : clip.muted;
+    const allMuted = isMulti ? selectedClips.every((c) => c.muted) : clip.muted;
 
-    function close() { onClose(); }
+    function close() {
+        onClose();
+    }
 
     return (
         <div
@@ -157,58 +180,120 @@ export const ClipContextMenu: React.FC<{
                         已选 {selectedClips.length} 个
                     </div>
                     <Divider />
-                    <MenuItem label="删除所选" danger onClick={() => { onDelete(ids); close(); }} />
+                    <MenuItem
+                        label="删除所选"
+                        danger
+                        onClick={() => {
+                            onDelete(ids);
+                            close();
+                        }}
+                    />
                     <MenuItem
                         label={allMuted ? "取消静音所选" : "静音所选"}
-                        onClick={() => { onMute(ids, !allMuted); close(); }}
+                        onClick={() => {
+                            onMute(ids, !allMuted);
+                            close();
+                        }}
                     />
-                    <MenuItem label="复制所选" onClick={() => { onCopy(ids); close(); }} />
+                    <MenuItem
+                        label="复制所选"
+                        onClick={() => {
+                            onCopy(ids);
+                            close();
+                        }}
+                    />
                     <Divider />
                     <MenuItem
                         label={t("glue")}
                         disabled={glueDisabled}
-                        onClick={() => { onGlue(ids); close(); }}
+                        onClick={() => {
+                            onGlue(ids);
+                            close();
+                        }}
                     />
                 </>
             ) : (
                 // ── 单选菜单 ──
                 <>
-                    <MenuItem label="删除" danger onClick={() => { onDelete([clip.id]); close(); }} />
+                    <MenuItem
+                        label="删除"
+                        danger
+                        onClick={() => {
+                            onDelete([clip.id]);
+                            close();
+                        }}
+                    />
                     <MenuItem
                         label={clip.muted ? t("clip_unmute") : t("clip_mute")}
-                        onClick={() => { onMute([clip.id], !clip.muted); close(); }}
+                        onClick={() => {
+                            onMute([clip.id], !clip.muted);
+                            close();
+                        }}
                     />
-                    <MenuItem label="重命名" onClick={() => { onRename(clip.id); close(); }} />
-                    <MenuItem label="复制" onClick={() => { onCopy([clip.id]); close(); }} />
+                    <MenuItem
+                        label="重命名"
+                        onClick={() => {
+                            onRename(clip.id);
+                            close();
+                        }}
+                    />
+                    <MenuItem
+                        label="复制"
+                        onClick={() => {
+                            onCopy([clip.id]);
+                            close();
+                        }}
+                    />
                     <MenuItem
                         label="在播放头处分割"
                         disabled={!playheadInClip}
-                        onClick={() => { onSplit(clip.id); close(); }}
+                        onClick={() => {
+                            onSplit(clip.id);
+                            close();
+                        }}
                     />
                     <Divider />
                     <ColorRow
                         currentColor={clip.color as ClipColor}
-                        onSelect={(c) => { onColorChange(clip.id, c); close(); }}
+                        onSelect={(c) => {
+                            onColorChange(clip.id, c);
+                            close();
+                        }}
                     />
-                    {onFadeCurveChange && (clip.fadeInBeats > 0 || clip.fadeOutBeats > 0) && (
-                        <>
-                            <Divider />
-                            {clip.fadeInBeats > 0 && (
-                                <FadeCurveRow
-                                    label="淡入"
-                                    current={(clip.fadeInCurve as FadeCurveType) ?? "sine"}
-                                    onSelect={(c) => { onFadeCurveChange(clip.id, "in", c); }}
-                                />
-                            )}
-                            {clip.fadeOutBeats > 0 && (
-                                <FadeCurveRow
-                                    label="淡出"
-                                    current={(clip.fadeOutCurve as FadeCurveType) ?? "sine"}
-                                    onSelect={(c) => { onFadeCurveChange(clip.id, "out", c); }}
-                                />
-                            )}
-                        </>
-                    )}
+                    {onFadeCurveChange &&
+                        (clip.fadeInBeats > 0 || clip.fadeOutBeats > 0) && (
+                            <>
+                                <Divider />
+                                {clip.fadeInBeats > 0 && (
+                                    <FadeCurveRow
+                                        label="淡入"
+                                        current={
+                                            (clip.fadeInCurve as FadeCurveType) ??
+                                            "sine"
+                                        }
+                                        onSelect={(c) => {
+                                            onFadeCurveChange(clip.id, "in", c);
+                                        }}
+                                    />
+                                )}
+                                {clip.fadeOutBeats > 0 && (
+                                    <FadeCurveRow
+                                        label="淡出"
+                                        current={
+                                            (clip.fadeOutCurve as FadeCurveType) ??
+                                            "sine"
+                                        }
+                                        onSelect={(c) => {
+                                            onFadeCurveChange(
+                                                clip.id,
+                                                "out",
+                                                c,
+                                            );
+                                        }}
+                                    />
+                                )}
+                            </>
+                        )}
                 </>
             )}
         </div>

@@ -1,5 +1,4 @@
-use libloading::Library;
-use std::sync::OnceLock;
+// Direct FFI bindings to statically-linked WORLD library
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -34,169 +33,72 @@ pub struct D4COption {
     pub threshold: f64,
 }
 
-type DioFn = unsafe extern "C" fn(
-    x: *const f64,
-    x_length: i32,
-    fs: i32,
-    option: *const DioOption,
-    temporal_positions: *mut f64,
-    f0: *mut f64,
-);
-
-type InitializeDioOptionFn = unsafe extern "C" fn(option: *mut DioOption);
-
-type GetSamplesForDIOFn = unsafe extern "C" fn(fs: i32, x_length: i32, frame_period: f64) -> i32;
-
-type StoneMaskFn = unsafe extern "C" fn(
-    x: *const f64,
-    x_length: i32,
-    fs: i32,
-    temporal_positions: *const f64,
-    f0: *const f64,
-    f0_length: i32,
-    refined_f0: *mut f64,
-);
-
-type HarvestFn = unsafe extern "C" fn(
-    x: *const f64,
-    x_length: i32,
-    fs: i32,
-    option: *const HarvestOption,
-    temporal_positions: *mut f64,
-    f0: *mut f64,
-);
-
-type InitializeHarvestOptionFn = unsafe extern "C" fn(option: *mut HarvestOption);
-
-type GetSamplesForHarvestFn =
-    unsafe extern "C" fn(fs: i32, x_length: i32, frame_period: f64) -> i32;
-
-type InitializeCheapTrickOptionFn = unsafe extern "C" fn(fs: i32, option: *mut CheapTrickOption);
-
-type GetFFTSizeForCheapTrickFn =
-    unsafe extern "C" fn(fs: i32, option: *const CheapTrickOption) -> i32;
-
-type CheapTrickFn = unsafe extern "C" fn(
-    x: *const f64,
-    x_length: i32,
-    fs: i32,
-    temporal_positions: *const f64,
-    f0: *const f64,
-    f0_length: i32,
-    option: *const CheapTrickOption,
-    spectrogram: *mut *mut f64,
-);
-
-type InitializeD4COptionFn = unsafe extern "C" fn(option: *mut D4COption);
-
-type D4CFn = unsafe extern "C" fn(
-    x: *const f64,
-    x_length: i32,
-    fs: i32,
-    temporal_positions: *const f64,
-    f0: *const f64,
-    f0_length: i32,
-    fft_size: i32,
-    option: *const D4COption,
-    aperiodicity: *mut *mut f64,
-);
-
-type SynthesisFn = unsafe extern "C" fn(
-    f0: *const f64,
-    f0_length: i32,
-    spectrogram: *const *const f64,
-    aperiodicity: *const *const f64,
-    fft_size: i32,
-    frame_period: f64,
-    fs: i32,
-    y_length: i32,
-    y: *mut f64,
-);
-
-struct WorldVocoderApi {
-    _lib: Library,
-
-    dio: DioFn,
-    initialize_dio_option: InitializeDioOptionFn,
-    get_samples_for_dio: GetSamplesForDIOFn,
-    stone_mask: StoneMaskFn,
-
-    harvest: HarvestFn,
-    initialize_harvest_option: InitializeHarvestOptionFn,
-    get_samples_for_harvest: GetSamplesForHarvestFn,
-
-    initialize_cheaptrick_option: InitializeCheapTrickOptionFn,
-    get_fft_size_for_cheaptrick: GetFFTSizeForCheapTrickFn,
-    cheaptrick: CheapTrickFn,
-
-    initialize_d4c_option: InitializeD4COptionFn,
-    d4c: D4CFn,
-
-    synthesis: SynthesisFn,
-}
-
-fn try_load_library() -> Result<Library, String> {
-    if let Ok(p) = std::env::var("HIFISHIFTER_WORLD_DLL") {
-        return unsafe { Library::new(&p) }.map_err(|e| e.to_string());
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let cand = dir.join("world.dll");
-            if cand.exists() {
-                return unsafe { Library::new(&cand) }.map_err(|e| e.to_string());
-            }
-        }
-    }
-
-    unsafe { Library::new("world.dll") }.map_err(|e| e.to_string())
-}
-
-fn api() -> Result<&'static WorldVocoderApi, String> {
-    static API: OnceLock<Result<WorldVocoderApi, String>> = OnceLock::new();
-    let v = API.get_or_init(|| {
-        let lib = try_load_library()?;
-        unsafe {
-            Ok(WorldVocoderApi {
-                dio: *lib.get(b"Dio\0").map_err(|e| e.to_string())?,
-                initialize_dio_option: *lib
-                    .get(b"InitializeDioOption\0")
-                    .map_err(|e| e.to_string())?,
-                get_samples_for_dio: *lib.get(b"GetSamplesForDIO\0").map_err(|e| e.to_string())?,
-                stone_mask: *lib.get(b"StoneMask\0").map_err(|e| e.to_string())?,
-
-                harvest: *lib.get(b"Harvest\0").map_err(|e| e.to_string())?,
-                initialize_harvest_option: *lib
-                    .get(b"InitializeHarvestOption\0")
-                    .map_err(|e| e.to_string())?,
-                get_samples_for_harvest: *lib
-                    .get(b"GetSamplesForHarvest\0")
-                    .map_err(|e| e.to_string())?,
-
-                initialize_cheaptrick_option: *lib
-                    .get(b"InitializeCheapTrickOption\0")
-                    .map_err(|e| e.to_string())?,
-                get_fft_size_for_cheaptrick: *lib
-                    .get(b"GetFFTSizeForCheapTrick\0")
-                    .map_err(|e| e.to_string())?,
-                cheaptrick: *lib.get(b"CheapTrick\0").map_err(|e| e.to_string())?,
-
-                initialize_d4c_option: *lib
-                    .get(b"InitializeD4COption\0")
-                    .map_err(|e| e.to_string())?,
-                d4c: *lib.get(b"D4C\0").map_err(|e| e.to_string())?,
-
-                synthesis: *lib.get(b"Synthesis\0").map_err(|e| e.to_string())?,
-
-                _lib: lib,
-            })
-        }
-    });
-
-    match v {
-        Ok(api) => Ok(api),
-        Err(e) => Err(e.clone()),
-    }
+// External C functions from statically-linked WORLD library
+extern "C" {
+    fn Dio(
+        x: *const f64,
+        x_length: i32,
+        fs: i32,
+        option: *const DioOption,
+        temporal_positions: *mut f64,
+        f0: *mut f64,
+    );
+    fn InitializeDioOption(option: *mut DioOption);
+    fn GetSamplesForDIO(fs: i32, x_length: i32, frame_period: f64) -> i32;
+    fn StoneMask(
+        x: *const f64,
+        x_length: i32,
+        fs: i32,
+        temporal_positions: *const f64,
+        f0: *const f64,
+        f0_length: i32,
+        refined_f0: *mut f64,
+    );
+    fn Harvest(
+        x: *const f64,
+        x_length: i32,
+        fs: i32,
+        option: *const HarvestOption,
+        temporal_positions: *mut f64,
+        f0: *mut f64,
+    );
+    fn InitializeHarvestOption(option: *mut HarvestOption);
+    fn GetSamplesForHarvest(fs: i32, x_length: i32, frame_period: f64) -> i32;
+    fn CheapTrick(
+        x: *const f64,
+        x_length: i32,
+        fs: i32,
+        temporal_positions: *const f64,
+        f0: *const f64,
+        f0_length: i32,
+        option: *const CheapTrickOption,
+        spectrogram: *mut *mut f64,
+    );
+    fn InitializeCheapTrickOption(fs: i32, option: *mut CheapTrickOption);
+    fn GetFFTSizeForCheapTrick(fs: i32, option: *const CheapTrickOption) -> i32;
+    fn D4C(
+        x: *const f64,
+        x_length: i32,
+        fs: i32,
+        temporal_positions: *const f64,
+        f0: *const f64,
+        f0_length: i32,
+        fft_size: i32,
+        option: *const D4COption,
+        aperiodicity: *mut *mut f64,
+    );
+    fn InitializeD4COption(option: *mut D4COption);
+    fn Synthesis(
+        f0: *const f64,
+        f0_length: i32,
+        spectrogram: *const *const f64,
+        aperiodicity: *const *const f64,
+        fft_size: i32,
+        frame_period: f64,
+        fs: i32,
+        y_length: i32,
+        y: *mut f64,
+    );
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -219,7 +121,8 @@ fn world_f0_method() -> WorldF0Method {
 }
 
 pub fn is_available() -> bool {
-    api().is_ok()
+    // With static linking, WORLD functions are always available
+    true
 }
 
 fn ratio_from_semitones(semitones: f64) -> f64 {
@@ -303,7 +206,6 @@ fn compute_f0_with_positions_dio_stonemask(
     f0_floor: f64,
     f0_ceil: f64,
 ) -> Result<(Vec<f64>, Vec<f64>), String> {
-    let api = api()?;
     if x.is_empty() {
         return Ok((vec![], vec![]));
     }
@@ -319,7 +221,7 @@ fn compute_f0_with_positions_dio_stonemask(
         .try_into()
         .map_err(|_| "WORLD: input too long".to_string())?;
 
-    let samples = unsafe { (api.get_samples_for_dio)(fs, x_len, fp) };
+    let samples = unsafe { GetSamplesForDIO(fs, x_len, fp) };
     if samples <= 0 {
         return Ok((vec![], vec![]));
     }
@@ -332,7 +234,7 @@ fn compute_f0_with_positions_dio_stonemask(
         speed: 1,
         allowed_range: 0.1,
     };
-    unsafe { (api.initialize_dio_option)(&mut option as *mut DioOption) };
+    unsafe { InitializeDioOption(&mut option as *mut DioOption) };
     option.frame_period = fp;
     if f0_floor.is_finite() && f0_floor > 0.0 {
         option.f0_floor = f0_floor;
@@ -345,7 +247,7 @@ fn compute_f0_with_positions_dio_stonemask(
     let mut f0 = vec![0.0f64; samples as usize];
 
     unsafe {
-        (api.dio)(
+        Dio(
             x.as_ptr(),
             x_len,
             fs,
@@ -357,7 +259,7 @@ fn compute_f0_with_positions_dio_stonemask(
 
     let mut refined = vec![0.0f64; samples as usize];
     unsafe {
-        (api.stone_mask)(
+        StoneMask(
             x.as_ptr(),
             x_len,
             fs,
@@ -378,7 +280,6 @@ fn compute_f0_with_positions_harvest(
     f0_floor: f64,
     f0_ceil: f64,
 ) -> Result<(Vec<f64>, Vec<f64>), String> {
-    let api = api()?;
     if x.is_empty() {
         return Ok((vec![], vec![]));
     }
@@ -394,7 +295,7 @@ fn compute_f0_with_positions_harvest(
         .try_into()
         .map_err(|_| "WORLD: input too long".to_string())?;
 
-    let samples = unsafe { (api.get_samples_for_harvest)(fs, x_len, fp) };
+    let samples = unsafe { GetSamplesForHarvest(fs, x_len, fp) };
     if samples <= 0 {
         return Ok((vec![], vec![]));
     }
@@ -404,7 +305,7 @@ fn compute_f0_with_positions_harvest(
         f0_ceil: 800.0,
         frame_period: fp,
     };
-    unsafe { (api.initialize_harvest_option)(&mut option as *mut HarvestOption) };
+    unsafe { InitializeHarvestOption(&mut option as *mut HarvestOption) };
     option.frame_period = fp;
     if f0_floor.is_finite() && f0_floor > 0.0 {
         option.f0_floor = f0_floor;
@@ -417,7 +318,7 @@ fn compute_f0_with_positions_harvest(
     let mut f0 = vec![0.0f64; samples as usize];
 
     unsafe {
-        (api.harvest)(
+        Harvest(
             x.as_ptr(),
             x_len,
             fs,
@@ -440,8 +341,6 @@ fn vocode_one(
     abs_time_start_sec: f64,
     semitone_at_time: &impl Fn(f64) -> f64,
 ) -> Result<Vec<f64>, String> {
-    let api = api()?;
-
     if x_f64.is_empty() {
         return Ok(vec![]);
     }
@@ -502,11 +401,11 @@ fn vocode_one(
         f0_floor: f0_floor.max(20.0),
         fft_size: 0,
     };
-    unsafe { (api.initialize_cheaptrick_option)(fs, &mut ct_opt as *mut CheapTrickOption) };
+    unsafe { InitializeCheapTrickOption(fs, &mut ct_opt as *mut CheapTrickOption) };
     ct_opt.f0_floor = f0_floor.max(20.0);
 
     let fft_size =
-        unsafe { (api.get_fft_size_for_cheaptrick)(fs, &ct_opt as *const CheapTrickOption) };
+        unsafe { GetFFTSizeForCheapTrick(fs, &ct_opt as *const CheapTrickOption) };
     if fft_size <= 0 {
         return Err("WORLD: invalid fft_size".to_string());
     }
@@ -519,7 +418,7 @@ fn vocode_one(
     let mut sp_ptrs: Vec<*mut f64> = spectrogram.iter_mut().map(|row| row.as_mut_ptr()).collect();
 
     unsafe {
-        (api.cheaptrick)(
+        CheapTrick(
             x_f64.as_ptr(),
             x_f64
                 .len()
@@ -535,7 +434,7 @@ fn vocode_one(
     }
 
     let mut d4c_opt = D4COption { threshold: 0.85 };
-    unsafe { (api.initialize_d4c_option)(&mut d4c_opt as *mut D4COption) };
+    unsafe { InitializeD4COption(&mut d4c_opt as *mut D4COption) };
 
     let mut aperiodicity: Vec<Vec<f64>> = vec![vec![0.0f64; spec_bins]; f0.len()];
     let mut ap_ptrs: Vec<*mut f64> = aperiodicity
@@ -544,7 +443,7 @@ fn vocode_one(
         .collect();
 
     unsafe {
-        (api.d4c)(
+        D4C(
             x_f64.as_ptr(),
             x_f64
                 .len()
@@ -570,7 +469,7 @@ fn vocode_one(
     unsafe {
         let sp_const: Vec<*const f64> = sp_ptrs.iter().map(|&p| p as *const f64).collect();
         let ap_const: Vec<*const f64> = ap_ptrs.iter().map(|&p| p as *const f64).collect();
-        (api.synthesis)(
+        Synthesis(
             shifted_f0.as_ptr(),
             f0_len_i32,
             sp_const.as_ptr(),
@@ -666,14 +565,6 @@ where
     if mono_pcm.is_empty() {
         return Ok(vec![]);
     }
-
-    // WORLD DLL may not be thread-safe in practice on some builds; serialize all calls.
-    let _guard = crate::world_lock::world_dll_mutex()
-        .lock()
-        .map_err(|_| "WORLD: mutex poisoned".to_string())?;
-
-    // Ensure vocoder symbols exist.
-    let _ = api()?;
 
     let sr = sample_rate.max(1) as i32;
 

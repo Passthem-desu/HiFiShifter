@@ -1,4 +1,17 @@
 @echo off
+
+REM ==================================================================================
+REM [DEPRECATED] This script is no longer needed as of v2026.03
+REM ==================================================================================
+REM WORLD vocoder is now statically linked at compile time using the `cc` crate.
+REM The Rust build script (backend/src-tauri/build.rs) automatically compiles
+REM WORLD C++ sources during cargo build - no separate DLL build step required.
+REM
+REM This file is kept for reference only. If you need to build WORLD for other
+REM purposes, ensure the source is available at:
+REM   backend/src-tauri/third_party/world-static/
+REM ==================================================================================
+
 setlocal
 
 set REPO_ROOT=%~dp0..
