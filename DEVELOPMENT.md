@@ -344,14 +344,14 @@ Frontend triggers analysis (rootTrackId)
 
 ### Performance Targets & Results
 
-| Scenario                          | Old Implementation | Target         | Implementation Status       |
-| --------------------------------- | ------------------ | -------------- | --------------------------- |
-| **First analysis** (10 clips)    | 22-45s             | 3-7s           | ✅ Parallel (rayon)         |
-| **Repeat analysis** (cached)     | 22-45s             | <100ms         | ✅ LRU cache                |
-| **Incremental** (edit 1 clip)    | 22-45s (full scan) | 1-4s           | ✅ Snapshot comparison      |
-| **Position change** (drag clip)  | 22-45s             | <100ms         | ✅ Position-independent key |
-| **Fusion algorithm**             | 150-250ms          | <100ms         | ✅ Coverage table           |
-| **Memory usage** (100 clips)     | —                  | <500MB         | ✅ Arc sharing + LRU        |
+| Scenario                        | Old Implementation | Target | Implementation Status      |
+| ------------------------------- | ------------------ | ------ | -------------------------- |
+| **First analysis** (10 clips)   | 22-45s             | 3-7s   | ✅ Parallel (rayon)         |
+| **Repeat analysis** (cached)    | 22-45s             | <100ms | ✅ LRU cache                |
+| **Incremental** (edit 1 clip)   | 22-45s (full scan) | 1-4s   | ✅ Snapshot comparison      |
+| **Position change** (drag clip) | 22-45s             | <100ms | ✅ Position-independent key |
+| **Fusion algorithm**            | 150-250ms          | <100ms | ✅ Coverage table           |
+| **Memory usage** (100 clips)    | —                  | <500MB | ✅ Arc sharing + LRU        |
 
 **Actual measurements**: Pending user testing with real project data. (See tasks.md Group 18)
 
