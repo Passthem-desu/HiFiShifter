@@ -157,6 +157,8 @@ export const setClipStateRemote = createAsyncThunk(
     "session/setClipStateRemote",
     async (payload: {
         clipId: string;
+        name?: string;
+        color?: string;
         lengthBeats?: number;
         gain?: number;
         muted?: boolean;

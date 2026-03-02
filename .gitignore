@@ -165,9 +165,3 @@ cython_debug/
 
 run_gui.bat
 build_and_run.bat
-
-# WORLD static build (cloned source, not tracked)
-backend/src-tauri/third_party/world-static/
-
-# Rubber Band static build (cloned source, not tracked)
-backend/src-tauri/third_party/rubberband-static/

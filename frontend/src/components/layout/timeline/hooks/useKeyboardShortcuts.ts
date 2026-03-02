@@ -6,7 +6,6 @@ import {
     createClipsRemote,
     removeClipRemote,
     selectClipRemote,
-    setClipStateRemote,
     splitClipRemote,
 } from "../../../../features/session/sessionSlice";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";

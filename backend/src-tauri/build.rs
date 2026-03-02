@@ -1,7 +1,64 @@
 fn main() {
+    build_frontend();
     tauri_build::build();
     build_world_static();
     build_rubberband_static();
+}
+
+/// 在编译时自动构建前端静态资源。
+///
+/// 当 `frontend/dist` 目录不存在时，自动执行 `npm run build` 生成前端产物，
+/// 确保 Tauri 能找到 `frontendDist`。
+/// 若 dist 已存在则跳过（开发者可手动删除 dist 目录强制重建）。
+fn build_frontend() {
+    use std::path::Path;
+    use std::process::Command;
+
+    // build.rs 的工作目录是 src-tauri/，前端目录在上两级
+    let frontend_dir = Path::new("../../frontend");
+    let dist_dir = frontend_dir.join("dist");
+
+    if !frontend_dir.exists() {
+        println!("cargo:warning=[Frontend] frontend 目录不存在，跳过前端构建");
+        return;
+    }
+
+    // 当关键文件变更时重新触发 build.rs
+    println!("cargo:rerun-if-changed=../../frontend/src");
+    println!("cargo:rerun-if-changed=../../frontend/package.json");
+    println!("cargo:rerun-if-changed=../../frontend/vite.config.ts");
+    println!("cargo:rerun-if-changed=../../frontend/vite.config.js");
+
+    // dist 已存在则跳过，避免每次编译都重新构建前端
+    if dist_dir.exists() {
+        println!("cargo:warning=[Frontend] dist 已存在，跳过构建（删除 frontend/dist 可强制重建）");
+        return;
+    }
+
+    println!("cargo:warning=[Frontend] 正在构建前端，请稍候...");
+
+    let npm_cmd = if cfg!(target_os = "windows") { "npm.cmd" } else { "npm" };
+
+    let status = Command::new(npm_cmd)
+        .arg("run")
+        .arg("build")
+        .current_dir(frontend_dir)
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {
+            println!("cargo:warning=[Frontend] 前端构建成功");
+        }
+        Ok(s) => {
+            panic!("[Frontend] 前端构建失败，退出码: {:?}", s.code());
+        }
+        Err(e) => {
+            panic!(
+                "[Frontend] 无法执行 npm run build: {}。请确保已安装 Node.js 和 npm。",
+                e
+            );
+        }
+    }
 }
 
 /// Build WORLD vocoder as a static library using cc crate.
@@ -98,11 +155,13 @@ fn build_world_static() {
 ///
 /// Source location: third_party/rubberband-static/rubberband/
 /// Build time: ~2-5 minutes on first build (larger than WORLD), ~10-20s incremental
+/// Version: v4.0.0
 ///
 /// The Rubber Band Library (https://github.com/breakfastquay/rubberband) provides:
 /// - High-quality pitch-preserving time stretching
 /// - Real-time and offline processing modes
 /// - Dual-engine architecture (R2 "faster" + R3 "finer")
+/// - Live shifting via R3LiveShifter (new in v4.0.0)
 /// - Formant preservation and transient detection
 ///
 /// Note: Rubber Band is GPL-licensed, which affects the licensing of the final binary.
@@ -121,9 +180,9 @@ fn build_rubberband_static() {
         eprintln!("\nExpected location: {}", rb_src_path.display());
         eprintln!("\nTo fix this, run:");
         eprintln!("  cd backend/src-tauri/third_party/rubberband-static");
-        eprintln!("  git clone --depth 1 --branch v3.3.0 https://github.com/breakfastquay/rubberband.git rubberband");
+        eprintln!("  git clone --depth 1 --branch v4.0.0 https://github.com/breakfastquay/rubberband.git rubberband");
         eprintln!("\nOr from project root:");
-        eprintln!("  git clone --depth 1 --branch v3.3.0 https://github.com/breakfastquay/rubberband.git backend/src-tauri/third_party/rubberband-static/rubberband");
+        eprintln!("  git clone --depth 1 --branch v4.0.0 https://github.com/breakfastquay/rubberband.git backend/src-tauri/third_party/rubberband-static/rubberband");
         eprintln!("========================================\n");
         panic!("Rubber Band sources missing. See error message above for instructions.");
     }
@@ -132,9 +191,11 @@ fn build_rubberband_static() {
     let critical_files = [
         "rubberband-c.cpp",
         "RubberBandStretcher.cpp",
+        "RubberBandLiveShifter.cpp",
         "common/Allocators.cpp",
         "faster/R2Stretcher.cpp",
         "finer/R3Stretcher.cpp",
+        "finer/R3LiveShifter.cpp",
     ];
 
     for file in &critical_files {
@@ -180,6 +241,7 @@ fn build_rubberband_static() {
         // C API wrapper and main interface
         .file(format!("{}/rubberband-c.cpp", rb_src_dir))
         .file(format!("{}/RubberBandStretcher.cpp", rb_src_dir))
+        .file(format!("{}/RubberBandLiveShifter.cpp", rb_src_dir))
         // Common utilities
         .file(format!("{}/common/Allocators.cpp", rb_src_dir))
         .file(format!("{}/common/BQResampler.cpp", rb_src_dir))
@@ -203,6 +265,7 @@ fn build_rubberband_static() {
         .file(format!("{}/faster/StretcherProcess.cpp", rb_src_dir))
         // R3 Engine (finer)
         .file(format!("{}/finer/R3Stretcher.cpp", rb_src_dir))
+        .file(format!("{}/finer/R3LiveShifter.cpp", rb_src_dir))
         // External dependencies (FFT and resampler implementations)
         // These are CRITICAL for pitch preservation functionality
         .file(format!("{}/ext/kissfft/kiss_fft.c", rb_src_dir))    // Core FFT implementation
@@ -210,14 +273,19 @@ fn build_rubberband_static() {
 
     println!("cargo:warning=[RubberBand] Compiling with HAVE_KISSFFT for full pitch shifting support");
 
-    // Platform-specific flags
-    if cfg!(target_os = "windows") {
-        build.flag("/EHsc"); // Enable C++ exception handling
+    // Platform-specific flags: detect actual compiler toolchain, not just OS.
+    // On Windows, the compiler may be MinGW g++ (GCC flags) or MSVC cl.exe (MSVC flags).
+    // Using cfg!(target_os = "windows") would incorrectly apply MSVC flags to MinGW g++.
+    let compiler = build.get_compiler();
+    if compiler.is_like_msvc() {
+        build.flag("/EHsc"); // Enable C++ exception handling (MSVC)
         build.flag("/std:c++14"); // C++14 standard (MSVC uses /std: not -std=)
         build.define("NOMINMAX", None); // Prevent Windows min/max macros from interfering with std::min/max
     } else {
-        build.flag("-std=c++14"); // C++14 standard for GCC/Clang
-        build.flag("-fPIC"); // Position-independent code for Unix
+        build.flag("-std=c++14"); // C++14 standard for GCC/Clang/MinGW
+        if !cfg!(target_os = "windows") {
+            build.flag("-fPIC"); // Position-independent code for Unix (not needed on Windows/MinGW)
+        }
     }
 
     build.compile("rubberband");

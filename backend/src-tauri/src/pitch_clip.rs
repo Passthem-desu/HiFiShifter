@@ -1,7 +1,96 @@
+use crate::audio_engine::make_stretch_key;
+use crate::audio_engine::types::ResampledStereo;
 use crate::state::{Clip, TimelineState};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
+use std::time::Instant;
+
+// ── 全局 clip pitch 分析进度状态 ─────────────────────────────────────────────
+
+/// 当前批次的进度状态（供前端轮询）
+#[derive(Debug, Clone, Default)]
+pub struct ClipPitchBatchProgress {
+    /// 当前正在分析的 clip 名称
+    pub current_clip_name: Option<String>,
+    /// 已完成的 clip 数量
+    pub completed_clips: u32,
+    /// 本批次需要分析的 clip 总数
+    pub total_clips: u32,
+    /// 整体进度 0.0~1.0
+    pub progress: f32,
+}
+
+struct GlobalBatchState {
+    /// 本批次总 clip 数
+    total_clips: AtomicU32,
+    /// 已完成 clip 数
+    completed_clips: AtomicU32,
+    /// 当前正在分析的 clip 名称
+    current_clip_name: Mutex<Option<String>>,
+}
+
+impl GlobalBatchState {
+    fn new() -> Self {
+        Self {
+            total_clips: AtomicU32::new(0),
+            completed_clips: AtomicU32::new(0),
+            current_clip_name: Mutex::new(None),
+        }
+    }
+
+    fn reset(&self, total: u32) {
+        self.total_clips.store(total, AtomicOrdering::Relaxed);
+        self.completed_clips.store(0, AtomicOrdering::Relaxed);
+        if let Ok(mut g) = self.current_clip_name.lock() {
+            *g = None;
+        }
+    }
+
+    fn set_current(&self, name: Option<String>) {
+        if let Ok(mut g) = self.current_clip_name.lock() {
+            *g = name;
+        }
+    }
+
+    fn complete_one(&self) -> u32 {
+        self.completed_clips.fetch_add(1, AtomicOrdering::Relaxed) + 1
+    }
+
+    fn snapshot(&self) -> ClipPitchBatchProgress {
+        let total = self.total_clips.load(AtomicOrdering::Relaxed);
+        let completed = self.completed_clips.load(AtomicOrdering::Relaxed);
+        let current = self.current_clip_name.lock().ok().and_then(|g| g.clone());
+        let progress = if total == 0 {
+            0.0
+        } else {
+            (completed as f32 / total as f32).clamp(0.0, 1.0)
+        };
+        ClipPitchBatchProgress {
+            current_clip_name: current,
+            completed_clips: completed,
+            total_clips: total,
+            progress,
+        }
+    }
+}
+
+static GLOBAL_BATCH_STATE: OnceLock<GlobalBatchState> = OnceLock::new();
+
+fn global_batch_state() -> &'static GlobalBatchState {
+    GLOBAL_BATCH_STATE.get_or_init(GlobalBatchState::new)
+}
+
+/// 获取当前 clip pitch 批次分析进度（供 `get_pitch_analysis_progress` 命令调用）
+pub fn get_clip_pitch_batch_progress() -> Option<ClipPitchBatchProgress> {
+    let s = global_batch_state().snapshot();
+    if s.total_clips == 0 {
+        None
+    } else {
+        Some(s)
+    }
+}
 
 #[derive(Debug, Clone)]
 struct ClipPitchKey {
@@ -21,7 +110,7 @@ pub struct CachedClipPitch {
 static GLOBAL_CLIP_PITCH_CACHE: OnceLock<Mutex<HashMap<String, CachedClipPitch>>> = OnceLock::new();
 static GLOBAL_CLIP_PITCH_INFLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
-fn global_cache() -> &'static Mutex<HashMap<String, CachedClipPitch>> {
+pub(crate) fn global_cache() -> &'static Mutex<HashMap<String, CachedClipPitch>> {
     GLOBAL_CLIP_PITCH_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -62,11 +151,43 @@ fn quantize_u32(x: f64, scale: f64) -> u32 {
     }
 }
 
+// ── file_sig 缓存（TTL 10 秒，避免每次 UpdateTimeline 都做文件系统 I/O）────────
+
+struct FileSigEntry {
+    sig: (u64, u64),
+    fetched_at: Instant,
+}
+
+static GLOBAL_FILE_SIG_CACHE: OnceLock<Mutex<HashMap<PathBuf, FileSigEntry>>> = OnceLock::new();
+
+fn global_file_sig_cache() -> &'static Mutex<HashMap<PathBuf, FileSigEntry>> {
+    GLOBAL_FILE_SIG_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 获取文件签名 (len_bytes, modified_ms)，结果缓存 10 秒，避免频繁文件系统 I/O。
 fn file_sig(path: &Path) -> (u64, u64) {
-    // (len_bytes, modified_ms_since_epoch)
+    const TTL_SECS: u64 = 10;
+    let path_buf = path.to_path_buf();
+
+    // 先查缓存
+    {
+        let cache = global_file_sig_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = cache.get(&path_buf) {
+            if entry.fetched_at.elapsed().as_secs() < TTL_SECS {
+                return entry.sig;
+            }
+        }
+    }
+
+    // 缓存未命中或已过期，做真实 I/O
     let meta = match std::fs::metadata(path) {
         Ok(m) => m,
-        Err(_) => return (0, 0),
+        Err(_) => {
+            // 文件不存在，缓存 (0,0) 并返回
+            let mut cache = global_file_sig_cache().lock().unwrap_or_else(|e| e.into_inner());
+            cache.insert(path_buf, FileSigEntry { sig: (0, 0), fetched_at: Instant::now() });
+            return (0, 0);
+        }
     };
     let len = meta.len();
     let mtime_ms = meta
@@ -75,7 +196,17 @@ fn file_sig(path: &Path) -> (u64, u64) {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    (len, mtime_ms)
+    let sig = (len, mtime_ms);
+
+    let mut cache = global_file_sig_cache().lock().unwrap_or_else(|e| e.into_inner());
+    cache.insert(path_buf, FileSigEntry { sig, fetched_at: Instant::now() });
+    sig
+}
+
+/// 检查文件是否存在，复用 file_sig 缓存（len > 0 表示文件存在）。
+fn file_exists_cached(path: &Path) -> bool {
+    let (len, _) = file_sig(path);
+    len > 0
 }
 
 fn resample_curve_linear(values: &[f32], out_len: usize) -> Vec<f32> {
@@ -129,7 +260,6 @@ fn build_clip_pitch_key(
 
     let source_path = clip.source_path.as_deref()?;
 
-    let _clip_start_sec = (clip.start_beat.max(0.0)) * bs;
     let clip_timeline_len_sec = (clip.length_beats.max(0.0)) * bs;
     if !(clip_timeline_len_sec.is_finite() && clip_timeline_len_sec > 0.0) {
         return None;
@@ -165,14 +295,15 @@ fn build_clip_pitch_key(
     hasher.update(&quantize_u32(bpm, 1000.0).to_le_bytes());
     hasher.update(&quantize_u32(fp, 1000.0).to_le_bytes());
 
-    // Content-affecting params.
-    hasher.update(&quantize_u32(clip.start_beat, 1000.0).to_le_bytes());
-    hasher.update(&quantize_u32(clip.length_beats, 1000.0).to_le_bytes());
+    // 只有影响音频内容的字段才参与 hash：
+    //   source_path、trim_start_beat、trim_end_beat、playback_rate
+    // 注意：start_beat（clip 位置）和 length_beats 不参与 hash，
+    //       clip 移动不会触发重新检测。
     hasher.update(&quantize_u32(playback_rate, 10000.0).to_le_bytes());
     hasher.update(&quantize_i64(clip.trim_start_beat, 1000.0).to_le_bytes());
     hasher.update(&quantize_u32(clip.trim_end_beat, 1000.0).to_le_bytes());
 
-    // Pre-silence influences alignment.
+    // Pre-silence 由 trim_start_beat 和 playback_rate 决定，已隐含在上面的字段中。
     hasher.update(&quantize_u32(pre_silence_sec, 1000.0).to_le_bytes());
     hasher.update(&quantize_u32(trim_start_sec, 1000.0).to_le_bytes());
     hasher.update(&quantize_u32(trim_end_sec, 1000.0).to_le_bytes());
@@ -232,24 +363,50 @@ fn store_clip_pitch_cache(clip_id: &str, cached: CachedClipPitch) {
 /// 任务完成后通过 `engine_tx` 发送 `EngineCommand::ClipPitchReady`，触发 snapshot rebuild。
 ///
 /// 利用 `GLOBAL_CLIP_PITCH_INFLIGHT` 去重，同一 clip 不会重复提交。
+///
+/// `stretch_cache`：若 clip 已有拉伸后 PCM，优先使用它作为音高检测输入。
 pub fn schedule_clip_pitch_jobs(
     tl: &TimelineState,
     engine_tx: &mpsc::Sender<crate::audio_engine::types::EngineCommand>,
+    stretch_cache: &Arc<Mutex<HashMap<crate::audio_engine::types::StretchKey, ResampledStereo>>>,
+    app_handle: Option<&tauri::AppHandle>,
 ) {
+    eprintln!("[pitch_clip] schedule_clip_pitch_jobs called, clips={}, app_handle={}",
+        tl.clips.len(), app_handle.is_some());
+
     if !crate::world::is_available() {
+        eprintln!("[pitch_clip] WORLD not available, skipping");
         return;
     }
 
+    use tauri::Emitter;
+    use crate::pitch_analysis::PitchOrigAnalysisProgressEvent;
+
     // 收集需要计算的 clip 快照（避免持锁期间做耗时操作）
     let frame_period_ms = 5.0f64;
+
+    // ── 阶段1：收集所有需要分析的 clip ──────────────────────────────────────
+    struct PendingJob {
+        clip: Clip,
+        ck: ClipPitchKey,
+        root_track_id: String,
+        inflight_key: String,
+        stretched_pcm: Option<ResampledStereo>,
+    }
+
+    let mut pending_jobs: Vec<PendingJob> = Vec::new();
 
     for clip in &tl.clips {
         // 跳过无效 clip
         let source_path = match clip.source_path.as_deref() {
             Some(p) if !p.is_empty() => p,
-            _ => continue,
+            _ => {
+                eprintln!("[pitch_clip] clip '{}' skipped: no source_path", clip.id);
+                continue;
+            }
         };
-        if !Path::new(source_path).exists() {
+        if !file_exists_cached(Path::new(source_path)) {
+            eprintln!("[pitch_clip] clip '{}' skipped: file not found: {}", clip.id, source_path);
             continue;
         }
 
@@ -264,8 +421,13 @@ pub fn schedule_clip_pitch_jobs(
             let cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
             if let Some(found) = cache.get(&ck.clip_id) {
                 if found.key == ck.key {
+                    eprintln!("[pitch_clip] clip '{}' ({}) cache HIT, skipping", clip.name, clip.id);
                     continue;
+                } else {
+                    eprintln!("[pitch_clip] clip '{}' ({}) cache STALE, will reanalyze", clip.name, clip.id);
                 }
+            } else {
+                eprintln!("[pitch_clip] clip '{}' ({}) cache MISS, will analyze", clip.name, clip.id);
             }
         }
 
@@ -274,6 +436,7 @@ pub fn schedule_clip_pitch_jobs(
         let should_spawn = {
             let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
             if set.contains(&inflight_key) {
+                eprintln!("[pitch_clip] clip '{}' ({}) already inflight, skipping", clip.name, clip.id);
                 false
             } else {
                 set.insert(inflight_key.clone());
@@ -284,36 +447,152 @@ pub fn schedule_clip_pitch_jobs(
             continue;
         }
 
-        // 克隆必要数据，在独立线程中异步计算
-        let tl_clone = tl.clone();
-        let clip_clone = clip.clone();
+        // 尝试从 stretch_cache 中获取拉伸后 PCM。
+        let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 { tl.bpm } else { 120.0 };
+        let playback_rate = clip.playback_rate as f64;
+        let playback_rate = if playback_rate.is_finite() && playback_rate > 0.0 { playback_rate } else { 1.0 };
+
+        let stretched_pcm: Option<ResampledStereo> = if (playback_rate - 1.0).abs() > 1e-6 {
+            let sk = make_stretch_key(
+                Path::new(source_path),
+                44100,
+                bpm,
+                clip.trim_start_beat,
+                clip.trim_end_beat,
+                playback_rate,
+            );
+            let cached = stretch_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&sk)
+                .cloned();
+            if cached.is_none() {
+                // 拉伸尚未完成，跳过；等待 handle_stretch_ready 触发重新调度
+                let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
+                set.remove(&inflight_key);
+                continue;
+            }
+            cached
+        } else {
+            None
+        };
+
         let root_track_id = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+        pending_jobs.push(PendingJob {
+            clip: clip.clone(),
+            ck,
+            root_track_id,
+            inflight_key,
+            stretched_pcm,
+        });
+    }
+
+    if pending_jobs.is_empty() {
+        eprintln!("[pitch_clip] no pending jobs (all cached or inflight), nothing to do");
+        return;
+    }
+    eprintln!("[pitch_clip] {} clip(s) need analysis", pending_jobs.len());
+
+    // ── 阶段2：重置全局进度状态，批量提交分析任务 ────────────────────────────
+    let total = pending_jobs.len() as u32;
+    global_batch_state().reset(total);
+
+    // 发送分析开始事件
+    if let Some(app) = app_handle {
+        let root_track_id = pending_jobs.first()
+            .map(|j| j.root_track_id.clone())
+            .unwrap_or_default();
+        eprintln!("[pitch_clip] emitting pitch_orig_analysis_started for root_track_id='{}'", root_track_id);
+        let r1 = app.emit(
+            "pitch_orig_analysis_started",
+            crate::pitch_analysis::PitchOrigAnalysisStartedEvent {
+                root_track_id: root_track_id.clone(),
+                key: String::new(),
+            },
+        );
+        eprintln!("[pitch_clip] pitch_orig_analysis_started emit result: {:?}", r1);
+        // 发送初始进度（0%，显示第一个 clip 名称）
+        let first_clip_name = pending_jobs.first().map(|j| j.clip.name.clone());
+        eprintln!("[pitch_clip] emitting initial progress 0/{}, first_clip={:?}", total, first_clip_name);
+        let r2 = app.emit(
+            "pitch_orig_analysis_progress",
+            PitchOrigAnalysisProgressEvent {
+                root_track_id,
+                progress: 0.0,
+                current_clip_name: first_clip_name,
+                completed_clips: 0,
+                total_clips: total,
+            },
+        );
+        eprintln!("[pitch_clip] initial progress emit result: {:?}", r2);
+    } else {
+        eprintln!("[pitch_clip] WARNING: app_handle is None, cannot emit events!");
+    }
+
+    for job in pending_jobs {
         let tx = engine_tx.clone();
+        let app_handle_clone = app_handle.cloned();
+        let tl_clone = tl.clone();
 
         std::thread::spawn(move || {
+            // 通知进度：开始分析此 clip
+            eprintln!("[pitch_clip] thread: starting analysis for clip '{}'", job.clip.name);
+            global_batch_state().set_current(Some(job.clip.name.clone()));
+
             let midi = compute_clip_pitch_midi(
                 &tl_clone,
-                &clip_clone,
-                &root_track_id,
+                &job.clip,
+                &job.root_track_id,
                 frame_period_ms,
+                job.stretched_pcm.as_ref(),
             );
+
+            // 完成一个 clip，更新进度
+            let completed = global_batch_state().complete_one();
+            global_batch_state().set_current(None);
+            eprintln!("[pitch_clip] thread: clip '{}' analysis done, midi={}, completed={}/{}",
+                job.clip.name, midi.is_some(), completed, total);
+
+            // 发送进度事件
+            if let Some(app) = &app_handle_clone {
+                let progress = if total == 0 { 1.0 } else { completed as f32 / total as f32 };
+                let r = app.emit(
+                    "pitch_orig_analysis_progress",
+                    PitchOrigAnalysisProgressEvent {
+                        root_track_id: job.root_track_id.clone(),
+                        progress: progress.clamp(0.0, 1.0),
+                        current_clip_name: None,
+                        completed_clips: completed,
+                        total_clips: total,
+                    },
+                );
+                eprintln!("[pitch_clip] thread: progress emit {}/{} result: {:?}", completed, total, r);
+            } else {
+                eprintln!("[pitch_clip] thread: WARNING app_handle is None, cannot emit progress!");
+            }
 
             // 无论成功与否，先清除 inflight 标记
             {
                 let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
-                set.remove(&inflight_key);
+                set.remove(&job.inflight_key);
             }
 
             if let Some(midi_data) = midi {
                 let cached = CachedClipPitch {
-                    key: ck.key.clone(),
+                    key: job.ck.key.clone(),
                     midi: midi_data,
                 };
-                store_clip_pitch_cache(&ck.clip_id, cached);
+                store_clip_pitch_cache(&job.ck.clip_id, cached);
                 // 通知引擎缓存已就绪，触发 snapshot rebuild
                 let _ = tx.send(crate::audio_engine::types::EngineCommand::ClipPitchReady {
-                    clip_id: ck.clip_id.clone(),
+                    clip_id: job.ck.clip_id.clone(),
                 });
+            }
+
+            // 所有 clip 完成后，重置全局进度状态
+            if completed >= total {
+                eprintln!("[pitch_clip] thread: all {} clips done, resetting batch state", total);
+                global_batch_state().reset(0);
             }
         });
     }
@@ -324,13 +603,13 @@ pub fn compute_clip_pitch_midi(
     clip: &Clip,
     root_track_id: &str,
     frame_period_ms: f64,
+    stretched_pcm: Option<&ResampledStereo>,
 ) -> Option<Vec<f32>> {
     if !crate::world::is_available() {
         return None;
     }
 
     let ck = build_clip_pitch_key(tl, clip, root_track_id, frame_period_ms)?;
-    let source_path = clip.source_path.as_deref()?;
 
     let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 {
         tl.bpm
@@ -339,63 +618,71 @@ pub fn compute_clip_pitch_midi(
     };
     let bs = beat_sec(bpm);
 
-    // Source trimming in beats -> sec.
-    let trim_start_beats_src = clip.trim_start_beat.max(0.0);
-    let trim_end_beats_src = clip.trim_end_beat.max(0.0);
+    // ── 选择分析用 PCM ────────────────────────────────────────────────────
+    // 优先使用拉伸后 PCM（已包含 trim + 时间拉伸），直接用于分析；
+    // 若无拉伸缓存，则解码原始文件并手动 trim。
+    let (analysis_pcm, analysis_rate, analysis_channels): (Vec<f32>, u32, usize) =
+        if let Some(stretched) = stretched_pcm {
+            // 拉伸后 PCM 已经是 interleaved stereo，直接使用
+            ((*stretched.pcm).clone(), stretched.sample_rate, 2)
+        } else {
+            let source_path = clip.source_path.as_deref()?;
+            let trim_start_beats_src = clip.trim_start_beat.max(0.0);
+            let trim_end_beats_src = clip.trim_end_beat.max(0.0);
+            let trim_start_sec = trim_start_beats_src * bs;
+            let trim_end_sec = trim_end_beats_src * bs;
 
-    let trim_start_sec = trim_start_beats_src * bs;
-    let trim_end_sec = trim_end_beats_src * bs;
+            let (in_rate, in_channels, pcm) =
+                crate::audio_utils::decode_audio_f32_interleaved(Path::new(source_path)).ok()?;
+            let in_channels_usize = (in_channels as usize).max(1);
+            let in_frames = pcm.len() / in_channels_usize;
+            if in_frames < 2 {
+                return None;
+            }
 
-    // Decode.
-    let (in_rate, in_channels, pcm) =
-        crate::audio_utils::decode_audio_f32_interleaved(Path::new(source_path)).ok()?;
-    let in_channels_usize = (in_channels as usize).max(1);
-    let in_frames = pcm.len() / in_channels_usize;
-    if in_frames < 2 {
+            let total_sec = (in_frames as f64) / (in_rate.max(1) as f64);
+            if !(total_sec.is_finite() && total_sec > 0.0) {
+                return None;
+            }
+
+            let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
+            if src_end_limit_sec - trim_start_sec <= 1e-9 {
+                return None;
+            }
+
+            let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
+            let src_i1 = (src_end_limit_sec * in_rate as f64)
+                .ceil()
+                .max(src_i0 as f64) as usize;
+            let src_i1 = src_i1.min(in_frames);
+            if src_i1 <= src_i0 + 1 {
+                return None;
+            }
+
+            let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
+            let segment = crate::mixdown::linear_resample_interleaved(
+                segment,
+                in_channels_usize,
+                in_rate,
+                ck.sample_rate,
+            );
+            (segment, ck.sample_rate, in_channels_usize)
+        };
+
+    let analysis_frames = analysis_pcm.len() / analysis_channels;
+    if analysis_frames < 2 {
         return None;
     }
 
-    let total_sec = (in_frames as f64) / (in_rate.max(1) as f64);
-    if !(total_sec.is_finite() && total_sec > 0.0) {
-        return None;
-    }
-
-    let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
-    if src_end_limit_sec - trim_start_sec <= 1e-9 {
-        return None;
-    }
-
-    let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
-    let src_i1 = (src_end_limit_sec * in_rate as f64)
-        .ceil()
-        .max(src_i0 as f64) as usize;
-    let src_i1 = src_i1.min(in_frames);
-    if src_i1 <= src_i0 + 1 {
-        return None;
-    }
-
-    let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
-    let segment = crate::mixdown::linear_resample_interleaved(
-        segment,
-        in_channels_usize,
-        in_rate,
-        ck.sample_rate,
-    );
-
-    let seg_frames = segment.len() / in_channels_usize;
-    if seg_frames < 2 {
-        return None;
-    }
-
-    // mono
-    let mut mono_raw: Vec<f64> = Vec::with_capacity(seg_frames);
-    for f in 0..seg_frames {
-        let base = f * in_channels_usize;
+    // ── 转 mono + 归一化 ──────────────────────────────────────────────────
+    let mut mono_raw: Vec<f64> = Vec::with_capacity(analysis_frames);
+    for f in 0..analysis_frames {
+        let base = f * analysis_channels;
         let mut sum = 0.0f64;
-        for c in 0..in_channels_usize {
-            sum += segment[base + c] as f64;
+        for c in 0..analysis_channels {
+            sum += analysis_pcm[base + c] as f64;
         }
-        mono_raw.push(sum / in_channels_usize as f64);
+        mono_raw.push(sum / analysis_channels as f64);
     }
 
     // remove DC + clamp like other WORLD callers
@@ -436,7 +723,7 @@ pub fn compute_clip_pitch_midi(
     let f0_floor = 40.0;
     let f0_ceil = 1600.0;
 
-    let fs_i32 = ck.sample_rate as i32;
+    let fs_i32 = analysis_rate as i32;
     let f0_hz: Vec<f64> = {
         let try_harvest = || {
             crate::world::compute_f0_hz_harvest(
@@ -522,6 +809,13 @@ pub fn compute_clip_pitch_midi(
     }
 
     Some(midi)
+}
+
+/// 使指定 clip 的 pitch MIDI 缓存失效（例如拉伸参数变化后调用）。
+/// 下次 `schedule_clip_pitch_jobs` 时会重新提交检测任务。
+pub fn invalidate_clip_pitch_cache(clip_id: &str) {
+    let mut cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
+    cache.remove(clip_id);
 }
 
 #[allow(dead_code)]

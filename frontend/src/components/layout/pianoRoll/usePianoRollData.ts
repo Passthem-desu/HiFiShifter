@@ -1,17 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { ParamFramesPayload } from "../../../types/api";
-import { paramsApi, waveformApi } from "../../../services/api";
+import { paramsApi } from "../../../services/api";
 import { clamp } from "../timeline";
 
-import type { ParamName, ParamViewSegment, WavePeaksSegment } from "./types";
-import {
-    lruGet,
-    lruSet,
-    ROOT_MIX_CACHE_LIMIT,
-    rootMixPeaksCache,
-    rootMixPeaksInflight,
-} from "./peaksCache";
+import type { ParamName, ParamViewSegment } from "./types";
 import { framesToTime, timeToFrame } from "./utils";
 const paramFramePeriodCache = new Map<string, number>();
 
@@ -21,7 +14,6 @@ export function usePianoRollData(args: {
     paramsEpoch: number;
     rootTrackId: string | null;
     selectedTrackId: string | null;
-    tracks: Array<{ id: string; parentId?: string | null }>;
     secPerBeat: number;
     scrollLeft: number;
     pxPerBeat: number;
@@ -40,7 +32,6 @@ export function usePianoRollData(args: {
         paramsEpoch,
         rootTrackId,
         selectedTrackId,
-        tracks,
         secPerBeat,
         scrollLeft,
         pxPerBeat,
@@ -59,17 +50,13 @@ export function usePianoRollData(args: {
 
     // 当 pitch_orig_updated 到达时若正在编辑，将刷新推迟到 pointer-up 后执行。
     const pendingPitchUpdatedRefreshRef = useRef(false);
-    const [wavePeaks, setWavePeaks] = useState<WavePeaksSegment | null>(null);
     const [paramView, setParamView] = useState<ParamViewSegment | null>(null);
     // 副参数曲线（仅 edit，用于叠加显示）
     const [secondaryParamView, setSecondaryParamView] =
         useState<ParamViewSegment | null>(null);
     const secondaryFetchReqIdRef = useRef(0);
 
-    const [pitchAnalysisPending, setPitchAnalysisPending] = useState(false);
-    const [pitchAnalysisProgress, setPitchAnalysisProgress] = useState<
-        number | null
-    >(null);
+
 
     const [pitchEditUserModified, setPitchEditUserModified] = useState<
         boolean | null
@@ -103,16 +90,6 @@ export function usePianoRollData(args: {
     const [forceParamFetchToken, setForceParamFetchToken] = useState(0);
     const lastAppliedForceParamFetchTokenRef = useRef(0);
 
-    function hasTauriInvoke(): boolean {
-        const w = window as unknown as {
-            __TAURI__?: { core?: { invoke?: unknown }; invoke?: unknown };
-        };
-        return (
-            typeof w.__TAURI__?.core?.invoke === "function" ||
-            typeof w.__TAURI__?.invoke === "function"
-        );
-    }
-
     // Force parameter refresh when the session state changes meaningfully (undo/redo/timeline edits).
     // 同时清除旧曲线数据，避免旧数据在新数据到达前短暂显示（也修复初次导入后曲线不显示的问题）。
     useEffect(() => {
@@ -123,40 +100,12 @@ export function usePianoRollData(args: {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [paramsEpoch, rootTrackId]);
 
-    const pitchPollDelayMsRef = useRef(250);
-
-    // In pywebview (no Tauri events), poll pitch analysis completion while pending.
-    useEffect(() => {
-        if (editParam !== "pitch") return;
-        if (!pitchEnabled) return;
-        if (!rootTrackId) return;
-        if (hasTauriInvoke()) return;
-
-        if (!pitchAnalysisPending) {
-            pitchPollDelayMsRef.current = 250;
-            return;
-        }
-
-        const delay = clamp(pitchPollDelayMsRef.current, 100, 1500);
-        const id = window.setTimeout(() => {
-            setForceParamFetchToken((x) => x + 1);
-            pitchPollDelayMsRef.current = Math.min(
-                1000,
-                Math.round(pitchPollDelayMsRef.current * 1.6),
-            );
-        }, delay);
-
-        return () => {
-            window.clearTimeout(id);
-        };
-    }, [editParam, pitchEnabled, rootTrackId, pitchAnalysisPending]);
-
-    // Listen for backend pitch analysis lifecycle notifications (Tauri only).
+    // 监听 pitch_orig_updated 事件，触发曲线刷新。
+    // 注意：分析进度状态（started/progress）由全局 PitchAnalysisProvider 统一管理，
+    // 此处只负责在分析完成后刷新 PianoRoll 曲线数据。
     useEffect(() => {
         let disposed = false;
         let unlistenUpdated: null | (() => void) = null;
-        let unlistenStarted: null | (() => void) = null;
-        let unlistenProgress: null | (() => void) = null;
 
         async function setup() {
             if (editParam !== "pitch") return;
@@ -166,11 +115,6 @@ export function usePianoRollData(args: {
                 const mod = await import("@tauri-apps/api/event");
 
                 type PitchOrigUpdatedPayload = { rootTrackId?: string };
-                type PitchOrigAnalysisStartedPayload = { rootTrackId?: string };
-                type PitchOrigAnalysisProgressPayload = {
-                    rootTrackId?: string;
-                    progress?: number;
-                };
 
                 unlistenUpdated = await mod.listen<PitchOrigUpdatedPayload>(
                     "pitch_orig_updated",
@@ -183,56 +127,16 @@ export function usePianoRollData(args: {
                         )
                             return;
 
-                        setPitchAnalysisPending(false);
-                        setPitchAnalysisProgress(null);
-
                         // 若用户正在绘制曲线（pointer down），推迟曲线刷新到 pointer-up 后，
                         // 避免后端分析结果覆盖用户正在绘制的 liveEditOverride 内容。
                         if (liveEditActiveRef.current) {
                             pendingPitchUpdatedRefreshRef.current = true;
                         } else {
-                            // 清空波形缓存，强制重新拉取以同步音高分析后的数据
-                            setWavePeaks(null);
                             setForceParamFetchToken((x) => x + 1);
                             setRefreshToken((x) => x + 1);
                         }
                     },
                 );
-
-                unlistenStarted =
-                    await mod.listen<PitchOrigAnalysisStartedPayload>(
-                        "pitch_orig_analysis_started",
-                        (event) => {
-                            if (disposed) return;
-                            const payload = event.payload ?? {};
-                            if (
-                                payload?.rootTrackId &&
-                                payload.rootTrackId !== rootTrackId
-                            )
-                                return;
-                            setPitchAnalysisPending(true);
-                            setPitchAnalysisProgress(0);
-                        },
-                    );
-
-                unlistenProgress =
-                    await mod.listen<PitchOrigAnalysisProgressPayload>(
-                        "pitch_orig_analysis_progress",
-                        (event) => {
-                            if (disposed) return;
-                            const payload = event.payload ?? {};
-                            if (
-                                payload?.rootTrackId &&
-                                payload.rootTrackId !== rootTrackId
-                            )
-                                return;
-                            const p = Number(payload?.progress);
-                            if (!Number.isFinite(p)) return;
-                            const pp = Math.max(0, Math.min(1, p));
-                            setPitchAnalysisPending(true);
-                            setPitchAnalysisProgress(pp);
-                        },
-                    );
             } catch {
                 // Safe no-op: browser/pywebview builds won't have the Tauri API.
             }
@@ -243,8 +147,6 @@ export function usePianoRollData(args: {
         return () => {
             disposed = true;
             if (unlistenUpdated) unlistenUpdated();
-            if (unlistenStarted) unlistenStarted();
-            if (unlistenProgress) unlistenProgress();
         };
     }, [editParam, pitchEnabled, rootTrackId]);
 
@@ -252,8 +154,6 @@ export function usePianoRollData(args: {
         if (editParam !== "pitch") return;
         if (pitchEnabled) return;
         setParamView(null);
-        setPitchAnalysisPending(false);
-        setPitchAnalysisProgress(null);
         setPitchEditUserModified(null);
         setPitchEditBackendAvailable(null);
     }, [editParam, pitchEnabled]);
@@ -277,15 +177,7 @@ export function usePianoRollData(args: {
             return null;
         }
 
-        const selected = selectedTrackId
-            ? (tracks.find((tr) => tr.id === selectedTrackId) ?? null)
-            : null;
-        const waveTrackId = selected?.parentId ?? selected?.id ?? trackId;
-
         const { w } = viewSizeRef.current;
-        const colsRaw = clamp(Math.floor(w), 16, 8192);
-        const cols = clamp(Math.round(colsRaw / 64) * 64, 64, 1024);
-
         const sl = scrollLeftRef.current;
         const ppb = pxPerBeatRef.current;
         const startBeat = sl / Math.max(1e-9, ppb);
@@ -302,42 +194,6 @@ export function usePianoRollData(args: {
             const step = Math.max(1e-6, quantStepSec);
             return Math.round(x / step) * step;
         };
-
-        const waveCoversVisible =
-            wavePeaks != null &&
-            wavePeaks.key.startsWith(`${waveTrackId}|`) &&
-            wavePeaks.startSec <= visibleStartSec &&
-            wavePeaks.startSec + wavePeaks.durSec >= visibleEndSec;
-
-        const marginSec = visibleDurSec * 2;
-        const covStartSec = Math.max(0, visibleStartSec - marginSec);
-        const covDurSec = visibleDurSec + 2 * marginSec;
-        const covCols = clamp(
-            Math.round(((cols * (covDurSec / visibleDurSec)) / 64) * 64),
-            64,
-            2048,
-        );
-
-        const startSecQ = Math.max(0, q(covStartSec));
-        const durSecQ = Math.max(quantStepSec, q(covDurSec));
-
-        const waveKey = `${waveTrackId}|${startSecQ.toFixed(3)}|${durSecQ.toFixed(3)}|${covCols}`;
-
-        const waveHit = !waveCoversVisible
-            ? lruGet(rootMixPeaksCache, waveKey)
-            : null;
-        if (waveHit) {
-            setWavePeaks({
-                key: waveKey,
-                startSec: startSecQ,
-                durSec: durSecQ,
-                columns: covCols,
-                min: waveHit.min,
-                max: waveHit.max,
-            });
-        }
-
-        const shouldFetchWave = !waveCoversVisible && waveHit == null;
 
         const fpKey = `${trackId}|${editParam}`;
         const cachedFp = paramFramePeriodCache.get(fpKey);
@@ -435,13 +291,6 @@ export function usePianoRollData(args: {
         return {
             debug,
             trackId,
-            waveTrackId,
-            waveHit,
-            shouldFetchWave,
-            waveKey,
-            startSecQ,
-            durSecQ,
-            covCols,
             paramCoversVisible,
             paramKey,
             startFrame,
@@ -466,13 +315,6 @@ export function usePianoRollData(args: {
         const {
             debug,
             trackId,
-            waveTrackId,
-            waveHit,
-            shouldFetchWave,
-            waveKey,
-            startSecQ,
-            durSecQ,
-            covCols,
             paramCoversVisible,
             paramKey,
             startFrame,
@@ -483,87 +325,7 @@ export function usePianoRollData(args: {
             forceParamFetchToken: localForceParamFetchToken,
         } = req;
 
-        if (waveHit) {
-            setWavePeaks({
-                key: waveKey,
-                startSec: startSecQ,
-                durSec: durSecQ,
-                columns: covCols,
-                min: waveHit.min,
-                max: waveHit.max,
-            });
-        }
-
-        const waveP = shouldFetchWave
-            ? (rootMixPeaksInflight.get(waveKey) ??
-              (async () => {
-                  const res = await waveformApi.getTrackMixWaveformPeaksSegment(
-                      waveTrackId,
-                      startSecQ,
-                      durSecQ,
-                      covCols,
-                  );
-                  return res;
-              })())
-            : null;
-        if (waveP) rootMixPeaksInflight.set(waveKey, waveP);
-
         const reqId = ++fetchReqIdRef.current;
-
-        if (waveP) {
-            void (async () => {
-                beginLoading();
-                try {
-                    const res = await waveP;
-                    if (fetchReqIdRef.current !== reqId) return;
-                    if (!res?.ok) {
-                        if (debug) {
-                            // eslint-disable-next-line no-console
-                            console.debug("[PianoRollData] wavePeaks not ok", {
-                                waveTrackId,
-                                waveKey,
-                                res,
-                            });
-                        }
-                        return;
-                    }
-                    const min = (res.min ?? []).map((v) => Number(v) || 0);
-                    const max = (res.max ?? []).map((v) => Number(v) || 0);
-
-                    // DEBUG: 验证返回数据长度
-                    console.log("[WavePeaks] API response:", {
-                        requestedStartSec: startSecQ,
-                        requestedDurSec: durSecQ,
-                        requestedColumns: covCols,
-                        actualMinLength: min.length,
-                        actualMaxLength: max.length,
-                        mismatch:
-                            min.length !== covCols || max.length !== covCols,
-                    });
-
-                    lruSet(
-                        rootMixPeaksCache,
-                        waveKey,
-                        { min, max, t: Date.now() },
-                        ROOT_MIX_CACHE_LIMIT,
-                    );
-                    rootMixPeaksInflight.delete(waveKey);
-                    setWavePeaks({
-                        key: waveKey,
-                        startSec: startSecQ,
-                        durSec: durSecQ,
-                        columns: covCols,
-                        min,
-                        max,
-                    });
-                    invalidate();
-                } catch {
-                    rootMixPeaksInflight.delete(waveKey);
-                } finally {
-                    endLoading();
-                }
-            })();
-        }
 
         if (editParam === "pitch" && !pitchEnabled) {
             // Skip pitch fetch when disabled; waveform still updates.
@@ -676,12 +438,6 @@ export function usePianoRollData(args: {
                     const payload = res as ParamFramesPayload;
 
                     if (editParam === "pitch") {
-                        const pending = Boolean(
-                            payload.analysis_pending ?? false,
-                        );
-                        setPitchAnalysisPending(pending);
-                        if (!pending) setPitchAnalysisProgress(null);
-
                         const userModified = payload.pitch_edit_user_modified;
                         setPitchEditUserModified(
                             typeof userModified === "boolean"
@@ -766,11 +522,6 @@ export function usePianoRollData(args: {
         const {
             debug,
             trackId,
-            waveTrackId,
-            waveKey,
-            startSecQ,
-            durSecQ,
-            covCols,
             paramKey,
             startFrame,
             frameCount,
@@ -789,13 +540,7 @@ export function usePianoRollData(args: {
         const shouldFetchSecondary = secondaryPitchOk;
         try {
             beginLoading();
-            const [waveRes, paramRes, secondaryRes] = await Promise.all([
-                waveformApi.getTrackMixWaveformPeaksSegment(
-                    waveTrackId,
-                    startSecQ,
-                    durSecQ,
-                    covCols,
-                ),
+            const [paramRes, secondaryRes] = await Promise.all([
                 shouldFetchParam
                     ? paramsApi.getParamFrames(
                           trackId,
@@ -818,40 +563,10 @@ export function usePianoRollData(args: {
 
             if (fetchReqIdRef.current !== reqId) return;
 
-            if (waveRes?.ok) {
-                const min = (waveRes.min ?? []).map((v) => Number(v) || 0);
-                const max = (waveRes.max ?? []).map((v) => Number(v) || 0);
-                lruSet(
-                    rootMixPeaksCache,
-                    waveKey,
-                    { min, max, t: Date.now() },
-                    ROOT_MIX_CACHE_LIMIT,
-                );
-                setWavePeaks({
-                    key: waveKey,
-                    startSec: startSecQ,
-                    durSec: durSecQ,
-                    columns: covCols,
-                    min,
-                    max,
-                });
-            } else if (debug) {
-                // eslint-disable-next-line no-console
-                console.debug("[PianoRollData] refreshNow wavePeaks not ok", {
-                    waveTrackId,
-                    waveKey,
-                    waveRes,
-                });
-            }
-
             if (shouldFetchParam && paramRes?.ok) {
                 const payload = paramRes as ParamFramesPayload;
 
                 if (editParam === "pitch") {
-                    const pending = Boolean(payload.analysis_pending ?? false);
-                    setPitchAnalysisPending(pending);
-                    if (!pending) setPitchAnalysisProgress(null);
-
                     const userModified = payload.pitch_edit_user_modified;
                     setPitchEditUserModified(
                         typeof userModified === "boolean" ? userModified : null,
@@ -960,8 +675,6 @@ export function usePianoRollData(args: {
     }
 
     return {
-        wavePeaks,
-        setWavePeaks,
         paramView,
         setParamView,
         secondaryParamView,
@@ -970,8 +683,6 @@ export function usePianoRollData(args: {
         notifyLiveEditEnded,
         isRefreshing,
         isLoading,
-        pitchAnalysisPending,
-        pitchAnalysisProgress,
         pitchEditUserModified,
         pitchEditBackendAvailable,
     };

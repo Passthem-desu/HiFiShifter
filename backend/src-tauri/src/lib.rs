@@ -6,6 +6,7 @@ mod models;
 mod pitch_analysis;
 mod pitch_clip;
 mod pitch_editing;
+mod onnx_clip_cache;
 mod clip_pitch_cache;
 mod pitch_progress;
 mod vocoder_pipeline;
@@ -24,6 +25,7 @@ mod time_stretch;
 mod waveform;
 mod waveform_disk_cache;
 mod world;
+mod streaming_world;
 mod world_vocoder;
 
 use std::path::PathBuf;
@@ -110,6 +112,9 @@ pub fn run() {
 
             // Expose app handle for background workers.
             let _ = state.app_handle.set(app.handle().clone());
+
+            // 将 app_handle 传递给 audio engine worker，使其能向前端推送事件。
+            state.audio_engine.set_app_handle(app.handle().clone());
 
             // Prefer the OS-level app cache dir so peaks persist across runs.
             let base = app

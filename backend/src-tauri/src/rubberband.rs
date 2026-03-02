@@ -74,6 +74,10 @@ extern "C" {
     ) -> u32;
     
     fn rubberband_calculate_stretch(state: RubberBandState);
+
+    fn rubberband_get_preferred_start_pad(state: RubberBandState) -> u32;
+    fn rubberband_get_start_delay(state: RubberBandState) -> u32;
+    fn rubberband_get_samples_required(state: RubberBandState) -> u32;
 }
 
 pub struct RubberBandRealtimeStretcher {
@@ -409,6 +413,180 @@ pub fn try_time_stretch_interleaved_offline(
         for (f, frame) in out.chunks_exact_mut(channels).enumerate() {
             for (ch, v) in frame.iter_mut().enumerate() {
                 *v = out_ch[ch][f];
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// 使用 RubberBand **实时模式**（`OptionProcessRealTime`）完成批量时间拉伸。
+///
+/// 与 [`try_time_stretch_interleaved_offline`] 的区别：
+/// - 不需要 `study` pass，只需一次 `process` + `retrieve` 遍历
+/// - 内存占用更低（无需两次遍历缓冲区）
+/// - 与 `stretch_stream` 实时路径使用相同的 API 模式，代码路径统一
+/// - 需要处理实时模式的延迟补偿（`getPreferredStartPad` + `getStartDelay`）
+///
+/// # 延迟补偿
+/// 实时模式不自动补偿启动延迟，需要：
+/// 1. 在输入前填充 `getPreferredStartPad()` 个静音帧
+/// 2. 丢弃输出前 `getStartDelay()` 个帧
+///
+/// # 参数
+/// - `input_interleaved`: 交错 PCM 输入（f32，范围 -1.0 ~ 1.0）
+/// - `channels`: 声道数（1 或 2）
+/// - `sample_rate`: 采样率（Hz）
+/// - `time_ratio`: 时间拉伸比（输出时长 / 输入时长），> 1 减速，< 1 加速
+/// - `out_frames_hint`: 期望输出帧数（用于预分配缓冲区）
+pub fn try_time_stretch_interleaved_realtime(
+    input_interleaved: &[f32],
+    channels: usize,
+    sample_rate: u32,
+    time_ratio: f64,
+    out_frames_hint: usize,
+) -> Result<Vec<f32>, String> {
+    if input_interleaved.is_empty() || channels == 0 {
+        return Ok(vec![]);
+    }
+    if channels > 2 {
+        return Err("rubberband: channels > 2 not supported yet".to_string());
+    }
+
+    let in_frames = input_interleaved.len() / channels;
+    if in_frames < 2 {
+        return Ok(input_interleaved.to_vec());
+    }
+    let time_ratio = if time_ratio.is_finite() && time_ratio > 1e-6 {
+        time_ratio
+    } else {
+        1.0
+    };
+
+    // 实时模式选项：与 stretch_stream 保持一致
+    let options = opts::RubberBandOptionProcessRealTime
+        | opts::RubberBandOptionEngineFiner
+        | opts::RubberBandOptionPitchHighQuality
+        | opts::RubberBandOptionFormantPreserved
+        | opts::RubberBandOptionChannelsTogether
+        | opts::RubberBandOptionTransientsSmooth
+        | opts::RubberBandOptionDetectorSoft
+        | opts::RubberBandOptionPhaseLaminar;
+
+    // 反交错为声道主序缓冲区
+    let mut ch_buf: Vec<Vec<f32>> = (0..channels).map(|_| vec![0.0; in_frames]).collect();
+    for f in 0..in_frames {
+        for ch in 0..channels {
+            ch_buf[ch][f] = input_interleaved[f * channels + ch];
+        }
+    }
+
+    unsafe {
+        let state = rubberband_new(sample_rate, channels as u32, options, time_ratio, 1.0);
+        if state.is_null() {
+            return Err("rubberband_new returned null".to_string());
+        }
+
+        rubberband_set_time_ratio(state, time_ratio);
+        rubberband_set_pitch_scale(state, 1.0);
+
+        const BLOCK: usize = 1024;
+        rubberband_set_max_process_size(state, BLOCK as u32);
+
+        // 实时模式延迟补偿：
+        // 1. 查询需要填充的静音帧数（start pad）
+        // 2. 查询需要丢弃的输出帧数（start delay）
+        let start_pad = rubberband_get_preferred_start_pad(state) as usize;
+        let start_delay = rubberband_get_start_delay(state) as usize;
+
+        // 填充静音帧（start pad）
+        if start_pad > 0 {
+            let silence: Vec<f32> = vec![0.0; start_pad * channels];
+            let mut pad_ch: Vec<Vec<f32>> = (0..channels).map(|_| vec![0.0; start_pad]).collect();
+            let _ = silence; // 已通过 pad_ch 零初始化
+
+            let mut pad_pos = 0;
+            while pad_pos < start_pad {
+                let end = (pad_pos + BLOCK).min(start_pad);
+                let count = end - pad_pos;
+                let ptrs: Vec<*const f32> = pad_ch.iter().map(|b| b.as_ptr().add(pad_pos)).collect();
+                rubberband_process(state, ptrs.as_ptr(), count as u32, 0);
+                pad_pos = end;
+            }
+        }
+
+        // 主处理 pass（process + retrieve 交替）
+        let mut out_ch: Vec<Vec<f32>> = (0..channels)
+            .map(|_| Vec::with_capacity(out_frames_hint.max(1) + start_pad))
+            .collect();
+        let mut temp: Vec<Vec<f32>> = (0..channels).map(|_| vec![0.0f32; BLOCK]).collect();
+
+        let mut i = 0;
+        while i < in_frames {
+            let end = (i + BLOCK).min(in_frames);
+            let count = end - i;
+            let is_final = if end >= in_frames { 1 } else { 0 };
+
+            let ptrs: Vec<*const f32> = ch_buf.iter().map(|b| b.as_ptr().add(i)).collect();
+            rubberband_process(state, ptrs.as_ptr(), count as u32, is_final);
+            i = end;
+
+            // 每次 process 后立即 retrieve，避免内部缓冲区积压
+            loop {
+                let avail = rubberband_available(state);
+                if avail <= 0 {
+                    break;
+                }
+                let req = (avail as usize).min(BLOCK);
+                let out_ptrs: Vec<*mut f32> = temp.iter_mut().map(|t| t.as_mut_ptr()).collect();
+                let got = rubberband_retrieve(state, out_ptrs.as_ptr(), req as u32) as usize;
+                if got == 0 {
+                    break;
+                }
+                for (out_buf, tmp) in out_ch.iter_mut().zip(temp.iter()) {
+                    out_buf.extend_from_slice(&tmp[..got]);
+                }
+            }
+        }
+
+        // 最终 flush：继续 retrieve 直到无更多输出
+        loop {
+            let avail = rubberband_available(state);
+            if avail <= 0 {
+                break;
+            }
+            let req = (avail as usize).min(BLOCK);
+            let out_ptrs: Vec<*mut f32> = temp.iter_mut().map(|t| t.as_mut_ptr()).collect();
+            let got = rubberband_retrieve(state, out_ptrs.as_ptr(), req as u32) as usize;
+            if got == 0 {
+                break;
+            }
+            for (out_buf, tmp) in out_ch.iter_mut().zip(temp.iter()) {
+                out_buf.extend_from_slice(&tmp[..got]);
+            }
+        }
+
+        rubberband_reset(state);
+        rubberband_delete(state);
+
+        // 丢弃 start_delay 帧（延迟补偿）
+        let out_frames_raw = out_ch
+            .first()
+            .map(|v| v.len())
+            .unwrap_or(0)
+            .min(out_ch.get(1).map(|v| v.len()).unwrap_or(usize::MAX));
+
+        let skip = start_delay.min(out_frames_raw);
+        let out_frames = out_frames_raw.saturating_sub(skip);
+
+        if out_frames == 0 {
+            return Ok(vec![]);
+        }
+
+        // 交错输出
+        let mut out = vec![0.0f32; out_frames * channels];
+        for (f, frame) in out.chunks_exact_mut(channels).enumerate() {
+            for (ch, v) in frame.iter_mut().enumerate() {
+                *v = out_ch[ch].get(skip + f).copied().unwrap_or(0.0);
             }
         }
         Ok(out)

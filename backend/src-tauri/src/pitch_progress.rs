@@ -4,7 +4,7 @@
 //! progress of parallel pitch analysis jobs across multiple clips.
 
 use crate::state::Clip;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -19,6 +19,12 @@ pub struct ProgressTracker {
     completed_workload: AtomicU64,
     /// Start time for ETA calculation
     start_time: Instant,
+    /// Total number of clips to analyze (excluding cache hits)
+    pub total_clips: u32,
+    /// Number of clips completed so far
+    completed_clips: AtomicU32,
+    /// Name of the clip currently being analyzed
+    current_clip_name: Mutex<Option<String>>,
 }
 
 impl ProgressTracker {
@@ -68,6 +74,9 @@ impl ProgressTracker {
             total_workload: total.max(1e-6), // Avoid division by zero
             completed_workload: AtomicU64::new(0),
             start_time: Instant::now(),
+            total_clips: clips.len() as u32,
+            completed_clips: AtomicU32::new(0),
+            current_clip_name: Mutex::new(None),
         }
     }
     
@@ -88,8 +97,26 @@ impl ProgressTracker {
         
         let workload_u64 = (workload * 1000.0).round().max(0.0) as u64;
         self.completed_workload.fetch_add(workload_u64, Ordering::Relaxed);
+        self.completed_clips.fetch_add(1, Ordering::Relaxed);
         
         self.get_current_progress()
+    }
+
+    /// Set the name of the clip currently being analyzed
+    pub fn set_current_clip(&self, name: Option<String>) {
+        if let Ok(mut guard) = self.current_clip_name.lock() {
+            *guard = name;
+        }
+    }
+
+    /// Get the name of the clip currently being analyzed
+    pub fn get_current_clip_name(&self) -> Option<String> {
+        self.current_clip_name.lock().ok()?.clone()
+    }
+
+    /// Get the number of completed clips
+    pub fn get_completed_clips(&self) -> u32 {
+        self.completed_clips.load(Ordering::Relaxed)
     }
     
     /// Get current progress percentage

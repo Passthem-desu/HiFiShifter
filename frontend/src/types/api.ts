@@ -170,9 +170,15 @@ export interface ParamFramesPayload {
 }
 
 export interface PitchProgressPayload {
-    root_track_id: string;
+    rootTrackId: string;
     progress: number;
-    eta_seconds?: number;
+    etaSeconds?: number;
+    /** 当前正在分析的 clip 名称 */
+    currentClipName?: string | null;
+    /** 已完成的 clip 数量 */
+    completedClips?: number;
+    /** 需要分析的 clip 总数 */
+    totalClips?: number;
 }
 
 export interface OnnxStatusResult {

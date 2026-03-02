@@ -26,8 +26,8 @@ export const PitchAnalysisProgressBar: React.FC<
     const [isFadingOut, setIsFadingOut] = useState(false);
 
     useEffect(() => {
-        let intervalId: NodeJS.Timeout | null = null;
-        let fadeOutTimer: NodeJS.Timeout | null = null;
+        let intervalId: ReturnType<typeof setInterval> | null = null;
+        let fadeOutTimer: ReturnType<typeof setTimeout> | null = null;
 
         const pollProgress = async () => {
             try {
@@ -68,16 +68,22 @@ export const PitchAnalysisProgressBar: React.FC<
     }
 
     // 计算进度百分比 (Task 3.10)
-    const percentage =
-        progress.total > 0 ? (progress.completed / progress.total) * 100 : 0;
+    const percentage = Math.max(0, Math.min(100, progress.progress * 100));
 
-    // 格式化进度标签
+    // 格式化进度标签：显示当前 clip 名称和进度计数
+    const completedClips = progress.completedClips ?? 0;
+    const totalClips = progress.totalClips ?? 0;
+    const clipCountStr = totalClips > 0 ? ` (${completedClips}/${totalClips})` : "";
+    const clipNameStr = progress.currentClipName
+        ? ` "${progress.currentClipName}"`
+        : "";
     const label =
-        progress.currentTask ||
-        `Analyzing clips (${progress.completed}/${progress.total})`;
+        totalClips > 0
+            ? `正在分析${clipNameStr}${clipCountStr} ${Math.round(percentage)}%`
+            : `Analyzing... ${Math.round(percentage)}%`;
 
-    // 转换预计剩余时间为秒
-    const estimatedRemainingSec = progress.estimatedRemainingMs / 1000;
+    // 预计剩余时间（秒）
+    const estimatedRemainingSec = progress.etaSeconds ?? null;
 
     return (
         <div

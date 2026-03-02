@@ -17,16 +17,31 @@ use super::resource_manager::ResourceManager;
 use super::snapshot::{
     build_snapshot, build_snapshot_for_file, schedule_stretch_jobs, source_bounds_frames,
 };
-use crate::pitch_clip::schedule_clip_pitch_jobs;
+use crate::pitch_clip::{invalidate_clip_pitch_cache, schedule_clip_pitch_jobs};
 use super::types::{
     AudioEngineStateSnapshot, EngineCommand, EngineSnapshot, ResampledStereo, StretchJob,
     StretchKey,
 };
 
 use crate::pitch_editing::PitchEditAlgorithm;
+use crate::pitch_clip::get_or_compute_clip_pitch_midi_global;
+use tauri::{Emitter, Manager};
 
 use super::realtime_stats::RealtimeRenderStats;
 use super::realtime_stats::RealtimeRenderStatsSnapshot;
+
+/// 音高检测完成后推送给前端的事件 payload。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ClipPitchDataPayload {
+    /// clip 的唯一 ID
+    pub clip_id: String,
+    /// clip 在 timeline 上的起始帧（绝对，基于引擎采样率）
+    pub start_frame: u64,
+    /// MIDI 音高曲线（每帧一个 MIDI 值，0 表示无声）
+    pub midi_curve: Vec<f32>,
+    /// 帧周期（毫秒），用于前端将帧索引转换为时间
+    pub frame_period_ms: f64,
+}
 
 pub struct AudioEngine {
     tx: mpsc::Sender<EngineCommand>,
@@ -61,6 +76,16 @@ impl Clone for AudioEngine {
 
 impl AudioEngine {
     pub fn new() -> Self {
+        Self::with_app_handle(None)
+    }
+
+    /// 在 Tauri setup 完成后调用，将 app_handle 传递给 engine worker，
+    /// 使其能够向前端推送事件（如 `clip_pitch_data`）。
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        let _ = self.tx.send(EngineCommand::SetAppHandle { handle });
+    }
+
+    fn with_app_handle(app_handle: Option<tauri::AppHandle>) -> Self {
         let (tx, rx) = mpsc::channel::<EngineCommand>();
         let tx_for_worker = tx.clone();
 
@@ -351,6 +376,9 @@ impl AudioEngine {
             let stretch_stream_epoch: Arc<AtomicU64> = Arc::new(AtomicU64::new(1));
             // per-clip stretch epoch map（方案 D）
             let mut clip_stretch_epochs: HashMap<String, Arc<AtomicU64>> = HashMap::new();
+            // per-clip synth epoch map，用于音高合成缓存失效控制
+            let mut clip_synth_epochs: HashMap<String, Arc<AtomicU64>> = HashMap::new();
+            let mut app_handle_for_worker: Option<tauri::AppHandle> = app_handle;
 
             loop {
                 match rx.recv() {
@@ -370,10 +398,12 @@ impl AudioEngine {
                             stretch_tx: &stretch_tx,
                             stretch_stream_epoch: &stretch_stream_epoch,
                             clip_stretch_epochs: &mut clip_stretch_epochs,
+                            clip_synth_epochs: &mut clip_synth_epochs,
                             resources: &resources,
                             tx: &tx_for_worker,
                             last_timeline: &mut last_timeline,
                             last_play_file: &mut last_play_file,
+                            app_handle: app_handle_for_worker.clone(),
                         };
                         match cmd {
                             EngineCommand::Stop => handle_stop(&mut state),
@@ -389,6 +419,9 @@ impl AudioEngine {
                             }
                             EngineCommand::ClipPitchReady { clip_id } => {
                                 handle_clip_pitch_ready(&mut state, clip_id)
+                            }
+                            EngineCommand::SetAppHandle { handle } => {
+                                app_handle_for_worker = Some(handle);
                             }
                             EngineCommand::AudioReady { key } => handle_audio_ready(&mut state, key),
                             EngineCommand::PlayFile {
@@ -530,10 +563,14 @@ struct EngineWorkerState<'a> {
     stretch_stream_epoch: &'a Arc<AtomicU64>,
     /// per-clip stretch epoch map，用于细化 cancel 粒度（方案 D）
     clip_stretch_epochs: &'a mut HashMap<String, Arc<AtomicU64>>,
+    /// per-clip synth epoch map，用于音高合成缓存失效控制
+    clip_synth_epochs: &'a mut HashMap<String, Arc<AtomicU64>>,
     resources: &'a ResourceManager,
     tx: &'a mpsc::Sender<EngineCommand>,
     last_timeline: &'a mut Option<TimelineState>,
     last_play_file: &'a mut Option<(PathBuf, f64, String)>,
+    /// 可选的 Tauri app handle，用于向前端推送事件
+    app_handle: Option<tauri::AppHandle>,
 }
 
 // ─── 命令处理函数 ─────────────────────────────────────────────────────────────
@@ -559,8 +596,8 @@ fn handle_set_playing(s: &mut EngineWorkerState, playing: bool, target: Option<S
 }
 
 fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
-    // 对参数变化的 clip 递增其 per-clip epoch（方案 D）。
-    // 新增 clip 也会初始化 epoch；已删除 clip 的 epoch 在最后清理。
+    // ── 1. per-clip stretch epoch（方案 D）────────────────────────────────
+    // 对拉伸参数变化的 clip 递增其 stretch epoch；新增 clip 也初始化。
     for clip in &tl.clips {
         let changed = s
             .last_timeline
@@ -575,9 +612,65 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
                 .fetch_add(1, Ordering::Relaxed);
         }
     }
-    // 清理已删除 clip 的 epoch
+    // 清理已删除 clip 的 stretch epoch
     s.clip_stretch_epochs
         .retain(|id, _| tl.clips.iter().any(|c| &c.id == id));
+
+    // ── 2. per-clip synth epoch ───────────────────────────────────────────
+    // 当某个 root_track 的 pitch_edit 曲线发生变化时，
+    // 递增该 track 上所有 clip 的 synth_epoch，触发重新合成。
+    // 新增 clip 也初始化 synth_epoch（默认 0，首次合成时会被触发）。
+    for clip in &tl.clips {
+        // 确保每个 clip 都有 synth_epoch 条目
+        s.clip_synth_epochs
+            .entry(clip.id.clone())
+            .or_insert_with(|| Arc::new(AtomicU64::new(0)));
+
+        // 检查该 clip 所在 track 的 pitch_edit 是否发生变化
+        let pitch_changed = s
+            .last_timeline
+            .as_ref()
+            .map(|old_tl| {
+                let old_params = old_tl.params_by_root_track.get(&clip.track_id);
+                let new_params = tl.params_by_root_track.get(&clip.track_id);
+                match (old_params, new_params) {
+                    (Some(old), Some(new)) => old.pitch_edit != new.pitch_edit,
+                    (None, Some(new)) => !new.pitch_edit.is_empty(),
+                    (Some(_), None) => true, // track params 被删除
+                    (None, None) => false,
+                }
+            })
+            .unwrap_or(false); // 首次 timeline，不触发重新合成
+
+        if pitch_changed {
+            if let Some(epoch) = s.clip_synth_epochs.get(&clip.id) {
+                epoch.fetch_add(1, Ordering::Relaxed);
+            }
+            // 同步使 ONNX per-clip 缓存失效，确保下次推理使用新的 pitch_edit 曲线。
+            crate::onnx_clip_cache::global_onnx_clip_cache()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .invalidate(&clip.id);
+        }
+    }
+    // 清理已删除 clip 的 synth epoch
+    s.clip_synth_epochs
+        .retain(|id, _| tl.clips.iter().any(|c| &c.id == id));
+
+    // ── 3. 收集 start_beat 发生变化的 clip（clip 被移动）────────────────────
+    // 必须在 last_timeline 更新之前收集，否则比较的是新旧相同的值。
+    let moved_clip_ids: Vec<String> = tl
+        .clips
+        .iter()
+        .filter(|clip| {
+            s.last_timeline
+                .as_ref()
+                .and_then(|old_tl| old_tl.clips.iter().find(|c| c.id == clip.id))
+                .map(|old| (old.start_beat - clip.start_beat).abs() > 1e-9)
+                .unwrap_or(false) // 新 clip 由 ClipPitchReady 事件处理，此处跳过
+        })
+        .map(|clip| clip.id.clone())
+        .collect();
 
     *s.last_timeline = Some(tl.clone());
     *s.last_play_file = None;
@@ -625,7 +718,45 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
 
     // 异步预计算所有可见 clip 的 pitch MIDI（缓存未命中时后台计算，
     // 完成后发送 ClipPitchReady 触发 snapshot rebuild，不阻塞当前构建）。
-    schedule_clip_pitch_jobs(&tl, s.tx);
+    // 若 clip 已有拉伸后 PCM，优先使用拉伸后 PCM 作为分析输入。
+    //
+    // 优化：只有当存在 pitch-relevant 参数变化的 clip 或新增 clip 时，
+    // 才调用 schedule_clip_pitch_jobs。clip 仅移动（start_beat 变化）时跳过，
+    // 避免对所有 clip 做不必要的文件系统 I/O 和缓存查询。
+    let needs_pitch_schedule = tl.clips.iter().any(|clip| {
+        match s.last_timeline.as_ref().and_then(|old_tl| old_tl.clips.iter().find(|c| c.id == clip.id)) {
+            None => true, // 新增 clip
+            Some(old) => clip_pitch_params_changed(old, clip),
+        }
+    });
+    if needs_pitch_schedule {
+        schedule_clip_pitch_jobs(&tl, s.tx, s.stretch_cache, s.app_handle.as_ref());
+    }
+
+    // 当 clip 的 start_beat 发生变化时（clip 被移动），即使 MIDI 缓存命中，
+    // 也需要重新发送 clip_pitch_data 事件以更新前端的 startFrame。
+    // 这里直接用缓存的 MIDI 曲线重新推送，无需重新分析。
+    if !moved_clip_ids.is_empty() {
+        if let Some(app) = s.app_handle.as_ref() {
+            let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 { tl.bpm } else { 120.0 };
+            let bs = 60.0 / bpm;
+            let frame_period_ms = 5.0f64;
+            for clip in tl.clips.iter().filter(|c| moved_clip_ids.contains(&c.id)) {
+                let root = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+                if let Some(cached) = get_or_compute_clip_pitch_midi_global(&tl, clip, &root, frame_period_ms) {
+                    let start_frame = ((clip.start_beat.max(0.0) * bs) * s.sr as f64)
+                        .round().max(0.0) as u64;
+                    let payload = ClipPitchDataPayload {
+                        clip_id: clip.id.clone(),
+                        start_frame,
+                        midi_curve: cached.midi,
+                        frame_period_ms,
+                    };
+                    let _ = app.emit("clip_pitch_data", payload);
+                }
+            }
+        }
+    }
 
     let snap = build_snapshot(
         &tl,
@@ -636,6 +767,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
         s.is_playing,
         s.stretch_stream_epoch,
         s.clip_stretch_epochs,
+        s.clip_synth_epochs,
     );
     s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
     s.snapshot.store(Arc::new(snap));
@@ -647,6 +779,21 @@ fn handle_stretch_ready(s: &mut EngineWorkerState, key: StretchKey) {
     }
     // Switch to cache-backed buffers; stop any streaming workers.
     s.stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
+
+    // 拉伸完成后，使对应 clip 的 pitch 缓存失效并重新调度音高检测。
+    // 找到所有 source_path 匹配该 StretchKey 的 clip，清除其 pitch 缓存。
+    if let Some(tl) = s.last_timeline.as_ref() {
+        for clip in &tl.clips {
+            if let Some(src) = clip.source_path.as_deref() {
+                if std::path::Path::new(src) == key.path.as_path() {
+                    invalidate_clip_pitch_cache(&clip.id);
+                }
+            }
+        }
+        // 重新调度音高检测（使用新的拉伸后 PCM）
+        schedule_clip_pitch_jobs(tl, s.tx, s.stretch_cache, s.app_handle.as_ref());
+    }
+
     if let Some(tl) = s.last_timeline.as_ref() {
         let snap = build_snapshot(
             tl,
@@ -657,15 +804,57 @@ fn handle_stretch_ready(s: &mut EngineWorkerState, key: StretchKey) {
             s.is_playing,
             s.stretch_stream_epoch,
             s.clip_stretch_epochs,
+            s.clip_synth_epochs,
         );
         s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
         s.snapshot.store(Arc::new(snap));
     }
 }
 
-fn handle_clip_pitch_ready(s: &mut EngineWorkerState, _clip_id: String) {
+fn handle_clip_pitch_ready(s: &mut EngineWorkerState, clip_id: String) {
     // clip pitch MIDI 异步预计算完成，缓存已就绪，重建 snapshot 以接入 pitch edit。
     // 无需停止 stretch streamer，pitch stream 会在 build_snapshot 内重建。
+
+    // 向前端推送 ClipPitchData 事件（含 MIDI 曲线和时间线位置）。
+    if let Some(app) = s.app_handle.as_ref() {
+        if let Some(tl) = s.last_timeline.as_ref() {
+            // 找到对应 clip
+            if let Some(clip) = tl.clips.iter().find(|c| c.id == clip_id) {
+                let root = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+                let frame_period_ms = 5.0f64;
+                if let Some(cached) = get_or_compute_clip_pitch_midi_global(
+                    tl, clip, &root, frame_period_ms,
+                ) {
+                    let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 { tl.bpm } else { 120.0 };
+                    let bs = 60.0 / bpm;
+                    let start_frame = ((clip.start_beat.max(0.0) * bs) * s.sr as f64)
+                        .round().max(0.0) as u64;
+                    let payload = ClipPitchDataPayload {
+                        clip_id: clip_id.clone(),
+                        start_frame,
+                        midi_curve: cached.midi,
+                        frame_period_ms,
+                    };
+                    let _ = app.emit("clip_pitch_data", payload);
+                }
+            }
+        }
+    }
+
+    // 每当一个 clip 分析完成，尝试重新组装整体音高线（pitch_orig）
+    // 使用"最上方 clip 为准"的覆盖策略，直接从缓存读取，不重新分析音频
+    if let Some(app) = s.app_handle.as_ref() {
+        if let Some(tl) = s.last_timeline.as_ref() {
+            if let Some(clip) = tl.clips.iter().find(|c| c.id == clip_id) {
+                let root_track_id = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+                if !root_track_id.is_empty() {
+                    let state = app.state::<crate::state::AppState>();
+                    crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_track_id);
+                }
+            }
+        }
+    }
+
     if let Some(tl) = s.last_timeline.as_ref() {
         let snap = build_snapshot(
             tl,
@@ -676,6 +865,7 @@ fn handle_clip_pitch_ready(s: &mut EngineWorkerState, _clip_id: String) {
             s.is_playing,
             s.stretch_stream_epoch,
             s.clip_stretch_epochs,
+            s.clip_synth_epochs,
         );
         s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
         s.snapshot.store(Arc::new(snap));
@@ -695,6 +885,7 @@ fn handle_audio_ready(s: &mut EngineWorkerState, _key: super::types::AudioKey) {
             s.is_playing,
             s.stretch_stream_epoch,
             s.clip_stretch_epochs,
+            s.clip_synth_epochs,
         );
         s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
         s.snapshot.store(Arc::new(snap));
@@ -739,4 +930,14 @@ fn clip_stretch_params_changed(old: &crate::state::Clip, new: &crate::state::Cli
     (old.playback_rate - new.playback_rate).abs() > 1e-6
         || (old.trim_start_beat - new.trim_start_beat).abs() > 1e-6
         || (old.trim_end_beat - new.trim_end_beat).abs() > 1e-6
+}
+
+/// 判断 clip 的 pitch 分析相关参数是否发生变化。
+/// 只有这些参数变化时才需要重新调度 pitch 分析任务。
+/// 注意：start_beat（clip 位置）不参与判断，clip 移动不触发重新分析。
+fn clip_pitch_params_changed(old: &crate::state::Clip, new: &crate::state::Clip) -> bool {
+    old.source_path != new.source_path
+        || (old.trim_start_beat - new.trim_start_beat).abs() > 1e-6
+        || (old.trim_end_beat - new.trim_end_beat).abs() > 1e-6
+        || (old.playback_rate - new.playback_rate).abs() > 1e-6
 }

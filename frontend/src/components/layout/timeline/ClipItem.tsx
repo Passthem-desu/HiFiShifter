@@ -540,10 +540,42 @@ export const ClipItem: React.FC<{
             >
                 {/* Body (waveform + edit handles) */}
                 <div className="absolute inset-0">
-                    {/* Fade handles: 操作区覆盖整个 fade 区域 */}
+                    {/* Fade 角落 handle：始终存在，位于 body 左上角/右上角，用于从 0 开始拖拽出渐变 */}
+                    {/* left-[10px]：避开左侧 edge handle 的 10px 宽度，确保两者不重叠 */}
+                    <div
+                        className="absolute left-[10px] top-0 w-[14px] h-[14px] z-[55]"
+                        style={{ cursor: "nwse-resize" }}
+                        onPointerDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                                ensureSelected(clip.id);
+                            }
+                            selectClipRemote(clip.id);
+                            startEditDrag(e, clip.id, "fade_in");
+                        }}
+                        title={t("fade_in")}
+                    />
+                    {/* right-[10px]：避开右侧 edge handle 的 10px 宽度，确保两者不重叠 */}
+                    <div
+                        className="absolute right-[10px] top-0 w-[14px] h-[14px] z-[55]"
+                        style={{ cursor: "nesw-resize" }}
+                        onPointerDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                                ensureSelected(clip.id);
+                            }
+                            selectClipRemote(clip.id);
+                            startEditDrag(e, clip.id, "fade_out");
+                        }}
+                        title={t("fade_out")}
+                    />
+
+                    {/* Fade handles: 操作区覆盖整个 fade 区域（fadeBeats > 0 时显示） */}
                     {(clip.fadeInBeats ?? 0) > 0 && (
                         <div
-                            className="absolute left-0 top-0 h-full z-[80] cursor-col-resize"
+className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
                             style={{
                                 width: Math.min(
                                     width,
@@ -577,7 +609,7 @@ export const ClipItem: React.FC<{
                     )}
                     {(clip.fadeOutBeats ?? 0) > 0 && (
                         <div
-                            className="absolute right-0 top-0 h-full z-[80] cursor-col-resize"
+className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                             style={{
                                 width: Math.min(
                                     width,

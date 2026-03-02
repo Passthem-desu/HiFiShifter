@@ -34,7 +34,9 @@ import {
 
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./pianoRoll/constants";
 import { drawPianoRoll } from "./pianoRoll/render";
+import type { DetectedPitchCurve } from "./pianoRoll/render";
 import { usePianoRollData } from "./pianoRoll/usePianoRollData";
+import { useClipsPeaksForPianoRoll } from "./pianoRoll/useClipsPeaksForPianoRoll";
 import { usePianoRollInteractions } from "./pianoRoll/usePianoRollInteractions";
 import { useLiveParamEditing } from "./pianoRoll/useLiveParamEditing";
 import type {
@@ -47,8 +49,8 @@ import type {
 import { PitchStatusBadge } from "./PitchStatusBadge";
 import { useAsyncPitchRefresh } from "../../hooks/useAsyncPitchRefresh";
 import { ProgressBar } from "../ProgressBar";
-import { PitchAnalysisProgressBar } from "../PitchAnalysisProgressBar";
 import { LoadingSpinner } from "../LoadingSpinner";
+import { usePitchAnalysis } from "../../contexts/PitchAnalysisContext";
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -188,19 +190,16 @@ export const PianoRollPanel: React.FC = () => {
                 : undefined;
         }
 
-        if (onnxDiagnostic.isAvailable) {
+        if (onnxDiagnostic.available) {
             return undefined;
         }
 
         const hints: string[] = [];
-        if (onnxDiagnostic.errorDetails) {
-            hints.push(onnxDiagnostic.errorDetails);
+        if (onnxDiagnostic.error) {
+            hints.push(onnxDiagnostic.error);
         }
-        if (!onnxDiagnostic.ortLibraryLoaded) {
-            hints.push("ONNX Runtime library not loaded");
-        }
-        if (onnxDiagnostic.epStatus) {
-            hints.push(`EP: ${onnxDiagnostic.epStatus}`);
+        if (onnxDiagnostic.ep_choice) {
+            hints.push(`EP: ${onnxDiagnostic.ep_choice}`);
         }
         hints.push("Run: cargo tauri dev --features onnx");
 
@@ -412,12 +411,19 @@ export const PianoRollPanel: React.FC = () => {
         values: number[];
     } | null>(null);
 
+    // 从全局 Context 读取 pitch 分析进度状态（由 PitchAnalysisProvider 统一管理）
+    const pitchAnalysis = usePitchAnalysis();
+    const pitchAnalysisPending = pitchAnalysis.pending;
+    const pitchAnalysisProgress = pitchAnalysis.progress;
+    const pitchAnalysisCurrentClip = pitchAnalysis.currentClip;
+    const pitchAnalysisCompletedClips = pitchAnalysis.completedClips;
+    const pitchAnalysisTotalClips = pitchAnalysis.totalClips;
+
     // 用于通知 usePianoRollData 当前是否处于 live 编辑状态（pointer down 期间为 true）。
     // pitch_orig_updated 事件到达时若为 true，则延迟曲线刷新到 pointer-up 后执行。
     const liveEditActiveRef = useRef(false);
 
     const {
-        wavePeaks,
         paramView,
         setParamView,
         secondaryParamView,
@@ -425,8 +431,6 @@ export const PianoRollPanel: React.FC = () => {
         refreshNow,
         notifyLiveEditEnded,
         isLoading,
-        pitchAnalysisPending,
-        pitchAnalysisProgress,
         pitchEditUserModified,
         pitchEditBackendAvailable,
     } = usePianoRollData({
@@ -436,7 +440,6 @@ export const PianoRollPanel: React.FC = () => {
             (s as unknown as { paramsEpoch?: number }).paramsEpoch ?? 0,
         rootTrackId,
         selectedTrackId: effectiveSelectedTrackId,
-        tracks: s.tracks,
         secPerBeat,
         scrollLeft,
         pxPerBeat,
@@ -448,16 +451,38 @@ export const PianoRollPanel: React.FC = () => {
         liveEditActiveRef,
     });
 
+    // 获取当前 track 下的所有 clips，用于 per-clip 波形叠加绘制
+    const trackClips = useMemo(
+        () => s.clips.filter((c) => c.trackId === rootTrackId),
+        [s.clips, rootTrackId],
+    );
+
+    // 可见区域的 beat 范围
+    const visibleStartBeat = scrollLeft / Math.max(1e-9, pxPerBeat);
+    const visibleEndBeat = visibleStartBeat + viewSize.w / Math.max(1e-9, pxPerBeat);
+
+    // Per-clip 波形 peaks（替代原来的 mix 波形）
+    const clipPeaks = useClipsPeaksForPianoRoll({
+        clips: trackClips,
+        visibleStartBeat,
+        visibleEndBeat,
+        pxPerBeat,
+        secPerBeat,
+    });
+
     // Data and viewport changes should always trigger a canvas redraw.
     // usePianoRollData() may call invalidate() before these refs update,
     // so we schedule a follow-up redraw after React commits state.
     useEffect(() => {
         invalidate();
-    }, [wavePeaks, paramView, pxPerBeat, viewSize.w, viewSize.h, invalidate]);
+    }, [clipPeaks, paramView, pxPerBeat, viewSize.w, viewSize.h, invalidate]);
 
     useEffect(() => {
         invalidate();
     }, [pitchView, tensionView, editParam, invalidate]);
+
+    // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后）
+    // useEffect 已移至 detectedPitchCurves useMemo 定义之后，见下方。
 
     const paramViewRef = useRef<
         import("./pianoRoll/types").ParamViewSegment | null
@@ -492,6 +517,23 @@ export const PianoRollPanel: React.FC = () => {
         [commitStrokeBase, notifyLiveEditEnded],
     );
 
+    // 将 store 中的 clipPitchCurves 转换为 DetectedPitchCurve[] 供 drawPianoRoll 使用。
+    // 仅在 pitch 模式下有意义，其他模式下传空数组以避免不必要的计算。
+    const detectedPitchCurves = useMemo((): DetectedPitchCurve[] => {
+        if (editParam !== "pitch") return [];
+        return Object.values(s.clipPitchCurves).map((c) => ({
+            startFrame: c.startFrame,
+            midiCurve: c.midiCurve,
+            framePeriodMs: c.framePeriodMs,
+            sampleRate: 44100,
+        }));
+    }, [editParam, s.clipPitchCurves]);
+
+    // 检测音高曲线更新时触发重绘
+    useEffect(() => {
+        invalidate();
+    }, [detectedPitchCurves, invalidate]);
+
     // Keep draw function always up-to-date (invalidate() is stable and calls drawRef.current()).
     drawRef.current = () => {
         // 确定副参数名称（非当前 editParam 的另一个参数）
@@ -505,7 +547,7 @@ export const PianoRollPanel: React.FC = () => {
             pitchView: pitchViewRef.current,
             tensionView: tensionViewRef.current,
             valueToY,
-            wavePeaks,
+            clipPeaks,
             paramView,
             secondaryParamView,
             showSecondaryParam: secondaryParamVisible[secondaryParam] ?? false,
@@ -520,6 +562,7 @@ export const PianoRollPanel: React.FC = () => {
             secPerBeat,
             playheadBeat: s.playheadBeat,
             waveformColors,
+            detectedPitchCurves,
         });
     };
 
@@ -778,7 +821,7 @@ export const PianoRollPanel: React.FC = () => {
                                 <Select.Trigger className="min-w-[140px]" />
                                 <Select.Content>
                                     <Select.Item value="world_dll">
-                                        WORLD (DLL)
+                                        world
                                     </Select.Item>
                                     <Select.Item value="nsf_hifigan_onnx">
                                         <span
@@ -789,7 +832,7 @@ export const PianoRollPanel: React.FC = () => {
                                             }
                                             title={onnxCompileHint}
                                         >
-                                            NSF-HiFiGAN (ONNX)
+                                            nsf-hifigan
                                             {onnxLabelSuffix}
                                         </span>
                                     </Select.Item>
@@ -821,9 +864,6 @@ export const PianoRollPanel: React.FC = () => {
                     />
                 </Flex>
             )}
-
-            {/* Task 3.11: 检测到分析任务时自动显示进度条 */}
-            <PitchAnalysisProgressBar className="mx-3 mt-2" />
 
             {/* Task 6.7: 任务完成后显示成功提示 */}
             {showSuccessMessage && (
@@ -972,34 +1012,66 @@ export const PianoRollPanel: React.FC = () => {
 
                 {showOverlay ? (
                     <div className="absolute inset-0 z-50 flex items-center justify-center qt-overlay">
-                        <div className="flex flex-col items-center gap-2">
-                            <Text size="2" color="gray">
-                                {showPitchAnalyzingOverlay
-                                    ? pitchPercent != null
-                                        ? `${t("pitch_analyzing")} ${pitchPercent}%`
-                                        : t("pitch_analyzing")
-                                    : t("loading")}
-                            </Text>
+                    <div className="flex flex-col items-center gap-3 w-72">
                             {showPitchAnalyzingOverlay ? (
-                                <div className="w-64 h-2 bg-qt-surface border border-qt-border rounded overflow-hidden">
-                                    <div
-                                        className={
-                                            "h-full bg-qt-highlight transition-[width] duration-150" +
-                                            (pitchPercent == null
-                                                ? " animate-pulse"
-                                                : "")
-                                        }
-                                        style={{
-                                            width:
-                                                pitchPercent != null
+                                <>
+                                    {/* 主标题 */}
+                                    <Text size="2" color="gray">
+                                        {t("pitch_analyzing")}
+                                    </Text>
+                                    {/* clip 名称：有值时显示具体名称，无值时显示占位 */}
+                                    <Text
+                                        size="1"
+                                        color="gray"
+                                        className="max-w-full truncate"
+                                        title={pitchAnalysisCurrentClip ?? undefined}
+                                    >
+                                        {pitchAnalysisCurrentClip
+                                            ? `"${pitchAnalysisCurrentClip}"`
+                                            : t("pitch_analyzing_preparing")}
+                                    </Text>
+                                    {/* 进度条 + 计数 */}
+                                    <div className="w-full flex flex-col gap-1">
+                                        <div className="w-full h-2 bg-qt-surface border border-qt-border rounded overflow-hidden">
+                                            <div
+                                                className={
+                                                    "h-full bg-qt-highlight transition-[width] duration-150" +
+                                                    (pitchPercent == null
+                                                        ? " animate-pulse"
+                                                        : "")
+                                                }
+                                                style={{
+                                                    width:
+                                                        pitchPercent != null
+                                                            ? `${pitchPercent}%`
+                                                            : "15%",
+                                                    opacity:
+                                                        pitchPercent != null
+                                                            ? 1
+                                                            : 0.6,
+                                                }}
+                                            />
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <Text size="1" color="gray">
+                                                {pitchAnalysisTotalClips != null &&
+                                                pitchAnalysisTotalClips > 0
+                                                    ? `${pitchAnalysisCompletedClips ?? 0} / ${pitchAnalysisTotalClips} clips`
+                                                    : ""}
+                                            </Text>
+                                            <Text size="1" color="gray">
+                                                {pitchPercent != null
                                                     ? `${pitchPercent}%`
-                                                    : "15%",
-                                            opacity:
-                                                pitchPercent != null ? 1 : 0.6,
-                                        }}
-                                    />
-                                </div>
-                            ) : null}
+                                                    : ""}
+                                            </Text>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <Text size="2" color="gray">
+                                    {t("loading")}
+                                </Text>
+                            )}
                         </div>
                     </div>
                 ) : null}

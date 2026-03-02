@@ -20,7 +20,14 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
     let src_frames = clip.src.frames as u64;
     let loop_len = clip.src_end_frame.saturating_sub(clip.src_start_frame) as f64;
 
-    // Fast path: stretch_stream ring 已覆盖该帧
+    // 最高优先级：synth_ring（per-clip 音高合成预计算缓存）
+    if let Some(synth) = clip.synth_ring.as_ref() {
+        if let Some((sl, sr)) = synth.read_frame(local) {
+            return Some((sl, sr));
+        }
+    }
+
+    // 次优先级：stretch_stream ring（实时拉伸缓存）
     if let Some(stream) = clip.stretch_stream.as_ref() {
         if let Some((sl, sr)) = stream.read_frame(local) {
             return Some((sl, sr));
@@ -126,7 +133,7 @@ pub(crate) fn mix_snapshot_clips_into_scratch(
 
 pub(crate) fn mix_snapshot_clips_pitch_edited_into_scratch(
     _frames: usize,
-    timeline: &TimelineState,
+    _timeline: &TimelineState,
     snap: &EngineSnapshot,
     pos0: u64,
     pos1: u64,
@@ -137,93 +144,11 @@ pub(crate) fn mix_snapshot_clips_pitch_edited_into_scratch(
     }
     scratch.fill(0.0);
 
-    let sr = snap.sample_rate.max(1) as f64;
-
-    // Temporary per-clip render buffer.
-    let mut seg: Vec<f32> = vec![];
-
-    for clip in snap.clips.iter() {
-        let clip_start = clip.start_frame;
-        let clip_end = clip.start_frame.saturating_add(clip.length_frames);
-        if clip_end <= pos0 || clip_start >= pos1 {
-            continue;
-        }
-
-        let overlap_start = clip_start.max(pos0);
-        let overlap_end = clip_end.min(pos1);
-        if overlap_end <= overlap_start {
-            continue;
-        }
-
-        let out_off = (overlap_start - pos0) as usize;
-        let clip_off = overlap_start - clip_start;
-        let mix_frames = (overlap_end - overlap_start) as usize;
-
-        if mix_frames == 0 {
-            continue;
-        }
-
-        // Render this clip segment (pre-gain, pre-fade).
-        seg.resize(mix_frames * 2, 0.0);
-        seg.fill(0.0);
-
-        for f in 0..mix_frames {
-            let local = clip_off + f as u64;
-
-            let local_i64 = if local > i64::MAX as u64 {
-                continue;
-            } else {
-                local as i64
-            };
-            let local_adj_i64 = local_i64.saturating_add(clip.local_src_offset_frames);
-            if local_adj_i64 < 0 {
-                continue;
-            }
-            let local_adj = local_adj_i64 as f64;
-
-            let Some((l, r)) = sample_clip_pcm(clip, local, local_adj) else {
-                continue;
-            };
-
-            seg[f * 2] = l;
-            seg[f * 2 + 1] = r;
-        }
-
-        // Apply v2 pitch edit for this clip segment (best-effort).
-        if let Some(src_clip) = timeline.clips.iter().find(|c| c.id == clip.clip_id) {
-            let clip_start_sec = (clip.start_frame as f64) / sr;
-            let seg_start_sec = (overlap_start as f64) / sr;
-            let _ = crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
-                timeline,
-                src_clip,
-                clip_start_sec,
-                seg_start_sec,
-                snap.sample_rate,
-                seg.as_mut_slice(),
-            );
-        }
-
-        // Mix into output with gain and fades.
-        for f in 0..mix_frames {
-            let local = clip_off + f as u64;
-
-            let mut g = clip.gain;
-            if clip.fade_in_frames > 0 && local < clip.fade_in_frames {
-                g *= (local as f32 / clip.fade_in_frames as f32).clamp(0.0, 1.0);
-            }
-            if clip.fade_out_frames > 0 && local + clip.fade_out_frames > clip.length_frames {
-                let remain = clip.length_frames.saturating_sub(local);
-                g *= (remain as f32 / clip.fade_out_frames as f32).clamp(0.0, 1.0);
-            }
-            if g <= 0.0 {
-                continue;
-            }
-
-            let oi = (out_off + f) * 2;
-            scratch[oi] += seg[f * 2] * g;
-            scratch[oi + 1] += seg[f * 2 + 1] * g;
-        }
-    }
+    // Per-clip synth_ring 已在 build_snapshot 中预计算好，
+    // sample_clip_pcm 会优先读取 synth_ring，fallback 到 stretch_stream，
+    // 再 fallback 到原始 PCM。此处直接复用 mix_snapshot_clips_into_scratch 路径，
+    // 不再在实时回调中执行 WORLD 合成（避免 CPU 尖峰和音频 underrun）。
+    mix_snapshot_clips_into_scratch(_frames, snap, pos0, pos1, scratch);
 }
 
 fn mix_into_scratch_stereo(

@@ -51,3 +51,25 @@ pub fn model_load_error() -> Option<String> {
 pub fn ep_choice() -> String {
     "disabled".to_string()
 }
+
+// ─── 分块推理 stub（与 nsf_hifigan_onnx.rs 接口保持一致）──────────────────────
+
+pub fn env_chunk_sec() -> f64 {
+    10.0
+}
+
+pub fn env_overlap_sec() -> f64 {
+    0.1
+}
+
+pub fn infer_pitch_edit_chunked(
+    mono: &[f32],
+    _sample_rate: u32,
+    _start_sec: f64,
+    _midi_at_time: impl Fn(f64) -> f64 + Clone,
+    _chunk_sec: f64,
+    _overlap_sec: f64,
+) -> Result<Vec<f32>, String> {
+    // ONNX feature disabled: bypass.
+    Ok(mono.to_vec())
+}

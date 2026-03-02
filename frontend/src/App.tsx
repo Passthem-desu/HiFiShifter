@@ -20,6 +20,11 @@ import {
     saveProjectAsRemote,
 } from "./features/session/sessionSlice";
 import { useI18n } from "./i18n/I18nProvider";
+import { useClipPitchDataListener } from "./hooks/useClipPitchDataListener";
+import {
+    PitchAnalysisProvider,
+    usePitchAnalysis,
+} from "./contexts/PitchAnalysisContext";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -42,9 +47,10 @@ const statusKey: Record<string, string> = {
     "Glue done": "status_glue_done",
 };
 
-function App() {
+function AppInner() {
     const dispatch = useAppDispatch();
     const { t } = useI18n();
+    const pitchAnalysis = usePitchAnalysis();
 
     const status = useAppSelector((state) => state.session.status);
     const error = useAppSelector((state) => state.session.error);
@@ -135,7 +141,37 @@ function App() {
 
     const statusText = statusKey[status] ? t(statusKey[status] as any) : status;
 
+    // 监听后端 clip_pitch_data 事件，将 per-clip MIDI 曲线存入 store。
+    useClipPitchDataListener();
+
     const errorText = error ? `${t("status_error_prefix")}：${error}` : statusText;
+
+    // 构建 pitch 分析进度文本（分析中时显示在状态栏左侧）
+    const pitchAnalysisText = pitchAnalysis.pending
+        ? (() => {
+              const parts: string[] = [t("status_analyzing_pitch")];
+              if (pitchAnalysis.currentClip) {
+                  parts.push(`"${pitchAnalysis.currentClip}"`);
+              }
+              if (
+                  pitchAnalysis.totalClips != null &&
+                  pitchAnalysis.totalClips > 0
+              ) {
+                  parts.push(
+                      `(${pitchAnalysis.completedClips ?? 0}/${pitchAnalysis.totalClips})`,
+                  );
+              }
+              if (
+                  pitchAnalysis.progress != null &&
+                  Number.isFinite(pitchAnalysis.progress)
+              ) {
+                  parts.push(
+                      `${Math.round(pitchAnalysis.progress * 100)}%`,
+                  );
+              }
+              return parts.join(" ");
+          })()
+        : null;
 
     const [rendering, setRendering] = useState<{
         active: boolean;
@@ -382,6 +418,14 @@ function App() {
                 className="h-6 bg-qt-window border-t border-qt-border px-1 select-none gap-2"
             >
                 <Text size="1" color={error ? "red" : "gray"} className="truncate min-w-0">
+                    {pitchAnalysisText ? (
+                        <>
+                            <span style={{ color: "var(--accent-9)" }}>
+                                {pitchAnalysisText}
+                            </span>
+                            {" | "}
+                        </>
+                    ) : null}
                     {errorText}
                     {rendering.active ? (
                         <>
@@ -401,6 +445,14 @@ function App() {
                 </Text>
             </Flex>
         </Flex>
+    );
+}
+
+function App() {
+    return (
+        <PitchAnalysisProvider>
+            <AppInner />
+        </PitchAnalysisProvider>
     );
 }
 

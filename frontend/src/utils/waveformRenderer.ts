@@ -140,7 +140,7 @@ export function processWaveformPeaks(
         durSec,
         visibleStartSec,
         visibleDurSec,
-        targetWidth: _targetWidth,
+        targetWidth,
     } = options;
 
     const n = Math.min(min.length, max.length);
@@ -148,36 +148,55 @@ export function processWaveformPeaks(
         return { min: [], max: [], timestamps: [], stride: 1 };
     }
 
-    // 自适应采样：根据数据点数量调整 stride
-    let stride = 1;
-    if (n > 2000) {
-        stride = 4;
-    } else if (n > 1000) {
-        stride = 2;
-    }
-
     const v0 = visibleStartSec;
     const v1 = visibleStartSec + Math.max(1e-9, visibleDurSec);
-    const denom = Math.max(1, n);
+    const endSec = startSec + Math.max(1e-9, durSec);
+
+    // 第一步：将时间范围映射到数组索引，找到可见区域的 startIdx / endIdx
+    // 每个数据点 i 对应时间区间 [startSec + i/n*durSec, startSec + (i+1)/n*durSec)
+    const startIdx = Math.max(
+        0,
+        Math.floor(((v0 - startSec) / Math.max(1e-9, endSec - startSec)) * n),
+    );
+    const endIdx = Math.min(
+        n,
+        Math.ceil(((v1 - startSec) / Math.max(1e-9, endSec - startSec)) * n),
+    );
+
+    const visiblePoints = endIdx - startIdx;
+    if (visiblePoints <= 0) {
+        return { min: [], max: [], timestamps: [], stride: 1 };
+    }
+
+    // 第二步：基于可见点数和目标宽度计算 stride（上限 16，防止极端情况）
+    const stride = Math.max(
+        1,
+        Math.min(16, Math.ceil(visiblePoints / Math.max(1, targetWidth))),
+    );
 
     const resultMin: number[] = [];
     const resultMax: number[] = [];
     const resultTimestamps: number[] = [];
 
-    // 时间范围裁剪 + 采样
-    for (let i = 0; i < n; i += stride) {
-        // 计算当前数据点对应的时间
-        const t = startSec + ((i + 0.5) * durSec) / denom;
+    // 第三步：窗口聚合采样——每个窗口内取 min/max，保留峰值细节
+    for (let i = startIdx; i < endIdx; i += stride) {
+        const windowEnd = Math.min(i + stride, endIdx);
 
-        // 仅处理可见区域的数据点
-        if (t < v0 || t > v1) continue;
+        let wMin = Infinity;
+        let wMax = -Infinity;
+        for (let j = i; j < windowEnd; j++) {
+            const v = min[j] ?? 0;
+            if (v < wMin) wMin = v;
+            const u = max[j] ?? 0;
+            if (u > wMax) wMax = u;
+        }
 
-        const mi = min[i] ?? 0;
-        const ma = max[i] ?? 0;
+        // 窗口中心点对应的时间戳
+        const midIdx = (i + windowEnd) / 2;
+        const t = startSec + (midIdx / n) * durSec;
 
-        // 振幅归一化（数据已经是 -1 到 1 范围，直接使用）
-        resultMin.push(mi);
-        resultMax.push(ma);
+        resultMin.push(wMin === Infinity ? 0 : wMin);
+        resultMax.push(wMax === -Infinity ? 0 : wMax);
         resultTimestamps.push(t);
     }
 

@@ -41,6 +41,7 @@ export const messages = {
         loading: "Loading...",
         rendering: "Rendering...",
         pitch_analyzing: "Analyzing pitch...",
+        pitch_analyzing_preparing: "Preparing...",
         playhead: "Playhead",
 
         panel_editor: "Editor",
@@ -146,6 +147,10 @@ export const messages = {
         fade_out: "Fade Out",
         show_secondary_param: "Show secondary parameter overlay",
         hide_secondary_param: "Hide secondary parameter overlay",
+        onnx_compile_required: "ONNX model not compiled. Run: cargo tauri dev --features onnx",
+        onnx_unavailable_label: " (unavailable)",
+        solo: "Solo",
+        status_analyzing_pitch: "Analyzing pitch",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -189,6 +194,7 @@ export const messages = {
         loading: "加载中...",
         rendering: "渲染中...",
         pitch_analyzing: "正在分析音高...",
+        pitch_analyzing_preparing: "正在准备...",
         playhead: "播放头",
 
         panel_editor: "编辑器",
@@ -290,6 +296,10 @@ export const messages = {
         fade_out: "淡出",
         show_secondary_param: "显示副参数叠加曲线",
         hide_secondary_param: "隐藏副参数叠加曲线",
+        onnx_compile_required: "ONNX 模型未编译，请运行：cargo tauri dev --features onnx",
+        onnx_unavailable_label: "（不可用）",
+        solo: "独奏",
+        status_analyzing_pitch: "正在分析音高",
     },
 } as const;
 

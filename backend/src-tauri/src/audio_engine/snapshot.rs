@@ -116,7 +116,7 @@ fn clip_source_bounds_frames(
     )
 }
 
-fn make_stretch_key(
+pub(crate) fn make_stretch_key(
     path: &Path,
     out_rate: u32,
     bpm: f64,
@@ -227,6 +227,7 @@ pub(crate) fn build_snapshot(
     is_playing: &Arc<AtomicBool>,
     stretch_stream_epoch: &Arc<AtomicU64>,
     clip_stretch_epochs: &HashMap<String, Arc<AtomicU64>>,
+    clip_synth_epochs: &HashMap<String, Arc<AtomicU64>>,
 ) -> EngineSnapshot {
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
     let bpm = if timeline.bpm.is_finite() && timeline.bpm > 0.0 {
@@ -395,6 +396,60 @@ pub(crate) fn build_snapshot(
             .round()
             .max(0.0) as u64;
 
+        // 读取该 clip 当前的合成 epoch（用于失效控制）。
+        let synth_epoch = clip_synth_epochs
+            .get(&clip.id)
+            .map(|e| e.load(std::sync::atomic::Ordering::Relaxed))
+            .unwrap_or(0);
+
+        // 若 pitch edit 激活且 WORLD 后端可用，为该 clip 启动后台合成 worker，
+        // 将合成结果预写入 synth_ring，播放时优先读取。
+        let synth_ring: Option<Arc<StreamRingStereo>> =
+            if crate::pitch_editing::is_pitch_edit_active(timeline)
+                && crate::pitch_editing::is_pitch_edit_backend_available(timeline)
+                && !matches!(
+                    crate::pitch_editing::selected_pitch_edit_algorithm(timeline),
+                    crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx
+                )
+            {
+                let cap_frames = length_frames.max(1);
+                let ring = Arc::new(StreamRingStereo::new(cap_frames));
+
+                // 构建一个轻量 snapshot 供 worker 使用（只含当前 clip）
+                let snap_for_synth = EngineSnapshot {
+                    bpm,
+                    sample_rate: out_rate,
+                    duration_frames,
+                    clips: Arc::new(clips_out.clone()),
+                    base_stream: None,
+                    pitch_stream: None,
+                    pitch_stream_algo: None,
+                };
+
+                let per_clip_epoch = clip_synth_epochs
+                    .get(&clip.id)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::new(std::sync::atomic::AtomicU64::new(0)));
+
+                super::synth_stream::spawn_synth_stream(
+                    ring.clone(),
+                    snap_for_synth,
+                    clip.clone(),
+                    timeline.clone(),
+                    start_frame,
+                    length_frames,
+                    out_rate,
+                    position_frames.clone(),
+                    is_playing.clone(),
+                    per_clip_epoch,
+                    synth_epoch,
+                );
+
+                Some(ring)
+            } else {
+                None
+            };
+
         clips_out.push(EngineClip {
             clip_id: clip.id.clone(),
             track_id: clip.track_id.clone(),
@@ -410,6 +465,8 @@ pub(crate) fn build_snapshot(
             fade_in_frames,
             fade_out_frames,
             gain,
+            synth_ring,
+            synth_epoch,
         });
     }
 
@@ -748,6 +805,8 @@ pub(crate) fn build_snapshot_for_file(
             fade_in_frames: 0,
             fade_out_frames: 0,
             gain: 1.0,
+            synth_ring: None,
+            synth_epoch: 0,
         }]),
         base_stream: None,
         pitch_stream: None,

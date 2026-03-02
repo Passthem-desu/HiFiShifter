@@ -980,3 +980,145 @@ pub fn diagnose_onnx_availability() -> OnnxDiagnosticInfo {
         providers,
     }
 }
+
+// ─── 分块推理环境变量辅助（任务 2.5）──────────────────────────────────────────
+
+/// 从环境变量 `HIFISHIFTER_ONNX_CHUNK_SEC` 读取单块最大时长（秒），默认 10.0。
+pub fn env_chunk_sec() -> f64 {
+    std::env::var("HIFISHIFTER_ONNX_CHUNK_SEC")
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(10.0)
+}
+
+/// 从环境变量 `HIFISHIFTER_ONNX_OVERLAP_SEC` 读取相邻块重叠时长（秒），默认 0.1。
+pub fn env_overlap_sec() -> f64 {
+    std::env::var("HIFISHIFTER_ONNX_OVERLAP_SEC")
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .unwrap_or(0.1)
+}
+
+// ─── 分块推理（任务 2.1-2.4）──────────────────────────────────────────────────
+
+/// 对长 clip 进行分块推理，每块调用 [`infer_pitch_edit_mono`]，
+/// 相邻块之间使用等功率 crossfade 拼接，消除块边界伪影。
+///
+/// # 参数
+///
+/// - `mono_pcm`：单声道 PCM 输入（f32，已归一化）
+/// - `sample_rate`：采样率（Hz）
+/// - `start_sec`：该片段在时间轴上的起始时间（秒），用于 `midi_at_time` 对齐
+/// - `midi_at_time`：返回目标绝对 MIDI 的回调（0.0 表示静音/无效）
+/// - `chunk_sec`：单块最大时长（秒），建议 5.0–15.0
+/// - `overlap_sec`：相邻块的重叠时长（秒），用于等功率 crossfade
+///
+/// # 行为
+///
+/// - 若 `mono_pcm` 时长 ≤ `chunk_sec`，等价于直接调用 `infer_pitch_edit_mono`
+/// - 最后一块不足 `chunk_sec` 时直接推理，无需额外 padding
+/// - 输出长度与输入 `mono_pcm` 严格一致
+pub fn infer_pitch_edit_chunked(
+    mono_pcm: &[f32],
+    sample_rate: u32,
+    start_sec: f64,
+    midi_at_time: impl Fn(f64) -> f64 + Clone,
+    chunk_sec: f64,
+    overlap_sec: f64,
+) -> Result<Vec<f32>, String> {
+    if mono_pcm.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let sr = sample_rate.max(1) as f64;
+    let total_samples = mono_pcm.len();
+    let chunk_samples = ((chunk_sec * sr).round() as usize).max(1);
+    let overlap_samples = ((overlap_sec * sr).round() as usize).min(chunk_samples.saturating_sub(1));
+
+    // 单块情况：直接调用 infer_pitch_edit_mono，无额外开销
+    if total_samples <= chunk_samples {
+        return infer_pitch_edit_mono(mono_pcm, sample_rate, start_sec, midi_at_time);
+    }
+
+    // 多块情况：分块推理 + 等功率 crossfade 拼接
+    let mut out = vec![0.0f32; total_samples];
+
+    // 步长 = 块长 - 重叠长，保证相邻块有 overlap_samples 的重叠区
+    let step = chunk_samples.saturating_sub(overlap_samples).max(1);
+
+    let mut chunk_start = 0usize;
+    // 记录上一块推理结果的末尾（用于 crossfade），以及其在 out 中的起始位置
+    let mut prev_chunk_out: Option<(Vec<f32>, usize)> = None;
+
+    loop {
+        let chunk_end = (chunk_start + chunk_samples).min(total_samples);
+        let chunk_pcm = &mono_pcm[chunk_start..chunk_end];
+        let chunk_start_sec = start_sec + (chunk_start as f64) / sr;
+
+        let chunk_result = infer_pitch_edit_mono(
+            chunk_pcm,
+            sample_rate,
+            chunk_start_sec,
+            midi_at_time.clone(),
+        )?;
+
+        // 确保推理结果长度与输入一致（infer_pitch_edit_mono 保证这一点）
+        let chunk_len = chunk_result.len().min(chunk_end - chunk_start);
+
+        if let Some((prev_out, prev_start)) = prev_chunk_out.take() {
+            // crossfade 区域：当前块的前 overlap_samples 与上一块的后 overlap_samples 混合
+            // 等功率权重：w_curr = sin(t·π/2)，w_prev = cos(t·π/2)，满足 w²+w²=1
+            let xfade_len = overlap_samples.min(chunk_len).min(prev_out.len().saturating_sub(
+                chunk_start.saturating_sub(prev_start),
+            ));
+
+            for i in 0..xfade_len {
+                let t = (i as f64 + 0.5) / (xfade_len as f64).max(1.0);
+                let angle = t * std::f64::consts::FRAC_PI_2;
+                let w_curr = angle.sin() as f32;
+                let w_prev = angle.cos() as f32;
+
+                let out_idx = chunk_start + i;
+                if out_idx >= total_samples {
+                    break;
+                }
+                // 上一块在该位置的值（已写入 out）
+                let prev_val = out[out_idx];
+                // 当前块在该位置的值
+                let curr_val = chunk_result.get(i).copied().unwrap_or(0.0);
+                out[out_idx] = prev_val * w_prev + curr_val * w_curr;
+            }
+
+            // crossfade 区域之后：直接写入当前块的剩余部分
+            for i in xfade_len..chunk_len {
+                let out_idx = chunk_start + i;
+                if out_idx >= total_samples {
+                    break;
+                }
+                out[out_idx] = chunk_result.get(i).copied().unwrap_or(0.0);
+            }
+
+            // 保存当前块供下一次 crossfade 使用（仅保留末尾 overlap 区域）
+            prev_chunk_out = Some((chunk_result, chunk_start));
+        } else {
+            // 第一块：直接写入，无需 crossfade
+            for i in 0..chunk_len {
+                let out_idx = chunk_start + i;
+                if out_idx >= total_samples {
+                    break;
+                }
+                out[out_idx] = chunk_result.get(i).copied().unwrap_or(0.0);
+            }
+            prev_chunk_out = Some((chunk_result, chunk_start));
+        }
+
+        if chunk_end >= total_samples {
+            break;
+        }
+        chunk_start += step;
+    }
+
+    Ok(out)
+}

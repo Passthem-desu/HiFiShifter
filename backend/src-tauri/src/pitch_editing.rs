@@ -445,10 +445,12 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             mono_pcm: mono.as_slice(),
             sample_rate,
             seg_start_sec,
+            seg_end_sec: seg_start_sec + (frames as f64) / (sample_rate.max(1) as f64),
             clip_start_sec,
             frame_period_ms,
             pitch_edit,
             clip_midi: &clip_pitch.midi,
+            clip_id: &clip.id,
         };
         let out = pipeline.process(&ctx)?;
         Ok(Some(out))

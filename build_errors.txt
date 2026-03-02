@@ -1,0 +1,362 @@
+﻿cargo :    Compiling backend v0.1.0 (D:\Code\HiFiShifter\backend\src-tauri)
+所在位置 行:1 字符: 2
++  cargo build 2>&1 | Out-File -FilePath "d:\Code\HiFiShifter\build_err ...
++  ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ba...kend\src-tauri):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+warning: backend@0.1.0: [Frontend] dist 宸插瓨鍦紝璺宠繃鏋勫缓锛堝垹闄?frontend/dist 鍙己鍒堕噸寤猴級
+warning: backend@0.1.0: [RubberBand] Compiling with HAVE_KISSFFT for full pitch shifting support
+warning: unused import: `Mutex`
+  --> src\clip_pitch_cache.rs:10:22
+   |
+10 | use std::sync::{Arc, Mutex};
+   |                      ^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src\pitch_analysis.rs:401:9
+    |
+401 |     let mut need_analysis_ids: std::collections::HashSet<String> = comparison
+    |         ----^^^^^^^^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `playback_rate`
+   --> src\pitch_analysis.rs:533:9
+    |
+533 |     let playback_rate = if clip.playback_rate.is_finite() && clip.playback_rate > 0.0 {
+    |         ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_playback_rate`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> src\pitch_analysis.rs:1486:9
+     |
+1486 |     let mut last_winner: Option<String> = None;
+     |         ----^^^^^^^^^^^
+     |         |
+     |         help: remove this `mut`
+
+warning: unused variable: `last_winner`
+    --> src\pitch_analysis.rs:1486:9
+     |
+1486 |     let mut last_winner: Option<String> = None;
+     |         ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_last_winner`
+
+warning: variable does not need to be mutable
+   --> src\rubberband.rs:504:17
+    |
+504 |             let mut pad_ch: Vec<Vec<f32>> = (0..channels).map(|_| vec![0.0; start_pad]).collect();
+    |                 ----^^^^^^
+    |                 |
+    |                 help: remove this `mut`
+
+warning: methods `is_window_covered` and `read_interleaved_into` are never used
+  --> src\audio_engine\ring.rs:86:19
+   |
+16 | impl StreamRingStereo {
+   | --------------------- methods in this implementation
+...
+86 |     pub(crate) fn is_window_covered(&self, start_frame: u64, frames: u64) -> bool {
+   |                   ^^^^^^^^^^^^^^^^^
+...
+97 |     pub(crate) fn read_interleaved_into(&self, start_frame: u64, out: &mut [f32]) -> bool {
+   |                   ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: fields `track_id` and `synth_epoch` are never read
+  --> src\audio_engine\types.rs:60:16
+   |
+58 | pub(crate) struct EngineClip {
+   |                   ---------- fields in this struct
+59 |     pub(crate) clip_id: String,
+60 |     pub(crate) track_id: String,
+   |                ^^^^^^^^
+...
+97 |     pub(crate) synth_epoch: u64,
+   |                ^^^^^^^^^^^
+   |
+   = note: `EngineClip` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Wav24` is never constructed
+  --> src\mixdown.rs:16:5
+   |
+11 | pub enum ExportFormat {
+   |          ------------ variant in this enum
+...
+16 |     Wav24,
+   |     ^^^^^
+   |
+   = note: `ExportFormat` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `quality_preset` is never read
+  --> src\mixdown.rs:41:9
+   |
+32 | pub struct MixdownOptions {
+   |            -------------- field in this struct
+...
+41 |     pub quality_preset: QualityPreset,
+   |         ^^^^^^^^^^^^^^
+   |
+   = note: `MixdownOptions` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `build_timeline_snapshot` is never used
+   --> src\pitch_analysis.rs:241:4
+    |
+241 | fn build_timeline_snapshot(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: enum `ClipChangeType` is never used
+   --> src\pitch_analysis.rs:291:6
+    |
+291 | enum ClipChangeType {
+    |      ^^^^^^^^^^^^^^
+
+warning: struct `SnapshotComparison` is never constructed
+   --> src\pitch_analysis.rs:300:8
+    |
+300 | struct SnapshotComparison {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `compare_snapshots` is never used
+   --> src\pitch_analysis.rs:321:4
+    |
+321 | fn compare_snapshots(
+    |    ^^^^^^^^^^^^^^^^^
+
+warning: function `determine_clips_to_analyze` is never used
+   --> src\pitch_analysis.rs:393:4
+    |
+393 | fn determine_clips_to_analyze<'a>(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `analyze_clip_with_cache` is never used
+   --> src\pitch_analysis.rs:466:4
+    |
+466 | fn analyze_clip_with_cache(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `was_cache_hit` is never read
+   --> src\pitch_analysis.rs:687:5
+    |
+679 | struct ClipAnalysisResult {
+    |        ------------------ field in this struct
+...
+687 |     was_cache_hit: bool,
+    |     ^^^^^^^^^^^^^
+    |
+    = note: `ClipAnalysisResult` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `process_single_clip` is never used
+   --> src\pitch_analysis.rs:695:4
+    |
+695 | fn process_single_clip(
+    |    ^^^^^^^^^^^^^^^^^^^
+
+warning: function `compute_pitch_curve_parallel` is never used
+   --> src\pitch_analysis.rs:841:4
+    |
+841 | fn compute_pitch_curve_parallel(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `compute_pitch_curve_with_incremental_refresh` is never used
+    --> src\pitch_analysis.rs:1026:4
+     |
+1026 | fn compute_pitch_curve_with_incremental_refresh(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CACHE_FORMAT_VERSION` is never used
+  --> src\clip_pitch_cache.rs:15:11
+   |
+15 | pub const CACHE_FORMAT_VERSION: u32 = 1;
+   |           ^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ClipCacheKey` is never constructed
+  --> src\clip_pitch_cache.rs:22:12
+   |
+22 | pub struct ClipCacheKey {
+   |            ^^^^^^^^^^^^
+
+warning: methods `get` and `put` are never used
+  --> src\clip_pitch_cache.rs:64:12
+   |
+52 | impl ClipPitchCache {
+   | ------------------- methods in this implementation
+...
+64 |     pub fn get(&mut self, key: &str) -> Option<Arc<Vec<f32>>> {
+   |            ^^^
+...
+75 |     pub fn put(&mut self, key: String, curve: Arc<Vec<f32>>) {
+   |            ^^^
+
+warning: fields `hits` and `misses` are never read
+   --> src\clip_pitch_cache.rs:110:9
+    |
+107 | pub struct CacheStats {
+    |            ---------- fields in this struct
+...
+110 |     pub hits: u64,
+    |         ^^^^
+111 |     pub misses: u64,
+    |         ^^^^^^
+    |
+    = note: `CacheStats` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `quantize_f64` is never used
+   --> src\clip_pitch_cache.rs:119:8
+    |
+119 | pub fn quantize_f64(value: f64, multiplier: f64) -> u64 {
+    |        ^^^^^^^^^^^^
+
+warning: function `quantize_i64` is never used
+   --> src\clip_pitch_cache.rs:127:8
+    |
+127 | pub fn quantize_i64(value: f64, multiplier: f64) -> i64 {
+    |        ^^^^^^^^^^^^
+
+warning: function `get_file_signature` is never used
+   --> src\clip_pitch_cache.rs:135:8
+    |
+135 | pub fn get_file_signature(path: &Path) -> (u64, u64) {
+    |        ^^^^^^^^^^^^^^^^^^
+
+warning: function `generate_clip_cache_key` is never used
+   --> src\clip_pitch_cache.rs:151:8
+    |
+151 | pub fn generate_clip_cache_key(key_data: &ClipCacheKey) -> String {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `ProgressTracker` is never constructed
+  --> src\pitch_progress.rs:15:12
+   |
+15 | pub struct ProgressTracker {
+   |            ^^^^^^^^^^^^^^^
+
+warning: associated items `new`, `report_clip_completed`, `get_current_progress`, and `estimate_eta` are never used
+   --> src\pitch_progress.rs:36:12
+    |
+ 24 | impl ProgressTracker {
+    | -------------------- associated items in this implementation
+...
+ 36 |     pub fn new(
+    |            ^^^
+...
+ 82 |     pub fn report_clip_completed(&self, clip_duration_sec: f64, was_cache_hit: bool) -> f32 {
+    |            ^^^^^^^^^^^^^^^^^^^^^
+...
+ 96 |     pub fn get_current_progress(&self) -> f32 {
+    |            ^^^^^^^^^^^^^^^^^^^^
+...
+107 |     pub fn estimate_eta(&self) -> Option<f64> {
+    |            ^^^^^^^^^^^^
+
+warning: method `kind` is never used
+  --> src\vocoder_pipeline.rs:36:8
+   |
+34 | pub trait VocoderPipeline: Send + Sync {
+   |           --------------- method in this trait
+35 |     /// 杩斿洖璇ョ绾垮搴旂殑 [`SynthPipelineKind`]銆?36 |     fn kind(&self) -> SynthPipelineKind;
+   |        ^^^^
+
+warning: function `infer_pitch_edit_mono` is never used
+  --> src\nsf_hifigan_onnx_stub.rs:10:8
+   |
+10 | pub fn infer_pitch_edit_mono(
+   |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `rubberband_get_samples_required` is never used
+  --> src\rubberband.rs:80:8
+   |
+80 |     fn rubberband_get_samples_required(state: RubberBandState) -> u32;
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: fields `clips`, `bpm`, and `frame_period_ms` are never read
+   --> src\state.rs:339:9
+    |
+337 | pub struct TimelineSnapshot {
+    |            ---------------- fields in this struct
+338 |     /// Mapping from clip ID to cache key
+339 |     pub clips: HashMap<String, String>,
+    |         ^^^^^
+340 |     /// BPM at the time of analysis
+341 |     pub bpm: f64,
+    |         ^^^
+342 |     /// Frame period used for analysis
+343 |     pub frame_period_ms: f64,
+    |         ^^^^^^^^^^^^^^^
+    |
+    = note: `TimelineSnapshot` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `pitch_timeline_snapshot` is never read
+   --> src\state.rs:369:9
+    |
+346 | pub struct AppState {
+    |            -------- field in this struct
+...
+369 |     pub pitch_timeline_snapshot: Mutex<HashMap<String, TimelineSnapshot>>,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `StreamingWorldAnalyzer` is never constructed
+  --> src\streaming_world.rs:32:12
+   |
+32 | pub struct StreamingWorldAnalyzer {
+   |            ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `AnalysisFrames` is never constructed
+  --> src\streaming_world.rs:56:12
+   |
+56 | pub struct AnalysisFrames {
+   |            ^^^^^^^^^^^^^^
+
+warning: associated items `new`, `push_samples`, `pull_frames`, `flush`, `fft_size`, and `advance_buffer` are never used
+   --> src\streaming_world.rs:76:12
+    |
+ 71 | impl StreamingWorldAnalyzer {
+    | --------------------------- associated items in this implementation
+...
+ 76 |     pub fn new(
+    |            ^^^
+...
+109 |     pub fn push_samples(&mut self, samples: &[f64]) {
+    |            ^^^^^^^^^^^^
+...
+119 |     pub fn pull_frames(&mut self) -> Option<AnalysisFrames> {
+    |            ^^^^^^^^^^^
+...
+258 |     pub fn flush(&mut self) -> Option<AnalysisFrames> {
+    |            ^^^^^
+...
+274 |     pub fn fft_size(&self) -> i32 {
+    |            ^^^^^^^^
+...
+279 |     fn advance_buffer(&mut self) {
+    |        ^^^^^^^^^^^^^^
+
+warning: field `fft_size` is never read
+   --> src\streaming_world.rs:310:5
+    |
+300 | pub struct StreamingWorldSynthesizer {
+    |            ------------------------- field in this struct
+...
+310 |     fft_size: usize,
+    |     ^^^^^^^^
+
+warning: function `vocode_one` is never used
+   --> src\world_vocoder.rs:370:4
+    |
+370 | fn vocode_one(
+    |    ^^^^^^^^^^
+
+warning: function `RefreshSynthesizer` is never used
+   --> src\world_vocoder.rs:119:12
+    |
+119 |     pub fn RefreshSynthesizer(synth: *mut WorldSynthesizerRaw);
+    |            ^^^^^^^^^^^^^^^^^^
+
+warning: `backend` (lib) generated 41 warnings (run `cargo fix --lib -p backend` to apply 6 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 36.69s

@@ -10,7 +10,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { coreApi } from "../services/api/core";
-import type { PitchTaskStatus } from "../types/api";
+import type { PitchTaskStatusPayload } from "../types/api";
+
+type PitchTaskStatus = PitchTaskStatusPayload["status"];
 
 interface AsyncPitchRefreshState {
     isLoading: boolean;

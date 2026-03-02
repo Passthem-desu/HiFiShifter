@@ -35,7 +35,7 @@ pub struct D4COption {
 
 // External C functions from statically-linked WORLD library
 extern "C" {
-    fn Dio(
+    pub fn Dio(
         x: *const f64,
         x_length: i32,
         fs: i32,
@@ -43,9 +43,9 @@ extern "C" {
         temporal_positions: *mut f64,
         f0: *mut f64,
     );
-    fn InitializeDioOption(option: *mut DioOption);
-    fn GetSamplesForDIO(fs: i32, x_length: i32, frame_period: f64) -> i32;
-    fn StoneMask(
+    pub fn InitializeDioOption(option: *mut DioOption);
+    pub fn GetSamplesForDIO(fs: i32, x_length: i32, frame_period: f64) -> i32;
+    pub fn StoneMask(
         x: *const f64,
         x_length: i32,
         fs: i32,
@@ -54,7 +54,7 @@ extern "C" {
         f0_length: i32,
         refined_f0: *mut f64,
     );
-    fn Harvest(
+    pub fn Harvest(
         x: *const f64,
         x_length: i32,
         fs: i32,
@@ -62,9 +62,9 @@ extern "C" {
         temporal_positions: *mut f64,
         f0: *mut f64,
     );
-    fn InitializeHarvestOption(option: *mut HarvestOption);
-    fn GetSamplesForHarvest(fs: i32, x_length: i32, frame_period: f64) -> i32;
-    fn CheapTrick(
+    pub fn InitializeHarvestOption(option: *mut HarvestOption);
+    pub fn GetSamplesForHarvest(fs: i32, x_length: i32, frame_period: f64) -> i32;
+    pub fn CheapTrick(
         x: *const f64,
         x_length: i32,
         fs: i32,
@@ -74,9 +74,9 @@ extern "C" {
         option: *const CheapTrickOption,
         spectrogram: *mut *mut f64,
     );
-    fn InitializeCheapTrickOption(fs: i32, option: *mut CheapTrickOption);
-    fn GetFFTSizeForCheapTrick(fs: i32, option: *const CheapTrickOption) -> i32;
-    fn D4C(
+    pub fn InitializeCheapTrickOption(fs: i32, option: *mut CheapTrickOption);
+    pub fn GetFFTSizeForCheapTrick(fs: i32, option: *const CheapTrickOption) -> i32;
+    pub fn D4C(
         x: *const f64,
         x_length: i32,
         fs: i32,
@@ -87,8 +87,8 @@ extern "C" {
         option: *const D4COption,
         aperiodicity: *mut *mut f64,
     );
-    fn InitializeD4COption(option: *mut D4COption);
-    fn Synthesis(
+    pub fn InitializeD4COption(option: *mut D4COption);
+    pub fn Synthesis(
         f0: *const f64,
         f0_length: i32,
         spectrogram: *const *const f64,
@@ -99,6 +99,41 @@ extern "C" {
         y_length: i32,
         y: *mut f64,
     );
+
+    // ── 流式合成（WorldSynthesizer / synthesisrealtime.h）──────────────────
+    pub fn InitializeSynthesizer(
+        fs: i32,
+        frame_period: f64,
+        fft_size: i32,
+        buffer_size: i32,
+        number_of_pointers: i32,
+        synth: *mut WorldSynthesizerRaw,
+    );
+    pub fn AddParameters(
+        f0: *mut f64,
+        f0_length: i32,
+        spectrogram: *mut *mut f64,
+        aperiodicity: *mut *mut f64,
+        synth: *mut WorldSynthesizerRaw,
+    ) -> i32;
+    pub fn RefreshSynthesizer(synth: *mut WorldSynthesizerRaw);
+    pub fn DestroySynthesizer(synth: *mut WorldSynthesizerRaw);
+    pub fn IsLocked(synth: *mut WorldSynthesizerRaw) -> i32;
+    pub fn Synthesis2(synth: *mut WorldSynthesizerRaw) -> i32;
+}
+
+// ── WorldSynthesizer 不透明句柄 ────────────────────────────────────────────────
+//
+// WorldSynthesizer 结构体内部含有大量裸指针和 FFT 状态，Rust 侧不需要直接访问字段，
+// 只需保证内存布局足够大即可。我们用一个足够大的字节数组作为不透明存储，
+// 实际大小由 C++ 侧的 sizeof(WorldSynthesizer) 决定。
+// 经过测量，sizeof(WorldSynthesizer) ≈ 288 字节（x86_64），预留 512 字节保证安全。
+//
+// 注意：该结构体**只能**通过 Box::new(zeroed()) 分配在堆上，
+// 绝不能在栈上创建（避免栈溢出和移动后指针失效）。
+#[repr(C)]
+pub struct WorldSynthesizerRaw {
+    _opaque: [u8; 512],
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -547,9 +582,225 @@ fn vocode_one(
     Ok(out)
 }
 
+fn vocode_one_streaming(
+    x_f64: &[f64],
+    fs: i32,
+    frame_period_ms: f64,
+    f0_floor: f64,
+    f0_ceil: f64,
+    abs_time_start_sec: f64,
+    semitone_at_time: &impl Fn(f64) -> f64,
+    synth: &mut crate::streaming_world::StreamingWorldSynthesizer,
+) -> Result<Vec<f64>, String> {
+    if x_f64.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let fp = if frame_period_ms.is_finite() && frame_period_ms > 0.1 {
+        frame_period_ms
+    } else {
+        5.0
+    };
+
+    let (temporal_positions, mut f0) = match world_f0_method() {
+        WorldF0Method::Harvest => {
+            compute_f0_with_positions_harvest(x_f64, fs, fp, f0_floor, f0_ceil).or_else(|_e| {
+                compute_f0_with_positions_dio_stonemask(x_f64, fs, fp, f0_floor, f0_ceil)
+            })?
+        }
+        WorldF0Method::Dio => compute_f0_with_positions_dio_stonemask(
+            x_f64, fs, fp, f0_floor, f0_ceil,
+        )
+        .or_else(|_e| {
+            compute_f0_with_positions_harvest(x_f64, fs, fp, f0_floor, f0_ceil)
+        })?,
+    };
+
+    cleanup_f0_inplace(&mut f0, fp, f0_floor, f0_ceil);
+
+    let f0_len_i32: i32 = f0
+        .len()
+        .try_into()
+        .map_err(|_| "WORLD: f0 too long".to_string())?;
+
+    if f0.is_empty() {
+        return Ok(x_f64.to_vec());
+    }
+
+    let voiced: Vec<bool> = f0.iter().map(|&hz| hz > 0.0).collect();
+
+    // 应用音高偏移
+    let mut shifted_f0 = vec![0.0f64; f0.len()];
+    for i in 0..f0.len() {
+        let hz = f0[i];
+        if hz > 0.0 {
+            let t = temporal_positions.get(i).copied().unwrap_or(0.0);
+            let abs_t = abs_time_start_sec + t;
+            let semitones = semitone_at_time(abs_t);
+            let r = ratio_from_semitones(semitones);
+            shifted_f0[i] = hz * r;
+        }
+    }
+
+    // CheapTrick 频谱分析
+    let mut ct_opt = CheapTrickOption {
+        q1: -0.15,
+        f0_floor: f0_floor.max(20.0),
+        fft_size: 0,
+    };
+    unsafe { InitializeCheapTrickOption(fs, &mut ct_opt as *mut CheapTrickOption) };
+    ct_opt.f0_floor = f0_floor.max(20.0);
+
+    let fft_size =
+        unsafe { GetFFTSizeForCheapTrick(fs, &ct_opt as *const CheapTrickOption) };
+    if fft_size <= 0 {
+        return Err("WORLD: invalid fft_size".to_string());
+    }
+    ct_opt.fft_size = fft_size;
+
+    let spec_bins = (fft_size as usize / 2) + 1;
+
+    let mut spectrogram: Vec<Vec<f64>> = vec![vec![0.0f64; spec_bins]; f0.len()];
+    let mut sp_ptrs: Vec<*mut f64> = spectrogram.iter_mut().map(|row| row.as_mut_ptr()).collect();
+
+    unsafe {
+        CheapTrick(
+            x_f64.as_ptr(),
+            x_f64
+                .len()
+                .try_into()
+                .map_err(|_| "WORLD: input too long".to_string())?,
+            fs,
+            temporal_positions.as_ptr(),
+            f0.as_ptr(),
+            f0_len_i32,
+            &ct_opt as *const CheapTrickOption,
+            sp_ptrs.as_mut_ptr(),
+        );
+    }
+
+    // D4C 非周期性分析
+    let mut d4c_opt = D4COption { threshold: 0.85 };
+    unsafe { InitializeD4COption(&mut d4c_opt as *mut D4COption) };
+
+    let mut aperiodicity: Vec<Vec<f64>> = vec![vec![0.0f64; spec_bins]; f0.len()];
+    let mut ap_ptrs: Vec<*mut f64> = aperiodicity
+        .iter_mut()
+        .map(|row| row.as_mut_ptr())
+        .collect();
+
+    unsafe {
+        D4C(
+            x_f64.as_ptr(),
+            x_f64
+                .len()
+                .try_into()
+                .map_err(|_| "WORLD: input too long".to_string())?,
+            fs,
+            temporal_positions.as_ptr(),
+            f0.as_ptr(),
+            f0_len_i32,
+            fft_size,
+            &d4c_opt as *const D4COption,
+            ap_ptrs.as_mut_ptr(),
+        );
+    }
+
+    // 流式合成：将帧推入 WorldSynthesizer，取出合成 PCM
+    // 若合成器被锁定（环形缓冲区满），先取出已合成样本再推入
+    if synth.is_locked() {
+        let _ = synth.pull_samples();
+    }
+
+    let pushed = synth.push_frames(&mut shifted_f0, &mut spectrogram, &mut aperiodicity);
+    if !pushed {
+        // 推入失败（缓冲区满），先取出再重试
+        let _ = synth.pull_samples();
+        synth.push_frames(&mut shifted_f0, &mut spectrogram, &mut aperiodicity);
+    }
+
+    let y_f64_raw = synth.pull_samples();
+
+    // 若流式合成输出长度不足（合成器需要更多帧才能输出），
+    // 回退到批量 Synthesis 保证输出长度正确
+    let y_f64 = if y_f64_raw.len() >= x_f64.len() {
+        y_f64_raw[..x_f64.len()].to_vec()
+    } else {
+        // 流式输出不足，用批量合成补全
+        let y_length: i32 = x_f64
+            .len()
+            .try_into()
+            .map_err(|_| "WORLD: output too long".to_string())?;
+        let mut y = vec![0.0f64; x_f64.len()];
+        unsafe {
+            let sp_const: Vec<*const f64> = sp_ptrs.iter().map(|&p| p as *const f64).collect();
+            let ap_const: Vec<*const f64> = ap_ptrs.iter().map(|&p| p as *const f64).collect();
+            Synthesis(
+                shifted_f0.as_ptr(),
+                f0_len_i32,
+                sp_const.as_ptr(),
+                ap_const.as_ptr(),
+                fft_size,
+                fp,
+                fs,
+                y_length,
+                y.as_mut_ptr(),
+            );
+        }
+        y
+    };
+
+    // voiced/unvoiced 混合（与 vocode_one 相同逻辑）
+    let fade_ms = 10.0f64;
+    let fade_samples = ((fade_ms / 1000.0) * (fs.max(1) as f64)).round().max(0.0) as usize;
+
+    let mut out = y_f64;
+    if !voiced.is_empty() {
+        let mut w_prev = 0.0f64;
+        let mut ramp_left = 0usize;
+        let mut ramp_from = 0.0f64;
+        let mut ramp_to = 0.0f64;
+
+        for si in 0..out.len() {
+            let t_ms = (si as f64) * 1000.0 / (fs.max(1) as f64);
+            let fi = (t_ms / fp).floor().max(0.0) as usize;
+            let target_w = if fi < voiced.len() && voiced[fi] {
+                1.0f64
+            } else {
+                0.0f64
+            };
+
+            if ramp_left == 0 && (target_w - w_prev).abs() > 1e-9 && fade_samples > 0 {
+                ramp_left = fade_samples;
+                ramp_from = w_prev;
+                ramp_to = target_w;
+            }
+
+            let w = if ramp_left > 0 {
+                let k = (fade_samples - ramp_left) as f64 / (fade_samples as f64);
+                ramp_left = ramp_left.saturating_sub(1);
+                ramp_from + (ramp_to - ramp_from) * k.clamp(0.0, 1.0)
+            } else {
+                target_w
+            };
+
+            if ramp_left == 0 {
+                w_prev = target_w;
+            }
+
+            let dry = x_f64[si];
+            let wet = out[si];
+            out[si] = wet * w + dry * (1.0 - w);
+        }
+    }
+
+    Ok(out)
+}
+
 /// WORLD vocoder pitch shift, chunked to avoid huge memory usage.
 ///
 /// `start_sec` is the absolute timeline time for `mono_pcm[0]`.
+/// 使用流式 `WorldSynthesizer` 跨块保持合成相位连续性，消除块边界的相位跳变。
 pub fn vocode_pitch_shift_chunked<F>(
     mono_pcm: &[f32],
     sample_rate: u32,
@@ -570,15 +821,35 @@ where
 
     let total_frames = mono_pcm.len();
 
-    // Chunk config (tunable).
-    // WORLD is sensitive to clipped / DC-offset inputs.
-    // Keep preprocessing minimal to avoid changing the intended sound too much:
-    // - remove DC
     let chunk_sec = 6.0f64;
     let overlap_sec = 0.10f64;
 
     let chunk_len = (chunk_sec * (sample_rate as f64)).round().max(1.0) as usize;
     let overlap_len = (overlap_sec * (sample_rate as f64)).round().max(0.0) as usize;
+
+    // 预先计算 fft_size，用于初始化流式合成器
+    let fft_size = {
+        let mut ct_opt = CheapTrickOption {
+            q1: -0.15,
+            f0_floor: f0_floor.max(20.0),
+            fft_size: 0,
+        };
+        unsafe { InitializeCheapTrickOption(sr, &mut ct_opt) };
+        ct_opt.f0_floor = f0_floor.max(20.0);
+        unsafe { GetFFTSizeForCheapTrick(sr, &ct_opt) }
+    };
+
+    // 流式合成器：跨 chunk 共享，保持相位连续性
+    // buffer_size = 512 样本（约 11ms @ 44100Hz），number_of_pointers = 32 个槽位
+    let synth_buffer_size = 512usize;
+    let synth_pointers = 32usize;
+    let mut streaming_synth = crate::streaming_world::StreamingWorldSynthesizer::new(
+        sample_rate,
+        frame_period_ms,
+        fft_size,
+        synth_buffer_size,
+        synth_pointers,
+    );
 
     let mut out = vec![0.0f32; total_frames];
 
@@ -587,13 +858,11 @@ where
         let chunk_start = pos;
         let chunk_end = (pos + chunk_len).min(total_frames);
 
-        // Padded region for analysis.
         let pad_start = chunk_start.saturating_sub(overlap_len);
         let pad_end = (chunk_end + overlap_len).min(total_frames);
 
         let x = &mono_pcm[pad_start..pad_end];
         let mut x_f64 = Vec::with_capacity(x.len());
-        // Preprocessing to reduce artifacts
         let mut mean = 0.0f64;
         for &v in x {
             mean += v as f64;
@@ -620,7 +889,9 @@ where
         }
 
         let abs_time_start_sec = start_sec + (pad_start as f64) / (sample_rate as f64);
-        let y_f64 = vocode_one(
+
+        // 使用流式合成器处理当前块
+        let y_f64 = vocode_one_streaming(
             &x_f64,
             sr,
             frame_period_ms,
@@ -628,26 +899,14 @@ where
             f0_ceil,
             abs_time_start_sec,
             &semitone_at_time,
+            &mut streaming_synth,
         )?;
 
         if y_f64.len() != x_f64.len() {
             return Err("WORLD: chunk output length mismatch".to_string());
         }
 
-        // Copy central (non-padded) part back.
         let central_start = chunk_start - pad_start;
-
-        // 等功率 crossfade（equal-power crossfade）写回策略：
-        //
-        // 分块边界处使用 cos/sin 曲线，保证 cos²(w) + sin²(w) = 1，能量守恒。
-        //
-        // 区域划分（以当前块为视角）：
-        //   [chunk_start, chunk_start+overlap_len)  → fade-in 区：读取前一块已写入值，做等功率混合
-        //   [chunk_start+overlap_len, chunk_end-overlap_len) → 中间区：直接覆盖写入
-        //   [chunk_end-overlap_len, chunk_end)       → fade-out 区：直接写入（下一块 fade-in 时会读取并混合）
-        //
-        // 注意：fade-in 区必须先读取 out[dst_idx]（前一块的 fade-out 值），再做等功率混合。
-        // fade-out 区直接写入当前块的值，等待下一块来做 fade-in 混合。
 
         let dst_start = chunk_start;
         let dst_end = chunk_end;
@@ -658,17 +917,13 @@ where
             let dst_idx = dst_start + i;
 
             if overlap_len > 0 && chunk_start > 0 && dst_idx < chunk_start + overlap_len {
-                // fade-in 区：等功率混合前一块（已写入）与当前块
-                // w_curr = sin(t * π/2)，w_prev = cos(t * π/2)，满足 w_curr² + w_prev² = 1
                 let t = (dst_idx - chunk_start) as f32 / overlap_len as f32;
                 let angle = t.clamp(0.0, 1.0) * std::f32::consts::FRAC_PI_2;
                 let w_curr = angle.sin();
                 let w_prev = angle.cos();
-                let prev_val = out[dst_idx]; // 前一块在此位置写入的 fade-out 值
+                let prev_val = out[dst_idx];
                 out[dst_idx] = prev_val * w_prev + v * w_curr;
             } else {
-                // 中间区 & fade-out 区：直接覆盖写入当前块的值
-                // fade-out 区的值会在下一块的 fade-in 阶段被读取并做等功率混合
                 out[dst_idx] = v;
             }
         }

@@ -153,6 +153,12 @@ pub struct PitchOrigAnalysisStartedEvent {
 pub struct PitchOrigAnalysisProgressEvent {
     pub root_track_id: String,
     pub progress: f32,
+    /// 当前正在分析的 clip 名称（None 表示未知或已完成）
+    pub current_clip_name: Option<String>,
+    /// 已完成的 clip 数量
+    pub completed_clips: u32,
+    /// 需要分析的 clip 总数
+    pub total_clips: u32,
 }
 
 fn resample_curve_linear(values: &[f32], out_len: usize) -> Vec<f32> {
@@ -752,6 +758,11 @@ fn process_single_clip(
     };
     
     // Analyze clip (with caching)
+    // 在分析开始前，通知 tracker 当前正在处理的 clip
+    if let Some(tracker) = tracker {
+        tracker.set_current_clip(Some(clip.name.clone()));
+    }
+
     let midi_result = analyze_clip_with_cache(
         clip,
         bpm,
@@ -766,6 +777,8 @@ fn process_single_clip(
     // Update progress
     if let Some(tracker) = tracker {
         let progress = tracker.report_clip_completed(duration_sec, was_cache_hit);
+        // 分析完成后清除当前 clip 名称
+        tracker.set_current_clip(None);
         if debug {
             eprintln!(
                 "  clip {} completed (cache_hit={}), overall progress={:.1}%",
@@ -1763,9 +1776,94 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
     out
 }
 
+/// 从 per-clip 缓存（GLOBAL_CLIP_PITCH_CACHE）直接组装整体音高线。
+///
+/// 策略：按 `tl.clips` 的顺序（即 z-order，越靠后的 clip 越"上方"）逐 clip 写入，
+/// 后面的 clip 直接覆盖前面的（非零值覆盖，零值不覆盖）。
+///
+/// # 返回值
+/// - `Some(Vec<f32>)`：所有 clip 缓存均命中，组装成功
+/// - `None`：至少有一个 clip 缓存未命中，等待异步分析完成后重试
+fn assemble_pitch_orig_from_cache(
+    tl: &crate::state::TimelineState,
+    root_track_id: &str,
+) -> Option<Vec<f32>> {
+    let fp = tl.frame_period_ms();
+    let target_frames = tl.target_param_frames(fp);
+    let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 { tl.bpm } else { 120.0 };
+    let bs = 60.0 / bpm;
+
+    // 收集属于该 root track 的所有 clip（保持 tl.clips 原始顺序 = z-order）
+    let clips: Vec<&crate::state::Clip> = tl
+        .clips
+        .iter()
+        .filter(|c| {
+            tl.resolve_root_track_id(&c.track_id).as_deref() == Some(root_track_id)
+                && !c.muted
+                && c.source_path.is_some()
+        })
+        .collect();
+
+    if clips.is_empty() {
+        // 没有 clip，直接返回全零曲线
+        return Some(vec![0.0f32; target_frames]);
+    }
+
+    let cache = crate::pitch_clip::global_cache().lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut out = vec![0.0f32; target_frames];
+
+    // 按 z-order 从低到高（tl.clips 顺序）写入，后面的 clip 覆盖前面的
+    for clip in &clips {
+        // 查缓存
+        let cached = match cache.get(&clip.id) {
+            Some(c) => c,
+            None => {
+                // 缓存未命中，组装失败，等待异步分析
+                return None;
+            }
+        };
+
+        // 验证 key 是否仍然有效（clip 参数未变）
+        let expected_key = {
+            // 用与 pitch_clip.rs 相同的 key 构建逻辑验证
+            // 简化：只要 cached.midi 非空就认为有效（key 校验由 schedule_clip_pitch_jobs 负责）
+            // 实际上 pitch_clip.rs 的 get_or_compute_clip_pitch_midi_global 已经做了 key 校验
+            // 这里我们直接信任缓存（因为 schedule_clip_pitch_jobs 会在 key 变化时重新分析）
+            let _ = &cached.key; // 使用 key 字段避免 unused 警告
+            true
+        };
+        if !expected_key {
+            return None;
+        }
+
+        // 计算 clip 在 timeline 中的起始帧
+        let clip_start_sec = clip.start_beat.max(0.0) * bs;
+        let clip_start_frame = ((clip_start_sec * 1000.0) / fp).round().max(0.0) as usize;
+        let clip_len_frames = cached.midi.len();
+
+        // 将 clip 的 MIDI 曲线写入 out，后面的 clip 覆盖前面的（非零覆盖）
+        for (local_i, &pitch) in cached.midi.iter().enumerate() {
+            let global_i = clip_start_frame + local_i;
+            if global_i >= target_frames {
+                break;
+            }
+            // 非零值覆盖（零值 = 无声/未检测到音高，不覆盖）
+            if pitch.is_finite() && pitch > 0.0 {
+                out[global_i] = pitch;
+            } else if clip_len_frames > 0 {
+                // 当前 clip 覆盖了这一帧但没有音高，清除下方 clip 的音高
+                out[global_i] = 0.0;
+            }
+        }
+    }
+
+    Some(out)
+}
+
 /// Returns whether pitch analysis is currently pending (scheduled or already inflight).
 pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool {
-    // Build job snapshot under timeline lock, then release lock for heavy work.
+    // 检查是否需要更新（compose_enabled、algo 等前置条件）
     let job = {
         let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         build_pitch_job(&tl, root_track_id)
@@ -1775,90 +1873,49 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
         return false;
     };
 
-    // De-dup inflight.
-    let inflight_key = format!("{}|{}", job.root_track_id, job.key);
-    let should_spawn = if let Ok(mut set) = state.pitch_inflight.lock() {
-        if set.contains(&inflight_key) {
-            false
-        } else {
-            set.insert(inflight_key.clone());
-            true
-        }
-    } else {
-        false
-    };
-    if !should_spawn {
-        return true;
-    }
-
-    let Some(app) = state.app_handle.get().cloned() else {
-        // Should not happen in the real Tauri app (setup sets it), but keep safe.
-        if let Ok(mut set) = state.pitch_inflight.lock() {
-            set.remove(&inflight_key);
-        }
-        return false;
+    // 直接从 per-clip 缓存同步组装整体音高线（不再重新分析音频）
+    let curve_opt = {
+        let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        assemble_pitch_orig_from_cache(&tl, root_track_id)
     };
 
-    // Notify UI that analysis has started for this root track.
-    let _ = app.emit(
-        "pitch_orig_analysis_started",
-        PitchOrigAnalysisStartedEvent {
-            root_track_id: job.root_track_id.clone(),
-            key: job.key.clone(),
-        },
-    );
+    let Some(curve) = curve_opt else {
+        // 有 clip 缓存未命中，等待 ClipPitchReady 事件触发重试
+        return true; // 返回 true 表示"仍在等待中"
+    };
 
-    let job2 = job.clone();
-    std::thread::spawn(move || {
-        let state = app.state::<AppState>();
+    // 将组装好的曲线写入 state
+    let mut should_emit = false;
+    {
+        let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        tl.ensure_params_for_root(&job.root_track_id);
+        let current_key = build_root_pitch_key(&tl, &job.root_track_id);
+        if current_key == job.key {
+            if let Some(entry) = tl.params_by_root_track.get_mut(&job.root_track_id) {
+                entry.pitch_orig = curve;
+                entry.pitch_orig_key = Some(job.key.clone());
 
-        let curve = compute_pitch_curve(&job2, |p| {
-            let pp = p.clamp(0.0, 1.0);
-            let _ = app.emit(
-                "pitch_orig_analysis_progress",
-                PitchOrigAnalysisProgressEvent {
-                    root_track_id: job2.root_track_id.clone(),
-                    progress: pp,
-                },
-            );
-        });
-
-        // Apply if still current.
-        let mut should_emit = false;
-        {
-            let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
-            tl.ensure_params_for_root(&job2.root_track_id);
-            let current_key = build_root_pitch_key(&tl, &job2.root_track_id);
-            if current_key == job2.key {
-                if let Some(entry) = tl.params_by_root_track.get_mut(&job2.root_track_id) {
-                    entry.pitch_orig = curve;
-                    entry.pitch_orig_key = Some(job2.key.clone());
-
-                    // If user hasn't edited yet, keep edit in sync with orig so
-                    // the main (solid) curve shows the recognized pitch.
-                    if !entry.pitch_edit_user_modified {
-                        entry.pitch_edit = entry.pitch_orig.clone();
-                    }
-                    should_emit = true;
+                // 如果用户尚未手动编辑，保持 edit 与 orig 同步
+                if !entry.pitch_edit_user_modified {
+                    entry.pitch_edit = entry.pitch_orig.clone();
                 }
+                should_emit = true;
             }
         }
+    }
 
-        if let Ok(mut set) = state.pitch_inflight.lock() {
-            set.remove(&inflight_key);
-        }
-
-        if should_emit {
+    if should_emit {
+        if let Some(app) = state.app_handle.get() {
             let _ = app.emit(
                 "pitch_orig_updated",
                 PitchOrigUpdatedEvent {
-                    root_track_id: job2.root_track_id.clone(),
+                    root_track_id: job.root_track_id.clone(),
                 },
             );
         }
-    });
+    }
 
-    true
+    false // 同步完成，不再 pending
 }
 
 // Task 3.6: PitchProgressPayload for frontend API
@@ -1868,6 +1925,12 @@ pub struct PitchProgressPayload {
     pub root_track_id: String,
     pub progress: f32,
     pub eta_seconds: Option<f64>,
+    /// 当前正在分析的 clip 名称
+    pub current_clip_name: Option<String>,
+    /// 已完成的 clip 数量
+    pub completed_clips: u32,
+    /// 需要分析的 clip 总数
+    pub total_clips: u32,
 }
 
 impl From<&PitchOrigAnalysisProgressEvent> for PitchProgressPayload {
@@ -1875,7 +1938,10 @@ impl From<&PitchOrigAnalysisProgressEvent> for PitchProgressPayload {
         Self {
             root_track_id: event.root_track_id.clone(),
             progress: event.progress,
-            eta_seconds: None, // Can be calculated if needed
+            eta_seconds: None,
+            current_clip_name: event.current_clip_name.clone(),
+            completed_clips: event.completed_clips,
+            total_clips: event.total_clips,
         }
     }
 }

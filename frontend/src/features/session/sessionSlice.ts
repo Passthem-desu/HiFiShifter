@@ -122,6 +122,16 @@ export interface SessionState {
     clipWaveforms: Record<string, WaveformPreview>;
     clipPitchRanges: Record<string, { min: number; max: number }>;
 
+    /**
+     * 后端推送的 per-clip 音高检测结果（MIDI 曲线）。
+     * key: clip_id
+     * value: { startFrame, midiCurve, framePeriodMs }
+     */
+    clipPitchCurves: Record<
+        string,
+        { startFrame: number; midiCurve: number[]; framePeriodMs: number }
+    >;
+
     modelDir: string;
     audioPath: string;
     outputPath: string;
@@ -458,6 +468,7 @@ const initialState: SessionState = {
     selectedPointId: null,
     clipWaveforms: {},
     clipPitchRanges: {},
+    clipPitchCurves: {},
 
     modelDir: "pc_nsf_hifigan_44.1k_hop512_128bin_2025.02",
     audioPath: "",
@@ -788,6 +799,7 @@ const sessionSlice = createSlice({
             delete state.clipAutomation[selectedId];
             delete state.clipWaveforms[selectedId];
             delete state.clipPitchRanges[selectedId];
+            delete state.clipPitchCurves[selectedId];
             state.selectedPointId = null;
             state.selectedClipId = state.clips[0]?.id ?? null;
             if (state.selectedClipId) {
@@ -888,6 +900,28 @@ const sessionSlice = createSlice({
             if (state.selectedPointId === action.payload.pointId) {
                 state.selectedPointId = null;
             }
+        },
+        /** 更新某个 clip 的音高曲线（来自后端 clip_pitch_data 事件） */
+        setClipPitchData(
+            state,
+            action: PayloadAction<{
+                clipId: string;
+                startFrame: number;
+                midiCurve: number[];
+                framePeriodMs: number;
+            }>,
+        ) {
+            const { clipId, startFrame, midiCurve, framePeriodMs } =
+                action.payload;
+            state.clipPitchCurves[clipId] = {
+                startFrame,
+                midiCurve,
+                framePeriodMs,
+            };
+        },
+        /** 移除某个 clip 的音高曲线（clip 被删除时清理） */
+        removeClipPitchData(state, action: PayloadAction<string>) {
+            delete state.clipPitchCurves[action.payload];
         },
         undo(state) {
             const snapshot = state.historyPast.pop();
@@ -1663,6 +1697,8 @@ export const {
     moveAutomationPoint,
     setSelectedPoint,
     removeAutomationPoint,
+    setClipPitchData,
+    removeClipPitchData,
     undo,
     redo,
 } = sessionSlice.actions;

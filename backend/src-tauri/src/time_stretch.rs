@@ -39,13 +39,27 @@ pub fn time_stretch_interleaved(
             }
             let ratio = (out_frames as f64) / (in_frames as f64);
 
-            match crate::rubberband::try_time_stretch_interleaved_offline(
+            // 优先使用实时模式（process + retrieve），与 stretch_stream 路径统一。
+            // 实时模式无需 study pass，内存占用更低，代码路径与流式拉伸一致。
+            // 若实时模式失败，回退到离线模式（study + process + retrieve）。
+            let result = crate::rubberband::try_time_stretch_interleaved_realtime(
                 input,
                 channels,
                 sample_rate.max(1),
                 ratio,
                 out_frames,
-            ) {
+            )
+            .or_else(|_| {
+                crate::rubberband::try_time_stretch_interleaved_offline(
+                    input,
+                    channels,
+                    sample_rate.max(1),
+                    ratio,
+                    out_frames,
+                )
+            });
+
+            match result {
                 Ok(mut out) => {
                     // Ensure requested length. Rubber Band may output slightly different size.
                     let got_frames = out.len() / channels.max(1);

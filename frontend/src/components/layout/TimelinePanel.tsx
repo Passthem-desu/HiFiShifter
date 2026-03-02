@@ -11,12 +11,12 @@ import {
     seekPlayhead,
     selectClipRemote,
     setPlayheadBeat,
-    moveClipRemote,
     moveTrackRemote,
     setClipMuted,
     importAudioAtPosition,
     importAudioFileAtPosition,
     setClipStateRemote,
+    setClipFades,
     glueClipsRemote,
     optimisticUpdateClipColor,
     rollbackClipColor,
@@ -35,7 +35,6 @@ import {
     ClipContextMenu,
     DEFAULT_PX_PER_BEAT,
     DEFAULT_ROW_HEIGHT,
-    GlueContextMenu,
     MAX_PX_PER_BEAT,
     MAX_ROW_HEIGHT,
     MIN_PX_PER_BEAT,
@@ -45,14 +44,12 @@ import {
     TrackLane,
     TrackList,
     useTimelineSelectionRect,
-    clamp,
     extractLocalFilePath,
     gridStepBeats,
     hasFileDrag,
 } from "./timeline";
 
 export const TimelinePanel: React.FC = () => {
-    const NEW_TRACK_SENTINEL = "__hs_new_track__";
     const dispatch = useAppDispatch();
     const { t } = useI18n();
     const s = useAppSelector((state: RootState) => state.session);
@@ -512,7 +509,7 @@ export const TimelinePanel: React.FC = () => {
     }
 
     // ── 拖拽 hooks ──────────────────────────────────────────────────────────
-    const { editDragRef, startEditDrag } = useEditDrag({
+    const { editDragRef: _editDragRef, startEditDrag } = useEditDrag({
         scrollRef,
         sessionRef,
         dispatch,
@@ -520,7 +517,7 @@ export const TimelinePanel: React.FC = () => {
         beatFromClientX,
     });
 
-    const { slipDragRef, startSlipDrag } = useSlipDrag({
+    const { slipDragRef: _slipDragRef, startSlipDrag } = useSlipDrag({
         scrollRef,
         sessionRef,
         dispatch,
@@ -529,7 +526,7 @@ export const TimelinePanel: React.FC = () => {
         beatFromClientX,
     });
 
-    const { clipDragRef, startClipDrag: _startClipDragInner } = useClipDrag({
+    const { clipDragRef: _clipDragRef, startClipDrag: _startClipDragInner } = useClipDrag({
         scrollRef,
         sessionRef,
         pxPerBeat,
@@ -1164,7 +1161,7 @@ export const TimelinePanel: React.FC = () => {
                                 void dispatch(
                                     splitClipRemote({
                                         clipId,
-                                        beat: sessionRef.current.playheadBeat,
+                                        splitBeat: sessionRef.current.playheadBeat,
                                     }),
                                 );
                             }}

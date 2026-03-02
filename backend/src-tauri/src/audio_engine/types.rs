@@ -85,6 +85,16 @@ pub(crate) struct EngineClip {
     pub(crate) fade_in_frames: u64,
     pub(crate) fade_out_frames: u64,
     pub(crate) gain: f32,
+
+    // Per-clip WORLD 音高合成缓存 ring。
+    // 当音高编辑激活时，后台 worker 将该 clip 的合成 PCM 写入此 ring；
+    // 播放时优先从此 ring 读取，未覆盖区域 fallback 到 stretch_stream / src。
+    pub(crate) synth_ring: Option<Arc<StreamRingStereo>>,
+
+    // 合成 epoch：每当该 clip 的音高曲线发生变化时递增，
+    // 使旧的合成 worker 自动退出，触发重新合成。
+    // 与 clip_stretch_epochs 机制一致，使用 Arc<AtomicU64> 跨线程共享。
+    pub(crate) synth_epoch: u64,
 }
 
 #[allow(dead_code)]
@@ -146,6 +156,10 @@ pub(crate) enum EngineCommand {
     /// clip pitch MIDI 异步预计算完成，触发 snapshot rebuild。
     ClipPitchReady {
         clip_id: String,
+    },
+    /// 设置 Tauri app handle，使 engine worker 能向前端推送事件。
+    SetAppHandle {
+        handle: tauri::AppHandle,
     },
     Stop,
     Shutdown,
