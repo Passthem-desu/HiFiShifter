@@ -268,6 +268,10 @@ pub fn run() {
             commands::get_onnx_diagnostic,
             commands::clear_pitch_cache,
             commands::get_pitch_cache_stats
+            // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
+            // commands::start_pitch_refresh_task,
+            // commands::get_pitch_refresh_status,
+            // commands::cancel_pitch_task
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -11,6 +11,7 @@ interface ClipPitchDataPayload {
     start_frame: number;
     midi_curve: number[];
     frame_period_ms: number;
+    sample_rate: number;
 }
 
 /**
@@ -40,6 +41,7 @@ export function useClipPitchDataListener(): void {
                                 startFrame: Number(p.start_frame ?? 0),
                                 midiCurve: p.midi_curve as number[],
                                 framePeriodMs: Number(p.frame_period_ms ?? 5),
+                                sampleRate: Number(p.sample_rate ?? 44100),
                             }),
                         );
                     },

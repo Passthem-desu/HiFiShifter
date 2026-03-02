@@ -4,8 +4,8 @@
     "version": "0.1.0",
     "identifier": "com.arounder.hifishifter",
     "build": {
-        "beforeDevCommand": "npm --prefix ../../frontend run build",
-        "beforeBuildCommand": "npm --prefix ../../frontend run build",
+        "beforeDevCommand": "powershell -Command \"cd ../frontend; npm run build\"",
+        "beforeBuildCommand": "powershell -Command \"cd ../frontend; npm run build\"",
         "frontendDist": "../../frontend/dist"
     },
     "app": {

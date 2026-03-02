@@ -15,7 +15,7 @@ fn default_frame_period_ms() -> f64 {
     5.0
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PitchAnalysisAlgo {
     #[default]
@@ -97,7 +97,9 @@ pub struct Clip {
     pub color: String,
 
     pub source_path: Option<String>,
-    pub duration_sec: Option<f64>,
+    pub duration_sec: Option<f64>,           // 兼容性保留
+    pub duration_frames: Option<u64>,        // 精确的frame总数
+    pub source_sample_rate: Option<u32>,     // 源文件采样率
     pub waveform_preview: Option<Vec<f32>>,
     pub pitch_range: Option<PitchRange>,
 
@@ -587,6 +589,8 @@ impl TimelineState {
                 color: c.color.clone(),
                 source_path: c.source_path.clone(),
                 duration_sec: c.duration_sec,
+                duration_frames: c.duration_frames,
+                source_sample_rate: c.source_sample_rate,
                 waveform_preview: c.waveform_preview.clone(),
                 pitch_range: c.pitch_range.clone(),
                 gain: Some(c.gain),
@@ -813,6 +817,8 @@ impl TimelineState {
                 .map(|c| {
                     (
                         c.duration_sec,
+                        c.duration_frames,
+                        c.source_sample_rate,
                         c.waveform_preview.clone(),
                         c.pitch_range.clone(),
                     )
@@ -832,10 +838,12 @@ impl TimelineState {
             color: default_clip_color(),
             source_path,
             duration_sec: inherited.as_ref().and_then(|v| v.0),
-            waveform_preview: inherited.as_ref().and_then(|v| v.1.clone()),
+            duration_frames: inherited.as_ref().and_then(|v| v.1),
+            source_sample_rate: inherited.as_ref().and_then(|v| v.2),
+            waveform_preview: inherited.as_ref().and_then(|v| v.3.clone()),
             pitch_range: inherited
                 .as_ref()
-                .and_then(|v| v.2.clone())
+                .and_then(|v| v.4.clone())
                 .or(Some(PitchRange {
                     min: -24.0,
                     max: 24.0,
@@ -1056,6 +1064,8 @@ impl TimelineState {
             .to_string();
 
         let mut duration_sec: Option<f64> = None;
+        let mut duration_frames: Option<u64> = None;
+        let mut source_sample_rate: Option<u32> = None;
         let mut waveform_preview: Option<Vec<f32>> = None;
 
         match try_read_wav_info(Path::new(audio_path), 4096) {
@@ -1074,7 +1084,9 @@ impl TimelineState {
                         .map(|v| format!("{:.4}", v))
                         .collect();
                     eprintln!(
-                        "import_audio_item: audio_info ok: duration_sec={:.3}, preview_len={}, preview_max={:.4}, preview_head=[{}]",
+                        "import_audio_item: audio_info ok: total_frames={}, sample_rate={}, duration_sec={:.6}, preview_len={}, preview_max={:.4}, preview_head=[{}]",
+                        info.total_frames,
+                        info.sample_rate,
                         info.duration_sec,
                         info.waveform_preview.len(),
                         max_amp,
@@ -1082,6 +1094,8 @@ impl TimelineState {
                     );
                 }
                 duration_sec = Some(info.duration_sec);
+                duration_frames = Some(info.total_frames);
+                source_sample_rate = Some(info.sample_rate);
                 waveform_preview = Some(info.waveform_preview);
             }
             None => {
@@ -1095,16 +1109,38 @@ impl TimelineState {
             }
         }
 
+        // 使用精确的frame计算length_beats
+        let computed_length_beats = if let (Some(frames), Some(sr)) = (duration_frames, source_sample_rate) {
+            let exact_duration_sec = frames as f64 / sr as f64;
+            (exact_duration_sec * self.bpm) / 60.0
+        } else {
+            duration_sec.map(|d| (d * self.bpm) / 60.0).unwrap_or(8.0)
+        };
+
         let clip_id = self.add_clip(
             track_id,
             Some(name),
             start_beat,
-            duration_sec.map(|d| (d * self.bpm) / 60.0).or(Some(8.0)),
+            Some(computed_length_beats),
             Some(audio_path.to_string()),
         );
 
+        // DEBUG: 打印导入clip时的关键参数
+        if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+            eprintln!(
+                "import_audio_item: clip created: clip_id={}, bpm={:.2}, duration_frames={:?}, sample_rate={:?}, computed_length_beats={:.6}",
+                &clip_id[..8.min(clip_id.len())],
+                self.bpm,
+                duration_frames,
+                source_sample_rate,
+                computed_length_beats
+            );
+        }
+
         if let Some(c) = self.clips.iter_mut().find(|c| c.id == clip_id) {
             c.duration_sec = duration_sec;
+            c.duration_frames = duration_frames;
+            c.source_sample_rate = source_sample_rate;
             c.waveform_preview = waveform_preview;
         }
     }

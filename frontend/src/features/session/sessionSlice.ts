@@ -125,11 +125,11 @@ export interface SessionState {
     /**
      * 后端推送的 per-clip 音高检测结果（MIDI 曲线）。
      * key: clip_id
-     * value: { startFrame, midiCurve, framePeriodMs }
+     * value: { startFrame, midiCurve, framePeriodMs, sampleRate }
      */
     clipPitchCurves: Record<
         string,
-        { startFrame: number; midiCurve: number[]; framePeriodMs: number }
+        { startFrame: number; midiCurve: number[]; framePeriodMs: number; sampleRate: number }
     >;
 
     modelDir: string;
@@ -287,26 +287,48 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         ),
     }));
 
-    state.clips = timeline.clips.map((clip: TimelineClip) => ({
-        id: clip.id,
-        trackId: clip.track_id,
-        name: clip.name,
-        startBeat: Number(clip.start_beat ?? 0),
-        lengthBeats: Math.max(0.0, Number(clip.length_beats ?? 1)),
-        color: normalizeClipColor(clip.color),
-        sourcePath: clip.source_path,
-        durationSec: Number(clip.duration_sec ?? 0) || undefined,
-        gain: clamp(Number(clip.gain ?? 1), 0, 2),
-        muted: Boolean(clip.muted),
-        // Allow negative trimStartBeat to represent leading silence (slip-edit past source start).
-        trimStartBeat: Number(clip.trim_start_beat ?? 0) || 0,
-        trimEndBeat: Math.max(0, Number(clip.trim_end_beat ?? 0)),
-        playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
-        fadeInBeats: Math.max(0, Number(clip.fade_in_beats ?? 0)),
-        fadeOutBeats: Math.max(0, Number(clip.fade_out_beats ?? 0)),
-        fadeInCurve: "sine" as FadeCurveType,
-        fadeOutCurve: "sine" as FadeCurveType,
-    }));
+    state.clips = timeline.clips.map((clip: TimelineClip) => {
+        const parsed = {
+            id: clip.id,
+            trackId: clip.track_id,
+            name: clip.name,
+            startBeat: Number(clip.start_beat ?? 0),
+            lengthBeats: Math.max(0.0, Number(clip.length_beats ?? 1)),
+            color: normalizeClipColor(clip.color),
+            sourcePath: clip.source_path,
+            durationSec: Number(clip.duration_sec ?? 0) || undefined,
+            durationFrames: clip.duration_frames,
+            sourceSampleRate: clip.source_sample_rate,
+            gain: clamp(Number(clip.gain ?? 1), 0, 2),
+            muted: Boolean(clip.muted),
+            // Allow negative trimStartBeat to represent leading silence (slip-edit past source start).
+            trimStartBeat: Number(clip.trim_start_beat ?? 0) || 0,
+            trimEndBeat: Math.max(0, Number(clip.trim_end_beat ?? 0)),
+            playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
+            fadeInBeats: Math.max(0, Number(clip.fade_in_beats ?? 0)),
+            fadeOutBeats: Math.max(0, Number(clip.fade_out_beats ?? 0)),
+            fadeInCurve: "sine" as FadeCurveType,
+            fadeOutCurve: "sine" as FadeCurveType,
+        };
+        
+        // DEBUG: 打印每个clip的关键参数
+        console.log(`[SessionSlice] Parsed clip ${parsed.id.slice(0, 8)}:`, {
+            lengthBeats: parsed.lengthBeats,
+            durationSec: parsed.durationSec,
+            durationFrames: parsed.durationFrames,
+            sourceSampleRate: parsed.sourceSampleRate,
+            computedDurSec: parsed.durationFrames && parsed.sourceSampleRate 
+                ? (parsed.durationFrames / parsed.sourceSampleRate).toFixed(6)
+                : 'N/A',
+            sourcePath: parsed.sourcePath?.split(/[/\\]/).pop(),
+            startBeat: parsed.startBeat,
+            trimStartBeat: parsed.trimStartBeat,
+            trimEndBeat: parsed.trimEndBeat,
+            playbackRate: parsed.playbackRate,
+        });
+        
+        return parsed;
+    });
 
     state.selectedTrackId = timeline.selected_track_id;
     state.selectedClipId = timeline.selected_clip_id;
@@ -909,14 +931,16 @@ const sessionSlice = createSlice({
                 startFrame: number;
                 midiCurve: number[];
                 framePeriodMs: number;
+                sampleRate: number;
             }>,
         ) {
-            const { clipId, startFrame, midiCurve, framePeriodMs } =
+            const { clipId, startFrame, midiCurve, framePeriodMs, sampleRate } =
                 action.payload;
             state.clipPitchCurves[clipId] = {
                 startFrame,
                 midiCurve,
                 framePeriodMs,
+                sampleRate,
             };
         },
         /** 移除某个 clip 的音高曲线（clip 被删除时清理） */

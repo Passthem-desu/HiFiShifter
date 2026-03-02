@@ -143,7 +143,8 @@ fn decode_audio_f32_interleaved_symphonia(path: &Path) -> Result<(u32, u16, Vec<
 
 pub struct WavInfo {
     pub sample_rate: u32,
-    pub duration_sec: f64,
+    pub total_frames: u64,      // 精确的frame总数
+    pub duration_sec: f64,       // 兼容性保留，从frames计算
     pub waveform_preview: Vec<f32>,
 }
 
@@ -432,14 +433,23 @@ fn try_read_wav_info_hound(path: &Path, preview_points: usize) -> Option<WavInfo
     }
 
     let total_samples = reader.duration() as usize;
-    let total_frames = (total_samples / spec.channels as usize).max(0) as f64;
-    let duration_sec = total_frames / spec.sample_rate as f64;
+    let total_frames = (total_samples / spec.channels as usize).max(0) as u64;
+    let duration_sec = total_frames as f64 / spec.sample_rate as f64;
+
+    // DEBUG: 打印音频文件的精确frame信息
+    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+        eprintln!(
+            "[audio_utils] WAV info: total_samples={}, channels={}, total_frames={}, sample_rate={}, duration_sec={:.6}",
+            total_samples, spec.channels, total_frames, spec.sample_rate, duration_sec
+        );
+    }
 
     let preview_len = preview_points.max(2);
     let mut preview = vec![0.0f32; preview_len];
     if total_samples == 0 || preview_points == 0 {
         return Some(WavInfo {
             sample_rate: spec.sample_rate,
+            total_frames,
             duration_sec,
             waveform_preview: if preview_points == 0 { vec![] } else { preview },
         });
@@ -509,6 +519,7 @@ fn try_read_wav_info_hound(path: &Path, preview_points: usize) -> Option<WavInfo
 
     Some(WavInfo {
         sample_rate: spec.sample_rate,
+        total_frames,
         duration_sec,
         waveform_preview: preview,
     })
@@ -595,6 +606,7 @@ fn try_read_audio_info_symphonia(path: &Path, preview_points: usize) -> Option<W
     if preview_points == 0 || total_frames == 0 {
         return Some(WavInfo {
             sample_rate,
+            total_frames,
             duration_sec,
             waveform_preview: vec![],
         });
@@ -662,6 +674,7 @@ fn try_read_audio_info_symphonia(path: &Path, preview_points: usize) -> Option<W
 
     Some(WavInfo {
         sample_rate,
+        total_frames,
         duration_sec,
         waveform_preview: preview,
     })

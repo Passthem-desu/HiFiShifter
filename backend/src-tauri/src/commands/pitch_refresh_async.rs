@@ -8,7 +8,7 @@ use uuid::Uuid;
 /// 后端返回的任务状态 payload
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PitchTaskStatusPayload {
+pub(crate) struct PitchTaskStatusPayload {
     pub status: String,
     pub progress: u8,
     pub error: Option<String>,

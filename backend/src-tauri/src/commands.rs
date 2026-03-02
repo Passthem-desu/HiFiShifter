@@ -31,6 +31,9 @@ mod pitch_progress;
 mod onnx_status;
 #[path = "commands/pitch_cache.rs"]
 mod pitch_cache;
+// TODO: 异步音高刷新功能未完成，缺少必要的状态管理和依赖
+// #[path = "commands/pitch_refresh_async.rs"]
+// mod pitch_refresh_async;
 
 use crate::state::AppState;
 use tauri::{State, Window};
@@ -467,3 +470,34 @@ pub fn clear_pitch_cache(state: State<'_, AppState>) -> serde_json::Value {
 pub fn get_pitch_cache_stats(state: State<'_, AppState>) -> pitch_cache::PitchCacheStatsPayload {
     pitch_cache::get_pitch_cache_stats(state)
 }
+
+// ===================== pitch_refresh_async (暂时禁用) =====================
+// TODO: 需要实现以下功能才能启用：
+// 1. 在 state.rs 中添加 PitchTaskInfo 和 PitchTaskStatus 类型
+// 2. 在 AppState 中添加 pitch_refresh_tasks 字段
+// 3. 在 Cargo.toml 中添加 tokio 依赖
+// 4. 将 pitch_analysis.rs 中的相关函数改为 pub
+//
+// #[tauri::command(rename_all = "camelCase")]
+// pub async fn start_pitch_refresh_task(
+//     root_track_id: String,
+//     state: State<'_, AppState>,
+// ) -> Result<String, String> {
+//     pitch_refresh_async::start_pitch_refresh_task(root_track_id, state).await
+// }
+//
+// #[tauri::command(rename_all = "camelCase")]
+// pub fn get_pitch_refresh_status(
+//     task_id: String,
+//     state: State<'_, AppState>,
+// ) -> Result<pitch_refresh_async::PitchTaskStatusPayload, String> {
+//     pitch_refresh_async::get_pitch_refresh_status(task_id, state)
+// }
+//
+// #[tauri::command(rename_all = "camelCase")]
+// pub fn cancel_pitch_task(
+//     task_id: String,
+//     state: State<'_, AppState>,
+// ) -> Result<(), String> {
+//     pitch_refresh_async::cancel_pitch_task(task_id, state)
+// }

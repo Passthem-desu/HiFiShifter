@@ -58,11 +58,30 @@ function buildClipPeaksRequest(
     const sourcePath = clip.sourcePath;
     if (!sourcePath) return null;
 
-    const durationSec = Number(clip.durationSec ?? 0);
+    // 优先使用精确的frame计算
+    let durationSec: number;
+    if (clip.durationFrames && clip.sourceSampleRate && clip.sourceSampleRate > 0) {
+        durationSec = clip.durationFrames / clip.sourceSampleRate;
+    } else {
+        durationSec = Number(clip.durationSec ?? 0);
+    }
+    
     if (!Number.isFinite(durationSec) || durationSec <= 0) return null;
 
     const lengthBeats = Math.max(0, Number(clip.lengthBeats ?? 0) || 0);
     if (lengthBeats <= 1e-9) return null;
+
+    console.log(`[ClipPeaks] Building request for clip ${clip.id.slice(0, 8)}:`, {
+        durationFrames: clip.durationFrames,
+        sourceSampleRate: clip.sourceSampleRate,
+        computedDurSec: durationSec.toFixed(6),
+        legacyDurationSec: clip.durationSec,
+        lengthBeats: lengthBeats,
+        secPerBeat: secPerBeat,
+        trimStartBeat: clip.trimStartBeat,
+        trimEndBeat: clip.trimEndBeat,
+        playbackRate: clip.playbackRate,
+    });
 
     const playbackRate = Number(clip.playbackRate ?? 1);
     const pr = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;

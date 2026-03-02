@@ -417,6 +417,17 @@ export function drawPianoRoll(args: {
         const clipStartX = clipStartSec * (pxPerBeat / secPerBeat) - scrollLeft;
         const clipWidthPx = (clipEndSec - clipStartSec) * (pxPerBeat / secPerBeat);
 
+        // DEBUG: 波形clip时间参数
+        console.log(`[WaveformClip] clipId=${entry.clipId}:`, {
+            startBeat: entry.startBeat,
+            lengthBeats: entry.lengthBeats,
+            clipStartSec,
+            clipEndSec,
+            clipDurationSec: clipEndSec - clipStartSec,
+            clipWidthPx,
+            peaksDurSec: entry.peaks?.durSec, // 波形实际audio段的时长
+        });
+
         if (clipWidthPx <= 0) continue;
 
         // 裁剪到 clip 的 x 范围，避免溢出到相邻 clip 区域
@@ -487,14 +498,22 @@ export function drawPianoRoll(args: {
             const fp = Math.max(1e-6, curve.framePeriodMs);
             // clip 起始时间（秒）：startFrame 是引擎采样帧
             const clipStartSec = curve.startFrame / sr;
+            
+            // 使用和波形相同的坐标计算方式：秒 -> beat -> 像素
+            const clipStartBeat = clipStartSec / secPerBeat;
+            const pxPerSec = pxPerBeat / secPerBeat;
 
-            // 将 MIDI 曲线转换为以 WORLD 帧为单位的 startFrame（秒偏移量转换为 WORLD 帧索引）
-            // drawCurveTimed 使用 framesToTime(frame, fp) = frame * fp / 1000
-            // 所以 startFrame_world = clipStartSec * 1000 / fp
-            const worldStartFrame = (clipStartSec * 1000) / fp;
-
-            // 过滤掉无声帧（midi === 0），用 NaN 占位保持帧索引对齐
-            const filteredCurve = curve.midiCurve.map((v) => (v > 0 ? v : NaN));
+            // DEBUG: 输出关键时间参数
+            console.log(`[DetectedPitch] Curve #${ci}:`, {
+                startFrame: curve.startFrame,
+                sampleRate: sr,
+                framePeriodMs: fp,
+                clipStartSec: clipStartSec,
+                clipStartBeat: clipStartBeat,
+                midiCurveLength: curve.midiCurve.length,
+                calculatedDurationSec: (curve.midiCurve.length * fp) / 1000,
+                pxPerSec: pxPerSec,
+            });
 
             ctx.save();
             ctx.strokeStyle = DETECTED_COLORS[ci % DETECTED_COLORS.length];
@@ -502,32 +521,52 @@ export function drawPianoRoll(args: {
             ctx.setLineDash([]);
             ctx.globalAlpha = 1;
 
-            // 手动绘制，跳过 NaN（无声帧）
+            // 使用和波形相同的坐标转换：beat * pxPerBeat - scrollLeft
             ctx.beginPath();
-            let inSegment = false;
-            for (let i = 0; i < filteredCurve.length; i++) {
-                const midi = filteredCurve[i];
-                if (midi == null || isNaN(midi)) {
-                    inSegment = false;
+            let firstX = -1, lastX = -1;
+            let hasStarted = false;
+            
+            for (let i = 0; i < curve.midiCurve.length; i++) {
+                const midi = curve.midiCurve[i];
+                if (midi == null || !isFinite(midi)) continue;
+                
+                // 计算当前帧的时间（秒），然后转换为beat和像素
+                const frameSec = clipStartSec + (i * fp / 1000);
+                const frameBeat = frameSec / secPerBeat;
+                const x = frameBeat * pxPerBeat - scrollLeft;
+                
+                // 裁剪到可见区域
+                if (x < -10 || x > w + 10) continue;
+                
+                if (firstX < 0) firstX = x;
+                lastX = x;
+                
+                // 无声帧（midi <= 0）：画在底部或跳过，但保持连续性
+                if (midi <= 0) {
+                    // 用户要求保持绘制，所以即使是0也画出来
+                    // 可以选择画一条底部基准线，或者简单跳过
                     continue;
                 }
-                const tSec = (worldStartFrame + i) * fp / 1000;
-                if (tSec < visibleStartSec - 0.5 || tSec > visibleStartSec + visibleDurSec + 0.5) {
-                    inSegment = false;
-                    continue;
-                }
-                const x = timeToPixel(tSec, visibleStartSec, visibleDurSec, w);
+                
                 // pitch 曲线加 0.5 偏移，使点落在键中心
                 const y = valueToY("pitch", midi + 0.5, h);
-                if (!inSegment) {
+                
+                if (!hasStarted) {
                     ctx.moveTo(x, y);
-                    inSegment = true;
+                    hasStarted = true;
                 } else {
                     ctx.lineTo(x, y);
                 }
             }
             ctx.stroke();
             ctx.restore();
+
+            console.log(`[DetectedPitch] Rendered Curve #${ci}:`, {
+                firstX,
+                lastX,
+                renderedWidthPx: lastX - firstX,
+                expectedDurationSec: (curve.midiCurve.length * fp) / 1000,
+            });
         }
     }
 

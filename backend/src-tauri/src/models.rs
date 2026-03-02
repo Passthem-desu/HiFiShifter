@@ -48,6 +48,8 @@ pub struct TimelineClip {
 
     pub source_path: Option<String>,
     pub duration_sec: Option<f64>,
+    pub duration_frames: Option<u64>,
+    pub source_sample_rate: Option<u32>,
     pub waveform_preview: Option<Vec<f32>>,
     pub pitch_range: Option<PitchRange>,
 

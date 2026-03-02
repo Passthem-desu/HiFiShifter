@@ -525,7 +525,7 @@ export const PianoRollPanel: React.FC = () => {
             startFrame: c.startFrame,
             midiCurve: c.midiCurve,
             framePeriodMs: c.framePeriodMs,
-            sampleRate: 44100,
+            sampleRate: c.sampleRate,
         }));
     }, [editParam, s.clipPitchCurves]);
 
