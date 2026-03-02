@@ -1,5 +1,10 @@
 export type ToolMode = "draw" | "select";
-export type FadeCurveType = "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
+export type FadeCurveType =
+    | "linear"
+    | "sine"
+    | "exponential"
+    | "logarithmic"
+    | "scurve";
 // 如需新增参数：同步修改 pianoRoll/types.ts 中的 ParamName
 export type EditParam = "pitch" | "tension";
 export type GridSize = "1/4" | "1/8" | "1/16" | "1/32";
@@ -29,8 +34,8 @@ export interface ClipInfo {
     color: "blue" | "violet" | "emerald" | "amber";
     sourcePath?: string;
     durationSec?: number;
-    durationFrames?: number;       // 精确frame总数
-    sourceSampleRate?: number;     // 源文件采样率
+    durationFrames?: number; // 精确frame总数
+    sourceSampleRate?: number; // 源文件采样率
     gain: number;
     muted: boolean;
     trimStartBeat: number;

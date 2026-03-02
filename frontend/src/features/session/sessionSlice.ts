@@ -129,7 +129,12 @@ export interface SessionState {
      */
     clipPitchCurves: Record<
         string,
-        { startFrame: number; midiCurve: number[]; framePeriodMs: number; sampleRate: number }
+        {
+            startFrame: number;
+            midiCurve: number[];
+            framePeriodMs: number;
+            sampleRate: number;
+        }
     >;
 
     modelDir: string;
@@ -205,7 +210,6 @@ function createDefaultAutomation() {
             { id: createId("pt_t"), beat: 8, value: 0.42 },
             { id: createId("pt_t"), beat: 12, value: 0.6 },
         ],
-
     };
 }
 
@@ -310,23 +314,26 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
             fadeInCurve: "sine" as FadeCurveType,
             fadeOutCurve: "sine" as FadeCurveType,
         };
-        
+
         // DEBUG: 打印每个clip的关键参数
         console.log(`[SessionSlice] Parsed clip ${parsed.id.slice(0, 8)}:`, {
             lengthBeats: parsed.lengthBeats,
             durationSec: parsed.durationSec,
             durationFrames: parsed.durationFrames,
             sourceSampleRate: parsed.sourceSampleRate,
-            computedDurSec: parsed.durationFrames && parsed.sourceSampleRate 
-                ? (parsed.durationFrames / parsed.sourceSampleRate).toFixed(6)
-                : 'N/A',
+            computedDurSec:
+                parsed.durationFrames && parsed.sourceSampleRate
+                    ? (parsed.durationFrames / parsed.sourceSampleRate).toFixed(
+                          6,
+                      )
+                    : "N/A",
             sourcePath: parsed.sourcePath?.split(/[/\\]/).pop(),
             startBeat: parsed.startBeat,
             trimStartBeat: parsed.trimStartBeat,
             trimEndBeat: parsed.trimEndBeat,
             playbackRate: parsed.playbackRate,
         });
-        
+
         return parsed;
     });
 
@@ -577,10 +584,7 @@ export {
     clearWaveformCacheRemote,
 } from "./thunks/runtimeThunks";
 
-export {
-    loadModel,
-    loadDefaultModel,
-} from "./thunks/modelThunks";
+export { loadModel, loadDefaultModel } from "./thunks/modelThunks";
 
 export {
     processAudio,
@@ -596,9 +600,6 @@ export {
     importAudioAtPosition,
     importAudioFileAtPosition,
 } from "./thunks/importThunks";
-
-
-
 
 const sessionSlice = createSlice({
     name: "session",
@@ -1338,17 +1339,21 @@ const sessionSlice = createSlice({
                 const shouldUpdatePlaybackFields =
                     nextIsPlaying !== state.runtime.isPlaying ||
                     nextTarget !== state.runtime.playbackTarget ||
-                    Math.abs(nextPositionSec - state.runtime.playbackPositionSec) >
-                        EPS_SEC ||
-                    Math.abs(nextDurationSec - state.runtime.playbackDurationSec) >
-                        EPS_SEC ||
+                    Math.abs(
+                        nextPositionSec - state.runtime.playbackPositionSec,
+                    ) > EPS_SEC ||
+                    Math.abs(
+                        nextDurationSec - state.runtime.playbackDurationSec,
+                    ) > EPS_SEC ||
                     (nextIsPlaying &&
-                        Math.abs(nextPlayheadBeat - state.playheadBeat) > epsBeat);
+                        Math.abs(nextPlayheadBeat - state.playheadBeat) >
+                            epsBeat);
 
                 if (!shouldUpdatePlaybackFields) {
                     // 即使播放已停止，也避免重复写入相同值（Immer 会把赋值视为 mutation）。
                     if (!nextIsPlaying) {
-                        if (state.playbackClipId !== null) state.playbackClipId = null;
+                        if (state.playbackClipId !== null)
+                            state.playbackClipId = null;
                         if (state.playbackAnchorBeat !== 0)
                             state.playbackAnchorBeat = 0;
                     }

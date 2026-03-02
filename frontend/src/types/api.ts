@@ -39,8 +39,8 @@ export interface TimelineClip {
     color: string;
     source_path?: string;
     duration_sec?: number;
-    duration_frames?: number;       // 精确frame总数
-    source_sample_rate?: number;    // 源文件采样率
+    duration_frames?: number; // 精确frame总数
+    source_sample_rate?: number; // 源文件采样率
     waveform_preview?:
         | number[]
         | { l: number[]; r: number[] }

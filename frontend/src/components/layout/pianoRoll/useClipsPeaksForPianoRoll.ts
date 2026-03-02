@@ -20,7 +20,12 @@ export interface ClipPeaksEntry {
     /** clip 的长度（beats） */
     lengthBeats: number;
     /** peaks 数据，未加载时为 null */
-    peaks: { min: number[]; max: number[]; startSec: number; durSec: number } | null;
+    peaks: {
+        min: number[];
+        max: number[];
+        startSec: number;
+        durSec: number;
+    } | null;
 }
 
 /** 缓存条目 */
@@ -60,31 +65,39 @@ function buildClipPeaksRequest(
 
     // 优先使用精确的frame计算
     let durationSec: number;
-    if (clip.durationFrames && clip.sourceSampleRate && clip.sourceSampleRate > 0) {
+    if (
+        clip.durationFrames &&
+        clip.sourceSampleRate &&
+        clip.sourceSampleRate > 0
+    ) {
         durationSec = clip.durationFrames / clip.sourceSampleRate;
     } else {
         durationSec = Number(clip.durationSec ?? 0);
     }
-    
+
     if (!Number.isFinite(durationSec) || durationSec <= 0) return null;
 
     const lengthBeats = Math.max(0, Number(clip.lengthBeats ?? 0) || 0);
     if (lengthBeats <= 1e-9) return null;
 
-    console.log(`[ClipPeaks] Building request for clip ${clip.id.slice(0, 8)}:`, {
-        durationFrames: clip.durationFrames,
-        sourceSampleRate: clip.sourceSampleRate,
-        computedDurSec: durationSec.toFixed(6),
-        legacyDurationSec: clip.durationSec,
-        lengthBeats: lengthBeats,
-        secPerBeat: secPerBeat,
-        trimStartBeat: clip.trimStartBeat,
-        trimEndBeat: clip.trimEndBeat,
-        playbackRate: clip.playbackRate,
-    });
+    console.log(
+        `[ClipPeaks] Building request for clip ${clip.id.slice(0, 8)}:`,
+        {
+            durationFrames: clip.durationFrames,
+            sourceSampleRate: clip.sourceSampleRate,
+            computedDurSec: durationSec.toFixed(6),
+            legacyDurationSec: clip.durationSec,
+            lengthBeats: lengthBeats,
+            secPerBeat: secPerBeat,
+            trimStartBeat: clip.trimStartBeat,
+            trimEndBeat: clip.trimEndBeat,
+            playbackRate: clip.playbackRate,
+        },
+    );
 
     const playbackRate = Number(clip.playbackRate ?? 1);
-    const pr = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
+    const pr =
+        Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
 
     // 计算 clip 在源文件中的起始时间
     // sourceBeats = durationSec / secPerBeat（源文件总 beats）
@@ -98,7 +111,11 @@ function buildClipPeaksRequest(
     const segLenBeats = Math.min(lengthBeats * pr, endBeat - startBeat);
     const segLenSec = (segLenBeats / Math.max(1e-6, sourceBeats)) * durationSec;
 
-    if (!Number.isFinite(startSec) || !Number.isFinite(segLenSec) || segLenSec <= 0) {
+    if (
+        !Number.isFinite(startSec) ||
+        !Number.isFinite(segLenSec) ||
+        segLenSec <= 0
+    ) {
         return null;
     }
 
@@ -111,7 +128,13 @@ function buildClipPeaksRequest(
 
     const cacheKey = `${sourcePath}|${startSecQ.toFixed(3)}|${durSecQ.toFixed(3)}|${columns}`;
 
-    return { sourcePath, startSec: startSecQ, durSec: durSecQ, columns, cacheKey };
+    return {
+        sourcePath,
+        startSec: startSecQ,
+        durSec: durSecQ,
+        columns,
+        cacheKey,
+    };
 }
 
 /**
@@ -131,9 +154,12 @@ export function useClipsPeaksForPianoRoll(args: {
     pxPerBeat: number;
     secPerBeat: number;
 }): ClipPeaksEntry[] {
-    const { clips, visibleStartBeat, visibleEndBeat, pxPerBeat, secPerBeat } = args;
+    const { clips, visibleStartBeat, visibleEndBeat, pxPerBeat, secPerBeat } =
+        args;
 
-    const [peaksMap, setPeaksMap] = useState<Map<string, CachedEntry>>(new Map());
+    const [peaksMap, setPeaksMap] = useState<Map<string, CachedEntry>>(
+        new Map(),
+    );
     const requestIdRef = useRef(0);
     const mountedRef = useRef(true);
 
@@ -148,7 +174,9 @@ export function useClipsPeaksForPianoRoll(args: {
         // 过滤出与可见区域有交叠的 clip
         const visibleClips = clips.filter((clip) => {
             const clipEnd = clip.startBeat + clip.lengthBeats;
-            return clipEnd > visibleStartBeat && clip.startBeat < visibleEndBeat;
+            return (
+                clipEnd > visibleStartBeat && clip.startBeat < visibleEndBeat
+            );
         });
 
         if (visibleClips.length === 0) {
@@ -160,7 +188,10 @@ export function useClipsPeaksForPianoRoll(args: {
 
         // 先用缓存数据立即更新
         const initialMap = new Map<string, CachedEntry>();
-        const toFetch: Array<{ clip: ClipInfo; req: NonNullable<ReturnType<typeof buildClipPeaksRequest>> }> = [];
+        const toFetch: Array<{
+            clip: ClipInfo;
+            req: NonNullable<ReturnType<typeof buildClipPeaksRequest>>;
+        }> = [];
 
         for (const clip of visibleClips) {
             const widthPx = clip.lengthBeats * pxPerBeat;
@@ -198,13 +229,22 @@ export function useClipsPeaksForPianoRoll(args: {
                             .then((res) => {
                                 if (!res?.ok) return null;
                                 const entry: CachedEntry = {
-                                    min: (res.min ?? []).map((v) => Number(v) || 0),
-                                    max: (res.max ?? []).map((v) => Number(v) || 0),
+                                    min: (res.min ?? []).map(
+                                        (v) => Number(v) || 0,
+                                    ),
+                                    max: (res.max ?? []).map(
+                                        (v) => Number(v) || 0,
+                                    ),
                                     startSec: req.startSec,
                                     durSec: req.durSec,
                                     t: performance.now(),
                                 };
-                                lruSet(clipPeaksCache, req.cacheKey, entry, CLIP_PEAKS_CACHE_LIMIT);
+                                lruSet(
+                                    clipPeaksCache,
+                                    req.cacheKey,
+                                    entry,
+                                    CLIP_PEAKS_CACHE_LIMIT,
+                                );
                                 return entry;
                             })
                             .finally(() => {
@@ -218,7 +258,11 @@ export function useClipsPeaksForPianoRoll(args: {
                 }),
             );
 
-            if (!mountedRef.current || currentRequestId !== requestIdRef.current) return;
+            if (
+                !mountedRef.current ||
+                currentRequestId !== requestIdRef.current
+            )
+                return;
 
             setPeaksMap((prev) => {
                 const next = new Map(prev);
@@ -248,7 +292,12 @@ export function useClipsPeaksForPianoRoll(args: {
             startBeat: clip.startBeat,
             lengthBeats: clip.lengthBeats,
             peaks: entry
-                ? { min: entry.min, max: entry.max, startSec: entry.startSec, durSec: entry.durSec }
+                ? {
+                      min: entry.min,
+                      max: entry.max,
+                      startSec: entry.startSec,
+                      durSec: entry.durSec,
+                  }
                 : null,
         };
     });

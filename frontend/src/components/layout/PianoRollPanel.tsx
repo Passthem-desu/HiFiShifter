@@ -459,7 +459,8 @@ export const PianoRollPanel: React.FC = () => {
 
     // 可见区域的 beat 范围
     const visibleStartBeat = scrollLeft / Math.max(1e-9, pxPerBeat);
-    const visibleEndBeat = visibleStartBeat + viewSize.w / Math.max(1e-9, pxPerBeat);
+    const visibleEndBeat =
+        visibleStartBeat + viewSize.w / Math.max(1e-9, pxPerBeat);
 
     // Per-clip 波形 peaks（替代原来的 mix 波形）
     const clipPeaks = useClipsPeaksForPianoRoll({
@@ -1012,7 +1013,7 @@ export const PianoRollPanel: React.FC = () => {
 
                 {showOverlay ? (
                     <div className="absolute inset-0 z-50 flex items-center justify-center qt-overlay">
-                    <div className="flex flex-col items-center gap-3 w-72">
+                        <div className="flex flex-col items-center gap-3 w-72">
                             {showPitchAnalyzingOverlay ? (
                                 <>
                                     {/* 主标题 */}
@@ -1024,7 +1025,10 @@ export const PianoRollPanel: React.FC = () => {
                                         size="1"
                                         color="gray"
                                         className="max-w-full truncate"
-                                        title={pitchAnalysisCurrentClip ?? undefined}
+                                        title={
+                                            pitchAnalysisCurrentClip ??
+                                            undefined
+                                        }
                                     >
                                         {pitchAnalysisCurrentClip
                                             ? `"${pitchAnalysisCurrentClip}"`
@@ -1054,7 +1058,8 @@ export const PianoRollPanel: React.FC = () => {
                                         </div>
                                         <div className="flex justify-between">
                                             <Text size="1" color="gray">
-                                                {pitchAnalysisTotalClips != null &&
+                                                {pitchAnalysisTotalClips !=
+                                                    null &&
                                                 pitchAnalysisTotalClips > 0
                                                     ? `${pitchAnalysisCompletedClips ?? 0} / ${pitchAnalysisTotalClips} clips`
                                                     : ""}
