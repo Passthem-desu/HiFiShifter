@@ -2,6 +2,12 @@ export const DEFAULT_PX_PER_BEAT = 120;
 export const MIN_PX_PER_BEAT = 8;
 export const MAX_PX_PER_BEAT = 2000;
 
+// 以秒为单位的缩放常量（pxPerSec = pxPerBeat / secPerBeat = pxPerBeat * bpm / 60）
+// DEFAULT_PX_PER_SEC = 240 对应 120 BPM 时 pxPerBeat = 240 * (60/120) = 120
+export const DEFAULT_PX_PER_SEC = 240;
+export const MIN_PX_PER_SEC = 4;
+export const MAX_PX_PER_SEC = 8000;
+
 export const DEFAULT_ROW_HEIGHT = 96;
 export const MIN_ROW_HEIGHT = 56;
 export const MAX_ROW_HEIGHT = 192;

@@ -13,9 +13,9 @@ import type { AppDispatch } from "../../../app/store";
 import { paramsApi } from "../../../services/api";
 import {
     seekPlayhead,
-    setPlayheadBeat,
+    setplayheadSec,
 } from "../../../features/session/sessionSlice";
-import { clamp, MAX_PX_PER_BEAT, MIN_PX_PER_BEAT } from "../timeline";
+import { clamp, MAX_PX_PER_SEC, MIN_PX_PER_SEC } from "../timeline";
 import type {
     ParamName,
     ParamViewSegment,
@@ -34,6 +34,8 @@ export function usePianoRollInteractions(args: {
     scrollLeftRef: MutableRefObject<number>;
     pxPerBeatRef: MutableRefObject<number>;
     setPxPerBeat: (next: number) => void;
+    /** 当前 BPM，用于动态计�?pxPerBeat 的合法范�?*/
+    bpm: number;
     setPitchView: (next: ValueViewport) => void;
     setTensionView: (next: ValueViewport) => void;
     pitchViewRef: MutableRefObject<ValueViewport>;
@@ -90,8 +92,8 @@ export function usePianoRollInteractions(args: {
 
     commitStroke: (points: StrokePoint[], mode: StrokeMode) => Promise<void>;
 
-    /** pointer down 期间设为 true，pointer up 后由 commitStroke 包装层重置为 false。
-     *  用于保护 pitch_orig_updated 事件触发的曲线刷新不覆盖正在绘制的内容。 */
+    /** pointer down 期间设为 true，pointer up 后由 commitStroke 包装层重置为 false�?
+     *  用于保护 pitch_orig_updated 事件触发的曲线刷新不覆盖正在绘制的内容�?*/
     liveEditActiveRef?: MutableRefObject<boolean>;
 }) {
     const {
@@ -104,6 +106,7 @@ export function usePianoRollInteractions(args: {
         scrollLeftRef,
         pxPerBeatRef,
         setPxPerBeat,
+        bpm,
         setPitchView,
         setTensionView,
         pitchViewRef,
@@ -167,10 +170,12 @@ export function usePianoRollInteractions(args: {
                 0,
                 1e12,
             );
-            dispatch(setPlayheadBeat(beat));
-            void dispatch(seekPlayhead(beat));
+            // beat → sec：playheadSec 存储的是秒，必须转换后再 dispatch
+            const sec = beat * secPerBeat;
+            dispatch(setplayheadSec(sec));
+            void dispatch(seekPlayhead(sec));
         },
-        [dispatch, scrollLeftRef, pxPerBeatRef],
+        [dispatch, scrollLeftRef, pxPerBeatRef, secPerBeat],
     );
 
     const onScrollerMouseDownCapture = useCallback((e: MouseEvent) => {
@@ -325,10 +330,15 @@ export function usePianoRollInteractions(args: {
             const beatAtPointer =
                 (pointerX + el.scrollLeft) / Math.max(1e-9, curPxPerBeat);
 
+            // 动态计�?pxPerBeat 的合法范围（基于 pxPerSec 的范围和当前 BPM�?
+            const secPerBeatLocal = 60 / Math.max(1, bpm);
+            const minPxPerBeat = MIN_PX_PER_SEC * secPerBeatLocal;
+            const maxPxPerBeat = MAX_PX_PER_SEC * secPerBeatLocal;
+
             const next = clamp(
                 curPxPerBeat * factor,
-                MIN_PX_PER_BEAT,
-                MAX_PX_PER_BEAT,
+                minPxPerBeat,
+                maxPxPerBeat,
             );
             if (Math.abs(next - curPxPerBeat) < 1e-9) return;
 
@@ -470,7 +480,7 @@ export function usePianoRollInteractions(args: {
                 param: editParam,
                 points: [{ frame, value }],
             };
-            // 标记 live 编辑开始，阻止 pitch_orig_updated 事件立即刷新曲线。
+            // 标记 live 编辑开始，阻止 pitch_orig_updated 事件立即刷新曲线�?
             if (liveEditActiveRef) liveEditActiveRef.current = true;
 
             const pv0 = paramViewRef.current;
@@ -552,7 +562,7 @@ export function usePianoRollInteractions(args: {
                 window.removeEventListener("pointerup", onUp);
                 window.removeEventListener("pointercancel", onUp);
                 invalidate();
-                // commitStroke 包装层会在完成后重置 liveEditActiveRef 并触发延迟刷新。
+                // commitStroke 包装层会在完成后重置 liveEditActiveRef 并触发延迟刷新�?
                 void commitStroke(st.points, st.mode);
             };
 

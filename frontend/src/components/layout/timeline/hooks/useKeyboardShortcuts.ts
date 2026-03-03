@@ -46,7 +46,7 @@ export function useKeyboardShortcuts(deps: {
                       ? [s.selectedClipId]
                       : [];
 
-            // Delete / Backspace：删除选中的 clip
+            // Delete / Backspace：删除选中�?clip
             if (!e.ctrlKey && !e.metaKey && !e.altKey) {
                 if (key === "delete" || key === "backspace") {
                     if (selectedIds.length === 0) return;
@@ -60,7 +60,7 @@ export function useKeyboardShortcuts(deps: {
                 }
             }
 
-            // Ctrl+C / Ctrl+V：复制/粘贴
+            // Ctrl+C / Ctrl+V：复�?粘贴
             if ((e.ctrlKey || e.metaKey) && !e.altKey) {
                 if (key === "c") {
                     if (selectedIds.length === 0) return;
@@ -71,17 +71,17 @@ export function useKeyboardShortcuts(deps: {
                     const templates = clips.map((c) => ({
                         trackId: c.trackId,
                         name: c.name,
-                        startBeat: c.startBeat,
-                        lengthBeats: c.lengthBeats,
+                        startSec: c.startSec,
+                        lengthSec: c.lengthSec,
                         sourcePath: c.sourcePath,
                         durationSec: c.durationSec,
                         gain: c.gain,
                         muted: c.muted,
-                        trimStartBeat: c.trimStartBeat,
-                        trimEndBeat: c.trimEndBeat,
+                        trimStartSec: c.trimStartSec,
+                        trimEndSec: c.trimEndSec,
                         playbackRate: c.playbackRate,
-                        fadeInBeats: c.fadeInBeats,
-                        fadeOutBeats: c.fadeOutBeats,
+                        fadeInSec: c.fadeInSec,
+                        fadeOutSec: c.fadeOutSec,
                     }));
                     (clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>).current = templates;
                     try {
@@ -102,9 +102,9 @@ export function useKeyboardShortcuts(deps: {
                     if (!tpl || tpl.length === 0) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    const playhead = s.playheadBeat ?? 0;
+                    const playhead = s.playheadSec ?? 0;
                     const minStart = tpl
-                        .map((c) => c.startBeat)
+                        .map((c) => c.startSec)
                         .reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY);
                     const delta =
                         Number.isFinite(minStart) && minStart !== Number.POSITIVE_INFINITY
@@ -112,7 +112,7 @@ export function useKeyboardShortcuts(deps: {
                             : 0;
                     const templates = tpl.map((c) => ({
                         ...c,
-                        startBeat: Math.max(0, c.startBeat + delta),
+                        startSec: Math.max(0, c.startSec + delta),
                     }));
                     dispatch(checkpointHistory());
                     void dispatch(createClipsRemote({ templates }))
@@ -134,7 +134,7 @@ export function useKeyboardShortcuts(deps: {
                 if (!clipId) return;
                 e.preventDefault();
                 e.stopPropagation();
-                const splitBeat = Math.max(0, Number(s.playheadBeat ?? 0) || 0);
+                const splitBeat = Math.max(0, Number(s.playheadSec ?? 0) || 0);
                 void dispatch(splitClipRemote({ clipId, splitBeat }));
             }
         }

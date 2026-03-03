@@ -135,7 +135,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
     switch (method) {
         case "set_transport": {
             const o: Record<string, unknown> = {};
-            if (args[0] !== undefined) o.playheadBeat = args[0];
+            if (args[0] !== undefined) o.playheadSec = args[0];
             if (args[1] !== undefined) o.bpm = args[1];
             return o;
         }
@@ -144,7 +144,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return {
                 audioPath: args[0],
                 ...(args[1] !== undefined ? { trackId: args[1] } : {}),
-                ...(args[2] !== undefined ? { startBeat: args[2] } : {}),
+                ...(args[2] !== undefined ? { startSec: args[2] } : {}),
             };
 
         case "import_audio_bytes":
@@ -152,7 +152,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 fileName: args[0],
                 base64Data: args[1],
                 ...(args[2] !== undefined ? { trackId: args[2] } : {}),
-                ...(args[3] !== undefined ? { startBeat: args[3] } : {}),
+                ...(args[3] !== undefined ? { startSec: args[3] } : {}),
             };
 
         case "add_track":
@@ -186,7 +186,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return { trackId: args[0] };
 
         case "set_project_length":
-            return { projectBeats: args[0] };
+            return { projectSec: args[0] };
 
         case "get_track_summary":
             return args[0] === undefined ? undefined : { trackId: args[0] };
@@ -195,8 +195,8 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return {
                 trackId: (args[0] ?? null) as unknown,
                 name: args[1],
-                startBeat: args[2],
-                lengthBeats: args[3],
+                startSec: args[2],
+                lengthSec: args[3],
                 sourcePath: args[4],
             };
 
@@ -206,21 +206,21 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "move_clip":
             return {
                 clipId: args[0],
-                startBeat: args[1],
+                startSec: args[1],
                 trackId: (args[2] ?? null) as unknown,
             };
 
         case "set_clip_state":
             return {
                 clipId: args[0],
-                lengthBeats: args[1],
+                lengthSec: args[1],
                 gain: args[2],
                 muted: args[3],
-                trimStartBeat: args[4],
-                trimEndBeat: args[5],
+                trimstartSec: args[4],
+                trimEndSec: args[5],
                 playbackRate: args[6],
-                fadeInBeats: args[7],
-                fadeOutBeats: args[8],
+                fadeInSec: args[7],
+                fadeOutSec: args[8],
             };
 
         case "split_clip":

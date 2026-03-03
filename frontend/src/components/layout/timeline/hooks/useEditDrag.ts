@@ -13,7 +13,6 @@ import {
     setClipTrim,
 } from "../../../../features/session/sessionSlice";
 import { clamp, gainToDb, dbToGain } from "../math";
-import { clipSourceBeats } from "../clipWaveform";
 
 export type EditDragType =
     | "trim_left"
@@ -28,13 +27,13 @@ export type EditDragState = {
     type: EditDragType;
     pointerId: number;
     clipId: string;
-    baseStartBeat: number;
-    baseLengthBeats: number;
+    basestartSec: number;
+    baselengthSec: number;
     basePlaybackRate: number;
-    baseTrimStartBeat: number;
-    baseTrimEndBeat: number;
-    baseFadeInBeats: number;
-    baseFadeOutBeats: number;
+    baseTrimStartSec: number;
+    basetrimEndSec: number;
+    basefadeInSec: number;
+    basefadeOutSec: number;
     baseGain: number;
     sourceBeats: number | null;
     rightEdgeBeat: number;
@@ -61,7 +60,7 @@ export function useEditDrag(deps: {
         if (!clip) return;
         const scroller = scrollRef.current;
         if (!scroller) return;
-        const rightEdgeBeat = clip.startBeat + clip.lengthBeats;
+        const rightEdgeBeat = clip.startSec + clip.lengthSec;
 
         dispatch(checkpointHistory());
 
@@ -69,15 +68,15 @@ export function useEditDrag(deps: {
             type,
             pointerId: e.pointerId,
             clipId,
-            baseStartBeat: clip.startBeat,
-            baseLengthBeats: clip.lengthBeats,
+            basestartSec: clip.startSec,
+            baselengthSec: clip.lengthSec,
             basePlaybackRate: Number(clip.playbackRate ?? 1) || 1,
-            baseTrimStartBeat: clip.trimStartBeat,
-            baseTrimEndBeat: clip.trimEndBeat,
-            baseFadeInBeats: clip.fadeInBeats,
-            baseFadeOutBeats: clip.fadeOutBeats,
+            baseTrimStartSec: clip.trimStartSec,
+            basetrimEndSec: clip.trimEndSec,
+            basefadeInSec: clip.fadeInSec,
+            basefadeOutSec: clip.fadeOutSec,
             baseGain: clip.gain,
-            sourceBeats: clipSourceBeats(clip, sessionRef.current.bpm),
+            sourceBeats: null,
             rightEdgeBeat,
         };
 
@@ -101,15 +100,15 @@ export function useEditDrag(deps: {
 
             const minLen = 0.0;
             if (drag.type === "fade_in") {
-                const raw = beat - drag.baseStartBeat;
-                const next = clamp(raw, 0, Math.max(0, drag.baseLengthBeats));
-                dispatch(setClipFades({ clipId: drag.clipId, fadeInBeats: next }));
+                const raw = beat - drag.basestartSec;
+                const next = clamp(raw, 0, Math.max(0, drag.baselengthSec));
+                dispatch(setClipFades({ clipId: drag.clipId, fadeInSec: next }));
                 return;
             }
             if (drag.type === "fade_out") {
                 const raw = drag.rightEdgeBeat - beat;
-                const next = clamp(raw, 0, Math.max(0, drag.baseLengthBeats));
-                dispatch(setClipFades({ clipId: drag.clipId, fadeOutBeats: next }));
+                const next = clamp(raw, 0, Math.max(0, drag.baselengthSec));
+                dispatch(setClipFades({ clipId: drag.clipId, fadeOutSec: next }));
                 return;
             }
             if (drag.type === "gain") {
@@ -123,20 +122,20 @@ export function useEditDrag(deps: {
 
             if (drag.type === "trim_left") {
                 const desiredStart = clamp(beat, 0, drag.rightEdgeBeat - minLen);
-                const desiredDelta = desiredStart - drag.baseStartBeat;
+                const desiredDelta = desiredStart - drag.basestartSec;
                 const rate =
                     Number(clipNow.playbackRate ?? 1) > 0
                         ? Number(clipNow.playbackRate ?? 1)
                         : 1;
-                let nextTrimStart = drag.baseTrimStartBeat + desiredDelta * rate;
+                let nextTrimStart = drag.baseTrimStartSec + desiredDelta * rate;
                 nextTrimStart = Math.max(0, nextTrimStart);
-                const actualDeltaTrim = nextTrimStart - drag.baseTrimStartBeat;
+                const actualDeltaTrim = nextTrimStart - drag.baseTrimStartSec;
                 const actualDeltaTimeline = actualDeltaTrim / rate;
-                const nextStart = drag.baseStartBeat + actualDeltaTimeline;
-                const nextLen = clamp(drag.baseLengthBeats - actualDeltaTimeline, minLen, 10_000);
-                dispatch(moveClipStart({ clipId: drag.clipId, startBeat: nextStart }));
-                dispatch(setClipLength({ clipId: drag.clipId, lengthBeats: nextLen }));
-                dispatch(setClipTrim({ clipId: drag.clipId, trimStartBeat: nextTrimStart }));
+                const nextStart = drag.basestartSec + actualDeltaTimeline;
+                const nextLen = clamp(drag.baselengthSec - actualDeltaTimeline, minLen, 10_000);
+                dispatch(moveClipStart({ clipId: drag.clipId, startSec: nextStart }));
+                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
+                dispatch(setClipTrim({ clipId: drag.clipId, trimStartSec: nextTrimStart }));
                 return;
             }
 
@@ -144,44 +143,44 @@ export function useEditDrag(deps: {
                 const desiredStart = clamp(beat, 0, drag.rightEdgeBeat - minLen);
                 const nextStart = desiredStart;
                 const nextLen = clamp(drag.rightEdgeBeat - nextStart, minLen, 10_000);
-                const baseLen = Math.max(1e-6, Number(drag.baseLengthBeats) || 0);
+                const baseLen = Math.max(1e-6, Number(drag.baselengthSec) || 0);
                 const baseRate =
                     drag.basePlaybackRate > 0 && Number.isFinite(drag.basePlaybackRate)
                         ? drag.basePlaybackRate
                         : 1;
                 const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, nextLen), 0.1, 10);
-                dispatch(moveClipStart({ clipId: drag.clipId, startBeat: nextStart }));
-                dispatch(setClipLength({ clipId: drag.clipId, lengthBeats: nextLen }));
+                dispatch(moveClipStart({ clipId: drag.clipId, startSec: nextStart }));
+                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
                 dispatch(setClipPlaybackRate({ clipId: drag.clipId, playbackRate: nextRate }));
                 return;
             }
 
             if (drag.type === "trim_right") {
-                const desiredRight = clamp(beat, drag.baseStartBeat + minLen, 10_000);
+                const desiredRight = clamp(beat, drag.basestartSec + minLen, 10_000);
                 const rate =
                     Number(clipNow.playbackRate ?? 1) > 0
                         ? Number(clipNow.playbackRate ?? 1)
                         : 1;
-                const desiredLen = desiredRight - drag.baseStartBeat;
+                const desiredLen = desiredRight - drag.basestartSec;
                 const nextLen = clamp(desiredLen, minLen, 10_000);
-                const usedDeltaTimeline = nextLen - drag.baseLengthBeats;
-                let nextTrimEnd = drag.baseTrimEndBeat - usedDeltaTimeline * rate;
+                const usedDeltaTimeline = nextLen - drag.baselengthSec;
+                let nextTrimEnd = drag.basetrimEndSec - usedDeltaTimeline * rate;
                 nextTrimEnd = Math.max(0, nextTrimEnd);
-                dispatch(setClipLength({ clipId: drag.clipId, lengthBeats: nextLen }));
-                dispatch(setClipTrim({ clipId: drag.clipId, trimEndBeat: nextTrimEnd }));
+                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
+                dispatch(setClipTrim({ clipId: drag.clipId, trimEndSec: nextTrimEnd }));
                 return;
             }
 
             if (drag.type === "stretch_right") {
-                const desiredRight = clamp(beat, drag.baseStartBeat + minLen, 10_000);
-                const nextLen = clamp(desiredRight - drag.baseStartBeat, minLen, 10_000);
-                const baseLen = Math.max(1e-6, Number(drag.baseLengthBeats) || 0);
+                const desiredRight = clamp(beat, drag.basestartSec + minLen, 10_000);
+                const nextLen = clamp(desiredRight - drag.basestartSec, minLen, 10_000);
+                const baseLen = Math.max(1e-6, Number(drag.baselengthSec) || 0);
                 const baseRate =
                     drag.basePlaybackRate > 0 && Number.isFinite(drag.basePlaybackRate)
                         ? drag.basePlaybackRate
                         : 1;
                 const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, nextLen), 0.1, 10);
-                dispatch(setClipLength({ clipId: drag.clipId, lengthBeats: nextLen }));
+                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
                 dispatch(setClipPlaybackRate({ clipId: drag.clipId, playbackRate: nextRate }));
             }
         }
@@ -195,19 +194,19 @@ export function useEditDrag(deps: {
             if (!clipNow) return;
 
             if (drag.type === "trim_left") {
-                void dispatch(moveClipRemote({ clipId: drag.clipId, startBeat: clipNow.startBeat, trackId: clipNow.trackId }));
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthBeats: clipNow.lengthBeats, trimStartBeat: clipNow.trimStartBeat }));
+                void dispatch(moveClipRemote({ clipId: drag.clipId, startSec: clipNow.startSec, trackId: clipNow.trackId }));
+                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, trimStartSec: clipNow.trimStartSec }));
             } else if (drag.type === "trim_right") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthBeats: clipNow.lengthBeats, trimEndBeat: clipNow.trimEndBeat }));
+                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, trimEndSec: clipNow.trimEndSec }));
             } else if (drag.type === "stretch_left") {
-                void dispatch(moveClipRemote({ clipId: drag.clipId, startBeat: clipNow.startBeat, trackId: clipNow.trackId }));
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthBeats: clipNow.lengthBeats, playbackRate: clipNow.playbackRate }));
+                void dispatch(moveClipRemote({ clipId: drag.clipId, startSec: clipNow.startSec, trackId: clipNow.trackId }));
+                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate }));
             } else if (drag.type === "stretch_right") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthBeats: clipNow.lengthBeats, playbackRate: clipNow.playbackRate }));
+                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate }));
             } else if (drag.type === "fade_in") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, fadeInBeats: clipNow.fadeInBeats }));
+                void dispatch(setClipStateRemote({ clipId: drag.clipId, fadeInSec: clipNow.fadeInSec }));
             } else if (drag.type === "fade_out") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, fadeOutBeats: clipNow.fadeOutBeats }));
+                void dispatch(setClipStateRemote({ clipId: drag.clipId, fadeOutSec: clipNow.fadeOutSec }));
             } else if (drag.type === "gain") {
                 void dispatch(setClipStateRemote({ clipId: drag.clipId, gain: clipNow.gain }));
             }

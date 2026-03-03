@@ -66,19 +66,19 @@ const SS_KEY_PREFIX = "hs_peaks_v1|";
 const SS_CACHE_LIMIT = 512;
 
 /**
- * 模块级 Set，记录已写入 sessionStorage 的完整 key（含前缀）。
- * 避免 ssSet 每次写入都遍历 sessionStorage.length（O(n)），改为 O(1) 查找。
- * 页面刷新后会重建，但重建成本极低（仅在首次 ssGet 命中时回填）。
+ * 模块�?Set，记录已写入 sessionStorage 的完�?key（含前缀）�?
+ * 避免 ssSet 每次写入都遍�?sessionStorage.length（O(n)），改为 O(1) 查找�?
+ * 页面刷新后会重建，但重建成本极低（仅在首�?ssGet 命中时回填）�?
  */
 const ssKeySet = new Set<string>();
 
-/** 从 sessionStorage 读取缓存条目（反序列化失败时静默忽略） */
+/** �?sessionStorage 读取缓存条目（反序列化失败时静默忽略�?*/
 function ssGet(key: string): CachedSegment | null {
     try {
         const fullKey = SS_KEY_PREFIX + key;
         const raw = sessionStorage.getItem(fullKey);
         if (!raw) return null;
-        // 回填 ssKeySet，保证刷新后 Set 与 sessionStorage 保持同步
+        // 回填 ssKeySet，保证刷新后 Set �?sessionStorage 保持同步
         ssKeySet.add(fullKey);
         return JSON.parse(raw) as CachedSegment;
     } catch {
@@ -86,12 +86,12 @@ function ssGet(key: string): CachedSegment | null {
     }
 }
 
-/** 写入 sessionStorage，超出 SS_CACHE_LIMIT 时删除最旧条目（O(1) key 查找） */
+/** 写入 sessionStorage，超�?SS_CACHE_LIMIT 时删除最旧条目（O(1) key 查找�?*/
 function ssSet(key: string, seg: CachedSegment) {
     try {
         const fullKey = SS_KEY_PREFIX + key;
         if (ssKeySet.size >= SS_CACHE_LIMIT && !ssKeySet.has(fullKey)) {
-            // 按 t 升序排序，删除最旧的一批
+            // �?t 升序排序，删除最旧的一�?
             const entries: { k: string; t: number }[] = [];
             for (const k of ssKeySet) {
                 try {
@@ -123,7 +123,7 @@ function getCachedSegment(key: string): CachedSegment | null {
         peaksSegmentCache.set(key, hit);
         return hit;
     }
-    // 未命中则查 sessionStorage，命中后回填内存 Map
+    // 未命中则�?sessionStorage，命中后回填内存 Map
     const ssHit = ssGet(key);
     if (ssHit) {
         peaksSegmentCache.set(key, ssHit);
@@ -162,14 +162,12 @@ function hasTauriInvoke(): boolean {
 
 export function useClipWaveformPeaks(args: {
     clip: ClipInfo;
-    bpm: number;
     widthPx: number;
     altPressed?: boolean;
     hasWaveformPreview: boolean;
 }) {
     const {
         clip,
-        bpm,
         widthPx,
         altPressed = false,
         hasWaveformPreview,
@@ -183,46 +181,32 @@ export function useClipWaveformPeaks(args: {
         const durationSec = Number(clip.durationSec ?? 0);
         if (!Number.isFinite(durationSec) || durationSec <= 0) return null;
 
-        const safeBpm = Math.max(1e-6, Number(bpm) || 120);
-        const sourceBeats = (durationSec * safeBpm) / 60;
-        if (!Number.isFinite(sourceBeats) || sourceBeats <= 1e-6) return null;
-
-        const timelineLenBeats = Math.max(
-            0,
-            Number(clip.lengthBeats ?? 0) || 0,
-        );
-        if (timelineLenBeats <= 1e-9) return null;
+        // 纯秒域计算，不依赖 BPM
+        const timelineLenSec = Math.max(0, Number(clip.lengthSec ?? 0) || 0);
+        if (timelineLenSec <= 1e-9) return null;
 
         const prRaw = Number(clip.playbackRate ?? 1);
         const pr = Number.isFinite(prRaw) && prRaw > 0 ? prRaw : 1;
-        const desiredLenBeats = timelineLenBeats * pr;
-        if (desiredLenBeats <= 1e-9) return null;
+        // source 域所需长度（秒）= timeline 长度 * playbackRate
+        const desiredLenSrc = timelineLenSec * pr;
+        if (desiredLenSrc <= 1e-9) return null;
 
-        const trimStartRaw = Number(clip.trimStartBeat ?? 0) || 0;
-        const preSilenceBeatsSrc = Math.max(0, -trimStartRaw);
+        const trimStartRaw = Number(clip.trimStartSec ?? 0) || 0;
+        const preSilenceSecSrc = Math.max(0, -trimStartRaw);
         const trimStart = Math.max(0, trimStartRaw);
-        const trimEnd = Math.max(0, Number(clip.trimEndBeat ?? 0) || 0);
-        const startBeat = clamp(trimStart, 0, sourceBeats);
-        const maxEndBeat = Math.max(startBeat, sourceBeats - trimEnd);
-        const cycleLenBeats = Math.max(0, maxEndBeat - startBeat);
-        if (cycleLenBeats <= 1e-9) return null;
+        const trimEnd = Math.max(0, Number(clip.trimEndSec ?? 0) || 0);
+        const startSec = clamp(trimStart, 0, durationSec);
+        const maxEndSec = Math.max(startSec, durationSec - trimEnd);
+        const cycleLenSec = Math.max(0, maxEndSec - startSec);
+        if (cycleLenSec <= 1e-9) return null;
 
-        // Non-repeating: lengths beyond the available source window are silence.
-        // Negative trimStart introduces leading silence that also consumes clip time.
-        const playableBeatsSrc = Math.max(
-            0,
-            desiredLenBeats - preSilenceBeatsSrc,
-        );
-        const segmentLenBeats = Math.min(playableBeatsSrc, cycleLenBeats);
-        if (segmentLenBeats <= 1e-9) return null;
+        // 非循环：超出 source 可用窗口的部分为静音
+        // 负 trimStart 引入前置静音，也消耗 clip 时间
+        const playableSecSrc = Math.max(0, desiredLenSrc - preSilenceSecSrc);
+        const segmentLenSec = Math.min(playableSecSrc, cycleLenSec);
+        if (segmentLenSec <= 1e-9) return null;
 
-        const startSec = (startBeat / sourceBeats) * durationSec;
-        const segmentLenSec = (segmentLenBeats / sourceBeats) * durationSec;
-        if (
-            !Number.isFinite(startSec) ||
-            !Number.isFinite(segmentLenSec) ||
-            segmentLenSec <= 0
-        ) {
+        if (!Number.isFinite(startSec) || !Number.isFinite(segmentLenSec)) {
             return null;
         }
 
@@ -246,8 +230,9 @@ export function useClipWaveformPeaks(args: {
             ? clamp(Math.round(outColumns / 4), 16, 2048)
             : outColumns;
 
-        const leadSilenceBeats = preSilenceBeatsSrc / Math.max(1e-6, pr);
-        const segmentLenBeatsTimeline = segmentLenBeats / Math.max(1e-6, pr);
+        // 转换回 timeline 域（秒）
+        const leadSilenceBeats = preSilenceSecSrc / Math.max(1e-6, pr);
+        const segmentLenBeatsTimeline = segmentLenSec / Math.max(1e-6, pr);
 
         return {
             sourcePath,
@@ -258,7 +243,8 @@ export function useClipWaveformPeaks(args: {
             leadSilenceBeats,
             segmentLenBeatsTimeline,
         };
-    }, [altPressed, bpm, clip, widthPx]);
+    // 注意：不依赖 bpm，波形内容基于秒域计算，BPM 变化不影响波形显示
+    }, [altPressed, clip, widthPx]);
 
     const [peaks, setPeaks] = React.useState<PeaksRenderState | null>(null);
 
@@ -299,11 +285,12 @@ export function useClipWaveformPeaks(args: {
             const outMin: number[] = new Array(outCols);
             const outMax: number[] = new Array(outCols);
 
-            const clipLenBeats = Math.max(
-                1e-9,
-                Number(clip.lengthBeats ?? 0) || 0,
-            );
             const lead = Math.max(0, Number(leadSilenceBeats) || 0);
+            // 使用当前请求的实际长度（segLen + lead），而非 clip.lengthSec�?
+            // clip.lengthSec �?trim 拖动时持续变化，会导�?buildOutput 每次
+            // 用不同的 clipLenBeats 重新映射波形，产生拉�?压缩视觉效果�?
+            // 当前请求�?segLen + lead 是稳定的，与 peaks 数据一一对应�?
+            const clipLenBeats = Math.max(1e-9, segLen + lead);
 
             for (let i = 0; i < outCols; i += 1) {
                 const t = i / denom;
@@ -351,8 +338,10 @@ export function useClipWaveformPeaks(args: {
             // Preview remap: if we already have a base segment from the previous request,
             // immediately rebuild output with the new timeline mapping while backend peaks load.
             // This avoids waveform flicker during trim/stretch/slip drags.
+            // isPreview=false: trim 时波形数据本身是正确的（只是 timeline 映射变了），
+            // 不需要降�?opacity，避免视觉闪烁�?
             if (peaks?.ok && peaks.segmentMin.length >= 2 && peaks.segmentMax.length >= 2) {
-                setPeaks(buildOutput(peaks.segmentMin, peaks.segmentMax, true));
+                setPeaks(buildOutput(peaks.segmentMin, peaks.segmentMax, false));
             } else if (altPressed && hasWaveformPreview) {
                 // As a last resort, during slip-edit prefer the import-time waveform preview.
                 setPeaks(null);

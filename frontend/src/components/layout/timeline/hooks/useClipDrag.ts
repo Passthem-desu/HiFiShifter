@@ -20,10 +20,10 @@ export type ClipDragState = {
     anchorClipId: string;
     clipIds: string[];
     offsetBeat: number;
-    initialById: Record<string, { startBeat: number; trackId: string }>;
-    minStartBeat: number;
+    initialById: Record<string, { startSec: number; trackId: string }>;
+    minstartSec: number;
     allowTrackMove: boolean;
-    initialAnchorStartBeat: number;
+    initialAnchorstartSec: number;
     initialAnchorTrackId: string;
     lastTrackId: string | null;
     lastDeltaBeat: number;
@@ -36,7 +36,6 @@ export type ClipDragState = {
 export function useClipDrag(deps: {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     sessionRef: React.RefObject<SessionState>;
-    pxPerBeat: number;
     rowHeight: number;
     multiSelectedClipIds: string[];
     multiSelectedSet: Set<string>;
@@ -73,7 +72,7 @@ export function useClipDrag(deps: {
     function startClipDrag(
         e: React.PointerEvent<HTMLDivElement>,
         clipId: string,
-        clipStartBeat: number,
+        clipstartSec: number,
         altPressedHint: boolean | undefined,
         startSlipDragFn: (e: React.PointerEvent<HTMLDivElement>, clipId: string) => void,
     ) {
@@ -102,20 +101,20 @@ export function useClipDrag(deps: {
                 ? [...multiSelectedClipIds]
                 : [clipId];
 
-        const initialById: Record<string, { startBeat: number; trackId: string }> = {};
-        let minStartBeat = Number.POSITIVE_INFINITY;
+        const initialById: Record<string, { startSec: number; trackId: string }> = {};
+        let minstartSec = Number.POSITIVE_INFINITY;
         let allowTrackMove = true;
         let baseTrackId: string | null = null;
         for (const id of clipIds) {
             const c = sessionRef.current.clips.find((x) => x.id === id);
             if (!c) continue;
-            const startBeat = Math.max(0, Number(c.startBeat ?? 0));
-            initialById[id] = { startBeat, trackId: String(c.trackId) };
-            minStartBeat = Math.min(minStartBeat, startBeat);
+            const startSec = Math.max(0, Number(c.startSec ?? 0));
+            initialById[id] = { startSec, trackId: String(c.trackId) };
+            minstartSec = Math.min(minstartSec, startSec);
             if (baseTrackId == null) baseTrackId = String(c.trackId);
             if (baseTrackId !== String(c.trackId)) allowTrackMove = false;
         }
-        if (!Number.isFinite(minStartBeat)) minStartBeat = 0;
+        if (!Number.isFinite(minstartSec)) minstartSec = 0;
 
         const initialTrackId = anchor.trackId;
         const targetTrackId = trackIdFromClientY(e.clientY) ?? initialTrackId;
@@ -123,11 +122,11 @@ export function useClipDrag(deps: {
             pointerId: e.pointerId,
             anchorClipId: clipId,
             clipIds,
-            offsetBeat: beatAtPointer - clipStartBeat,
+            offsetBeat: beatAtPointer - clipstartSec,
             initialById,
-            minStartBeat,
+            minstartSec,
             allowTrackMove,
-            initialAnchorStartBeat: clipStartBeat,
+            initialAnchorstartSec: clipstartSec,
             initialAnchorTrackId: initialTrackId,
             lastTrackId: targetTrackId,
             lastDeltaBeat: 0,
@@ -157,8 +156,8 @@ export function useClipDrag(deps: {
             let nextStart = Math.max(0, beatNow - drag.offsetBeat);
             if (!ev.shiftKey) nextStart = snapBeat(nextStart);
 
-            let deltaBeat = nextStart - drag.initialAnchorStartBeat;
-            deltaBeat = Math.max(deltaBeat, -drag.minStartBeat);
+            let deltaBeat = nextStart - drag.initialAnchorstartSec;
+            deltaBeat = Math.max(deltaBeat, -drag.minstartSec);
             drag.lastDeltaBeat = deltaBeat;
 
             const hoveredTrackId = trackIdFromClientY(ev.clientY);
@@ -181,7 +180,7 @@ export function useClipDrag(deps: {
                     dispatch(
                         moveClipStart({
                             clipId: id,
-                            startBeat: Math.max(0, initial.startBeat + deltaBeat),
+                            startSec: Math.max(0, initial.startSec + deltaBeat),
                         }),
                     );
                     if (drag.allowTrackMove) {
@@ -241,19 +240,19 @@ export function useClipDrag(deps: {
                     templates.push({
                         trackId: effectiveTrackId ?? initial.trackId,
                         name: String(now.name),
-                        startBeat: Number(now.startBeat),
-                        lengthBeats: Number(now.lengthBeats),
+                        startSec: Number(now.startSec),
+                        lengthSec: Number(now.lengthSec),
                         sourcePath: now.sourcePath,
                         durationSec: now.durationSec,
                         gain: Number(now.gain ?? 1) || 1,
                         muted: Boolean(now.muted),
-                        trimStartBeat: Number(now.trimStartBeat ?? 0) || 0,
-                        trimEndBeat: Number(now.trimEndBeat ?? 0) || 0,
+                        trimStartSec: Number(now.trimStartSec ?? 0) || 0,
+                        trimEndSec: Number(now.trimEndSec ?? 0) || 0,
                         playbackRate: Number(now.playbackRate ?? 1) || 1,
-                        fadeInBeats: Number(now.fadeInBeats ?? 0) || 0,
-                        fadeOutBeats: Number(now.fadeOutBeats ?? 0) || 0,
+                        fadeInSec: Number(now.fadeInSec ?? 0) || 0,
+                        fadeOutSec: Number(now.fadeOutSec ?? 0) || 0,
                     });
-                    dispatch(moveClipStart({ clipId: id, startBeat: initial.startBeat }));
+                    dispatch(moveClipStart({ clipId: id, startSec: initial.startSec }));
                     dispatch(moveClipTrack({ clipId: id, trackId: initial.trackId }));
                 }
                 if (templates.length > 0) {
@@ -289,7 +288,7 @@ export function useClipDrag(deps: {
                                 void dispatch(
                                     moveClipRemote({
                                         clipId: id,
-                                        startBeat: Number(now.startBeat),
+                                        startSec: Number(now.startSec),
                                         trackId: newTrackId,
                                     }),
                                 );
@@ -313,13 +312,13 @@ export function useClipDrag(deps: {
                     const now = session.clips.find((c) => c.id === id);
                     if (!initial || !now) continue;
                     const changedBeat =
-                        Math.abs(Number(now.startBeat) - initial.startBeat) > 1e-6;
+                        Math.abs(Number(now.startSec) - initial.startSec) > 1e-6;
                     const changedTrack = String(now.trackId) !== initial.trackId;
                     if (changedBeat || changedTrack) {
                         void dispatch(
                             moveClipRemote({
                                 clipId: id,
-                                startBeat: Number(now.startBeat),
+                                startSec: Number(now.startSec),
                                 trackId: String(now.trackId),
                             }),
                         );

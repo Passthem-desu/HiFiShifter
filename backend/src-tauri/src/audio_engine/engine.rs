@@ -197,9 +197,8 @@ impl AudioEngine {
                         };
 
                         let (src_start, src_end) = source_bounds_frames(
-                            job.trim_start_beat,
-                            job.trim_end_beat,
-                            job.bpm,
+                            job.trim_start_sec,
+                            job.trim_end_sec,
                             src.frames,
                             job.key.out_rate,
                         );
@@ -661,7 +660,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     s.clip_synth_epochs
         .retain(|id, _| tl.clips.iter().any(|c| &c.id == id));
 
-    // ── 3. 收集 start_beat 发生变化的 clip（clip 被移动）────────────────────
+    // ── 3. 收集 start_sec 发生变化的 clip（clip 被移动）────────────────────
     // 必须在 last_timeline 更新之前收集，否则比较的是新旧相同的值。
     let moved_clip_ids: Vec<String> = tl
         .clips
@@ -670,7 +669,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
             s.last_timeline
                 .as_ref()
                 .and_then(|old_tl| old_tl.clips.iter().find(|c| c.id == clip.id))
-                .map(|old| (old.start_beat - clip.start_beat).abs() > 1e-9)
+                .map(|old| (old.start_sec - clip.start_sec).abs() > 1e-9)
                 .unwrap_or(false) // 新 clip 由 ClipPitchReady 事件处理，此处跳过
         })
         .map(|clip| clip.id.clone())
@@ -761,7 +760,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     // 若 clip 已有拉伸后 PCM，优先使用拉伸后 PCM 作为分析输入。
     //
     // 优化：只有当存在 pitch-relevant 参数变化的 clip 或新增 clip 时，
-    // 才调用 schedule_clip_pitch_jobs。clip 仅移动（start_beat 变化）时跳过，
+    // 才调用 schedule_clip_pitch_jobs。clip 仅移动（start_sec 变化）时跳过，
     // 避免对所有 clip 做不必要的文件系统 I/O 和缓存查询。
     // 注意：检测逻辑已在 last_timeline 更新之前完成（见上方）
     
@@ -769,18 +768,16 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
         schedule_clip_pitch_jobs(&tl, s.tx, s.stretch_cache, s.app_handle.as_ref());
     }
 
-    // 当 clip 的 start_beat 发生变化时（clip 被移动），即使 MIDI 缓存命中，
+    // 当 clip 的 start_sec 发生变化时（clip 被移动），即使 MIDI 缓存命中，
     // 也需要重新发送 clip_pitch_data 事件以更新前端的 startFrame。
     // 这里直接用缓存的 MIDI 曲线重新推送，无需重新分析。
     if !moved_clip_ids.is_empty() {
         if let Some(app) = s.app_handle.as_ref() {
-            let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 { tl.bpm } else { 120.0 };
-            let bs = 60.0 / bpm;
             let frame_period_ms = 5.0f64;
             for clip in tl.clips.iter().filter(|c| moved_clip_ids.contains(&c.id)) {
                 let root = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
                 if let Some(cached) = get_or_compute_clip_pitch_midi_global(&tl, clip, &root, frame_period_ms) {
-                    let start_frame = ((clip.start_beat.max(0.0) * bs) * s.sr as f64)
+                    let start_frame = (clip.start_sec.max(0.0) * s.sr as f64)
                         .round().max(0.0) as u64;
                     let payload = ClipPitchDataPayload {
                         clip_id: clip.id.clone(),
@@ -864,9 +861,7 @@ fn handle_clip_pitch_ready(s: &mut EngineWorkerState, clip_id: String) {
                 if let Some(cached) = get_or_compute_clip_pitch_midi_global(
                     tl, clip, &root, frame_period_ms,
                 ) {
-                    let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 { tl.bpm } else { 120.0 };
-                    let bs = 60.0 / bpm;
-                    let start_frame = ((clip.start_beat.max(0.0) * bs) * s.sr as f64)
+                    let start_frame = (clip.start_sec.max(0.0) * s.sr as f64)
                         .round().max(0.0) as u64;
                     let payload = ClipPitchDataPayload {
                         clip_id: clip_id.clone(),
@@ -979,16 +974,16 @@ fn handle_play_file(
 /// 只有这些参数变化时才需要 cancel 并重建该 clip 的 stretch_stream worker。
 fn clip_stretch_params_changed(old: &crate::state::Clip, new: &crate::state::Clip) -> bool {
     (old.playback_rate - new.playback_rate).abs() > 1e-6
-        || (old.trim_start_beat - new.trim_start_beat).abs() > 1e-6
-        || (old.trim_end_beat - new.trim_end_beat).abs() > 1e-6
+        || (old.trim_start_sec - new.trim_start_sec).abs() > 1e-6
+        || (old.trim_end_sec - new.trim_end_sec).abs() > 1e-6
 }
 
 /// 判断 clip 的 pitch 分析相关参数是否发生变化。
 /// 只有这些参数变化时才需要重新调度 pitch 分析任务。
-/// 注意：start_beat（clip 位置）不参与判断，clip 移动不触发重新分析。
+/// 注意：start_sec（clip 位置）不参与判断，clip 移动不触发重新分析。
 fn clip_pitch_params_changed(old: &crate::state::Clip, new: &crate::state::Clip) -> bool {
     old.source_path != new.source_path
-        || (old.trim_start_beat - new.trim_start_beat).abs() > 1e-6
-        || (old.trim_end_beat - new.trim_end_beat).abs() > 1e-6
+        || (old.trim_start_sec - new.trim_start_sec).abs() > 1e-6
+        || (old.trim_end_sec - new.trim_end_sec).abs() > 1e-6
         || (old.playback_rate - new.playback_rate).abs() > 1e-6
 }

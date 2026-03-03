@@ -103,11 +103,11 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
 
     for c in clips {
         hasher.update(c.id.as_bytes());
-        hasher.update(&quantize_u32(c.start_beat, 1000.0).to_le_bytes());
-        hasher.update(&quantize_u32(c.length_beats, 1000.0).to_le_bytes());
+        hasher.update(&quantize_u32(c.start_sec, 1000.0).to_le_bytes());
+        hasher.update(&quantize_u32(c.length_sec, 1000.0).to_le_bytes());
         hasher.update(&quantize_u32(c.playback_rate as f64, 10000.0).to_le_bytes());
-        hasher.update(&quantize_i64(c.trim_start_beat, 1000.0).to_le_bytes());
-        hasher.update(&quantize_u32(c.trim_end_beat, 1000.0).to_le_bytes());
+        hasher.update(&quantize_i64(c.trim_start_sec, 1000.0).to_le_bytes());
+        hasher.update(&quantize_u32(c.trim_end_sec, 1000.0).to_le_bytes());
         if let Some(sp) = c.source_path.as_deref() {
             hasher.update(sp.as_bytes());
             let p = Path::new(sp);
@@ -266,9 +266,8 @@ fn build_timeline_snapshot(
                 source_path: source_path.clone(),
                 file_size,
                 file_mtime,
-                trim_start_beat: crate::clip_pitch_cache::quantize_i64(clip.trim_start_beat, 1000.0),
-                trim_end_beat: crate::clip_pitch_cache::quantize_f64(clip.trim_end_beat, 1000.0),
-                playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
+            trim_start_sec: crate::clip_pitch_cache::quantize_i64(clip.trim_start_sec, 1000.0),
+            trim_end_sec: crate::clip_pitch_cache::quantize_f64(clip.trim_end_sec, 1000.0),                playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
                 algo: match algo {
                     PitchAnalysisAlgo::WorldDll => "world_dll",
                     PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx",
@@ -322,7 +321,7 @@ struct SnapshotComparison {
 /// - **Deleted**: Clip ID exists in old snapshot but not in new
 /// - **Unchanged**: Clip ID and cache key are identical in both snapshots
 ///
-/// Note: Position-only changes (start_beat) do NOT affect the cache key,
+/// Note: Position-only changes (start_sec) do NOT affect the cache key,
 /// so moving a clip without changing its content will not trigger re-analysis.
 fn compare_snapshots(
     old_snapshot: Option<&crate::state::TimelineSnapshot>,
@@ -497,8 +496,8 @@ fn analyze_clip_with_cache(
         source_path: source_path.clone(),
         file_size,
         file_mtime,
-        trim_start_beat: crate::clip_pitch_cache::quantize_i64(clip.trim_start_beat, 1000.0),
-        trim_end_beat: crate::clip_pitch_cache::quantize_f64(clip.trim_end_beat, 1000.0),
+        trim_start_sec: crate::clip_pitch_cache::quantize_i64(clip.trim_start_sec, 1000.0),
+        trim_end_sec: crate::clip_pitch_cache::quantize_f64(clip.trim_end_sec, 1000.0),
         playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
         algo: algo_str.to_string(),
         f0_floor: crate::clip_pitch_cache::quantize_f64(f0_floor, 10.0),
@@ -542,11 +541,9 @@ fn analyze_clip_with_cache(
         1.0
     };
     
-    // Source trimming
-    let trim_start_beats_src = clip.trim_start_beat.max(0.0);
-    let trim_end_beats_src = clip.trim_end_beat.max(0.0);
-    let trim_start_sec = trim_start_beats_src * bs;
-    let trim_end_sec = trim_end_beats_src * bs;
+    // Source trimming (already in sec)
+    let trim_start_sec = clip.trim_start_sec.max(0.0);
+    let trim_end_sec = clip.trim_end_sec.max(0.0);
     
     let total_sec = (in_frames as f64) / (in_rate.max(1) as f64);
     if !(total_sec.is_finite() && total_sec > 0.0) {
@@ -710,10 +707,10 @@ fn process_single_clip(
     tracker: Option<&std::sync::Arc<crate::pitch_progress::ProgressTracker>>,
     debug: bool,
     duration_sec: f64,
-    bs: f64, // Beat duration in seconds
+    _bs: f64, // Beat duration in seconds (kept for signature compatibility)
 ) -> Result<ClipAnalysisResult, String> {
-    let clip_start_sec = (clip.start_beat.max(0.0)) * bs;
-    let clip_timeline_len_sec = (clip.length_beats.max(0.0)) * bs;
+    let clip_start_sec = clip.start_sec.max(0.0);
+    let clip_timeline_len_sec = clip.length_sec.max(0.0);
     let clip_end_sec = clip_start_sec + clip_timeline_len_sec;
     
     let track_gain_value = tracks_gain.get(&clip.track_id).copied().unwrap_or(1.0);
@@ -735,8 +732,8 @@ fn process_single_clip(
             source_path: _source_path.clone(),
             file_size,
             file_mtime,
-            trim_start_beat: crate::clip_pitch_cache::quantize_i64(clip.trim_start_beat, 1000.0),
-            trim_end_beat: crate::clip_pitch_cache::quantize_f64(clip.trim_end_beat, 1000.0),
+            trim_start_sec: crate::clip_pitch_cache::quantize_i64(clip.trim_start_sec, 1000.0),
+            trim_end_sec: crate::clip_pitch_cache::quantize_f64(clip.trim_end_sec, 1000.0),
             playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
             algo: match algo {
                 PitchAnalysisAlgo::WorldDll => "world_dll",
@@ -793,13 +790,13 @@ fn process_single_clip(
     match midi_result {
         Ok(midi) => {
             // Calculate pre_silence_sec for clip placement
-            let pre_silence_beats_src = (-clip.trim_start_beat).max(0.0);
+            let pre_silence_sec_src = (-clip.trim_start_sec).max(0.0);
             let playback_rate = if clip.playback_rate.is_finite() && clip.playback_rate > 0.0 {
                 clip.playback_rate as f64
             } else {
                 1.0
             };
-            let pre_silence_sec = (pre_silence_beats_src * bs) / playback_rate.max(1e-6);
+            let pre_silence_sec = pre_silence_sec_src / playback_rate.max(1e-6);
             
             // Estimate clip_total_frames (from original audio)
             let clip_total_frames = if let Some(dur) = clip.duration_sec {
@@ -897,7 +894,7 @@ fn compute_pitch_curve_parallel(
         let mut onnx_sorted: Vec<(&Clip, f64)> = onnx_clips
             .iter()
             .map(|clip| {
-                let duration_sec = (clip.length_beats.max(0.0)) * bs;
+                let duration_sec = clip.length_sec.max(0.0);
                 (*clip, duration_sec)
             })
             .collect();
@@ -937,11 +934,10 @@ fn compute_pitch_curve_parallel(
         let mut world_sorted: Vec<(&Clip, f64)> = world_clips
             .iter()
             .map(|clip| {
-                let duration_sec = (clip.length_beats.max(0.0)) * bs;
+                let duration_sec = clip.length_sec.max(0.0);
                 (*clip, duration_sec)
             })
-            .collect();
-        
+            .collect();        
         world_sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         
         for (clip, duration_sec) in world_sorted {
@@ -1129,19 +1125,19 @@ fn compute_pitch_curve_with_incremental_refresh(
         );
         
         if let Ok(midi) = cache_result {
-            let clip_start_sec = (clip.start_beat.max(0.0)) * bs;
-            let clip_timeline_len_sec = (clip.length_beats.max(0.0)) * bs;
+    let clip_start_sec = clip.start_sec.max(0.0);
+    let clip_timeline_len_sec = clip.length_sec.max(0.0);
             let clip_end_sec = clip_start_sec + clip_timeline_len_sec;
             
             let track_gain_value = tracks_gain.get(&clip.track_id).copied().unwrap_or(1.0);
             
-            let pre_silence_beats_src = (-clip.trim_start_beat).max(0.0);
+            let pre_silence_sec_src = (-clip.trim_start_sec).max(0.0);
             let playback_rate = if clip.playback_rate.is_finite() && clip.playback_rate > 0.0 {
                 clip.playback_rate as f64
             } else {
                 1.0
             };
-            let pre_silence_sec = (pre_silence_beats_src * bs) / playback_rate.max(1e-6);
+            let pre_silence_sec = pre_silence_sec_src / playback_rate.max(1e-6);
             
             let clip_total_frames = if let Some(dur) = clip.duration_sec {
                 let in_rate = 44100.0;
@@ -1205,13 +1201,13 @@ fn clip_weight_at_frame(
         return 0.0;
     }
 
-    let fade_in_frames = ((clip.fade_in_beats.max(0.0) * bs) * sample_rate as f64)
-        .round()
-        .max(0.0) as usize;
-    let fade_out_frames = ((clip.fade_out_beats.max(0.0) * bs) * sample_rate as f64)
-        .round()
-        .max(0.0) as usize;
 
+    let fade_in_frames = (clip.fade_in_sec.max(0.0) * sample_rate as f64)
+        .round()
+        .max(0.0) as usize;
+    let fade_out_frames = (clip.fade_out_sec.max(0.0) * sample_rate as f64)
+        .round()
+        .max(0.0) as usize;
     let pre_silence_frames = (pre_silence_sec * sample_rate as f64).round().max(0.0) as usize;
     let local_in_clip = pre_silence_frames.saturating_add(local_in_clip_frames);
     if local_in_clip >= clip_total_frames {
@@ -1519,8 +1515,8 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
         };
 
         // Timeline placement.
-        let clip_start_sec = (clip.start_beat.max(0.0)) * bs;
-        let clip_timeline_len_sec = (clip.length_beats.max(0.0)) * bs;
+    let clip_start_sec = clip.start_sec.max(0.0);
+    let clip_timeline_len_sec = clip.length_sec.max(0.0);
         if !(clip_timeline_len_sec.is_finite() && clip_timeline_len_sec > 0.0) {
             continue;
         }
@@ -1545,14 +1541,10 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
             1.0
         };
 
-        // Source trimming in beats -> sec.
-        let trim_start_beats_src = clip.trim_start_beat.max(0.0);
-        let trim_end_beats_src = clip.trim_end_beat.max(0.0);
-        let pre_silence_beats_src = (-clip.trim_start_beat).max(0.0);
-
-        let trim_start_sec = trim_start_beats_src * bs;
-        let trim_end_sec = trim_end_beats_src * bs;
-        let pre_silence_sec = (pre_silence_beats_src * bs) / playback_rate.max(1e-6);
+        // Source trimming (already in sec).
+        let trim_start_sec = clip.trim_start_sec.max(0.0);
+        let trim_end_sec = clip.trim_end_sec.max(0.0);
+        let pre_silence_sec = (-clip.trim_start_sec).max(0.0) / playback_rate.max(1e-6);
 
         let total_sec = (in_frames as f64) / (in_rate.max(1) as f64);
         if !(total_sec.is_finite() && total_sec > 0.0) {
@@ -1698,7 +1690,7 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
                     "  WARNING: Significant mismatch detected! Pitch curve will use AUDIO length to avoid time scaling error."
                 );
                 eprintln!(
-                    "  This may indicate clip.length_beats is incorrect. Audio: {:.3}s, Timeline: {:.3}s",
+                    "  This may indicate clip.length_sec is incorrect. Audio: {:.3}s, Timeline: {:.3}s",
                     actual_audio_sec,
                     clip_timeline_len_sec
                 );
@@ -1838,7 +1830,7 @@ fn assemble_pitch_orig_from_cache(
         }
 
         // 计算 clip 在 timeline 中的起始帧
-        let clip_start_sec = clip.start_beat.max(0.0) * bs;
+        let clip_start_sec = clip.start_sec.max(0.0);
         let clip_start_frame = ((clip_start_sec * 1000.0) / fp).round().max(0.0) as usize;
         let clip_len_frames = cached.midi.len();
 
@@ -1957,8 +1949,8 @@ mod tests {
             id: "test_clip".to_string(),
             track_id: "test_track".to_string(),
             name: "Test Clip".to_string(),
-            start_beat: 0.0,
-            length_beats: 4.0,
+            start_sec: 0.0,
+            length_sec: 4.0,
             color: "#ff0000".to_string(),
             source_path: None,
             duration_sec: None,
@@ -1966,11 +1958,11 @@ mod tests {
             pitch_range: None,
             gain: 1.0,
             muted: false,
-            trim_start_beat: 0.0,
-            trim_end_beat: 0.0,
+            trim_start_sec: 0.0,
+            trim_end_sec: 0.0,
             playback_rate: 1.0,
-            fade_in_beats: 0.0,
-            fade_out_beats: 0.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
         };
 
         let cache = Arc::new(Mutex::new(ClipPitchCache::new(10)));
@@ -1995,8 +1987,8 @@ mod tests {
             id: "test_clip".to_string(),
             track_id: "test_track".to_string(),
             name: "Test Clip".to_string(),
-            start_beat: 0.0,
-            length_beats: 4.0,
+            start_sec: 0.0,
+            length_sec: 4.0,
             color: "#ff0000".to_string(),
             source_path: Some("/nonexistent/path/to/audio.wav".to_string()),
             duration_sec: Some(2.0),
@@ -2004,12 +1996,11 @@ mod tests {
             pitch_range: None,
             gain: 1.0,
             muted: false,
-            trim_start_beat: 0.0,
-            trim_end_beat: 0.0,
+            trim_start_sec: 0.0,
+            trim_end_sec: 0.0,
             playback_rate: 1.0,
-            fade_in_beats: 0.0,
-            fade_out_beats: 0.0,
-        };
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,        };
 
         let cache = Arc::new(Mutex::new(ClipPitchCache::new(10)));
         let result = analyze_clip_with_cache(
@@ -2058,27 +2049,27 @@ mod tests {
                 id: "clip1".to_string(),
                 track_id: "track1".to_string(),
                 name: "Invalid 1".to_string(),
-                start_beat: 0.0,
-                length_beats: 4.0,
-                color: "#ff0000".to_string(),
-                source_path: None,
-                duration_sec: None,
-                waveform_preview: None,
-                pitch_range: None,
-                gain: 1.0,
-                muted: false,
-                trim_start_beat: 0.0,
-                trim_end_beat: 0.0,
-                playback_rate: 1.0,
-                fade_in_beats: 0.0,
-                fade_out_beats: 0.0,
+            start_sec: 0.0,
+            length_sec: 4.0,
+            color: "#ff0000".to_string(),
+            source_path: None,
+            duration_sec: None,
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            trim_start_sec: 0.0,
+            trim_end_sec: 0.0,
+            playback_rate: 1.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
             },
             Clip {
                 id: "clip2".to_string(),
                 track_id: "track1".to_string(),
                 name: "Invalid 2".to_string(),
-                start_beat: 4.0,
-                length_beats: 4.0,
+                start_sec: 4.0,
+                length_sec: 4.0,
                 color: "#00ff00".to_string(),
                 source_path: None,
                 duration_sec: None,
@@ -2086,11 +2077,11 @@ mod tests {
                 pitch_range: None,
                 gain: 1.0,
                 muted: false,
-                trim_start_beat: 0.0,
-                trim_end_beat: 0.0,
+                trim_start_sec: 0.0,
+                trim_end_sec: 0.0,
                 playback_rate: 1.0,
-                fade_in_beats: 0.0,
-                fade_out_beats: 0.0,
+                fade_in_sec: 0.0,
+                fade_out_sec: 0.0,
             },
         ];
         
@@ -2125,8 +2116,8 @@ mod tests {
                 id: "clip1".to_string(),
                 track_id: "track1".to_string(),
                 name: "Test Clip".to_string(),
-                start_beat: 0.0,
-                length_beats: 4.0,
+            start_sec: 0.0,
+            length_sec: 4.0,
                 color: "#ff0000".to_string(),
                 source_path: Some("/nonexistent.wav".to_string()),
                 duration_sec: Some(2.0),
@@ -2134,11 +2125,11 @@ mod tests {
                 pitch_range: None,
                 gain: 1.0,
                 muted: false,
-                trim_start_beat: 0.0,
-                trim_end_beat: 0.0,
-                playback_rate: 1.0,
-                fade_in_beats: 0.0,
-                fade_out_beats: 0.0,
+            trim_start_sec: 0.0,
+            trim_end_sec: 0.0,
+            playback_rate: 1.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
             },
         ];
         
@@ -2188,8 +2179,8 @@ mod tests {
                 id: "world1".to_string(),
                 track_id: "track1".to_string(),
                 name: "WORLD Clip 1".to_string(),
-                start_beat: 0.0,
-                length_beats: 4.0,
+            start_sec: 0.0,
+            length_sec: 4.0,
                 color: "#ff0000".to_string(),
                 source_path: Some("/nonexistent_world.wav".to_string()),
                 duration_sec: Some(2.0),
@@ -2197,18 +2188,18 @@ mod tests {
                 pitch_range: None,
                 gain: 1.0,
                 muted: false,
-                trim_start_beat: 0.0,
-                trim_end_beat: 0.0,
-                playback_rate: 1.0,
-                fade_in_beats: 0.0,
-                fade_out_beats: 0.0,
+            trim_start_sec: 0.0,
+            trim_end_sec: 0.0,
+            playback_rate: 1.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
             },
             Clip {
                 id: "world2".to_string(),
                 track_id: "track1".to_string(),
                 name: "WORLD Clip 2".to_string(),
-                start_beat: 4.0,
-                length_beats: 4.0,
+            start_sec: 4.0,
+            length_sec: 4.0,
                 color: "#00ff00".to_string(),
                 source_path: Some("/nonexistent_world2.wav".to_string()),
                 duration_sec: Some(2.0),
@@ -2216,11 +2207,11 @@ mod tests {
                 pitch_range: None,
                 gain: 1.0,
                 muted: false,
-                trim_start_beat: 0.0,
-                trim_end_beat: 0.0,
-                playback_rate: 1.0,
-                fade_in_beats: 0.0,
-                fade_out_beats: 0.0,
+            trim_start_sec: 0.0,
+            trim_end_sec: 0.0,
+            playback_rate: 1.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
             },
         ];
         

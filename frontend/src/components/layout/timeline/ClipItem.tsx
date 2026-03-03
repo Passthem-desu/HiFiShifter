@@ -19,13 +19,12 @@ type WaveformPreview = number[] | { l: number[]; r: number[] };
 /**
  * 对波形peaks数据应用淡入淡出增益曲线
  *
- * @param min - 最小值数组
- * @param max - 最大值数组
+ * @param min - 最小值数�?
+ * @param max - 最大值数�?
  * @param ampScale - 振幅缩放系数
- * @param lengthBeats - Clip长度（beats）
- * @param fadeInBeats - 淡入长度（beats）
- * @param fadeOutBeats - 淡出长度（beats）
- * @param fadeInCurve - 淡入曲线类型
+ * @param lengthSec - Clip长度（秒）
+ * @param fadeInSec - 淡入长度（秒）
+ * @param fadeOutSec - 淡出长度（秒） * @param fadeInCurve - 淡入曲线类型
  * @param fadeOutCurve - 淡出曲线类型
  * @returns 应用淡入淡出后的 min/max 数组
  */
@@ -33,18 +32,18 @@ function applyFadeGainToPeaks(
     min: number[],
     max: number[],
     ampScale: number,
-    lengthBeats: number,
-    fadeInBeats: number,
-    fadeOutBeats: number,
+    lengthSec: number,
+    fadeInSec: number,
+    fadeOutSec: number,
     fadeInCurve: FadeCurveType,
     fadeOutCurve: FadeCurveType,
 ): { min: number[]; max: number[] } {
     const srcN = Math.min(min.length, max.length);
     if (srcN === 0) return { min: [], max: [] };
 
-    const safeLenBeats = Math.max(1e-9, Number(lengthBeats) || 0);
-    const safeFadeIn = Math.max(0, Number(fadeInBeats) || 0);
-    const safeFadeOut = Math.max(0, Number(fadeOutBeats) || 0);
+    const safeLenBeats = Math.max(1e-9, Number(lengthSec) || 0);
+    const safeFadeIn = Math.max(0, Number(fadeInSec) || 0);
+    const safeFadeOut = Math.max(0, Number(fadeOutSec) || 0);
 
     const resultMin = new Array<number>(srcN);
     const resultMax = new Array<number>(srcN);
@@ -117,8 +116,7 @@ function minMaxEnvelopeFromSamples(
 export const ClipItem: React.FC<{
     clip: ClipInfo;
     rowHeight: number;
-    pxPerBeat: number;
-    bpm: number;
+    pxPerSec: number;
     waveform: WaveformPreview | undefined;
     altPressed?: boolean;
     selected: boolean;
@@ -129,14 +127,14 @@ export const ClipItem: React.FC<{
     selectClipRemote: (clipId: string) => void;
     openContextMenu: (clipId: string, clientX: number, clientY: number) => void;
 
-    /** 轨道主题色，用于 Clip 背景色和选中边框色 */
+    /** 轨道主题色，用于 Clip 背景色和选中边框�?*/
     trackColor?: string;
 
     seekFromClientX: (clientX: number, commit: boolean) => void;
     startClipDrag: (
         e: React.PointerEvent<HTMLDivElement>,
         clipId: string,
-        clipStartBeat: number,
+        clipstartSec: number,
         altPressedHint?: boolean,
     ) => void;
     startEditDrag: (
@@ -155,7 +153,7 @@ export const ClipItem: React.FC<{
 
     clearContextMenu: () => void;
 
-    /** 外部触发重命名（来自右键菜单） */
+    /** 外部触发重命名（来自右键菜单�?*/
     triggerRename?: boolean;
     onRenameCommit?: (clipId: string, newName: string) => void;
     onRenameDone?: () => void;
@@ -163,8 +161,7 @@ export const ClipItem: React.FC<{
 }> = ({
     clip,
     rowHeight,
-    pxPerBeat,
-    bpm,
+    pxPerSec,
     waveform,
     altPressed = false,
     selected,
@@ -191,23 +188,21 @@ export const ClipItem: React.FC<{
         [themeMode],
     );
 
-    const left = Math.max(0, clip.startBeat * pxPerBeat);
-    const width = Math.max(1, clip.lengthBeats * pxPerBeat);
+    const left = Math.max(0, clip.startSec * pxPerSec);
+    const width = Math.max(1, clip.lengthSec * pxPerSec);
     const bodyHeight = Math.max(
         1,
         rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT,
     );
 
-    // For time-stretch: timeline length changes, but the source window length should remain
-    // consistent. Our trimming math stores trim beats in *source* beat-domain.
-    // Convert timeline beats -> source beats using playbackRate.
-    const playbackRateRaw = Number(clip.playbackRate ?? 1);
-    const playbackRate =
-        Number.isFinite(playbackRateRaw) && playbackRateRaw > 0
-            ? playbackRateRaw
-            : 1;
-    const sourceWindowLenBeats =
-        Math.max(0, Number(clip.lengthBeats ?? 0) || 0) * playbackRate;
+    // source 可用窗口长度（秒）：durationSec 减去两端裁剪量。
+    // 此值不随 trim/stretch/BPM 变化，用于固定 sliceWaveformSamples 的输出密度，
+    // 确保 trim 拖动时波形不缩放（只改变切片起止点），stretch 时由 SVG 自动拉伸。
+    const durationSec = Math.max(0, Number(clip.durationSec ?? 0) || 0);
+    const trimStartRaw = Number(clip.trimStartSec ?? 0) || 0;
+    const trimStart = Math.max(0, trimStartRaw);
+    const trimEnd = Math.max(0, Number(clip.trimEndSec ?? 0) || 0);
+    const sourceAvailSec = Math.max(0, durationSec - trimStart - trimEnd);
 
     const showRepeatMarker = false;
     const repeatMarkerX = 0;
@@ -216,14 +211,13 @@ export const ClipItem: React.FC<{
         ? 0
         : clamp(Number(clip.gain ?? 1), 0, 4);
 
-    // Map full-scale audio (|v|≈1) to the band boundary. Keep gain applied.
+    // Map full-scale audio (|v|�?) to the band boundary. Keep gain applied.
     const waveformVisualAmpScale = waveformAmpScale;
 
     const hasWaveformPreview = waveform != null;
 
     const peaks = useClipWaveformPeaks({
         clip,
-        bpm,
         widthPx: width,
         altPressed,
         hasWaveformPreview,
@@ -238,16 +232,17 @@ export const ClipItem: React.FC<{
 
     const clipForWaveform = React.useMemo(
         () => ({
-            trimStartBeat: clip.trimStartBeat,
-            trimEndBeat: clip.trimEndBeat,
-            // Use source-domain window length so stretching changes visuals.
-            lengthBeats: sourceWindowLenBeats,
+            trimStartSec: clip.trimStartSec,
+            trimEndSec: clip.trimEndSec,
+            // 传入 source 可用窗口长度（秒）作为 desiredLen，
+            // 使输出采样密度固定，trim 时不缩放波形，stretch 时由 SVG 自动拉伸。
+            lengthSec: sourceAvailSec,
             durationSec: clip.durationSec,
         }),
         [
-            clip.trimStartBeat,
-            clip.trimEndBeat,
-            sourceWindowLenBeats,
+            clip.trimStartSec,
+            clip.trimEndSec,
+            sourceAvailSec,
             clip.durationSec,
         ],
     );
@@ -272,16 +267,16 @@ export const ClipItem: React.FC<{
         const centerTop = halfH;
         const centerBot = bandH + gap + halfH;
 
-        const lenBeats = Number(clip.lengthBeats ?? 0) || 0;
-        const fadeIn = Number(clip.fadeInBeats ?? 0) || 0;
-        const fadeOut = Number(clip.fadeOutBeats ?? 0) || 0;
+        const lenBeats = Number(clip.lengthSec ?? 0) || 0;
+        const fadeIn = Number(clip.fadeInSec ?? 0) || 0;
+        const fadeOut = Number(clip.fadeOutSec ?? 0) || 0;
         const fadeInCurve: FadeCurveType = clip.fadeInCurve ?? "sine";
         const fadeOutCurve: FadeCurveType = clip.fadeOutCurve ?? "sine";
 
         // 统一样式：从主题配置读取波形颜色
         const fill = waveformColors.fill;
         const stroke = waveformColors.stroke;
-        // preview 状态用降低 opacity 表示加载中，不使用虚线
+        // preview 状态用降低 opacity 表示加载中，不使用虚�?
         const waveformOpacity = peaks?.isPreview ? 0.6 : 1.0;
 
         let topMin: number[] | null = null;
@@ -305,12 +300,10 @@ export const ClipItem: React.FC<{
             const leftSamples = sliceWaveformSamples(
                 wf.l ?? [],
                 clipForWaveform,
-                bpm,
             );
             const rightSamples = sliceWaveformSamples(
                 wf.r ?? [],
                 clipForWaveform,
-                bpm,
             );
             const leftEnv = minMaxEnvelopeFromSamples(leftSamples, w);
             const rightEnv = minMaxEnvelopeFromSamples(rightSamples, w);
@@ -319,7 +312,7 @@ export const ClipItem: React.FC<{
             botMin = rightEnv.min;
             botMax = rightEnv.max;
         } else if (Array.isArray(waveform) && waveform.length > 0) {
-            const mono = sliceWaveformSamples(waveform, clipForWaveform, bpm);
+            const mono = sliceWaveformSamples(waveform, clipForWaveform);
             if (mono.length < 2) return null;
             const env = minMaxEnvelopeFromSamples(mono, w);
             topMin = env.min;
@@ -330,7 +323,7 @@ export const ClipItem: React.FC<{
             return null;
         }
 
-        // 应用淡入淡出效果到波形数据
+        // 应用淡入淡出效果到波形数�?
         const topFaded = applyFadeGainToPeaks(
             topMin,
             topMax,
@@ -365,7 +358,7 @@ export const ClipItem: React.FC<{
                 height: totalH,
                 centerY: centerTop,
                 halfHeight: halfH,
-                amplitudeScale: 1.0, // 振幅已在 applyFadeGainToPeaks 中处理
+                amplitudeScale: 1.0, // 振幅已在 applyFadeGainToPeaks 中处�?
             },
         );
 
@@ -418,19 +411,21 @@ export const ClipItem: React.FC<{
             </svg>
         );
     }, [
-        bpm,
         clipForWaveform,
-        clip.fadeInBeats,
-        clip.fadeOutBeats,
+        clip.fadeInSec,
+        clip.fadeOutSec,
         clip.fadeInCurve,
         clip.fadeOutCurve,
-        clip.lengthBeats,
+        clip.lengthSec,
         peaks,
         stereo,
         waveform,
         waveformAmpScale,
         waveformVisualAmpScale,
-        width,
+        // 注意：不依赖 width，trim 拖动时 width 变化不应触发波形重渲染。
+        // peaks?.ok 时 w = peaks.columns（固定值），与 width 无关。
+        // peaks 为 null 时 quantizeCols(width) 只影响初始占位列数，可接受延迟更新。
+        // 不依赖 bpm：波形内容基于秒域计算，BPM 变化不影响波形显示。
     ]);
 
     return (
@@ -496,7 +491,7 @@ export const ClipItem: React.FC<{
                     ensureSelected(clip.id);
                 }
                 selectClipRemote(clip.id);
-                startClipDrag(e, clip.id, clip.startBeat, alt);
+                startClipDrag(e, clip.id, clip.startSec, alt);
             }}
             title={clip.sourcePath ?? clip.name}
         >
@@ -540,8 +535,8 @@ export const ClipItem: React.FC<{
             >
                 {/* Body (waveform + edit handles) */}
                 <div className="absolute inset-0">
-                    {/* Fade 角落 handle：始终存在，位于 body 左上角/右上角，用于从 0 开始拖拽出渐变 */}
-                    {/* left-[10px]：避开左侧 edge handle 的 10px 宽度，确保两者不重叠 */}
+                    {/* Fade 角落 handle：始终存在，位于 body 左上�?右上角，用于�?0 开始拖拽出渐变 */}
+                    {/* left-[10px]：避开左侧 edge handle �?10px 宽度，确保两者不重叠 */}
                     <div
                         className="absolute left-[10px] top-0 w-[14px] h-[14px] z-[55]"
                         style={{ cursor: "nwse-resize" }}
@@ -556,7 +551,7 @@ export const ClipItem: React.FC<{
                         }}
                         title={t("fade_in")}
                     />
-                    {/* right-[10px]：避开右侧 edge handle 的 10px 宽度，确保两者不重叠 */}
+                    {/* right-[10px]：避开右侧 edge handle �?10px 宽度，确保两者不重叠 */}
                     <div
                         className="absolute right-[10px] top-0 w-[14px] h-[14px] z-[55]"
                         style={{ cursor: "nesw-resize" }}
@@ -572,14 +567,14 @@ export const ClipItem: React.FC<{
                         title={t("fade_out")}
                     />
 
-                    {/* Fade handles: 操作区覆盖整个 fade 区域（fadeBeats > 0 时显示） */}
-                    {(clip.fadeInBeats ?? 0) > 0 && (
+                    {/* Fade handles: 操作区覆盖整�?fade 区域（fadeBeats > 0 时显示） */}
+                    {(clip.fadeInSec ?? 0) > 0 && (
                         <div
 className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
                             style={{
                                 width: Math.min(
                                     width,
-                                    (clip.fadeInBeats ?? 0) * pxPerBeat,
+                                    (clip.fadeInSec ?? 0) * pxPerSec,
                                 ),
                             }}
                             onPointerDown={(e) => {
@@ -596,7 +591,7 @@ className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
                             }}
                             title={t("fade_in")}
                         >
-                            {/* 全区域条带：与可交互区域完全重合，右边缘竖线表示可拖拽边界 */}
+                            {/* 全区域条带：与可交互区域完全重合，右边缘竖线表示可拖拽边�?*/}
                             <div
                                 className={
                                     "absolute inset-0 rounded-l-sm bg-white/8 border-r transition-opacity " +
@@ -607,13 +602,13 @@ className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
                             />
                         </div>
                     )}
-                    {(clip.fadeOutBeats ?? 0) > 0 && (
+                    {(clip.fadeOutSec ?? 0) > 0 && (
                         <div
 className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                             style={{
                                 width: Math.min(
                                     width,
-                                    (clip.fadeOutBeats ?? 0) * pxPerBeat,
+                                    (clip.fadeOutSec ?? 0) * pxPerSec,
                                 ),
                             }}
                             onPointerDown={(e) => {
@@ -630,7 +625,7 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                             }}
                             title={t("fade_out")}
                         >
-                            {/* 全区域条带：与可交互区域完全重合，左边缘竖线表示可拖拽边界 */}
+                            {/* 全区域条带：与可交互区域完全重合，左边缘竖线表示可拖拽边�?*/}
                             <div
                                 className={
                                     "absolute inset-0 rounded-r-sm bg-white/8 border-l transition-opacity " +
@@ -657,15 +652,15 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                                 title={t("repeat")}
                             />
                         ) : null}
-                        {clip.fadeInBeats > 0 ? (
+                        {clip.fadeInSec > 0 ? (
                             <svg
                                 className="absolute left-0 top-0 h-full"
                                 width={Math.min(
                                     width,
-                                    clip.fadeInBeats * pxPerBeat,
+                                    clip.fadeInSec * pxPerSec,
                                 )}
                                 height={bodyHeight}
-                                viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeInBeats * pxPerBeat))} ${Math.max(1, bodyHeight)}`}
+                                viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeInSec * pxPerSec))} ${Math.max(1, bodyHeight)}`}
                                 preserveAspectRatio="none"
                             >
                                 <path
@@ -674,7 +669,7 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                                             1,
                                             Math.min(
                                                 width,
-                                                clip.fadeInBeats * pxPerBeat,
+                                                clip.fadeInSec * pxPerSec,
                                             ),
                                         ),
                                         Math.max(1, bodyHeight),
@@ -688,15 +683,15 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                                 />
                             </svg>
                         ) : null}
-                        {clip.fadeOutBeats > 0 ? (
+                        {clip.fadeOutSec > 0 ? (
                             <svg
                                 className="absolute right-0 top-0 h-full"
                                 width={Math.min(
                                     width,
-                                    clip.fadeOutBeats * pxPerBeat,
+                                    clip.fadeOutSec * pxPerSec,
                                 )}
                                 height={bodyHeight}
-                                viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeOutBeats * pxPerBeat))} ${Math.max(1, bodyHeight)}`}
+                                viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeOutSec * pxPerSec))} ${Math.max(1, bodyHeight)}`}
                                 preserveAspectRatio="none"
                             >
                                 <path
@@ -705,7 +700,7 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                                             1,
                                             Math.min(
                                                 width,
-                                                clip.fadeOutBeats * pxPerBeat,
+                                                clip.fadeOutSec * pxPerSec,
                                             ),
                                         ),
                                         Math.max(1, bodyHeight),

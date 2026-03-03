@@ -244,9 +244,8 @@ pub fn render_mixdown_interleaved(
 
     let out_rate = opts.sample_rate.max(8000);
     let out_channels: u16 = 2;
-    let bs = beat_sec(bpm);
 
-    let project_sec = (timeline.project_beats.max(0.0)) * bs;
+    let project_sec = timeline.project_sec.max(0.0);
     let start_sec = opts.start_sec.max(0.0);
     let end_sec = opts.end_sec.unwrap_or(project_sec).max(start_sec);
     let duration_sec = (end_sec - start_sec).max(0.0);
@@ -286,8 +285,8 @@ pub fn render_mixdown_interleaved(
         }
 
         // Timeline placement.
-        let clip_start_sec = (clip.start_beat.max(0.0)) * bs;
-        let clip_timeline_len_sec = (clip.length_beats.max(0.0)) * bs;
+        let clip_start_sec = clip.start_sec.max(0.0);
+        let clip_timeline_len_sec = clip.length_sec.max(0.0);
         if !(clip_timeline_len_sec.is_finite() && clip_timeline_len_sec > 0.0) {
             continue;
         }
@@ -328,17 +327,16 @@ pub fn render_mixdown_interleaved(
             continue;
         }
 
-        // Source trimming is expressed in beats using BPM -> seconds.
-        // Negative trim_start_beat means leading silence in the clip (slip-edit past source start).
-        let bs = beat_sec(bpm);
-        let trim_start_beats_src = clip.trim_start_beat.max(0.0);
-        let trim_end_beats_src = clip.trim_end_beat.max(0.0);
-        let pre_silence_beats_src = (-clip.trim_start_beat).max(0.0);
+        // Source trimming is expressed in seconds.
+        // Negative trim_start_sec means leading silence in the clip (slip-edit past source start).
+        let trim_start_sec_src = clip.trim_start_sec.max(0.0);
+        let trim_end_sec_src = clip.trim_end_sec.max(0.0);
+        let pre_silence_sec_src = (-clip.trim_start_sec).max(0.0);
 
-        let trim_start_sec = trim_start_beats_src * bs;
-        let trim_end_sec = trim_end_beats_src * bs;
-        // pre-silence is in source beats, so convert to timeline time by dividing by playback_rate.
-        let pre_silence_sec = (pre_silence_beats_src * bs) / playback_rate.max(1e-6);
+        let trim_start_sec = trim_start_sec_src;
+        let trim_end_sec = trim_end_sec_src;
+        // pre-silence is in source seconds, so convert to timeline time by dividing by playback_rate.
+        let pre_silence_sec = pre_silence_sec_src / playback_rate.max(1e-6);
 
         let total_sec = match clip_duration_sec_from_wav(in_rate, in_channels, &pcm) {
             Some(v) => v,
@@ -430,10 +428,10 @@ pub fn render_mixdown_interleaved(
         }
 
         // Apply fades (linear) and gain (timeline-referenced).
-        let fade_in_frames = ((clip.fade_in_beats.max(0.0) * bs) * out_rate as f64)
+        let fade_in_frames = (clip.fade_in_sec.max(0.0) * out_rate as f64)
             .round()
             .max(0.0) as usize;
-        let fade_out_frames = ((clip.fade_out_beats.max(0.0) * bs) * out_rate as f64)
+        let fade_out_frames = (clip.fade_out_sec.max(0.0) * out_rate as f64)
             .round()
             .max(0.0) as usize;
 

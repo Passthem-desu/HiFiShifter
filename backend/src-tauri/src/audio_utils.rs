@@ -31,7 +31,8 @@ fn decode_wav_f32_interleaved_hound(path: &Path) -> Result<(u32, u16, Vec<f32>),
 
     let channels = spec.channels;
     let sample_rate = spec.sample_rate;
-    let mut out: Vec<f32> = Vec::with_capacity(reader.duration() as usize);
+    // hound::duration() 返回每声道的帧数（frames），总样本数 = frames * channels
+    let mut out: Vec<f32> = Vec::with_capacity(reader.duration() as usize * channels as usize);
 
     match (spec.sample_format, spec.bits_per_sample) {
         (SampleFormat::Int, 16) => {
@@ -200,8 +201,8 @@ fn compute_minmax_peaks_hound(
     }
 
     let channels = spec.channels as usize;
-    let total_samples = reader.duration() as u64;
-    let total_frames = total_samples / channels as u64;
+    // hound::duration() 返回每声道的帧数（frames），直接就是 total_frames
+    let total_frames = reader.duration() as u64;
 
     let mut min = Vec::<f32>::new();
     let mut max = Vec::<f32>::new();
@@ -432,21 +433,15 @@ fn try_read_wav_info_hound(path: &Path, preview_points: usize) -> Option<WavInfo
         return None;
     }
 
-    let total_samples = reader.duration() as usize;
-    let total_frames = (total_samples / spec.channels as usize).max(0) as u64;
+    // hound::duration() 返回每声道的帧数（frames），直接就是 total_frames
+    let total_frames = reader.duration() as u64;
     let duration_sec = total_frames as f64 / spec.sample_rate as f64;
-
-    // DEBUG: 打印音频文件的精确frame信息
-    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
-        eprintln!(
-            "[audio_utils] WAV info: total_samples={}, channels={}, total_frames={}, sample_rate={}, duration_sec={:.6}",
-            total_samples, spec.channels, total_frames, spec.sample_rate, duration_sec
-        );
-    }
+    // total_samples 用于 preview 步长计算（逐样本迭代，包含所有声道）
+    let total_samples = total_frames as usize * spec.channels as usize;
 
     let preview_len = preview_points.max(2);
     let mut preview = vec![0.0f32; preview_len];
-    if total_samples == 0 || preview_points == 0 {
+    if total_frames == 0 || preview_points == 0 {
         return Some(WavInfo {
             sample_rate: spec.sample_rate,
             total_frames,

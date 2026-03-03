@@ -10,41 +10,41 @@ export const timelineApi = {
     getTimelineState: () => invoke<TimelineResult>("get_timeline_state"),
 
     // Transport
-    setTransport: (payload: { playheadBeat?: number; bpm?: number }) =>
-        invoke<{ ok: boolean; playhead_beat?: number; bpm?: number }>(
+    setTransport: (payload: { playheadSec?: number; bpm?: number }) =>
+        invoke<{ ok: boolean; playhead_sec?: number; bpm?: number }>(
             "set_transport",
-            payload.playheadBeat,
+            payload.playheadSec,
             payload.bpm,
         ),
 
-    setProjectLength: (projectBeats: number) =>
-        invoke<TimelineResult>("set_project_length", projectBeats),
+    setProjectLength: (projectSec: number) =>
+        invoke<TimelineResult>("set_project_length", projectSec),
 
     // Import
     importAudioItem: (
         audioPath: string,
         trackId?: string | null,
-        startBeat?: number,
+        startSec?: number,
     ) =>
         invoke<TimelineResult>(
             "import_audio_item",
             audioPath,
             trackId,
-            startBeat,
+            startSec,
         ),
 
     importAudioBytes: (
         fileName: string,
         base64Data: string,
         trackId?: string | null,
-        startBeat?: number,
+        startSec?: number,
     ) =>
         invoke<TimelineResult>(
             "import_audio_bytes",
             fileName,
             base64Data,
             trackId,
-            startBeat,
+            startSec,
         ),
 
     // Tracks
@@ -105,51 +105,51 @@ export const timelineApi = {
     addClip: (payload: {
         trackId?: string;
         name?: string;
-        startBeat?: number;
-        lengthBeats?: number;
+        startSec?: number;
+        lengthSec?: number;
         sourcePath?: string;
     }) =>
         invoke<TimelineResult>(
             "add_clip",
             payload.trackId,
             payload.name,
-            payload.startBeat,
-            payload.lengthBeats,
+            payload.startSec,
+            payload.lengthSec,
             payload.sourcePath,
         ),
 
     removeClip: (clipId: string) => invoke<TimelineResult>("remove_clip", clipId),
 
-    moveClip: (payload: { clipId: string; startBeat: number; trackId?: string }) =>
+    moveClip: (payload: { clipId: string; startSec: number; trackId?: string }) =>
         invoke<TimelineResult>(
             "move_clip",
             payload.clipId,
-            payload.startBeat,
+            payload.startSec,
             payload.trackId,
         ),
 
     setClipState: (payload: {
         clipId: string;
-        lengthBeats?: number;
+        lengthSec?: number;
         gain?: number;
         muted?: boolean;
-        trimStartBeat?: number;
-        trimEndBeat?: number;
+        trimstartSec?: number;
+        trimEndSec?: number;
         playbackRate?: number;
-        fadeInBeats?: number;
-        fadeOutBeats?: number;
+        fadeInSec?: number;
+        fadeOutSec?: number;
     }) =>
         invoke<TimelineResult>(
             "set_clip_state",
             payload.clipId,
-            payload.lengthBeats,
+            payload.lengthSec,
             payload.gain,
             payload.muted,
-            payload.trimStartBeat,
-            payload.trimEndBeat,
+            payload.trimstartSec,
+            payload.trimEndSec,
             payload.playbackRate,
-            payload.fadeInBeats,
-            payload.fadeOutBeats,
+            payload.fadeInSec,
+            payload.fadeOutSec,
         ),
 
     splitClip: (clipId: string, splitBeat: number) =>

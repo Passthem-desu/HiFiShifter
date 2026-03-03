@@ -245,21 +245,21 @@ export function renderWaveformCanvas(
     const centerY = options.centerY ?? height * 0.5;
     const amplitude = options.amplitude ?? height * 0.45;
 
-    const { min, max, timestamps } = data;
-    const n = timestamps.length;
+    const { min, max } = data;
+    const n = min.length;
     if (n === 0) return;
 
-    const visibleStartSec = timestamps[0];
-    const visibleEndSec = timestamps[timestamps.length - 1];
-    const visibleDurSec = Math.max(1e-9, visibleEndSec - visibleStartSec);
+    // 使用均匀分布 x 坐标：第一个点在 x=0，最后一个点在 x=width
+    // 避免因 timestamps 中心点偏移（midIdx = i+0.5）导致的波形位置误差
+    const xOf = (i: number) =>
+        n <= 1 ? 0 : (i / (n - 1)) * width;
 
     // 绘制连续折线路径（类似 SVG 的闭合路径）
     ctx.beginPath();
 
     // 1. 正向遍历 max 值，绘制上边缘折线
     for (let i = 0; i < n; i++) {
-        const t = timestamps[i];
-        const x = ((t - visibleStartSec) / visibleDurSec) * width;
+        const x = xOf(i);
         const ma = max[i] ?? 0;
         const y = centerY - ma * amplitude;
 
@@ -272,8 +272,7 @@ export function renderWaveformCanvas(
 
     // 2. 反向遍历 min 值，绘制下边缘折线
     for (let i = n - 1; i >= 0; i--) {
-        const t = timestamps[i];
-        const x = ((t - visibleStartSec) / visibleDurSec) * width;
+        const x = xOf(i);
         const mi = min[i] ?? 0;
         const y = centerY - mi * amplitude;
 

@@ -29,8 +29,8 @@ export interface ClipInfo {
     id: string;
     trackId: string;
     name: string;
-    startBeat: number;
-    lengthBeats: number;
+    startSec: number;
+    lengthSec: number;
     color: "blue" | "violet" | "emerald" | "amber";
     sourcePath?: string;
     durationSec?: number;
@@ -38,22 +38,20 @@ export interface ClipInfo {
     sourceSampleRate?: number; // 源文件采样率
     gain: number;
     muted: boolean;
-    trimStartBeat: number;
-    trimEndBeat: number;
+    trimStartSec: number;
+    trimEndSec: number;
     playbackRate: number;
-    fadeInBeats: number;
-    fadeOutBeats: number;
+    fadeInSec: number;
+    fadeOutSec: number;
     fadeInCurve: FadeCurveType;
     fadeOutCurve: FadeCurveType;
 }
-
 export type ClipTemplate = Partial<Omit<ClipInfo, "id" | "color">> & {
     trackId: string;
     name: string;
-    startBeat: number;
-    lengthBeats: number;
+    startSec: number;
+    lengthSec: number;
 };
-
 export interface AutomationPoint {
     id: string;
     beat: number;

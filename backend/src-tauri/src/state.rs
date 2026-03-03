@@ -92,8 +92,8 @@ pub struct Clip {
     pub id: String,
     pub track_id: String,
     pub name: String,
-    pub start_beat: f64,
-    pub length_beats: f64,
+    pub start_sec: f64,
+    pub length_sec: f64,
     pub color: String,
 
     pub source_path: Option<String>,
@@ -105,23 +105,23 @@ pub struct Clip {
 
     pub gain: f32,
     pub muted: bool,
-    pub trim_start_beat: f64,
-    pub trim_end_beat: f64,
+    pub trim_start_sec: f64,
+    pub trim_end_sec: f64,
     pub playback_rate: f32,
-    pub fade_in_beats: f64,
-    pub fade_out_beats: f64,
+    pub fade_in_sec: f64,
+    pub fade_out_sec: f64,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ClipStatePatch {
-    pub length_beats: Option<f64>,
+    pub length_sec: Option<f64>,
     pub gain: Option<f32>,
     pub muted: Option<bool>,
-    pub trim_start_beat: Option<f64>,
-    pub trim_end_beat: Option<f64>,
+    pub trim_start_sec: Option<f64>,
+    pub trim_end_sec: Option<f64>,
     pub playback_rate: Option<f32>,
-    pub fade_in_beats: Option<f64>,
-    pub fade_out_beats: Option<f64>,
+    pub fade_in_sec: Option<f64>,
+    pub fade_out_sec: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -141,8 +141,8 @@ pub struct TimelineState {
     pub selected_track_id: Option<String>,
     pub selected_clip_id: Option<String>,
     pub bpm: f64,
-    pub playhead_beat: f64,
-    pub project_beats: f64,
+    pub playhead_sec: f64,
+    pub project_sec: f64,
 
     #[serde(default)]
     pub params_by_root_track: BTreeMap<String, TrackParamsState>,
@@ -198,8 +198,8 @@ impl Default for TimelineState {
             selected_track_id: Some(track_id),
             selected_clip_id: None,
             bpm: 120.0,
-            playhead_beat: 0.0,
-            project_beats: 64.0,
+            playhead_sec: 0.0,
+            project_sec: 32.0, // 64 beats @ 120 BPM = 32 sec
 
             params_by_root_track: BTreeMap::new(),
             next_track_order: 1,
@@ -238,12 +238,7 @@ impl TimelineState {
     }
 
     pub fn project_duration_sec(&self) -> f64 {
-        let bpm = self.bpm;
-        if !(bpm.is_finite() && bpm > 0.0) {
-            return 0.0;
-        }
-        let beat_sec = 60.0 / bpm;
-        (self.project_beats.max(0.0) * beat_sec).max(0.0)
+        self.project_sec.max(0.0)
     }
 
     pub fn target_param_frames(&self, frame_period_ms: f64) -> usize {
@@ -563,15 +558,15 @@ fn default_clip_color() -> String {
 }
 
 impl TimelineState {
-    fn ensure_project_end_beat(&mut self, end_beat: f64) {
-        if !(end_beat.is_finite()) {
+    fn ensure_project_end_sec(&mut self, end_sec: f64) {
+        if !(end_sec.is_finite()) {
             return;
         }
         // Only extend; never shrink automatically.
         // Use ceil so the ruler/grid has room for the full clip.
-        let target = end_beat.max(4.0).ceil();
-        if target > self.project_beats {
-            self.project_beats = target;
+        let target = end_sec.max(4.0).ceil();
+        if target > self.project_sec {
+            self.project_sec = target;
         }
     }
 
@@ -584,8 +579,8 @@ impl TimelineState {
                 id: c.id.clone(),
                 track_id: c.track_id.clone(),
                 name: c.name.clone(),
-                start_beat: c.start_beat,
-                length_beats: c.length_beats,
+                start_sec: c.start_sec,
+                length_sec: c.length_sec,
                 color: c.color.clone(),
                 source_path: c.source_path.clone(),
                 duration_sec: c.duration_sec,
@@ -595,11 +590,11 @@ impl TimelineState {
                 pitch_range: c.pitch_range.clone(),
                 gain: Some(c.gain),
                 muted: Some(c.muted),
-                trim_start_beat: Some(c.trim_start_beat),
-                trim_end_beat: Some(c.trim_end_beat),
+                trim_start_sec: Some(c.trim_start_sec),
+                trim_end_sec: Some(c.trim_end_sec),
                 playback_rate: Some(c.playback_rate),
-                fade_in_beats: Some(c.fade_in_beats),
-                fade_out_beats: Some(c.fade_out_beats),
+                fade_in_sec: Some(c.fade_in_sec),
+                fade_out_sec: Some(c.fade_out_sec),
             })
             .collect::<Vec<_>>();
 
@@ -610,8 +605,8 @@ impl TimelineState {
             selected_track_id: self.selected_track_id.clone(),
             selected_clip_id: self.selected_clip_id.clone(),
             bpm: self.bpm,
-            playhead_beat: self.playhead_beat,
-            project_beats: Some(self.project_beats),
+            playhead_sec: self.playhead_sec,
+            project_sec: Some(self.project_sec),
             project: None,
         }
     }
@@ -771,9 +766,9 @@ impl TimelineState {
         }
     }
 
-    pub fn set_project_length(&mut self, project_beats: f64) {
-        if project_beats.is_finite() {
-            self.project_beats = project_beats.max(4.0);
+    pub fn set_project_length(&mut self, project_sec: f64) {
+        if project_sec.is_finite() {
+            self.project_sec = project_sec.max(4.0);
         }
     }
 
@@ -781,8 +776,8 @@ impl TimelineState {
         &mut self,
         track_id: Option<String>,
         name: Option<String>,
-        start_beat: Option<f64>,
-        length_beats: Option<f64>,
+        start_sec: Option<f64>,
+        length_sec: Option<f64>,
         source_path: Option<String>,
     ) -> String {
         let track_id = track_id
@@ -826,15 +821,15 @@ impl TimelineState {
         });
 
         let id = new_id("clip");
-        let sb = start_beat.unwrap_or(self.playhead_beat).max(0.0);
-        let lb = length_beats.unwrap_or(8.0).max(0.25);
-        self.ensure_project_end_beat(sb + lb);
+        let ss = start_sec.unwrap_or(self.playhead_sec).max(0.0);
+        let ls = length_sec.unwrap_or(4.0).max(0.01);
+        self.ensure_project_end_sec(ss + ls);
         let clip = Clip {
             id: id.clone(),
             track_id: track_id.clone(),
             name: name.unwrap_or_else(|| "Clip".to_string()),
-            start_beat: sb,
-            length_beats: lb,
+            start_sec: ss,
+            length_sec: ls,
             color: default_clip_color(),
             source_path,
             duration_sec: inherited.as_ref().and_then(|v| v.0),
@@ -850,15 +845,15 @@ impl TimelineState {
                 })),
             gain: 1.0,
             muted: false,
-            trim_start_beat: 0.0,
-            trim_end_beat: 0.0,
+            trim_start_sec: 0.0,
+            trim_end_sec: 0.0,
             playback_rate: 1.0,
-            fade_in_beats: 0.0,
-            fade_out_beats: 0.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
         };
         self.clips.push(clip);
         self.selected_clip_id = Some(id.clone());
-        self.playhead_beat = sb;
+        self.playhead_sec = ss;
         id
     }
 
@@ -869,19 +864,19 @@ impl TimelineState {
         }
     }
 
-    pub fn move_clip(&mut self, clip_id: &str, start_beat: f64, track_id: Option<String>) {
-        let mut end_beat: Option<f64> = None;
+    pub fn move_clip(&mut self, clip_id: &str, start_sec: f64, track_id: Option<String>) {
+        let mut end_sec: Option<f64> = None;
         if let Some(c) = self.clips.iter_mut().find(|c| c.id == clip_id) {
-            c.start_beat = start_beat.max(0.0);
+            c.start_sec = start_sec.max(0.0);
             if let Some(tid) = track_id {
                 if self.tracks.iter().any(|t| t.id == tid) {
                     c.track_id = tid;
                 }
             }
-            end_beat = Some(c.start_beat + c.length_beats);
+            end_sec = Some(c.start_sec + c.length_sec);
         }
-        if let Some(v) = end_beat {
-            self.ensure_project_end_beat(v);
+        if let Some(v) = end_sec {
+            self.ensure_project_end_sec(v);
         }
     }
 
@@ -889,35 +884,35 @@ impl TimelineState {
     pub fn set_clip_state(
         &mut self,
         clip_id: &str,
-        length_beats: Option<f64>,
+        length_sec: Option<f64>,
         gain: Option<f32>,
         muted: Option<bool>,
-        trim_start_beat: Option<f64>,
-        trim_end_beat: Option<f64>,
+        trim_start_sec: Option<f64>,
+        trim_end_sec: Option<f64>,
         playback_rate: Option<f32>,
-        fade_in_beats: Option<f64>,
-        fade_out_beats: Option<f64>,
+        fade_in_sec: Option<f64>,
+        fade_out_sec: Option<f64>,
     ) {
         self.patch_clip_state(
             clip_id,
             ClipStatePatch {
-                length_beats,
+                length_sec,
                 gain,
                 muted,
-                trim_start_beat,
-                trim_end_beat,
+                trim_start_sec,
+                trim_end_sec,
                 playback_rate,
-                fade_in_beats,
-                fade_out_beats,
+                fade_in_sec,
+                fade_out_sec,
             },
         );
     }
 
     pub fn patch_clip_state(&mut self, clip_id: &str, patch: ClipStatePatch) {
-        let mut end_beat: Option<f64> = None;
+        let mut end_sec: Option<f64> = None;
         if let Some(c) = self.clips.iter_mut().find(|c| c.id == clip_id) {
-            if let Some(v) = patch.length_beats {
-                c.length_beats = v.max(0.0);
+            if let Some(v) = patch.length_sec {
+                c.length_sec = v.max(0.0);
             }
             if let Some(v) = patch.gain {
                 c.gain = v.clamp(0.0, 2.0);
@@ -925,77 +920,77 @@ impl TimelineState {
             if let Some(v) = patch.muted {
                 c.muted = v;
             }
-            if let Some(v) = patch.trim_start_beat {
+            if let Some(v) = patch.trim_start_sec {
                 if v.is_finite() {
                     // Negative values are allowed (slip-edit past the source start -> leading silence).
                     // Keep a reasonable bound to avoid accidental extreme values.
-                    c.trim_start_beat = v.clamp(-1_000_000.0, 1_000_000.0);
+                    c.trim_start_sec = v.clamp(-1_000_000.0, 1_000_000.0);
                 }
             }
-            if let Some(v) = patch.trim_end_beat {
-                c.trim_end_beat = v.max(0.0);
+            if let Some(v) = patch.trim_end_sec {
+                c.trim_end_sec = v.max(0.0);
             }
             if let Some(v) = patch.playback_rate {
                 c.playback_rate = v.clamp(0.1, 10.0);
             }
-            if let Some(v) = patch.fade_in_beats {
-                c.fade_in_beats = v.max(0.0);
+            if let Some(v) = patch.fade_in_sec {
+                c.fade_in_sec = v.max(0.0);
             }
-            if let Some(v) = patch.fade_out_beats {
-                c.fade_out_beats = v.max(0.0);
+            if let Some(v) = patch.fade_out_sec {
+                c.fade_out_sec = v.max(0.0);
             }
 
-            end_beat = Some(c.start_beat + c.length_beats);
+            end_sec = Some(c.start_sec + c.length_sec);
         }
 
-        if let Some(v) = end_beat {
-            self.ensure_project_end_beat(v);
+        if let Some(v) = end_sec {
+            self.ensure_project_end_sec(v);
         }
     }
 
-    pub fn split_clip(&mut self, clip_id: &str, split_beat: f64) {
+    pub fn split_clip(&mut self, clip_id: &str, split_sec: f64) {
         let Some(idx) = self.clips.iter().position(|c| c.id == clip_id) else {
             return;
         };
         let clip = self.clips[idx].clone();
-        let start = clip.start_beat;
-        let end = clip.start_beat + clip.length_beats;
-        let split = split_beat.clamp(start, end);
+        let start = clip.start_sec;
+        let end = clip.start_sec + clip.length_sec;
+        let split = split_sec.clamp(start, end);
         if split <= start + 1e-6 || split >= end - 1e-6 {
             return;
         }
 
-        self.ensure_project_end_beat(end);
+        self.ensure_project_end_sec(end);
 
         let left_len = split - start;
         let right_len = end - split;
 
-        self.clips[idx].length_beats = left_len;
+        self.clips[idx].length_sec = left_len;
         // Fade semantics on split:
         // - fade-in is anchored to the original start, so only the left clip should keep it.
         // - fade-out is anchored to the original end, so only the right clip should keep it.
         // Clamp fades to the new clip lengths.
-        self.clips[idx].fade_in_beats = self.clips[idx].fade_in_beats.min(left_len.max(0.0));
-        self.clips[idx].fade_out_beats = 0.0;
+        self.clips[idx].fade_in_sec = self.clips[idx].fade_in_sec.min(left_len.max(0.0));
+        self.clips[idx].fade_out_sec = 0.0;
 
         let mut right = clip;
         right.id = new_id("clip");
-        right.start_beat = split;
-        right.length_beats = right_len;
-        right.fade_in_beats = 0.0;
-        right.fade_out_beats = right.fade_out_beats.min(right_len.max(0.0));
+        right.start_sec = split;
+        right.length_sec = right_len;
+        right.fade_in_sec = 0.0;
+        right.fade_out_sec = right.fade_out_sec.min(right_len.max(0.0));
 
         // Preserve the original audio offset: the right clip should continue from where the left ended.
-        // trim_* are in beats (source time), while playback_rate scales source progress per timeline time.
+        // trim_* are in sec (source time), while playback_rate scales source progress per timeline time.
         let rate = right.playback_rate as f64;
         let rate = if rate.is_finite() && rate > 0.0 {
             rate
         } else {
             1.0
         };
-        if right.trim_start_beat.is_finite() {
-            right.trim_start_beat =
-                (right.trim_start_beat + left_len * rate).clamp(-1_000_000.0, 1_000_000.0);
+        if right.trim_start_sec.is_finite() {
+            right.trim_start_sec =
+                (right.trim_start_sec + left_len * rate).clamp(-1_000_000.0, 1_000_000.0);
         }
         self.clips.push(right);
     }
@@ -1017,23 +1012,23 @@ impl TimelineState {
         if selected.iter().any(|c| c.track_id != track_id) {
             return;
         }
-        selected.sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
+        selected.sort_by(|a, b| a.start_sec.total_cmp(&b.start_sec));
         let Some(first) = selected.first() else {
             return;
         };
-        let start = first.start_beat;
+        let start = first.start_sec;
         let end = selected
             .iter()
-            .map(|c| c.start_beat + c.length_beats)
+            .map(|c| c.start_sec + c.length_sec)
             .fold(start, f64::max);
 
-        self.ensure_project_end_beat(end);
+        self.ensure_project_end_sec(end);
 
         let mut glued = first.clone();
         glued.id = new_id("clip");
         glued.name = "Glued".to_string();
-        glued.start_beat = start;
-        glued.length_beats = (end - start).max(0.25);
+        glued.start_sec = start;
+        glued.length_sec = (end - start).max(0.01);
 
         self.clips.retain(|c| !clip_ids.contains(&c.id));
         self.clips.push(glued.clone());
@@ -1055,7 +1050,7 @@ impl TimelineState {
         &mut self,
         audio_path: &str,
         track_id: Option<String>,
-        start_beat: Option<f64>,
+        start_sec: Option<f64>,
     ) {
         let name = Path::new(audio_path)
             .file_name()
@@ -1109,31 +1104,29 @@ impl TimelineState {
             }
         }
 
-        // 使用精确的frame计算length_beats
-        let computed_length_beats = if let (Some(frames), Some(sr)) = (duration_frames, source_sample_rate) {
-            let exact_duration_sec = frames as f64 / sr as f64;
-            (exact_duration_sec * self.bpm) / 60.0
+        // 使用精确的frame计算length_sec（直接用秒，不依赖BPM）
+        let computed_length_sec = if let (Some(frames), Some(sr)) = (duration_frames, source_sample_rate) {
+            frames as f64 / sr as f64
         } else {
-            duration_sec.map(|d| (d * self.bpm) / 60.0).unwrap_or(8.0)
+            duration_sec.unwrap_or(4.0)
         };
 
         let clip_id = self.add_clip(
             track_id,
             Some(name),
-            start_beat,
-            Some(computed_length_beats),
+            start_sec,
+            Some(computed_length_sec),
             Some(audio_path.to_string()),
         );
 
         // DEBUG: 打印导入clip时的关键参数
         if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
             eprintln!(
-                "import_audio_item: clip created: clip_id={}, bpm={:.2}, duration_frames={:?}, sample_rate={:?}, computed_length_beats={:.6}",
+                "import_audio_item: clip created: clip_id={}, duration_frames={:?}, sample_rate={:?}, computed_length_sec={:.6}",
                 &clip_id[..8.min(clip_id.len())],
-                self.bpm,
                 duration_frames,
                 source_sample_rate,
-                computed_length_beats
+                computed_length_sec
             );
         }
 

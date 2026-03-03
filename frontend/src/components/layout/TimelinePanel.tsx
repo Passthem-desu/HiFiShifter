@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Flex } from "@radix-ui/themes";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
@@ -10,7 +10,7 @@ import {
     setTrackStateRemote,
     seekPlayhead,
     selectClipRemote,
-    setPlayheadBeat,
+    setplayheadSec,
     moveTrackRemote,
     setClipMuted,
     importAudioAtPosition,
@@ -33,11 +33,11 @@ import { useKeyboardShortcuts } from "./timeline/hooks/useKeyboardShortcuts";
 import {
     BackgroundGrid,
     ClipContextMenu,
-    DEFAULT_PX_PER_BEAT,
+    DEFAULT_PX_PER_SEC,
     DEFAULT_ROW_HEIGHT,
-    MAX_PX_PER_BEAT,
+    MAX_PX_PER_SEC,
     MAX_ROW_HEIGHT,
-    MIN_PX_PER_BEAT,
+    MIN_PX_PER_SEC,
     MIN_ROW_HEIGHT,
     TimelineScrollArea,
     TimeRuler,
@@ -93,12 +93,17 @@ export const TimelinePanel: React.FC = () => {
                 : action;
         syncScrollLeft(next);
     };
-    const [pxPerBeat, setPxPerBeat] = useState(() => {
-        const stored = Number(localStorage.getItem("hifishifter.pxPerBeat"));
-        return Number.isFinite(stored)
-            ? Math.min(MAX_PX_PER_BEAT, Math.max(MIN_PX_PER_BEAT, stored))
-            : DEFAULT_PX_PER_BEAT;
+    const [pxPerSec, setPxPerSec] = useState(() => {
+        const stored = Number(localStorage.getItem("hifishifter.pxPerSec"));
+        return Number.isFinite(stored) && stored > 0
+            ? Math.min(MAX_PX_PER_SEC, Math.max(MIN_PX_PER_SEC, stored))
+            : DEFAULT_PX_PER_SEC;
     });
+    // 渲染时根据 BPM 计算 pxPerBeat，仅用于网格/标尺渲染
+    // pxPerBeat = pxPerSec × secPerBeat = pxPerSec × (60 / bpm)
+    const secPerBeat = 60 / Math.max(1, s.bpm);
+    const pxPerBeat = pxPerSec * secPerBeat;
+    // clip 位置/宽度/交互坐标统一使用 pxPerSec（不随 BPM 变化）
 
     const [rowHeight, setRowHeight] = useState(() => {
         const stored = Number(localStorage.getItem("hifishifter.rowHeight"));
@@ -115,8 +120,8 @@ export const TimelinePanel: React.FC = () => {
         scrollTop: number;
     } | null>(null);
 
-    // clip 拖拽、编辑拖拽、slip 拖拽的 ref 和启动函数由各自 hook 提供，
-    // 在下方 snapBeat / beatFromClientX / trackIdFromClientY 定义后初始化。
+    // clip ��ק���༭��ק��slip ��ק�� ref �����������ɸ��� hook �ṩ��
+    // ���·� snapBeat / beatFromClientX / trackIdFromClientY ������ʼ����
 
     const [trackVolumeUi, setTrackVolumeUi] = useState<Record<string, number>>(
         {},
@@ -125,7 +130,7 @@ export const TimelinePanel: React.FC = () => {
         path: string;
         fileName: string;
         trackId: string | null;
-        startBeat: number;
+        startSec: number;
     } | null>(null);
 
     const [clipDropNewTrack, setClipDropNewTrack] = useState(false);
@@ -225,7 +230,7 @@ export const TimelinePanel: React.FC = () => {
                         typeof pos?.x === "number" ? pos.x : undefined;
                     const clientY =
                         typeof pos?.y === "number" ? pos.y : undefined;
-                    const fallbackBeat = sessionRef.current.playheadBeat ?? 0;
+                    const fallbackBeat = sessionRef.current.playheadSec ?? 0;
                     const beat =
                         clientX !== undefined && bounds && scroller
                             ? beatFromClientX(
@@ -262,7 +267,7 @@ export const TimelinePanel: React.FC = () => {
                                 path,
                                 fileName: prev?.fileName ?? nextFileName,
                                 trackId,
-                                startBeat: beat,
+                                startSec: beat,
                             };
                         });
                         return;
@@ -293,7 +298,7 @@ export const TimelinePanel: React.FC = () => {
                                 importAudioAtPosition({
                                     audioPath: resolvedPath,
                                     trackId,
-                                    startBeat: beat,
+                                    startSec: beat,
                                 }),
                             );
                         }
@@ -316,7 +321,7 @@ export const TimelinePanel: React.FC = () => {
             disposed = true;
             if (unlisten) unlisten();
         };
-    }, [dispatch, pxPerBeat, rowHeight]);
+    }, [dispatch, pxPerSec, rowHeight]);
 
     const [multiSelectedClipIds, setMultiSelectedClipIds] = useState<string[]>(
         [],
@@ -332,14 +337,14 @@ export const TimelinePanel: React.FC = () => {
         clipId: string;
     } | null>(null);
 
-    /** 右键菜单中触发重命名的 clipId */
+    /** �Ҽ��˵��д����������� clipId */
     const [renamingClipId, setRenamingClipId] = useState<string | null>(null);
 
     const { selectionRect, onPointerDown: onSelectionRectPointerDown } =
         useTimelineSelectionRect({
             scrollRef,
             sessionRef,
-            pxPerBeat,
+            pxPerBeat: pxPerSec,
             rowHeight,
             clearContextMenu: () => {
                 setContextMenu(null);
@@ -351,9 +356,8 @@ export const TimelinePanel: React.FC = () => {
         });
 
     const contentWidth = useMemo(() => {
-        const beats = Math.max(8, Math.ceil(s.projectBeats));
-        return beats * pxPerBeat;
-    }, [s.projectBeats, pxPerBeat]);
+        return Math.max(8 * (60 / Math.max(1, s.bpm)), s.projectSec) * pxPerSec;
+    }, [s.projectSec, pxPerSec, s.bpm]);
 
     const dropExtraRows =
         (dropPreview && !dropPreview.trackId ? 1 : 0) +
@@ -362,7 +366,9 @@ export const TimelinePanel: React.FC = () => {
 
     const bars = useMemo(() => {
         const beatsPerBar = Math.max(1, Math.round(s.beats || 4));
-        const totalBeats = Math.max(1, Math.ceil(s.projectBeats));
+        const secPerBeat = 60 / Math.max(1, s.bpm);
+        // totalBeats 必须用秒/每拍换算，确保覆盖整个 projectSec 范围
+        const totalBeats = Math.max(1, Math.ceil(s.projectSec / secPerBeat));
         const result: Array<{ beat: number; label: string }> = [];
         let barIndex = 1;
         for (let beat = 0; beat <= totalBeats; beat += beatsPerBar) {
@@ -370,7 +376,7 @@ export const TimelinePanel: React.FC = () => {
             barIndex += 1;
         }
         return result;
-    }, [s.beats, s.projectBeats]);
+    }, [s.beats, s.projectSec, s.bpm]);
 
     const clipsByTrackId = useMemo(() => {
         const map = new Map<string, typeof s.clips>();
@@ -385,7 +391,7 @@ export const TimelinePanel: React.FC = () => {
 
         for (const arr of map.values()) {
             arr.sort((a, b) => {
-                const d = (a.startBeat ?? 0) - (b.startBeat ?? 0);
+                const d = (a.startSec ?? 0) - (b.startSec ?? 0);
                 if (Math.abs(d) > 1e-9) return d;
                 return String(a.id).localeCompare(String(b.id));
             });
@@ -394,14 +400,18 @@ export const TimelinePanel: React.FC = () => {
         return map;
     }, [s.clips]);
 
-    function beatFromClientX(
+    /** 将客户端 X 坐标转换为秒（seconds-based，不受 BPM 影响） */
+    function secFromClientX(
         clientX: number,
         bounds: DOMRect,
         xScroll: number,
     ) {
         const x = clientX - bounds.left + xScroll;
-        return Math.max(0, x / pxPerBeat);
+        return Math.max(0, x / pxPerSec);
     }
+
+    /** 兼容旧名称，内部统一使用 secFromClientX */
+    const beatFromClientX = secFromClientX;
 
     function trackIdFromClientY(clientY: number) {
         const scroller = scrollRef.current;
@@ -432,7 +442,7 @@ export const TimelinePanel: React.FC = () => {
         commit: boolean,
     ) {
         const beat = beatFromClientX(clientX, bounds, xScroll);
-        dispatch(setPlayheadBeat(beat));
+        dispatch(setplayheadSec(beat));
         if (commit) {
             void dispatch(seekPlayhead(beat));
         }
@@ -489,10 +499,15 @@ export const TimelinePanel: React.FC = () => {
         window.addEventListener("pointercancel", end);
     }
 
-    function snapBeat(beat: number) {
-        const step = gridStepBeats(s.grid);
-        return Math.round(beat / step) * step;
+    /** 将秒数 snap 到最近的 beat 对齐位置（seconds-based） */
+    function snapSec(sec: number) {
+        const stepBeats = gridStepBeats(s.grid);
+        const stepSec = stepBeats * (60 / Math.max(1, s.bpm));
+        return Math.round(sec / stepSec) * stepSec;
     }
+
+    /** 兼容旧名称，内部统一使用 snapSec */
+    const snapBeat = snapSec;
 
     function isEditableTarget(target: EventTarget | null): boolean {
         const el = target as HTMLElement | null;
@@ -508,7 +523,7 @@ export const TimelinePanel: React.FC = () => {
         return false;
     }
 
-    // ── 拖拽 hooks ──────────────────────────────────────────────────────────
+    // ���� ��ק hooks ��������������������������������������������������������������������������������������������������������������������
     const { editDragRef: _editDragRef, startEditDrag } = useEditDrag({
         scrollRef,
         sessionRef,
@@ -529,7 +544,6 @@ export const TimelinePanel: React.FC = () => {
     const { clipDragRef: _clipDragRef, startClipDrag: _startClipDragInner } = useClipDrag({
         scrollRef,
         sessionRef,
-        pxPerBeat,
         rowHeight,
         multiSelectedClipIds,
         multiSelectedSet,
@@ -544,13 +558,13 @@ export const TimelinePanel: React.FC = () => {
     function startClipDrag(
         e: React.PointerEvent<HTMLDivElement>,
         clipId: string,
-        clipStartBeat: number,
+        clipstartSec: number,
         altPressedHint?: boolean,
     ) {
-        _startClipDragInner(e, clipId, clipStartBeat, altPressedHint, startSlipDrag);
+        _startClipDragInner(e, clipId, clipstartSec, altPressedHint, startSlipDrag);
     }
 
-    // ── 键盘快捷键 hook ──────────────────────────────────────────────────────
+    // ���� ���̿�ݼ� hook ������������������������������������������������������������������������������������������������������������
     useKeyboardShortcuts({
         sessionRef,
         dispatch,
@@ -652,7 +666,9 @@ export const TimelinePanel: React.FC = () => {
                     scrollLeft={scrollLeft}
                     bars={bars}
                     pxPerBeat={pxPerBeat}
-                    playheadBeat={s.playheadBeat}
+                    pxPerSec={pxPerSec}
+                    secPerBeat={secPerBeat}
+                    playheadSec={s.playheadSec}
                     contentRef={rulerContentRef}
                     onMouseDown={(e) => {
                         if (e.button !== 0) return;
@@ -673,9 +689,10 @@ export const TimelinePanel: React.FC = () => {
                 {/* Tracks Area */}
                 <TimelineScrollArea
                     scrollRef={scrollRef}
-                    projectBeats={s.projectBeats}
-                    pxPerBeat={pxPerBeat}
-                    setPxPerBeat={setPxPerBeat}
+                    projectSec={s.projectSec}
+                    bpm={s.bpm}
+                    pxPerSec={pxPerSec}
+                    setPxPerSec={setPxPerSec}
                     rowHeight={rowHeight}
                     setRowHeight={setRowHeight}
                     setScrollLeft={setScrollLeftAction}
@@ -736,7 +753,7 @@ export const TimelinePanel: React.FC = () => {
                             path,
                             fileName,
                             trackId,
-                            startBeat: beat,
+                            startSec: beat,
                         });
                     }}
                     onDragLeave={(e) => {
@@ -798,7 +815,7 @@ export const TimelinePanel: React.FC = () => {
                                 importAudioAtPosition({
                                     audioPath: resolvedPath,
                                     trackId,
-                                    startBeat: beat,
+                                    startSec: beat,
                                 }),
                             );
                             return;
@@ -816,7 +833,7 @@ export const TimelinePanel: React.FC = () => {
                                     importAudioAtPosition({
                                         audioPath: p,
                                         trackId,
-                                        startBeat: beat,
+                                        startSec: beat,
                                     }),
                                 );
                             }, 0);
@@ -828,7 +845,7 @@ export const TimelinePanel: React.FC = () => {
                                 importAudioFileAtPosition({
                                     file: fallbackFile,
                                     trackId,
-                                    startBeat: beat,
+                                    startSec: beat,
                                 }),
                             );
                         }
@@ -913,12 +930,12 @@ export const TimelinePanel: React.FC = () => {
                                 ([] as typeof s.clips);
 
                             return (
-                                <TrackLane
+                        <TrackLane
                                     key={track.id}
                                     track={track}
                                     trackClips={trackClips}
                                     rowHeight={rowHeight}
-                                    pxPerBeat={pxPerBeat}
+                                    pxPerSec={pxPerSec}
                                     bpm={s.bpm}
                                     clipWaveforms={s.clipWaveforms}
                                     altPressed={altPressed}
@@ -1007,12 +1024,12 @@ export const TimelinePanel: React.FC = () => {
                                 style={{
                                     left: Math.max(
                                         0,
-                                        dropPreview.startBeat * pxPerBeat,
+                                        dropPreview.startSec * pxPerSec,
                                     ),
                                     top:
                                         rowTopForTrackId(dropPreview.trackId) +
                                         8,
-                                    width: Math.max(80, pxPerBeat * 2),
+                                    width: Math.max(80, pxPerSec * 2),
                                     height: rowHeight - 16,
                                 }}
                             >
@@ -1027,7 +1044,7 @@ export const TimelinePanel: React.FC = () => {
                         {/* Playhead Cursor */}
                         <div
                             className="absolute top-0 bottom-0 w-px bg-qt-playhead z-20 cursor-ew-resize"
-                            style={{ left: s.playheadBeat * pxPerBeat }}
+                            style={{ left: s.playheadSec * pxPerSec }}
                             onPointerDown={(e) => {
                                 if (e.button !== 0) return;
                                 e.stopPropagation();
@@ -1116,10 +1133,10 @@ export const TimelinePanel: React.FC = () => {
                         selectedIds.includes(c.id),
                     );
 
-                    const playheadBeat = sessionRef.current.playheadBeat;
+                    const playheadSec = sessionRef.current.playheadSec;
                     const playheadInClip =
-                        playheadBeat >= ctxClip.startBeat &&
-                        playheadBeat <= ctxClip.startBeat + ctxClip.lengthBeats;
+                        playheadSec >= ctxClip.startSec &&
+                        playheadSec <= ctxClip.startSec + ctxClip.lengthSec;
 
                     return (
                         <ClipContextMenu
@@ -1161,7 +1178,7 @@ export const TimelinePanel: React.FC = () => {
                                 void dispatch(
                                     splitClipRemote({
                                         clipId,
-                                        splitBeat: sessionRef.current.playheadBeat,
+                                        splitBeat: sessionRef.current.playheadSec,
                                     }),
                                 );
                             }}
@@ -1181,7 +1198,7 @@ export const TimelinePanel: React.FC = () => {
                                 }));
                             }}
                             onColorChange={(clipId, color) => {
-                                // 乐观更新：立即反映到 UI
+                                // �ֹ۸��£�������ӳ�� UI
                                 const prevClip = sessionRef.current.clips.find(
                                     (c) => c.id === clipId,
                                 );
@@ -1192,7 +1209,7 @@ export const TimelinePanel: React.FC = () => {
                                 void dispatch(
                                     setClipStateRemote({ clipId, color }),
                                 ).then((result) => {
-                                    // 后端失败时回滚颜色
+                                    // ���ʧ��ʱ�ع���ɫ
                                     if (
                                         result.type.endsWith("/rejected") ||
                                         !(result.payload as { ok?: boolean })?.ok

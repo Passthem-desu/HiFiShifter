@@ -127,13 +127,23 @@ extern "C" {
 // WorldSynthesizer 结构体内部含有大量裸指针和 FFT 状态，Rust 侧不需要直接访问字段，
 // 只需保证内存布局足够大即可。我们用一个足够大的字节数组作为不透明存储，
 // 实际大小由 C++ 侧的 sizeof(WorldSynthesizer) 决定。
-// 经过测量，sizeof(WorldSynthesizer) ≈ 288 字节（x86_64），预留 512 字节保证安全。
+//
+// 精确计算（x86_64，MSVC ABI）：
+//   基本字段（fs/frame_period/buffer_size/...到 randn_state 结束）：约 192 字节
+//   RandnState（4×uint32）：16 字节
+//   MinimumPhaseAnalysis（含 2 个 fft_plan，每个 72 字节）：176 字节
+//   InverseRealFFT（含 1 个 fft_plan）：96 字节
+//   ForwardRealFFT（含 1 个 fft_plan）：96 字节
+//   合计：约 560 字节
+//
+// 原来预留 512 字节不足（差 ~48 字节），导致 InitializeSynthesizer 写入越界，
+// 引发 STATUS_ACCESS_VIOLATION。现扩大到 1024 字节，留足安全余量。
 //
 // 注意：该结构体**只能**通过 Box::new(zeroed()) 分配在堆上，
 // 绝不能在栈上创建（避免栈溢出和移动后指针失效）。
 #[repr(C)]
 pub struct WorldSynthesizerRaw {
-    _opaque: [u8; 512],
+    _opaque: [u8; 1024],
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -708,15 +718,16 @@ fn vocode_one_streaming(
 
     // 流式合成：将帧推入 WorldSynthesizer，取出合成 PCM
     // 若合成器被锁定（环形缓冲区满），先取出已合成样本再推入
+    // 注意：push_frames 会取走数据所有权，防止 Synthesis2 访问悬空指针
     if synth.is_locked() {
         let _ = synth.pull_samples();
     }
 
-    let pushed = synth.push_frames(&mut shifted_f0, &mut spectrogram, &mut aperiodicity);
+    let pushed = synth.push_frames(shifted_f0.clone(), spectrogram.clone(), aperiodicity.clone());
     if !pushed {
         // 推入失败（缓冲区满），先取出再重试
         let _ = synth.pull_samples();
-        synth.push_frames(&mut shifted_f0, &mut spectrogram, &mut aperiodicity);
+        synth.push_frames(shifted_f0.clone(), spectrogram.clone(), aperiodicity.clone());
     }
 
     let y_f64_raw = synth.pull_samples();

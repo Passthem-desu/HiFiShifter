@@ -45,19 +45,19 @@ pub(crate) fn get_timeline_state_from_ref(state: &AppState) -> crate::models::Ti
 
 pub(super) fn set_transport(
     state: State<'_, AppState>,
-    playhead_beat: Option<f64>,
+    playhead_sec: Option<f64>,
     bpm: Option<f64>,
 ) -> serde_json::Value {
     if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
         eprintln!(
-            "set_transport(playhead_beat={:?}, bpm={:?})",
-            playhead_beat, bpm
+            "set_transport(playhead_sec={:?}, bpm={:?})",
+            playhead_sec, bpm
         );
     }
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     let prev_bpm = tl.bpm;
-    if let Some(v) = playhead_beat {
-        tl.playhead_beat = v.max(0.0);
+    if let Some(v) = playhead_sec {
+        tl.playhead_sec = v.max(0.0);
     }
     if let Some(v) = bpm {
         if v.is_finite() && v > 0.0 {
@@ -68,13 +68,12 @@ pub(super) fn set_transport(
     }
 
     // Keep realtime engine transport aligned.
-    let playhead_sec = (tl.playhead_beat.max(0.0)) * 60.0 / tl.bpm.max(1e-6);
-    state.audio_engine.seek_sec(playhead_sec);
+    state.audio_engine.seek_sec(tl.playhead_sec);
     if (tl.bpm - prev_bpm).abs() > 1e-9 {
         state.audio_engine.update_timeline(tl.clone());
     }
 
-    serde_json::json!({"ok": true, "playhead_beat": tl.playhead_beat, "bpm": tl.bpm })
+    serde_json::json!({"ok": true, "playhead_sec": tl.playhead_sec, "bpm": tl.bpm })
 }
 
 // ===================== undo / redo =====================

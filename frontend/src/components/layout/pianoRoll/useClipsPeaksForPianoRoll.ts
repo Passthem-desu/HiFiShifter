@@ -1,9 +1,9 @@
 /**
  * Piano Roll Per-Clip 波形 Peaks Hook
  *
- * 为 Piano Roll 背景波形提供 per-clip 的 peaks 数据，
- * 替代原来对整个 track 做 mix 后取波形的方式。
- * 每个可见 clip 独立获取 peaks，按时间位置叠加绘制。
+ * �?Piano Roll 背景波形提供 per-clip �?peaks 数据�?
+ * 替代原来对整�?track �?mix 后取波形的方式�?
+ * 每个可见 clip 独立获取 peaks，按时间位置叠加绘制�?
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -12,19 +12,20 @@ import { waveformApi } from "../../../services/api";
 import { lruGet, lruSet } from "./peaksCache";
 
 /** 单个 clip 的 peaks 数据条目 */
+/** 单个 clip 的 peaks 数据条目 */
 export interface ClipPeaksEntry {
     /** clip ID */
     clipId: string;
-    /** clip 在 timeline 上的起始 beat */
-    startBeat: number;
-    /** clip 的长度（beats） */
-    lengthBeats: number;
-    /** peaks 数据，未加载时为 null */
-    peaks: {
+    /** clip 在 timeline 上的起始位置（秒，来自 ClipInfo.startSec） */
+    startSec: number;
+    /** clip 的长度（秒，来自 ClipInfo.lengthSec），用于绘制宽度，不影响 peaks 请求 */
+    lengthSec: number;    peaks: {
         min: number[];
         max: number[];
         startSec: number;
         durSec: number;
+        /** peaks 实际列数，用于绘制时避免拉伸 */
+        columns: number;
     } | null;
 }
 
@@ -37,18 +38,18 @@ type CachedEntry = {
     t: number;
 };
 
-// 模块级缓存，跨 hook 实例共享
+// 模块级缓存，�?hook 实例共享
 const clipPeaksCache = new Map<string, CachedEntry>();
 const clipPeaksInflight = new Map<string, Promise<CachedEntry | null>>();
 const CLIP_PEAKS_CACHE_LIMIT = 128;
 
-/** 量化秒数，减少重复请求 */
+/** 量化秒数，减少重复请�?*/
 function qsec(x: number, step = 0.005): number {
     if (!Number.isFinite(x)) return 0;
     return Math.round(x / step) * step;
 }
 
-/** 将 clip 信息转换为 peaks 请求参数 */
+/** �?clip 信息转换�?peaks 请求参数 */
 function buildClipPeaksRequest(
     clip: ClipInfo,
     secPerBeat: number,
@@ -77,8 +78,8 @@ function buildClipPeaksRequest(
 
     if (!Number.isFinite(durationSec) || durationSec <= 0) return null;
 
-    const lengthBeats = Math.max(0, Number(clip.lengthBeats ?? 0) || 0);
-    if (lengthBeats <= 1e-9) return null;
+    const lengthSec = Math.max(0, Number(clip.lengthSec ?? 0) || 0);
+    if (lengthSec <= 1e-9) return null;
 
     console.log(
         `[ClipPeaks] Building request for clip ${clip.id.slice(0, 8)}:`,
@@ -87,10 +88,10 @@ function buildClipPeaksRequest(
             sourceSampleRate: clip.sourceSampleRate,
             computedDurSec: durationSec.toFixed(6),
             legacyDurationSec: clip.durationSec,
-            lengthBeats: lengthBeats,
+            lengthSec: lengthSec,
             secPerBeat: secPerBeat,
-            trimStartBeat: clip.trimStartBeat,
-            trimEndBeat: clip.trimEndBeat,
+            trimStartSec: clip.trimStartSec,
+            trimEndSec: clip.trimEndSec,
             playbackRate: clip.playbackRate,
         },
     );
@@ -99,18 +100,15 @@ function buildClipPeaksRequest(
     const pr =
         Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
 
-    // 计算 clip 在源文件中的起始时间
-    // sourceBeats = durationSec / secPerBeat（源文件总 beats）
-    const sourceBeats = durationSec / Math.max(1e-6, secPerBeat);
-    const trimStart = Math.max(0, Number(clip.trimStartBeat ?? 0) || 0);
-    const trimEnd = Math.max(0, Number(clip.trimEndBeat ?? 0) || 0);
-    const startBeat = Math.min(trimStart, sourceBeats);
-    const endBeat = Math.max(startBeat, sourceBeats - trimEnd);
+    // trimStartSec / trimEndSec 是秒单位，直接用于计算源文件内的起始和结束时间
+    const trimStart = Math.max(0, Number(clip.trimStartSec ?? 0) || 0); // 秒
+    const trimEnd = Math.max(0, Number(clip.trimEndSec ?? 0) || 0);     // 秒
+    const startSec = Math.min(trimStart, durationSec);                  // clip 在源文件中的起始秒
+    const endSec = Math.max(startSec, durationSec - trimEnd);           // clip 在源文件中的结束秒
 
-    const startSec = (startBeat / Math.max(1e-6, sourceBeats)) * durationSec;
-    const segLenBeats = Math.min(lengthBeats * pr, endBeat - startBeat);
-    const segLenSec = (segLenBeats / Math.max(1e-6, sourceBeats)) * durationSec;
-
+    // clip 在 timeline 上的时长（秒）= lengthSec（已是秒），受 playbackRate 影响
+    // 源文件中实际读取的时长 = min(lengthSec * pr, endSec - startSec)
+    const segLenSec = Math.min(lengthSec * pr, endSec - startSec);
     if (
         !Number.isFinite(startSec) ||
         !Number.isFinite(segLenSec) ||
@@ -122,7 +120,7 @@ function buildClipPeaksRequest(
     const startSecQ = qsec(startSec);
     const durSecQ = Math.max(0.005, qsec(segLenSec));
 
-    // columns 按 64 量化，与 ClipItem 保持一致
+    // columns �?64 量化，与 ClipItem 保持一�?
     const rawCols = Math.max(16, Math.min(8192, Math.floor(widthPx)));
     const columns = Math.max(16, Math.min(8192, Math.round(rawCols / 64) * 64));
 
@@ -138,25 +136,21 @@ function buildClipPeaksRequest(
 }
 
 /**
- * 为 Piano Roll 获取当前 track 下所有可见 clip 的 peaks 数据
+ * �?Piano Roll 获取当前 track 下所有可�?clip �?peaks 数据
  *
  * @param args.clips - 当前 track 下的所有 clip
- * @param args.visibleStartBeat - 可见区域起始 beat
- * @param args.visibleEndBeat - 可见区域结束 beat
- * @param args.pxPerBeat - 每 beat 的像素宽度
+ * @param args.visibleStartSec - 可见区域起始时间（秒）
+ * @param args.visibleEndSec - 可见区域结束时间（秒）
  * @param args.secPerBeat - 每 beat 的秒数
  * @returns ClipPeaksEntry 数组，每个 entry 对应一个可见 clip
  */
 export function useClipsPeaksForPianoRoll(args: {
     clips: ClipInfo[];
-    visibleStartBeat: number;
-    visibleEndBeat: number;
-    pxPerBeat: number;
+    visibleStartSec: number;
+    visibleEndSec: number;
     secPerBeat: number;
 }): ClipPeaksEntry[] {
-    const { clips, visibleStartBeat, visibleEndBeat, pxPerBeat, secPerBeat } =
-        args;
-
+    const { clips, visibleStartSec, visibleEndSec, secPerBeat } = args;
     const [peaksMap, setPeaksMap] = useState<Map<string, CachedEntry>>(
         new Map(),
     );
@@ -170,13 +164,28 @@ export function useClipsPeaksForPianoRoll(args: {
         };
     }, []);
 
+    /**
+     * 计算稳定�?peaks 请求 key 列表（不�?lengthSec）�?
+     * trim 拖动只改�?lengthSec，不改变 sourcePath/trimStart/trimEnd/playbackRate�?
+     * 因此 cacheKey 不变，不会触发重新请求�?
+     */
+    // clip.startSec / clip.lengthSec 是秒单位，直接与可见区域比较
+    const peaksRequestKeys = clips
+        .filter((clip) => {
+            return clip.startSec + clip.lengthSec > visibleStartSec && clip.startSec < visibleEndSec;
+        })
+        .map((clip) => {
+            // 使用固定宽度�?024）计�?cacheKey，与 lengthSec 解�?
+            const req = buildClipPeaksRequest(clip, secPerBeat, 1024);
+            return req ? `${clip.id}:${req.cacheKey}` : null;
+        })
+        .filter(Boolean)
+        .join(",");
+
     useEffect(() => {
-        // 过滤出与可见区域有交叠的 clip
+        // 过滤出与可见区域有交叠的 clip（clip.startSec/lengthSec 是秒，直接比较）
         const visibleClips = clips.filter((clip) => {
-            const clipEnd = clip.startBeat + clip.lengthBeats;
-            return (
-                clipEnd > visibleStartBeat && clip.startBeat < visibleEndBeat
-            );
+            return clip.startSec + clip.lengthSec > visibleStartSec && clip.startSec < visibleEndSec;
         });
 
         if (visibleClips.length === 0) {
@@ -194,8 +203,8 @@ export function useClipsPeaksForPianoRoll(args: {
         }> = [];
 
         for (const clip of visibleClips) {
-            const widthPx = clip.lengthBeats * pxPerBeat;
-            const req = buildClipPeaksRequest(clip, secPerBeat, widthPx);
+            // 使用固定列数�?024）请�?peaks，与 lengthSec 解耦，避免 trim 时重复请�?
+            const req = buildClipPeaksRequest(clip, secPerBeat, 1024);
             if (!req) continue;
 
             const cached = lruGet(clipPeaksCache, req.cacheKey);
@@ -277,26 +286,28 @@ export function useClipsPeaksForPianoRoll(args: {
                 return next;
             });
         })();
-    }, [clips, visibleStartBeat, visibleEndBeat, pxPerBeat, secPerBeat]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [peaksRequestKeys, visibleStartSec, visibleEndSec, secPerBeat]);
 
     // 构建返回值：过滤可见 clip，附加 peaks 数据
     const visibleClips = clips.filter((clip) => {
-        const clipEnd = clip.startBeat + clip.lengthBeats;
-        return clipEnd > visibleStartBeat && clip.startBeat < visibleEndBeat;
+        return clip.startSec + clip.lengthSec > visibleStartSec && clip.startSec < visibleEndSec;
     });
 
     return visibleClips.map((clip): ClipPeaksEntry => {
         const entry = peaksMap.get(clip.id) ?? null;
         return {
             clipId: clip.id,
-            startBeat: clip.startBeat,
-            lengthBeats: clip.lengthBeats,
+            startSec: clip.startSec,
+            // lengthSec 直接从 clip 读取，trim 拖动时实时更新，不触发 peaks 重请求
+            lengthSec: clip.lengthSec,
             peaks: entry
                 ? {
                       min: entry.min,
                       max: entry.max,
                       startSec: entry.startSec,
                       durSec: entry.durSec,
+                      columns: entry.min.length,
                   }
                 : null,
         };

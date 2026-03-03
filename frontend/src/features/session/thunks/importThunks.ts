@@ -61,7 +61,7 @@ export const importAudioAtPosition = createAsyncThunk(
         payload: {
             audioPath: string;
             trackId?: string | null;
-            startBeat?: number;
+            startSec?: number;
         },
         { dispatch, rejectWithValue, getState },
     ) => {
@@ -97,7 +97,7 @@ export const importAudioAtPosition = createAsyncThunk(
         const imported = await webApi.importAudioItem(
             payload.audioPath,
             targetTrackId,
-            payload.startBeat,
+            payload.startSec,
         );
         if (!(imported as { ok?: boolean }).ok) {
             return rejectWithValue(
@@ -115,7 +115,7 @@ export const importAudioAtPosition = createAsyncThunk(
 export const importAudioFileAtPosition = createAsyncThunk(
     "session/importAudioFileAtPosition",
     async (
-        payload: { file: File; trackId?: string | null; startBeat?: number },
+        payload: { file: File; trackId?: string | null; startSec?: number },
         { dispatch, rejectWithValue, getState },
     ) => {
         try {
@@ -155,7 +155,7 @@ export const importAudioFileAtPosition = createAsyncThunk(
                 fileName,
                 base64,
                 targetTrackId,
-                payload.startBeat,
+                payload.startSec,
             );
             if (!(imported as { ok?: boolean }).ok) {
                 return rejectWithValue(

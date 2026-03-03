@@ -42,8 +42,8 @@ pub struct TimelineClip {
     pub id: String,
     pub track_id: String,
     pub name: String,
-    pub start_beat: f64,
-    pub length_beats: f64,
+    pub start_sec: f64,
+    pub length_sec: f64,
     pub color: String,
 
     pub source_path: Option<String>,
@@ -55,11 +55,11 @@ pub struct TimelineClip {
 
     pub gain: Option<f32>,
     pub muted: Option<bool>,
-    pub trim_start_beat: Option<f64>,
-    pub trim_end_beat: Option<f64>,
+    pub trim_start_sec: Option<f64>,
+    pub trim_end_sec: Option<f64>,
     pub playback_rate: Option<f32>,
-    pub fade_in_beats: Option<f64>,
-    pub fade_out_beats: Option<f64>,
+    pub fade_in_sec: Option<f64>,
+    pub fade_out_sec: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,8 +71,8 @@ pub struct TimelineStatePayload {
     pub selected_track_id: Option<String>,
     pub selected_clip_id: Option<String>,
     pub bpm: f64,
-    pub playhead_beat: f64,
-    pub project_beats: Option<f64>,
+    pub playhead_sec: f64,
+    pub project_sec: Option<f64>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectMetaPayload>,

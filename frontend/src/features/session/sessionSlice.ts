@@ -98,15 +98,14 @@ export interface SessionState {
     editParam: EditParam;
     bpm: number;
     beats: number;
-    projectBeats: number;
-    grid: GridSize;
+    projectSec: number;    grid: GridSize;
 
     // Monotonic bump token for invalidating parameter curve caches.
     // - Not included in undo/redo snapshots.
     // - Should be bumped on any timeline/undo/redo operation that may affect param rendering.
     paramsEpoch: number;
 
-    playheadBeat: number;
+    playheadSec: number;
     tracks: TrackInfo[];
     clips: ClipInfo[];
     selectedTrackId: string | null;
@@ -123,7 +122,7 @@ export interface SessionState {
     clipPitchRanges: Record<string, { min: number; max: number }>;
 
     /**
-     * 后端推送的 per-clip 音高检测结果（MIDI 曲线）。
+     * 后端推送的 per-clip 音高检测结果（MIDI 曲线）�?
      * key: clip_id
      * value: { startFrame, midiCurve, framePeriodMs, sampleRate }
      */
@@ -142,7 +141,7 @@ export interface SessionState {
     outputPath: string;
     pitchShift: number;
     playbackClipId: string | null;
-    playbackAnchorBeat: number;
+    playbackAnchorSec: number;
 
     runtime: {
         device: string;
@@ -183,7 +182,7 @@ interface StateSnapshot {
     selectedTrackId: string | null;
     selectedClipId: string | null;
     selectedPointId: string | null;
-    playheadBeat: number;
+    playheadSec: number;
     clipWaveforms: Record<string, WaveformPreview>;
     clipPitchRanges: Record<string, { min: number; max: number }>;
 }
@@ -232,7 +231,7 @@ function createSnapshot(state: SessionState): StateSnapshot {
         selectedTrackId: state.selectedTrackId,
         selectedClipId: state.selectedClipId,
         selectedPointId: state.selectedPointId,
-        playheadBeat: state.playheadBeat,
+        playheadSec: state.playheadSec,
         clipWaveforms: JSON.parse(
             JSON.stringify(state.clipWaveforms),
         ) as Record<string, WaveformPreview>,
@@ -250,7 +249,7 @@ function applySnapshot(state: SessionState, snapshot: StateSnapshot) {
     state.selectedTrackId = snapshot.selectedTrackId;
     state.selectedClipId = snapshot.selectedClipId;
     state.selectedPointId = snapshot.selectedPointId;
-    state.playheadBeat = snapshot.playheadBeat;
+    state.playheadSec = snapshot.playheadSec;
     state.clipWaveforms = JSON.parse(
         JSON.stringify(snapshot.clipWaveforms),
     ) as Record<string, WaveformPreview>;
@@ -296,8 +295,8 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
             id: clip.id,
             trackId: clip.track_id,
             name: clip.name,
-            startBeat: Number(clip.start_beat ?? 0),
-            lengthBeats: Math.max(0.0, Number(clip.length_beats ?? 1)),
+            startSec: Number(clip.start_sec ?? 0),
+            lengthSec: Math.max(0.0, Number(clip.length_sec ?? 1)),
             color: normalizeClipColor(clip.color),
             sourcePath: clip.source_path,
             durationSec: Number(clip.duration_sec ?? 0) || undefined,
@@ -305,19 +304,19 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
             sourceSampleRate: clip.source_sample_rate,
             gain: clamp(Number(clip.gain ?? 1), 0, 2),
             muted: Boolean(clip.muted),
-            // Allow negative trimStartBeat to represent leading silence (slip-edit past source start).
-            trimStartBeat: Number(clip.trim_start_beat ?? 0) || 0,
-            trimEndBeat: Math.max(0, Number(clip.trim_end_beat ?? 0)),
+            // Allow negative trimStartSec to represent leading silence (slip-edit past source start).
+            trimStartSec: Number(clip.trim_start_sec ?? 0) || 0,
+            trimEndSec: Math.max(0, Number(clip.trim_end_sec ?? 0)),
             playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
-            fadeInBeats: Math.max(0, Number(clip.fade_in_beats ?? 0)),
-            fadeOutBeats: Math.max(0, Number(clip.fade_out_beats ?? 0)),
+            fadeInSec: Math.max(0, Number(clip.fade_in_sec ?? 0)),
+            fadeOutSec: Math.max(0, Number(clip.fade_out_sec ?? 0)),
             fadeInCurve: "sine" as FadeCurveType,
             fadeOutCurve: "sine" as FadeCurveType,
         };
 
-        // DEBUG: 打印每个clip的关键参数
+        // DEBUG: 打印每个clip的关键参�?
         console.log(`[SessionSlice] Parsed clip ${parsed.id.slice(0, 8)}:`, {
-            lengthBeats: parsed.lengthBeats,
+            lengthSec: parsed.lengthSec,
             durationSec: parsed.durationSec,
             durationFrames: parsed.durationFrames,
             sourceSampleRate: parsed.sourceSampleRate,
@@ -328,9 +327,9 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
                       )
                     : "N/A",
             sourcePath: parsed.sourcePath?.split(/[/\\]/).pop(),
-            startBeat: parsed.startBeat,
-            trimStartBeat: parsed.trimStartBeat,
-            trimEndBeat: parsed.trimEndBeat,
+            startSec: parsed.startSec,
+            trimStartSec: parsed.trimStartSec,
+            trimEndSec: parsed.trimEndSec,
             playbackRate: parsed.playbackRate,
         });
 
@@ -340,10 +339,10 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
     state.selectedTrackId = timeline.selected_track_id;
     state.selectedClipId = timeline.selected_clip_id;
     state.bpm = clamp(Number(timeline.bpm ?? state.bpm), 10, 300);
-    state.playheadBeat = Math.max(0, Number(timeline.playhead_beat ?? 0));
-    state.projectBeats = Math.max(
+    state.playheadSec = Math.max(0, Number(timeline.playhead_sec ?? 0));
+    state.projectSec = Math.max(
         4,
-        Number(timeline.project_beats ?? state.projectBeats),
+        Number(timeline.project_sec ?? state.projectSec),
     );
 
     const project = (timeline as any).project as
@@ -427,37 +426,37 @@ function upsertImportedClip(
         });
     }
 
-    const maxEndBeat = state.clips.reduce(
-        (maxBeat, clip) => Math.max(maxBeat, clip.startBeat + clip.lengthBeats),
+    const maxEndSec = state.clips.reduce(
+        (maxSec, clip) => Math.max(maxSec, clip.startSec + clip.lengthSec),
         0,
     );
-    const startBeat = Math.max(0, Math.ceil(maxEndBeat));
+    const startSec = Math.max(0, Math.ceil(maxEndSec));
     const newClipId = createId("clip");
-    const lengthBeats = Math.max(
+    const lengthSec = Math.max(
         1,
-        meta?.durationSec ? (meta.durationSec * state.bpm) / 60 : 8,
+        meta?.durationSec ?? 4,
     );
     state.clips.push({
         id: newClipId,
         trackId: targetTrackId,
         name: basenameFromPath(audioPath),
-        startBeat,
-        lengthBeats,
+        startSec,
+        lengthSec,
         color: "emerald",
         sourcePath: audioPath,
         durationSec: meta?.durationSec,
         gain: 1,
         muted: false,
-        trimStartBeat: 0,
-        trimEndBeat: 0,
+        trimStartSec: 0,
+        trimEndSec: 0,
         playbackRate: 1,
-        fadeInBeats: 0,
-        fadeOutBeats: 0,
+        fadeInSec: 0,
+        fadeOutSec: 0,
         fadeInCurve: "sine" as FadeCurveType,
         fadeOutCurve: "sine" as FadeCurveType,
     });
     state.selectedClipId = newClipId;
-    state.playheadBeat = startBeat;
+    state.playheadSec = startSec;
     state.selectedPointId = null;
     ensureClipAutomation(state, newClipId);
     state.clipWaveforms[newClipId] = meta?.waveform ?? [];
@@ -465,6 +464,11 @@ function upsertImportedClip(
         min: -24,
         max: 24,
     };
+    // 导入后自动扩展工程边界
+    const clipEnd = startSec + lengthSec;
+    if (clipEnd > state.projectSec) {
+        state.projectSec = Math.ceil(clipEnd);
+    }
 }
 
 const initialState: SessionState = {
@@ -472,12 +476,12 @@ const initialState: SessionState = {
     editParam: "pitch",
     bpm: 120,
     beats: 4,
-    projectBeats: 64,
+    projectSec: 30, // 默认 30 秒工程边界
     grid: "1/4",
 
     paramsEpoch: 0,
 
-    playheadBeat: 0,
+    playheadSec: 0,
     tracks: [
         {
             id: "track_main",
@@ -504,7 +508,7 @@ const initialState: SessionState = {
     outputPath: "outputs/webview_synth.wav",
     pitchShift: 0,
     playbackClipId: null,
-    playbackAnchorBeat: 0,
+    playbackAnchorSec: 0,
 
     runtime: {
         device: "unknown",
@@ -628,8 +632,8 @@ const sessionSlice = createSlice({
         setGrid(state, action: PayloadAction<GridSize>) {
             state.grid = action.payload;
         },
-        setPlayheadBeat(state, action: PayloadAction<number>) {
-            state.playheadBeat = Math.max(0, action.payload);
+        setplayheadSec(state, action: PayloadAction<number>) {
+            state.playheadSec = Math.max(0, action.payload);
         },
         setModelDir(state, action: PayloadAction<string>) {
             state.modelDir = action.payload;
@@ -657,13 +661,18 @@ const sessionSlice = createSlice({
         },
         moveClipStart(
             state,
-            action: PayloadAction<{ clipId: string; startBeat: number }>,
+            action: PayloadAction<{ clipId: string; startSec: number }>,
         ) {
             const clip = state.clips.find(
                 (entry) => entry.id === action.payload.clipId,
             );
             if (clip) {
-                clip.startBeat = Math.max(0, action.payload.startBeat);
+                clip.startSec = Math.max(0, action.payload.startSec);
+                // 拖动超出边界时自动扩展工程时长
+                const clipEnd = clip.startSec + clip.lengthSec;
+                if (clipEnd > state.projectSec) {
+                    state.projectSec = Math.ceil(clipEnd);
+                }
             }
         },
         moveClipTrack(
@@ -679,13 +688,13 @@ const sessionSlice = createSlice({
         },
         setClipLength(
             state,
-            action: PayloadAction<{ clipId: string; lengthBeats: number }>,
+            action: PayloadAction<{ clipId: string; lengthSec: number }>,
         ) {
             const clip = state.clips.find(
                 (entry) => entry.id === action.payload.clipId,
             );
             if (clip) {
-                clip.lengthBeats = Math.max(0.0, action.payload.lengthBeats);
+                clip.lengthSec = Math.max(0.0, action.payload.lengthSec);
             }
         },
         setClipPlaybackRate(
@@ -702,27 +711,27 @@ const sessionSlice = createSlice({
             state,
             action: PayloadAction<{
                 clipId: string;
-                trimStartBeat?: number;
-                trimEndBeat?: number;
+                trimStartSec?: number;
+                trimEndSec?: number;
             }>,
         ) {
             const clip = state.clips.find(
                 (entry) => entry.id === action.payload.clipId,
             );
             if (!clip) return;
-            if (action.payload.trimStartBeat !== undefined) {
-                clip.trimStartBeat = Number(action.payload.trimStartBeat) || 0;
+            if (action.payload.trimStartSec !== undefined) {
+                clip.trimStartSec = Number(action.payload.trimStartSec) || 0;
             }
-            if (action.payload.trimEndBeat !== undefined) {
-                clip.trimEndBeat = Math.max(0, action.payload.trimEndBeat);
+            if (action.payload.trimEndSec !== undefined) {
+                clip.trimEndSec = Math.max(0, action.payload.trimEndSec);
             }
         },
         setClipFades(
             state,
             action: PayloadAction<{
                 clipId: string;
-                fadeInBeats?: number;
-                fadeOutBeats?: number;
+                fadeInSec?: number;
+                fadeOutSec?: number;
                 fadeInCurve?: FadeCurveType;
                 fadeOutCurve?: FadeCurveType;
             }>,
@@ -731,11 +740,11 @@ const sessionSlice = createSlice({
                 (entry) => entry.id === action.payload.clipId,
             );
             if (!clip) return;
-            if (action.payload.fadeInBeats !== undefined) {
-                clip.fadeInBeats = Math.max(0, action.payload.fadeInBeats);
+            if (action.payload.fadeInSec !== undefined) {
+                clip.fadeInSec = Math.max(0, action.payload.fadeInSec);
             }
-            if (action.payload.fadeOutBeats !== undefined) {
-                clip.fadeOutBeats = Math.max(0, action.payload.fadeOutBeats);
+            if (action.payload.fadeOutSec !== undefined) {
+                clip.fadeOutSec = Math.max(0, action.payload.fadeOutSec);
             }
             if (action.payload.fadeInCurve !== undefined) {
                 clip.fadeInCurve = action.payload.fadeInCurve;
@@ -764,7 +773,7 @@ const sessionSlice = createSlice({
             if (!clip) return;
             clip.muted = Boolean(action.payload.muted);
         },
-        /** 乐观更新 clip 颜色（立即反映到 UI，后端确认前先行生效） */
+        /** 乐观更新 clip 颜色（立即反映到 UI，后端确认前先行生效�?*/
         optimisticUpdateClipColor(
             state,
             action: PayloadAction<{ clipId: string; color: ClipColor }>,
@@ -793,16 +802,16 @@ const sessionSlice = createSlice({
                 id: newClipId,
                 trackId: action.payload.trackId,
                 name: "New Clip.wav",
-                startBeat: Math.max(0, state.playheadBeat),
-                lengthBeats: 2,
+                startSec: Math.max(0, state.playheadSec),
+                lengthSec: 2,
                 color: "emerald",
                 gain: 1,
                 muted: false,
-                trimStartBeat: 0,
-                trimEndBeat: 0,
+                trimStartSec: 0,
+                trimEndSec: 0,
                 playbackRate: 1,
-                fadeInBeats: 0,
-                fadeOutBeats: 0,
+                fadeInSec: 0,
+                fadeOutSec: 0,
                 fadeInCurve: "sine" as FadeCurveType,
                 fadeOutCurve: "sine" as FadeCurveType,
             });
@@ -924,7 +933,7 @@ const sessionSlice = createSlice({
                 state.selectedPointId = null;
             }
         },
-        /** 更新某个 clip 的音高曲线（来自后端 clip_pitch_data 事件） */
+        /** 更新某个 clip 的音高曲线（来自后端 clip_pitch_data 事件�?*/
         setClipPitchData(
             state,
             action: PayloadAction<{
@@ -944,7 +953,7 @@ const sessionSlice = createSlice({
                 sampleRate,
             };
         },
-        /** 移除某个 clip 的音高曲线（clip 被删除时清理） */
+        /** 移除某个 clip 的音高曲线（clip 被删除时清理�?*/
         removeClipPitchData(state, action: PayloadAction<string>) {
             delete state.clipPitchCurves[action.payload];
         },
@@ -1262,7 +1271,7 @@ const sessionSlice = createSlice({
                 state.runtime.playbackTarget = ok ? "original" : null;
                 state.playbackClipId = ok ? (payload.clipId ?? null) : null;
                 // Backend playback state reports an absolute clock; anchor beat is no longer needed.
-                state.playbackAnchorBeat = 0;
+                state.playbackAnchorSec = 0;
                 state.status = ok ? "Playing original" : "Play original failed";
             })
             .addCase(playOriginal.rejected, setRejected)
@@ -1283,7 +1292,7 @@ const sessionSlice = createSlice({
                 state.runtime.playbackTarget = ok ? "synthesized" : null;
                 state.playbackClipId = ok ? (payload.clipId ?? null) : null;
                 // Backend playback state reports an absolute clock; anchor beat is no longer needed.
-                state.playbackAnchorBeat = 0;
+                state.playbackAnchorSec = 0;
                 state.status = ok
                     ? "Playing synthesized"
                     : "Play synthesized failed";
@@ -1301,7 +1310,7 @@ const sessionSlice = createSlice({
                 state.runtime.playbackPositionSec = 0;
                 state.runtime.playbackDurationSec = 0;
                 state.playbackClipId = null;
-                state.playbackAnchorBeat = 0;
+                state.playbackAnchorSec = 0;
                 state.status = (action.payload as { ok?: boolean }).ok
                     ? "Audio stopped"
                     : "Stop audio failed";
@@ -1326,14 +1335,14 @@ const sessionSlice = createSlice({
                 const nextPositionSec = payload.position_sec ?? 0;
                 const nextDurationSec = payload.duration_sec ?? 0;
 
-                // 0.5ms 阈值：避免轮询带来的浮点抖动导致无意义的 Redux 更新。
+                // 0.5ms 阈值：避免轮询带来的浮点抖动导致无意义�?Redux 更新�?
                 const EPS_SEC = 0.0005;
                 const epsBeat = (state.bpm / 60) * EPS_SEC;
 
-                let nextPlayheadBeat = state.playheadBeat;
+                let nextplayheadSec = state.playheadSec;
                 if (nextIsPlaying) {
                     const absSec = (payload.base_sec ?? 0) + nextPositionSec;
-                    nextPlayheadBeat = Math.max(0, (absSec * state.bpm) / 60);
+                    nextplayheadSec = Math.max(0, (absSec * state.bpm) / 60);
                 }
 
                 const shouldUpdatePlaybackFields =
@@ -1346,16 +1355,16 @@ const sessionSlice = createSlice({
                         nextDurationSec - state.runtime.playbackDurationSec,
                     ) > EPS_SEC ||
                     (nextIsPlaying &&
-                        Math.abs(nextPlayheadBeat - state.playheadBeat) >
+                        Math.abs(nextplayheadSec - state.playheadSec) >
                             epsBeat);
 
                 if (!shouldUpdatePlaybackFields) {
-                    // 即使播放已停止，也避免重复写入相同值（Immer 会把赋值视为 mutation）。
+                    // 即使播放已停止，也避免重复写入相同值（Immer 会把赋值视�?mutation）�?
                     if (!nextIsPlaying) {
                         if (state.playbackClipId !== null)
                             state.playbackClipId = null;
-                        if (state.playbackAnchorBeat !== 0)
-                            state.playbackAnchorBeat = 0;
+                        if (state.playbackAnchorSec !== 0)
+                            state.playbackAnchorSec = 0;
                     }
                     return;
                 }
@@ -1366,10 +1375,10 @@ const sessionSlice = createSlice({
                 state.runtime.playbackDurationSec = nextDurationSec;
 
                 if (nextIsPlaying) {
-                    state.playheadBeat = nextPlayheadBeat;
+                    state.playheadSec = nextplayheadSec;
                 } else {
                     state.playbackClipId = null;
-                    state.playbackAnchorBeat = 0;
+                    state.playbackAnchorSec = 0;
                 }
             })
 
@@ -1610,17 +1619,17 @@ const sessionSlice = createSlice({
             .addCase(seekPlayhead.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
-                    playhead_beat?: number;
+                    playhead_sec?: number;
                 } & Partial<TimelineState>;
                 if (!payload.ok) {
                     return;
                 }
-                state.playheadBeat = Math.max(
+                state.playheadSec = Math.max(
                     0,
-                    Number(payload.playhead_beat ?? state.playheadBeat),
+                    Number(payload.playhead_sec ?? state.playheadSec),
                 );
                 if (state.runtime.isPlaying) {
-                    state.playbackAnchorBeat = 0;
+                    state.playbackAnchorSec = 0;
                 }
                 if (payload.tracks && payload.clips) {
                     applyTimelineState(state, payload as TimelineState);
@@ -1701,7 +1710,7 @@ export const {
     setBpm,
     setBeats,
     setGrid,
-    setPlayheadBeat,
+    setplayheadSec,
     setModelDir,
     setAudioPath,
     setOutputPath,

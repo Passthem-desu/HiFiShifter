@@ -260,7 +260,7 @@ fn build_clip_pitch_key(
 
     let source_path = clip.source_path.as_deref()?;
 
-    let clip_timeline_len_sec = (clip.length_beats.max(0.0)) * bs;
+    let clip_timeline_len_sec = clip.length_sec.max(0.0);
     if !(clip_timeline_len_sec.is_finite() && clip_timeline_len_sec > 0.0) {
         return None;
     }
@@ -272,14 +272,14 @@ fn build_clip_pitch_key(
         1.0
     };
 
-    // Source trimming in beats -> sec.
-    let trim_start_beats_src = clip.trim_start_beat.max(0.0);
-    let trim_end_beats_src = clip.trim_end_beat.max(0.0);
-    let pre_silence_beats_src = (-clip.trim_start_beat).max(0.0);
+    // Source trimming in sec.
+    let trim_start_sec_src = clip.trim_start_sec.max(0.0);
+    let trim_end_sec_src = clip.trim_end_sec.max(0.0);
+    let pre_silence_sec_src = (-clip.trim_start_sec).max(0.0);
 
-    let trim_start_sec = trim_start_beats_src * bs;
-    let trim_end_sec = trim_end_beats_src * bs;
-    let pre_silence_sec = (pre_silence_beats_src * bs) / playback_rate.max(1e-6);
+    let trim_start_sec = trim_start_sec_src;
+    let trim_end_sec = trim_end_sec_src;
+    let pre_silence_sec = pre_silence_sec_src / playback_rate.max(1e-6);
 
     let fp = frame_period_ms.max(0.1);
 
@@ -296,14 +296,14 @@ fn build_clip_pitch_key(
     hasher.update(&quantize_u32(fp, 1000.0).to_le_bytes());
 
     // 只有影响音频内容的字段才参与 hash：
-    //   source_path、trim_start_beat、trim_end_beat、playback_rate
-    // 注意：start_beat（clip 位置）和 length_beats 不参与 hash，
+    //   source_path、trim_start_sec、trim_end_sec、playback_rate
+    // 注意：start_sec（clip 位置）和 length_sec 不参与 hash，
     //       clip 移动不会触发重新检测。
     hasher.update(&quantize_u32(playback_rate, 10000.0).to_le_bytes());
-    hasher.update(&quantize_i64(clip.trim_start_beat, 1000.0).to_le_bytes());
-    hasher.update(&quantize_u32(clip.trim_end_beat, 1000.0).to_le_bytes());
+    hasher.update(&quantize_i64(clip.trim_start_sec, 1000.0).to_le_bytes());
+    hasher.update(&quantize_u32(clip.trim_end_sec, 1000.0).to_le_bytes());
 
-    // Pre-silence 由 trim_start_beat 和 playback_rate 决定，已隐含在上面的字段中。
+    // Pre-silence 由 trim_start_sec 和 playback_rate 决定，已隐含在上面的字段中。
     hasher.update(&quantize_u32(pre_silence_sec, 1000.0).to_le_bytes());
     hasher.update(&quantize_u32(trim_start_sec, 1000.0).to_le_bytes());
     hasher.update(&quantize_u32(trim_end_sec, 1000.0).to_le_bytes());
@@ -456,9 +456,8 @@ pub fn schedule_clip_pitch_jobs(
             let sk = make_stretch_key(
                 Path::new(source_path),
                 44100,
-                bpm,
-                clip.trim_start_beat,
-                clip.trim_end_beat,
+                clip.trim_start_sec,
+                clip.trim_end_sec,
                 playback_rate,
             );
             let cached = stretch_cache
@@ -627,10 +626,10 @@ pub fn compute_clip_pitch_midi(
             ((*stretched.pcm).clone(), stretched.sample_rate, 2)
         } else {
             let source_path = clip.source_path.as_deref()?;
-            let trim_start_beats_src = clip.trim_start_beat.max(0.0);
-            let trim_end_beats_src = clip.trim_end_beat.max(0.0);
-            let trim_start_sec = trim_start_beats_src * bs;
-            let trim_end_sec = trim_end_beats_src * bs;
+            let trim_start_sec_src = clip.trim_start_sec.max(0.0);
+            let trim_end_sec_src = clip.trim_end_sec.max(0.0);
+            let trim_start_sec = trim_start_sec_src;
+            let trim_end_sec = trim_end_sec_src;
 
             let (in_rate, in_channels, pcm) =
                 crate::audio_utils::decode_audio_f32_interleaved(Path::new(source_path)).ok()?;
@@ -763,7 +762,7 @@ pub fn compute_clip_pitch_midi(
     }
 
     // timeline alignment
-    let clip_timeline_len_sec = (clip.length_beats.max(0.0)) * bs;
+    let clip_timeline_len_sec = clip.length_sec.max(0.0);
     let clip_frames = ((clip_timeline_len_sec * 1000.0) / frame_period_tl_ms)
         .round()
         .max(1.0) as usize;

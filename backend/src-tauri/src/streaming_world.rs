@@ -297,6 +297,10 @@ impl StreamingWorldAnalyzer {
 /// # 内存安全
 /// `WorldSynthesizerRaw` 通过 `Box` 分配在堆上，避免移动后指针失效。
 /// `Drop` 实现会调用 `DestroySynthesizer` 释放 C 侧内存。
+///
+/// WORLD 的 `AddParameters` 只存储指针，不拷贝数据。因此 `pending_data` 队列
+/// 持有每次 `push_frames` 传入的 spectrogram/aperiodicity 数据的所有权，
+/// 直到 `Synthesis2` 消费完毕后才释放，防止悬空指针导致 ACCESS_VIOLATION。
 pub struct StreamingWorldSynthesizer {
     /// C 侧合成器状态（堆分配，避免移动）
     inner: Box<WorldSynthesizerRaw>,
@@ -308,6 +312,12 @@ pub struct StreamingWorldSynthesizer {
     initialized: bool,
     /// FFT 大小（用于读取 buffer 偏移）
     fft_size: usize,
+    /// 持有已送入 AddParameters 的帧数据所有权，防止悬空指针。
+    /// 每次 push_frames 成功后追加一条，pull_samples 消费完毕后清理。
+    /// 元素：(f0, spectrogram, aperiodicity)
+    pending_data: std::collections::VecDeque<(Vec<f64>, Vec<Vec<f64>>, Vec<Vec<f64>>)>,
+    /// 环形缓冲区槽位数（用于判断何时可以安全释放旧数据）
+    number_of_pointers: usize,
 }
 
 impl StreamingWorldSynthesizer {
@@ -344,6 +354,8 @@ impl StreamingWorldSynthesizer {
             output_buf: Vec::new(),
             initialized: true,
             fft_size: fft_size as usize,
+            pending_data: std::collections::VecDeque::new(),
+            number_of_pointers,
         }
     }
 
@@ -354,29 +366,41 @@ impl StreamingWorldSynthesizer {
     /// - `aperiodicity`：非周期性，每帧 `fft_size/2 + 1` 个 bin
     ///
     /// 返回 `true` 表示成功加入队列，`false` 表示环形缓冲区已满（需先 `pull_samples`）。
+    ///
+    /// 注意：数据所有权会被转移到内部队列，直到 `Synthesis2` 消费完毕后才释放。
     pub fn push_frames(
         &mut self,
-        f0: &mut Vec<f64>,
-        spectrogram: &mut Vec<Vec<f64>>,
-        aperiodicity: &mut Vec<Vec<f64>>,
+        f0: Vec<f64>,
+        spectrogram: Vec<Vec<f64>>,
+        aperiodicity: Vec<Vec<f64>>,
     ) -> bool {
         if !self.initialized {
             return false;
         }
-        let f0_len = f0.len() as i32;
-        let mut sp_ptrs: Vec<*mut f64> = spectrogram.iter_mut().map(|r| r.as_mut_ptr()).collect();
-        let mut ap_ptrs: Vec<*mut f64> = aperiodicity.iter_mut().map(|r| r.as_mut_ptr()).collect();
+        // 将数据移入内部存储，确保在 Synthesis2 消费前数据不被释放
+        self.pending_data.push_back((f0, spectrogram, aperiodicity));
+        let entry = self.pending_data.back_mut().unwrap();
+
+        let f0_len = entry.0.len() as i32;
+        let mut sp_ptrs: Vec<*mut f64> = entry.1.iter_mut().map(|r| r.as_mut_ptr()).collect();
+        let mut ap_ptrs: Vec<*mut f64> = entry.2.iter_mut().map(|r| r.as_mut_ptr()).collect();
 
         let ok = unsafe {
             AddParameters(
-                f0.as_mut_ptr(),
+                entry.0.as_mut_ptr(),
                 f0_len,
                 sp_ptrs.as_mut_ptr(),
                 ap_ptrs.as_mut_ptr(),
                 self.inner.as_mut(),
             )
         };
-        ok != 0
+
+        if ok == 0 {
+            // AddParameters 失败（环形缓冲区满），撤回刚才存入的数据
+            self.pending_data.pop_back();
+            return false;
+        }
+        true
     }
 
     /// 取出已合成的 PCM 样本（f64，单声道）。
@@ -390,6 +414,8 @@ impl StreamingWorldSynthesizer {
             return vec![];
         }
 
+        let mut synthesis_count = 0usize;
+
         loop {
             // IsLocked 返回 1 表示环形缓冲区既满又无法合成，需要 refresh
             if unsafe { IsLocked(self.inner.as_mut()) } != 0 {
@@ -400,25 +426,9 @@ impl StreamingWorldSynthesizer {
             if ok == 0 {
                 break;
             }
+            synthesis_count += 1;
 
-            // Synthesis2 将结果写入 synth->buffer[0..buffer_size]
-            // buffer 的实际布局：buffer[0..buffer_size+fft_size] 是有效区域
-            // Synthesis2 每次输出 buffer_size 个样本到 buffer[0..buffer_size]
-            // 注意：synthesisrealtime.cpp 中 buffer 大小为 buffer_size*2 + fft_size
-            // 每次 Synthesis2 后，有效输出在 buffer[0..buffer_size]
-            let buffer_ptr = unsafe {
-                // WorldSynthesizerRaw 的 buffer 字段偏移：
-                // 结构体布局（按 synthesisrealtime.h 顺序）：
-                //   fs(i32), frame_period(f64), buffer_size(i32), number_of_pointers(i32),
-                //   fft_size(i32), buffer(*mut f64), ...
-                // 由于对齐，buffer 字段偏移 = 4(fs) + 4(pad) + 8(fp) + 4(buf_sz) + 4(n_ptr) + 4(fft) + 4(pad) = 32
-                // 但我们不能直接访问不透明结构体的字段。
-                // 改用 Synthesis2 写入的 synth->buffer 指针，通过已知偏移读取。
-                //
-                // 安全替代方案：在 C 侧暴露一个辅助函数获取 buffer 指针。
-                // 这里我们使用保守方案：通过 get_synth_buffer 辅助函数（见下方）。
-                get_synth_buffer(self.inner.as_mut())
-            };
+            let buffer_ptr = unsafe { get_synth_buffer(self.inner.as_mut()) };
 
             if buffer_ptr.is_null() {
                 break;
@@ -429,6 +439,14 @@ impl StreamingWorldSynthesizer {
                     .to_vec()
             };
             self.output_buf.extend_from_slice(&samples);
+        }
+
+        // 每次 Synthesis2 消费约 buffer_size 个样本，对应若干帧。
+        // 当 pending_data 队列长度超过 number_of_pointers 时，
+        // 说明最早的数据已经被环形缓冲区覆盖，可以安全释放。
+        // 保守策略：保留最近 number_of_pointers 条数据，释放更早的。
+        while self.pending_data.len() > self.number_of_pointers {
+            self.pending_data.pop_front();
         }
 
         std::mem::take(&mut self.output_buf)

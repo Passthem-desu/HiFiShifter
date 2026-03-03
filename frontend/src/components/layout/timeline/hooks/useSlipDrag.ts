@@ -7,7 +7,6 @@ import {
     setClipTrim,
 } from "../../../../features/session/sessionSlice";
 import { clamp } from "../math";
-import { clipSourceBeats } from "../clipWaveform";
 
 export type SlipDragState = {
     pointerId: number;
@@ -17,11 +16,11 @@ export type SlipDragState = {
     initialById: Record<
         string,
         {
-            trimStartBeat: number;
-            trimEndBeat: number;
+        trimStartSec: number;
+            trimEndSec: number;
             playbackRate: number;
-            sourceBeats: number | null;
-            maxSlipBeats: number;
+            sourceDurationSec: number | null;
+            maxSlipSec: number;
         }
     >;
 };
@@ -66,23 +65,23 @@ export function useSlipDrag(deps: {
                 : [clipId];
 
         const initialById: SlipDragState["initialById"] = {};
-        const bpm = Number(sessionRef.current.bpm ?? 120) || 120;
         for (const id of clipIds) {
             const c = sessionRef.current.clips.find((x) => x.id === id);
             if (!c) continue;
-            const sourceBeats = clipSourceBeats(c, bpm);
-            const trimStartBeat = Number(c.trimStartBeat ?? 0) || 0;
-            const trimEndBeat = Math.max(0, Number(c.trimEndBeat ?? 0) || 0);
-            const maxSlipBeats =
-                sourceBeats != null && Number.isFinite(sourceBeats)
-                    ? Math.max(0, Number(sourceBeats))
-                    : Math.max(0, Number(c.lengthBeats ?? 0) || 0);
+            // 纯秒域：source 文件总时长就是最大 slip 范围
+            const sourceDurationSec = Number(c.durationSec ?? 0) || null;
+            const trimStartSec = Number(c.trimStartSec ?? 0) || 0;
+            const trimEndSec = Math.max(0, Number(c.trimEndSec ?? 0) || 0);
+            const maxSlipSec =
+                sourceDurationSec != null && Number.isFinite(sourceDurationSec)
+                    ? Math.max(0, sourceDurationSec)
+                    : Math.max(0, Number(c.lengthSec ?? 0) || 0);
             initialById[id] = {
-                trimStartBeat,
-                trimEndBeat,
+                trimStartSec,
+                trimEndSec,
                 playbackRate: Number(c.playbackRate ?? 1) || 1,
-                sourceBeats,
-                maxSlipBeats,
+                sourceDurationSec,
+                maxSlipSec,
             };
         }
 
@@ -112,18 +111,18 @@ export function useSlipDrag(deps: {
                         ? initial.playbackRate
                         : 1;
                 const deltaSrcBeat = deltaBeat * rate;
-                let nextTrimStart = initial.trimStartBeat + deltaSrcBeat;
+                let nextTrimStart = initial.trimStartSec + deltaSrcBeat;
                 if (
-                    Number.isFinite(initial.maxSlipBeats) &&
-                    initial.maxSlipBeats > 1e-6
+                    Number.isFinite(initial.maxSlipSec) &&
+                    initial.maxSlipSec > 1e-6
                 ) {
                     nextTrimStart = clamp(
                         nextTrimStart,
-                        -initial.maxSlipBeats,
-                        initial.maxSlipBeats,
+                        -initial.maxSlipSec,
+                        initial.maxSlipSec,
                     );
                 }
-                dispatch(setClipTrim({ clipId: id, trimStartBeat: nextTrimStart }));
+                dispatch(setClipTrim({ clipId: id, trimStartSec: nextTrimStart }));
             }
         }
 
@@ -139,8 +138,8 @@ export function useSlipDrag(deps: {
                 void dispatch(
                     setClipStateRemote({
                         clipId: id,
-                        trimStartBeat: Number(now.trimStartBeat ?? 0) || 0,
-                        trimEndBeat: Number(now.trimEndBeat ?? 0) || 0,
+                        trimStartSec: Number(now.trimStartSec ?? 0) || 0,
+                        trimEndSec: Number(now.trimEndSec ?? 0) || 0,
                     }),
                 );
             }

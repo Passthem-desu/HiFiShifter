@@ -3,8 +3,8 @@ import { webApi } from "../../../services/webviewApi";
 import type { TimelineState } from "../../../types/api";
 import type { ClipTemplate } from "../sessionTypes";
 
-// 注意：这些 thunk 依赖 SessionState（目前仍在 sessionSlice.ts 内部定义）。
-// 我们在此处用 type-only import，避免运行时循环依赖。
+// 注意：这�?thunk 依赖 SessionState（目前仍�?sessionSlice.ts 内部定义）�?
+// 我们在此处用 type-only import，避免运行时循环依赖�?
 import type { SessionState } from "../sessionSlice";
 
 export const addTrackRemote = createAsyncThunk(
@@ -41,8 +41,8 @@ export const selectTrackRemote = createAsyncThunk(
 
 export const setProjectLengthRemote = createAsyncThunk(
     "session/setProjectLengthRemote",
-    async (projectBeats: number) => {
-        return webApi.setProjectLength(projectBeats);
+    async (projectSec: number) => {
+        return webApi.setProjectLength(projectSec);
     },
 );
 
@@ -72,14 +72,14 @@ export const createClipsRemote = createAsyncThunk(
         const state0 = getState() as { session: SessionState };
         const knownIds = new Set(state0.session.clips.map((c) => c.id));
 
-        // 并行创建所有 clip，提升批量操作性能
+        // 并行创建所�?clip，提升批量操作性能
         const results = await Promise.all(
             payload.templates.map(async (tpl) => {
                 const added = await webApi.addClip({
                     trackId: tpl.trackId,
                     name: tpl.name,
-                    startBeat: tpl.startBeat,
-                    lengthBeats: tpl.lengthBeats,
+                    startSec: tpl.startSec,
+                    lengthSec: tpl.lengthSec,
                     sourcePath: tpl.sourcePath,
                 });
                 if (!(added as { ok?: boolean }).ok) {
@@ -98,14 +98,14 @@ export const createClipsRemote = createAsyncThunk(
 
                 const updated = await webApi.setClipState({
                     clipId: createdId,
-                    lengthBeats: tpl.lengthBeats,
+                    lengthSec: tpl.lengthSec,
                     gain: tpl.gain,
                     muted: tpl.muted,
-                    trimStartBeat: tpl.trimStartBeat,
-                    trimEndBeat: tpl.trimEndBeat,
+                    trimstartSec: tpl.trimStartSec,
+                    trimEndSec: tpl.trimEndSec,
                     playbackRate: tpl.playbackRate,
-                    fadeInBeats: tpl.fadeInBeats,
-                    fadeOutBeats: tpl.fadeOutBeats,
+                    fadeInSec: tpl.fadeInSec,
+                    fadeOutSec: tpl.fadeOutSec,
                 });
                 if (!(updated as { ok?: boolean }).ok) {
                     throw new Error(
@@ -127,7 +127,7 @@ export const createClipsRemote = createAsyncThunk(
         }
 
         const createdClipIds = results.map((r) => r.createdId);
-        // 取最后一个 timeline 作为最终状态（各 clip 的 setClipState 结果）
+        // 取最后一�?timeline 作为最终状态（�?clip �?setClipState 结果�?
         const lastTimeline = results[results.length - 1]?.timeline ?? null;
         if (!lastTimeline) {
             return rejectWithValue("create_clips_failed");
@@ -148,7 +148,7 @@ export const removeClipRemote = createAsyncThunk(
 
 export const moveClipRemote = createAsyncThunk(
     "session/moveClipRemote",
-    async (payload: { clipId: string; startBeat: number; trackId?: string }) => {
+    async (payload: { clipId: string; startSec: number; trackId?: string }) => {
         return webApi.moveClip(payload);
     },
 );
@@ -159,16 +159,16 @@ export const setClipStateRemote = createAsyncThunk(
         clipId: string;
         name?: string;
         color?: string;
-        lengthBeats?: number;
+        lengthSec?: number;
         gain?: number;
         muted?: boolean;
-        trimStartBeat?: number;
-        trimEndBeat?: number;
+        trimStartSec?: number;
+        trimEndSec?: number;
         playbackRate?: number;
-        fadeInBeats?: number;
-        fadeOutBeats?: number;
+        fadeInSec?: number;
+        fadeOutSec?: number;
     }) => {
-        return webApi.setClipState(payload);
+        return webApi.setClipState({ ...payload, trimstartSec: payload.trimStartSec });
     },
 );
 

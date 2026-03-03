@@ -1,9 +1,9 @@
 import React, { useEffect, useLayoutEffect, useRef } from "react";
 
 import {
-    MAX_PX_PER_BEAT,
+    MAX_PX_PER_SEC,
     MAX_ROW_HEIGHT,
-    MIN_PX_PER_BEAT,
+    MIN_PX_PER_SEC,
     MIN_ROW_HEIGHT,
 } from "./constants";
 import { clamp } from "./math";
@@ -11,18 +11,20 @@ import { clamp } from "./math";
 export const TimelineScrollArea: React.FC<
     Omit<React.HTMLAttributes<HTMLDivElement>, "ref"> & {
         scrollRef: React.MutableRefObject<HTMLDivElement | null>;
-        projectBeats: number;
-        pxPerBeat: number;
-        setPxPerBeat: React.Dispatch<React.SetStateAction<number>>;
+        projectSec: number;
+        bpm: number;
+        pxPerSec: number;
+        setPxPerSec: React.Dispatch<React.SetStateAction<number>>;
         rowHeight: number;
         setRowHeight: React.Dispatch<React.SetStateAction<number>>;
         setScrollLeft: React.Dispatch<React.SetStateAction<number>>;
     }
 > = ({
     scrollRef,
-    projectBeats,
-    pxPerBeat,
-    setPxPerBeat,
+    projectSec,
+    bpm,
+    pxPerSec,
+    setPxPerSec,
     rowHeight,
     setRowHeight,
     setScrollLeft,
@@ -32,10 +34,11 @@ export const TimelineScrollArea: React.FC<
 }) => {
     const lastScrollLeftRef = useRef<number | null>(null);
 
+    // zoom 中心点以秒为基准
     const pendingZoomRef = useRef<{
         pointerX: number;
-        beatAtPointer: number;
-        nextPxPerBeat: number;
+        secAtPointer: number;
+        nextPxPerSec: number;
     } | null>(null);
 
     function syncScrollLeft(scroller: HTMLDivElement) {
@@ -61,31 +64,32 @@ export const TimelineScrollArea: React.FC<
     }, []);
 
     useLayoutEffect(() => {
-        // Apply pending cursor-centered zoom scrollLeft after pxPerBeat has updated
-        // (so layout/width calculations are consistent).
+        // Apply pending cursor-centered zoom scrollLeft after pxPerSec has updated
         const scroller = scrollRef.current;
         const pending = pendingZoomRef.current;
         if (!scroller || !pending) return;
-        if (Math.abs(pending.nextPxPerBeat - pxPerBeat) > 1e-9) return;
+        if (Math.abs(pending.nextPxPerSec - pxPerSec) > 1e-9) return;
 
         pendingZoomRef.current = null;
-        const { beatAtPointer, pointerX } = pending;
+        const { secAtPointer, pointerX } = pending;
+        const secPerBeat = 60 / Math.max(1, bpm);
+        const pxPerBeat = pxPerSec * secPerBeat;
+        const totalBeats = Math.max(8, Math.ceil(projectSec));
         const maxScroll = Math.max(
             0,
-            Math.ceil(Math.max(8, Math.ceil(projectBeats)) * pxPerBeat) -
-                scroller.clientWidth,
+            Math.ceil(totalBeats * pxPerBeat) - scroller.clientWidth,
         );
         const nextScrollLeft = Math.min(
             maxScroll,
-            Math.max(0, beatAtPointer * pxPerBeat - pointerX),
+            Math.max(0, secAtPointer * pxPerSec - pointerX),
         );
         scroller.scrollLeft = nextScrollLeft;
         syncScrollLeft(scroller);
-    }, [projectBeats, pxPerBeat, scrollRef]);
+    }, [projectSec, bpm, pxPerSec, scrollRef]);
 
     useEffect(() => {
-        localStorage.setItem("hifishifter.pxPerBeat", String(pxPerBeat));
-    }, [pxPerBeat]);
+        localStorage.setItem("hifishifter.pxPerSec", String(pxPerSec));
+    }, [pxPerSec]);
 
     useEffect(() => {
         localStorage.setItem("hifishifter.rowHeight", String(rowHeight));
@@ -119,21 +123,21 @@ export const TimelineScrollArea: React.FC<
             const pointerX = e.clientX - bounds.left;
 
             const next = clamp(
-                pxPerBeat * factor,
-                MIN_PX_PER_BEAT,
-                MAX_PX_PER_BEAT,
+                pxPerSec * factor,
+                MIN_PX_PER_SEC,
+                MAX_PX_PER_SEC,
             );
-            if (Math.abs(next - pxPerBeat) < 1e-9) return;
+            if (Math.abs(next - pxPerSec) < 1e-9) return;
 
-            // Compute beat under cursor using the current pxPerBeat and scrollLeft.
-            const beatAtPointer =
-                (pointerX + scroller.scrollLeft) / Math.max(1e-9, pxPerBeat);
+            // 以秒为基准计算光标下的时间点
+            const secAtPointer =
+                (pointerX + scroller.scrollLeft) / Math.max(1e-9, pxPerSec);
             pendingZoomRef.current = {
                 pointerX,
-                beatAtPointer,
-                nextPxPerBeat: next,
+                secAtPointer,
+                nextPxPerSec: next,
             };
-            setPxPerBeat(next);
+            setPxPerSec(next);
         };
 
         scroller.addEventListener("wheel", handler, {
@@ -142,7 +146,7 @@ export const TimelineScrollArea: React.FC<
         return () => {
             scroller.removeEventListener("wheel", handler);
         };
-    }, [pxPerBeat, scrollRef, setPxPerBeat, setRowHeight]);
+    }, [pxPerSec, scrollRef, setPxPerSec, setRowHeight]);
 
     return (
         <div

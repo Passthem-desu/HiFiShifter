@@ -61,12 +61,11 @@ pub fn get_timeline_state(state: State<'_, AppState>) -> crate::models::Timeline
 #[tauri::command(rename_all = "camelCase")]
 pub fn set_transport(
     state: State<'_, AppState>,
-    playhead_beat: Option<f64>,
+    playhead_sec: Option<f64>,
     bpm: Option<f64>,
 ) -> serde_json::Value {
-    core::set_transport(state, playhead_beat, bpm)
+    core::set_transport(state, playhead_sec, bpm)
 }
-
 #[tauri::command(rename_all = "camelCase")]
 pub fn undo_timeline(state: State<'_, AppState>) -> crate::models::TimelineStatePayload {
     core::undo_timeline(state)
@@ -177,22 +176,20 @@ pub fn import_audio_item(
     state: State<'_, AppState>,
     audio_path: String,
     track_id: Option<Option<String>>,
-    start_beat: Option<f64>,
+    start_sec: Option<f64>,
 ) -> crate::models::TimelineStatePayload {
-    timeline::import_audio_item(state, audio_path, track_id, start_beat)
+    timeline::import_audio_item(state, audio_path, track_id, start_sec)
 }
-
 #[tauri::command(rename_all = "camelCase")]
 pub fn import_audio_bytes(
     state: State<'_, AppState>,
     file_name: String,
     base64_data: String,
     track_id: Option<Option<String>>,
-    start_beat: Option<f64>,
+    start_sec: Option<f64>,
 ) -> crate::models::TimelineStatePayload {
-    timeline::import_audio_bytes(state, file_name, base64_data, track_id, start_beat)
+    timeline::import_audio_bytes(state, file_name, base64_data, track_id, start_sec)
 }
-
 #[tauri::command(rename_all = "camelCase")]
 pub fn add_track(
     state: State<'_, AppState>,
@@ -247,11 +244,10 @@ pub fn select_track(state: State<'_, AppState>, track_id: String) -> crate::mode
 #[tauri::command(rename_all = "camelCase")]
 pub fn set_project_length(
     state: State<'_, AppState>,
-    project_beats: f64,
+    project_sec: f64,
 ) -> crate::models::TimelineStatePayload {
-    timeline::set_project_length(state, project_beats)
+    timeline::set_project_length(state, project_sec)
 }
-
 #[tauri::command(rename_all = "camelCase")]
 pub fn get_track_summary(state: State<'_, AppState>, track_id: Option<String>) -> serde_json::Value {
     timeline::get_track_summary(state, track_id)
@@ -262,13 +258,12 @@ pub fn add_clip(
     state: State<'_, AppState>,
     track_id: Option<String>,
     name: Option<String>,
-    start_beat: Option<f64>,
-    length_beats: Option<f64>,
+    start_sec: Option<f64>,
+    length_sec: Option<f64>,
     source_path: Option<String>,
 ) -> crate::models::TimelineStatePayload {
-    timeline::add_clip(state, track_id, name, start_beat, length_beats, source_path)
+    timeline::add_clip(state, track_id, name, start_sec, length_sec, source_path)
 }
-
 #[tauri::command(rename_all = "camelCase")]
 pub fn remove_clip(state: State<'_, AppState>, clip_id: String) -> crate::models::TimelineStatePayload {
     timeline::remove_clip(state, clip_id)
@@ -278,49 +273,46 @@ pub fn remove_clip(state: State<'_, AppState>, clip_id: String) -> crate::models
 pub fn move_clip(
     state: State<'_, AppState>,
     clip_id: String,
-    start_beat: f64,
+    start_sec: f64,
     track_id: Option<String>,
 ) -> crate::models::TimelineStatePayload {
-    timeline::move_clip(state, clip_id, start_beat, track_id)
+    timeline::move_clip(state, clip_id, start_sec, track_id)
 }
-
 #[tauri::command(rename_all = "camelCase")]
 #[allow(clippy::too_many_arguments)]
 pub fn set_clip_state(
     state: State<'_, AppState>,
     clip_id: String,
-    length_beats: Option<f64>,
+    length_sec: Option<f64>,
     gain: Option<f32>,
     muted: Option<bool>,
-    trim_start_beat: Option<f64>,
-    trim_end_beat: Option<f64>,
+    trim_start_sec: Option<f64>,
+    trim_end_sec: Option<f64>,
     playback_rate: Option<f32>,
-    fade_in_beats: Option<f64>,
-    fade_out_beats: Option<f64>,
+    fade_in_sec: Option<f64>,
+    fade_out_sec: Option<f64>,
 ) -> crate::models::TimelineStatePayload {
     timeline::set_clip_state(
         state,
         clip_id,
-        length_beats,
+        length_sec,
         gain,
         muted,
-        trim_start_beat,
-        trim_end_beat,
+        trim_start_sec,
+        trim_end_sec,
         playback_rate,
-        fade_in_beats,
-        fade_out_beats,
+        fade_in_sec,
+        fade_out_sec,
     )
 }
-
 #[tauri::command(rename_all = "camelCase")]
 pub fn split_clip(
     state: State<'_, AppState>,
     clip_id: String,
-    split_beat: f64,
+    split_sec: f64,
 ) -> crate::models::TimelineStatePayload {
-    timeline::split_clip(state, clip_id, split_beat)
+    timeline::split_clip(state, clip_id, split_sec)
 }
-
 #[tauri::command(rename_all = "camelCase")]
 pub fn glue_clips(
     state: State<'_, AppState>,

@@ -64,7 +64,7 @@ impl ProgressTracker {
         
         let mut total = 0.0f64;
         for clip in clips {
-            let duration_sec = (clip.length_beats.max(0.0)) * bs;
+            let duration_sec = clip.length_sec.max(0.0);
             if duration_sec > 0.0 && duration_sec.is_finite() {
                 total += duration_sec * cache_miss_factor;
             }
@@ -157,34 +157,34 @@ impl ProgressTracker {
 mod tests {
     use super::*;
     
-    fn create_test_clip(id: &str, length_beats: f64) -> Clip {
+    fn create_test_clip(id: &str, length_sec: f64) -> Clip {
         Clip {
             id: id.to_string(),
             track_id: "test_track".to_string(),
             name: format!("Clip {}", id),
-            start_beat: 0.0,
-            length_beats,
+            start_sec: 0.0,
+            length_sec,
             color: "#ff0000".to_string(),
             source_path: Some(format!("/test/{}.wav", id)),
-            duration_sec: Some(length_beats / 2.0), // 120 BPM = 0.5 sec/beat
+            duration_sec: Some(length_sec),
             waveform_preview: None,
             pitch_range: None,
             gain: 1.0,
             muted: false,
-            trim_start_beat: 0.0,
-            trim_end_beat: 0.0,
+            trim_start_sec: 0.0,
+            trim_end_sec: 0.0,
             playback_rate: 1.0,
-            fade_in_beats: 0.0,
-            fade_out_beats: 0.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
         }
     }
     
     #[test]
     fn test_progress_tracker_weighted_calculation() {
         let clips = vec![
-            create_test_clip("1", 4.0), // 2 sec @ 120 BPM
-            create_test_clip("2", 8.0), // 4 sec
-            create_test_clip("3", 4.0), // 2 sec
+            create_test_clip("1", 2.0), // 2 sec
+            create_test_clip("2", 4.0), // 4 sec
+            create_test_clip("3", 2.0), // 2 sec
         ];
         
         let cache = Arc::new(Mutex::new(

@@ -69,15 +69,13 @@ pub(crate) fn compute_track_gains(tracks: &[Track]) -> HashMap<String, (f32, boo
 }
 
 pub(crate) fn source_bounds_frames(
-    trim_start_beat: f64,
-    trim_end_beat: f64,
-    bpm: f64,
+    trim_start_sec: f64,
+    trim_end_sec: f64,
     src_total_frames: usize,
     sr: u32,
 ) -> (u64, u64) {
-    let bs = 60.0 / bpm.max(1e-6);
-    let trim_start_sec = trim_start_beat.max(0.0) * bs;
-    let trim_end_sec = trim_end_beat.max(0.0) * bs;
+    let trim_start_sec = trim_start_sec.max(0.0);
+    let trim_end_sec = trim_end_sec.max(0.0);
 
     let total_sec = (src_total_frames as f64) / sr.max(1) as f64;
     let start = (trim_start_sec * sr as f64).round().max(0.0);
@@ -103,14 +101,12 @@ pub(crate) fn source_bounds_frames(
 
 fn clip_source_bounds_frames(
     clip: &Clip,
-    bpm: f64,
     src_total_frames: usize,
     sr: u32,
 ) -> (u64, u64) {
     source_bounds_frames(
-        clip.trim_start_beat.max(0.0),
-        clip.trim_end_beat,
-        bpm,
+        clip.trim_start_sec.max(0.0),
+        clip.trim_end_sec,
         src_total_frames,
         sr,
     )
@@ -119,7 +115,6 @@ fn clip_source_bounds_frames(
 pub(crate) fn make_stretch_key(
     path: &Path,
     out_rate: u32,
-    bpm: f64,
     trim_start: f64,
     trim_end: f64,
     playback_rate: f64,
@@ -127,7 +122,7 @@ pub(crate) fn make_stretch_key(
     StretchKey {
         path: path.to_path_buf(),
         out_rate,
-        bpm_q: quantize_u32(bpm, 100.0),
+        bpm_q: 0, // 不再依赖 BPM
         trim_start_q: quantize_i64(trim_start, 1000.0),
         trim_end_q: quantize_i64(trim_end, 1000.0),
         playback_rate_q: quantize_u32(playback_rate, 10000.0),
@@ -182,12 +177,10 @@ pub(crate) fn schedule_stretch_jobs(
         let key = make_stretch_key(
             path,
             out_rate,
-            bpm,
-            clip.trim_start_beat.max(0.0),
-            clip.trim_end_beat,
+            clip.trim_start_sec.max(0.0),
+            clip.trim_end_sec,
             playback_rate,
         );
-
         if let Ok(m) = stretch_cache.lock() {
             if m.contains_key(&key) {
                 continue;
@@ -210,9 +203,8 @@ pub(crate) fn schedule_stretch_jobs(
 
         let _ = stretch_tx.send(StretchJob {
             key,
-            bpm,
-            trim_start_beat: clip.trim_start_beat.max(0.0),
-            trim_end_beat: clip.trim_end_beat,
+            trim_start_sec: clip.trim_start_sec.max(0.0),
+            trim_end_sec: clip.trim_end_sec,
             playback_rate,
         });
     }
@@ -235,9 +227,8 @@ pub(crate) fn build_snapshot(
     } else {
         120.0
     };
-    let bs = 60.0 / bpm;
 
-    let duration_frames = ((timeline.project_beats.max(0.0) * bs) * out_rate as f64)
+    let duration_frames = (timeline.project_sec.max(0.0) * out_rate as f64)
         .round()
         .max(0.0) as u64;
 
@@ -276,13 +267,13 @@ pub(crate) fn build_snapshot(
             continue;
         }
 
-        let timeline_len_sec = (clip.length_beats.max(0.0) * bs).max(0.0);
+        let timeline_len_sec = clip.length_sec.max(0.0);
         if !(timeline_len_sec.is_finite() && timeline_len_sec > 1e-6) {
             continue;
         }
         let length_frames = (timeline_len_sec * out_rate as f64).round().max(1.0) as u64;
 
-        let start_sec = (clip.start_beat.max(0.0)) * bs;
+        let start_sec = clip.start_sec.max(0.0);
         let start_frame = (start_sec * out_rate as f64).round().max(0.0) as u64;
 
         let playback_rate = clip.playback_rate as f64;
@@ -298,7 +289,7 @@ pub(crate) fn build_snapshot(
         };
 
         let (mut src_start, mut src_end) =
-            clip_source_bounds_frames(clip, bpm, src.frames, out_rate);
+            clip_source_bounds_frames(clip, src.frames, out_rate);
         if src_end.saturating_sub(src_start) <= 1 {
             continue;
         }
@@ -308,12 +299,12 @@ pub(crate) fn build_snapshot(
         let mut stretch_stream: Option<Arc<StreamRingStereo>> = None;
 
         // Negative trimStart means the clip starts before the source: render leading silence.
-        // trim_* are expressed in SOURCE beats (i.e. they already incorporate playbackRate in UI).
+        // trim_* are expressed in SOURCE seconds (i.e. they already incorporate playbackRate in UI).
         // Therefore leading silence in timeline time scales by 1 / playback_rate.
         let local_src_offset_frames: i64 =
-            if clip.trim_start_beat.is_finite() && clip.trim_start_beat < 0.0 {
+            if clip.trim_start_sec.is_finite() && clip.trim_start_sec < 0.0 {
                 let pr = playback_rate.max(1e-6);
-                let pre_silence_sec = (-clip.trim_start_beat) * bs / pr;
+                let pre_silence_sec = (-clip.trim_start_sec) / pr;
                 let frames = (pre_silence_sec * out_rate as f64).round().max(0.0) as i64;
                 -frames
             } else {
@@ -328,12 +319,10 @@ pub(crate) fn build_snapshot(
             let key = make_stretch_key(
                 path,
                 out_rate,
-                bpm,
-                clip.trim_start_beat.max(0.0),
-                clip.trim_end_beat,
+                clip.trim_start_sec.max(0.0),
+                clip.trim_end_sec,
                 playback_rate,
-            );
-            if let Ok(m) = stretch_cache.lock() {
+            );            if let Ok(m) = stretch_cache.lock() {
                 if let Some(stretched) = m.get(&key) {
                     src_render = stretched.clone();
                     src_start = 0;
@@ -389,10 +378,10 @@ pub(crate) fn build_snapshot(
             }
         }
 
-        let fade_in_frames = ((clip.fade_in_beats.max(0.0) * bs) * out_rate as f64)
+        let fade_in_frames = (clip.fade_in_sec.max(0.0) * out_rate as f64)
             .round()
             .max(0.0) as u64;
-        let fade_out_frames = ((clip.fade_out_beats.max(0.0) * bs) * out_rate as f64)
+        let fade_out_frames = (clip.fade_out_sec.max(0.0) * out_rate as f64)
             .round()
             .max(0.0) as u64;
 

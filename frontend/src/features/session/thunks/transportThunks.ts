@@ -28,7 +28,7 @@ export const seekPlayhead = createAsyncThunk(
                 // Best-effort: still seek even if stopping fails.
             }
         }
-        return webApi.setTransport({ playheadBeat: beat });
+        return webApi.setTransport({ playheadSec: beat });
     },
 );
 
@@ -50,9 +50,9 @@ export const playOriginal = createAsyncThunk(
     "session/playOriginal",
     async (_, { getState }) => {
         const state = getState() as { session: SessionState };
-        const anchorBeat = state.session.playheadBeat;
+        const anchorBeat = state.session.playheadSec;
         // Ensure backend transport is in sync before starting playback.
-        await webApi.setTransport({ playheadBeat: anchorBeat });
+        await webApi.setTransport({ playheadSec: anchorBeat });
         const result = await webApi.playOriginal(0);
         return {
             ...result,
@@ -66,9 +66,9 @@ export const playSynthesized = createAsyncThunk(
     "session/playSynthesized",
     async (_, { getState }) => {
         const state = getState() as { session: SessionState };
-        const anchorBeat = state.session.playheadBeat;
+        const anchorBeat = state.session.playheadSec;
         // Ensure backend transport is in sync before starting playback.
-        await webApi.setTransport({ playheadBeat: anchorBeat });
+        await webApi.setTransport({ playheadSec: anchorBeat });
         const result = await webApi.playSynthesized(0);
         return {
             ...result,

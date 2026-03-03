@@ -51,7 +51,7 @@ const CURVE_OPTIONS: { value: FadeCurveType; label: string }[] = [
     { value: "sine", label: "正弦" },
     { value: "exponential", label: "指数" },
     { value: "logarithmic", label: "对数" },
-    { value: "scurve", label: "S形" },
+    { value: "scurve", label: "S曲线" },
 ];
 
 const FadeCurveRow: React.FC<{
@@ -114,9 +114,9 @@ export const ClipContextMenu: React.FC<{
     y: number;
     /** 右键点击的 clip */
     clip: ClipInfo;
-    /** 多选 clip 列表（含 clip 本身），长度 >= 2 时进入多选模式 */
+    /** 多个 clip 列表（含 clip 本身），长度 >= 2 时进入多选模式 */
     selectedClips: ClipInfo[];
-    /** 播放头是否在 clip 范围内（用于分割按钮启用判断） */
+    /** 播放头是否在 clip 范围内（用于分割按钮启用判断）*/
     playheadInClip: boolean;
     onClose: () => void;
     onDelete: (ids: string[]) => void;
@@ -174,14 +174,14 @@ export const ClipContextMenu: React.FC<{
             onPointerDown={(e) => e.stopPropagation()}
         >
             {isMulti ? (
-                // ── 多选菜单 ──
+// ── 多选菜单 ──
                 <>
                     <div className="px-3 py-1 text-[11px] text-qt-text/50 select-none">
-                        已选 {selectedClips.length} 个
+                    已选 {selectedClips.length} 个
                     </div>
                     <Divider />
                     <MenuItem
-                        label="删除所选"
+                        label="删除所有"
                         danger
                         onClick={() => {
                             onDelete(ids);
@@ -189,14 +189,14 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                     <MenuItem
-                        label={allMuted ? "取消静音所选" : "静音所选"}
+                        label={allMuted ? "取消静音所有" : "静音所有"}
                         onClick={() => {
                             onMute(ids, !allMuted);
                             close();
                         }}
                     />
                     <MenuItem
-                        label="复制所选"
+                        label="复制所有"
                         onClick={() => {
                             onCopy(ids);
                             close();
@@ -213,7 +213,7 @@ export const ClipContextMenu: React.FC<{
                     />
                 </>
             ) : (
-                // ── 单选菜单 ──
+// ── 单选菜单 ──
                 <>
                     <MenuItem
                         label="删除"
@@ -261,10 +261,10 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                     {onFadeCurveChange &&
-                        (clip.fadeInBeats > 0 || clip.fadeOutBeats > 0) && (
+                        (clip.fadeInSec > 0 || clip.fadeOutSec > 0) && (
                             <>
                                 <Divider />
-                                {clip.fadeInBeats > 0 && (
+                                {clip.fadeInSec > 0 && (
                                     <FadeCurveRow
                                         label="淡入"
                                         current={
@@ -276,7 +276,7 @@ export const ClipContextMenu: React.FC<{
                                         }}
                                     />
                                 )}
-                                {clip.fadeOutBeats > 0 && (
+                                {clip.fadeOutSec > 0 && (
                                     <FadeCurveRow
                                         label="淡出"
                                         current={

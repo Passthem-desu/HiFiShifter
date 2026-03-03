@@ -93,8 +93,8 @@ export function useTimelineSelectionRect(params: {
                     (t) => t.id === clip.trackId,
                 );
                 if (trackIdx < 0) continue;
-                const cx1 = clip.startBeat * pxPerBeat;
-                const cx2 = (clip.startBeat + clip.lengthBeats) * pxPerBeat;
+                const cx1 = clip.startSec * pxPerBeat;
+                const cx2 = (clip.startSec + clip.lengthSec) * pxPerBeat;
                 const cy1 = trackIdx * rowHeight;
                 const cy2 = cy1 + rowHeight;
                 const hit =

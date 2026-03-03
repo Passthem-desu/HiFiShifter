@@ -10,7 +10,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
     trackClips: ClipInfo[];
 
     rowHeight: number;
-    pxPerBeat: number;
+    pxPerSec: number;
     bpm: number;
 
     clipWaveforms: Record<string, WaveformPreview | undefined>;
@@ -21,7 +21,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
     multiSelectedClipIds: string[];
     multiSelectedSet: Set<string>;
 
-    /** 轨道主题色，用于 Clip 背景色和选中边框色 */
+    /** 轨道主题色，用于 Clip 背景色和选中边框�?*/
     trackColor?: string;
 
     ensureSelected: (clipId: string) => void;
@@ -32,7 +32,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
     startClipDrag: (
         e: React.PointerEvent<HTMLDivElement>,
         clipId: string,
-        clipStartBeat: number,
+        clipstartSec: number,
         altPressedHint?: boolean,
     ) => void;
     startEditDrag: (
@@ -61,8 +61,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         track,
         trackClips,
         rowHeight,
-        pxPerBeat,
-        bpm,
+        pxPerSec,
         clipWaveforms,
         altPressed,
         selectedClipId,
@@ -101,8 +100,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         key={clip.id}
                         clip={clip}
                         rowHeight={rowHeight}
-                        pxPerBeat={pxPerBeat}
-                        bpm={bpm}
+                        pxPerSec={pxPerSec}
                         waveform={waveform}
                         altPressed={altPressed}
                         selected={selected}

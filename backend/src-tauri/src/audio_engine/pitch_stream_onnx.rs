@@ -194,8 +194,8 @@ fn collect_clip_infos(timeline: &TimelineState, sr: u32) -> Vec<ClipInfo> {
         .iter()
         .filter(|c| !c.muted && c.source_path.is_some())
         .filter_map(|c| {
-            let start_sec = c.start_beat.max(0.0) * bs;
-            let len_sec = c.length_beats.max(0.0) * bs;
+            let start_sec = c.start_sec.max(0.0);
+            let len_sec = c.length_sec.max(0.0);
             if !(len_sec.is_finite() && len_sec > 1e-6) {
                 return None;
             }

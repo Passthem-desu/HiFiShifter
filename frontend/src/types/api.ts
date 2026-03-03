@@ -34,8 +34,8 @@ export interface TimelineClip {
     id: string;
     track_id: string;
     name: string;
-    start_beat: number;
-    length_beats: number;
+    start_sec: number;
+    length_sec: number;
     color: string;
     source_path?: string;
     duration_sec?: number;
@@ -51,11 +51,11 @@ export interface TimelineClip {
     };
     gain?: number;
     muted?: boolean;
-    trim_start_beat?: number;
-    trim_end_beat?: number;
+    trim_start_sec?: number;
+    trim_end_sec?: number;
     playback_rate?: number;
-    fade_in_beats?: number;
-    fade_out_beats?: number;
+    fade_in_sec?: number;
+    fade_out_sec?: number;
 }
 
 export interface ProjectMeta {
@@ -71,8 +71,8 @@ export interface TimelineState {
     selected_track_id: string | null;
     selected_clip_id: string | null;
     bpm: number;
-    playhead_beat: number;
-    project_beats?: number;
+    playhead_sec: number;
+    project_sec?: number;
     project?: ProjectMeta;
 }
 
@@ -83,8 +83,8 @@ export interface TimelineResult {
     selected_track_id: string | null;
     selected_clip_id: string | null;
     bpm: number;
-    playhead_beat: number;
-    project_beats?: number;
+    playhead_sec: number;
+    project_sec?: number;
     project?: ProjectMeta;
 }
 
@@ -175,7 +175,7 @@ export interface PitchProgressPayload {
     rootTrackId: string;
     progress: number;
     etaSeconds?: number;
-    /** 当前正在分析的 clip 名称 */
+    /** 当前正在分析�?clip 名称 */
     currentClipName?: string | null;
     /** 已完成的 clip 数量 */
     completedClips?: number;

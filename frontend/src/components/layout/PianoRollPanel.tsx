@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
     useCallback,
     useEffect,
     useLayoutEffect,
@@ -24,9 +24,9 @@ import { getWaveformColors } from "../../theme/waveformColors";
 
 import {
     BackgroundGrid,
-    DEFAULT_PX_PER_BEAT,
-    MAX_PX_PER_BEAT,
-    MIN_PX_PER_BEAT,
+    DEFAULT_PX_PER_SEC,
+    MAX_PX_PER_SEC,
+    MIN_PX_PER_SEC,
     TimeRuler,
     clamp,
     gridStepBeats,
@@ -101,16 +101,31 @@ export const PianoRollPanel: React.FC = () => {
     }, [s.selectedTrackId, s.selectedClipId, s.clips]);
 
     const [scrollLeft, setScrollLeft] = useState(0);
-    const [pxPerBeat, setPxPerBeat] = useState(() => {
+    const [pxPerSec, setPxPerSec] = useState(() => {
         const stored = Number(
-            localStorage.getItem("hifishifter.paramPxPerBeat"),
+            localStorage.getItem("hifishifter.paramPxPerSec"),
         );
-        return Number.isFinite(stored)
-            ? Math.min(MAX_PX_PER_BEAT, Math.max(MIN_PX_PER_BEAT, stored))
-            : DEFAULT_PX_PER_BEAT;
+        return Number.isFinite(stored) && stored > 0
+            ? Math.min(MAX_PX_PER_SEC, Math.max(MIN_PX_PER_SEC, stored))
+            : DEFAULT_PX_PER_SEC;
     });
+    // 渲染时根�?BPM 换算 pxPerBeat：pxPerBeat = pxPerSec × (60 / bpm)
+    const pxPerBeat = pxPerSec * (60 / Math.max(1e-6, s.bpm));
     const scrollLeftRef = useRef(scrollLeft);
     const pxPerBeatRef = useRef(pxPerBeat);
+
+    // BPM 变化时，按比例调�?scrollLeft，保持视口中心点的秒数不�?
+    // scrollLeft_new = scrollLeft_old × (bpm_old / bpm_new)
+    const prevBpmRef = useRef(s.bpm);
+    useEffect(() => {
+        const prevBpm = prevBpmRef.current;
+        prevBpmRef.current = s.bpm;
+        if (Math.abs(prevBpm - s.bpm) < 1e-9) return;
+        const ratio = prevBpm / Math.max(1e-6, s.bpm);
+        const newScrollLeft = scrollLeftRef.current * ratio;
+        scrollLeftRef.current = newScrollLeft;
+        setScrollLeft(newScrollLeft);
+    }, [s.bpm]);
 
     useEffect(() => {
         scrollLeftRef.current = scrollLeft;
@@ -118,15 +133,17 @@ export const PianoRollPanel: React.FC = () => {
 
     useEffect(() => {
         pxPerBeatRef.current = pxPerBeat;
-        localStorage.setItem("hifishifter.paramPxPerBeat", String(pxPerBeat));
-    }, [pxPerBeat]);
+        localStorage.setItem("hifishifter.paramPxPerSec", String(pxPerSec));
+    }, [pxPerBeat, pxPerSec]);
 
     const setPxPerBeatImmediate = useCallback(
         (next: number) => {
+            // next 是新�?pxPerBeat，需要反推回 pxPerSec
+            const nextPxPerSec = next / (60 / Math.max(1e-6, s.bpm));
             pxPerBeatRef.current = next;
-            setPxPerBeat(next);
+            setPxPerSec(nextPxPerSec);
         },
-        [setPxPerBeat],
+        [s.bpm, setPxPerSec],
     );
 
     // 副参数独立显示开关，默认全部关闭
@@ -209,10 +226,7 @@ export const PianoRollPanel: React.FC = () => {
     const onnxLabelSuffix = onnxUnavailable ? t("onnx_unavailable_label") : "";
 
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
-    const contentWidth = Math.max(
-        8,
-        Math.ceil(Math.max(1, s.projectBeats) * pxPerBeat),
-    );
+    const contentWidth = Math.max(8, Math.ceil(s.projectSec * pxPerSec));
 
     const scrollerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -261,7 +275,7 @@ export const PianoRollPanel: React.FC = () => {
     // Ensure playhead changes (seek / playback) trigger a redraw.
     useEffect(() => {
         invalidate();
-    }, [s.playheadBeat, invalidate]);
+    }, [s.playheadSec, invalidate]);
 
     function syncScrollLeft(scroller: HTMLDivElement) {
         const next = scroller.scrollLeft;
@@ -411,7 +425,7 @@ export const PianoRollPanel: React.FC = () => {
         values: number[];
     } | null>(null);
 
-    // 从全局 Context 读取 pitch 分析进度状态（由 PitchAnalysisProvider 统一管理）
+    // 从全局 Context 读取 pitch 分析进度状态（�?PitchAnalysisProvider 统一管理�?
     const pitchAnalysis = usePitchAnalysis();
     const pitchAnalysisPending = pitchAnalysis.pending;
     const pitchAnalysisProgress = pitchAnalysis.progress;
@@ -419,8 +433,8 @@ export const PianoRollPanel: React.FC = () => {
     const pitchAnalysisCompletedClips = pitchAnalysis.completedClips;
     const pitchAnalysisTotalClips = pitchAnalysis.totalClips;
 
-    // 用于通知 usePianoRollData 当前是否处于 live 编辑状态（pointer down 期间为 true）。
-    // pitch_orig_updated 事件到达时若为 true，则延迟曲线刷新到 pointer-up 后执行。
+    // 用于通知 usePianoRollData 当前是否处于 live 编辑状态（pointer down 期间�?true）�?
+    // pitch_orig_updated 事件到达时若�?true，则延迟曲线刷新�?pointer-up 后执行�?
     const liveEditActiveRef = useRef(false);
 
     const {
@@ -451,26 +465,23 @@ export const PianoRollPanel: React.FC = () => {
         liveEditActiveRef,
     });
 
-    // 获取当前 track 下的所有 clips，用于 per-clip 波形叠加绘制
+    // 获取当前 track 下的所�?clips，用�?per-clip 波形叠加绘制
     const trackClips = useMemo(
         () => s.clips.filter((c) => c.trackId === rootTrackId),
         [s.clips, rootTrackId],
     );
 
-    // 可见区域的 beat 范围
-    const visibleStartBeat = scrollLeft / Math.max(1e-9, pxPerBeat);
-    const visibleEndBeat =
-        visibleStartBeat + viewSize.w / Math.max(1e-9, pxPerBeat);
+    // 可见区域的 sec 范围（统一用 sec 坐标系）
+    const visibleStartSec = scrollLeft / Math.max(1e-9, pxPerSec);
+    const visibleEndSec = visibleStartSec + viewSize.w / Math.max(1e-9, pxPerSec);
 
     // Per-clip 波形 peaks（替代原来的 mix 波形）
     const clipPeaks = useClipsPeaksForPianoRoll({
         clips: trackClips,
-        visibleStartBeat,
-        visibleEndBeat,
-        pxPerBeat,
+        visibleStartSec,
+        visibleEndSec,
         secPerBeat,
     });
-
     // Data and viewport changes should always trigger a canvas redraw.
     // usePianoRollData() may call invalidate() before these refs update,
     // so we schedule a follow-up redraw after React commits state.
@@ -482,8 +493,8 @@ export const PianoRollPanel: React.FC = () => {
         invalidate();
     }, [pitchView, tensionView, editParam, invalidate]);
 
-    // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后）
-    // useEffect 已移至 detectedPitchCurves useMemo 定义之后，见下方。
+    // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后�?
+    // useEffect 已移�?detectedPitchCurves useMemo 定义之后，见下方�?
 
     const paramViewRef = useRef<
         import("./pianoRoll/types").ParamViewSegment | null
@@ -508,7 +519,7 @@ export const PianoRollPanel: React.FC = () => {
     });
 
     // 包装 commitStroke：在 pointer-up 提交笔画后，清除 liveEditActive 状态，
-    // 并触发可能被延迟的 pitch_orig_updated 曲线刷新。
+    // 并触发可能被延迟�?pitch_orig_updated 曲线刷新�?
     const commitStroke: typeof commitStrokeBase = useCallback(
         async (points, mode) => {
             await commitStrokeBase(points, mode);
@@ -518,8 +529,8 @@ export const PianoRollPanel: React.FC = () => {
         [commitStrokeBase, notifyLiveEditEnded],
     );
 
-    // 将 store 中的 clipPitchCurves 转换为 DetectedPitchCurve[] 供 drawPianoRoll 使用。
-    // 仅在 pitch 模式下有意义，其他模式下传空数组以避免不必要的计算。
+    // �?store 中的 clipPitchCurves 转换�?DetectedPitchCurve[] �?drawPianoRoll 使用�?
+    // 仅在 pitch 模式下有意义，其他模式下传空数组以避免不必要的计算�?
     const detectedPitchCurves = useMemo((): DetectedPitchCurve[] => {
         if (editParam !== "pitch") return [];
         return Object.values(s.clipPitchCurves).map((c) => ({
@@ -537,7 +548,7 @@ export const PianoRollPanel: React.FC = () => {
 
     // Keep draw function always up-to-date (invalidate() is stable and calls drawRef.current()).
     drawRef.current = () => {
-        // 确定副参数名称（非当前 editParam 的另一个参数）
+        // 确定副参数名称（非当�?editParam 的另一个参数）
         const secondaryParam: ParamName =
             editParam === "pitch" ? "tension" : "pitch";
         drawPianoRoll({
@@ -558,10 +569,10 @@ export const PianoRollPanel: React.FC = () => {
                     : null,
             liveEditOverride: liveEditOverrideRef.current,
             selection: selectionRef.current,
-            pxPerBeat: pxPerBeatRef.current,
+            pxPerSec,
             scrollLeft: scrollLeftRef.current,
             secPerBeat,
-            playheadBeat: s.playheadBeat,
+            playheadSec: s.playheadSec,
             waveformColors,
             detectedPitchCurves,
         });
@@ -574,6 +585,7 @@ export const PianoRollPanel: React.FC = () => {
         pitchEnabled,
         toolMode: s.toolMode,
         secPerBeat,
+        bpm: s.bpm,
         scrollLeftRef,
         pxPerBeatRef,
         setPxPerBeat: setPxPerBeatImmediate,
@@ -668,7 +680,7 @@ export const PianoRollPanel: React.FC = () => {
                         >
                             {t("pitch")}
                         </Button>
-                        {/* 当 editParam 不是 pitch 时，显示 pitch 副参数开关 */}
+                        {/* �?editParam 不是 pitch 时，显示 pitch 副参数开�?*/}
                         {editParam !== "pitch" && pitchEnabled ? (
                             <IconButton
                                 size="1"
@@ -706,7 +718,7 @@ export const PianoRollPanel: React.FC = () => {
                         >
                             {t("tension")}
                         </Button>
-                        {/* 当 editParam 不是 tension 时，显示 tension 副参数开关 */}
+                        {/* �?editParam 不是 tension 时，显示 tension 副参数开�?*/}
                         {editParam !== "tension" ? (
                             <IconButton
                                 size="1"
@@ -755,7 +767,7 @@ export const PianoRollPanel: React.FC = () => {
                         />
                     ) : null}
 
-                    {/* Task 6.4: 刷新按钮修改为调用 startRefresh() */}
+                    {/* Task 6.4: 刷新按钮修改为调�?startRefresh() */}
                     <IconButton
                         size="1"
                         variant="soft"
@@ -768,7 +780,7 @@ export const PianoRollPanel: React.FC = () => {
                         onClick={async () => {
                             if (!rootTrackId) return;
                             await asyncRefresh.startRefresh(rootTrackId);
-                            // Task 6.7: 任务完成后显示 1 秒成功提示
+                            // Task 6.7: 任务完成后显�?1 秒成功提�?
                             if (asyncRefresh.status === "completed") {
                                 setShowSuccessMessage(true);
                                 setTimeout(
@@ -776,7 +788,7 @@ export const PianoRollPanel: React.FC = () => {
                                     1000,
                                 );
                             }
-                            // 同时触发传统刷新以更新 UI（后续可优化为由后端事件驱动）
+                            // 同时触发传统刷新以更�?UI（后续可优化为由后端事件驱动�?
                             void refreshNow();
                         }}
                         style={{
@@ -847,7 +859,7 @@ export const PianoRollPanel: React.FC = () => {
                 </Flex>
             </Flex>
 
-            {/* Task 6.5: 参数面板顶部添加进度条区域 */}
+            {/* Task 6.5: 参数面板顶部添加进度条区�?*/}
             {asyncRefresh.isLoading && (
                 <Flex className="px-3 py-2 bg-qt-base border-b border-qt-border">
                     <ProgressBar
@@ -858,7 +870,7 @@ export const PianoRollPanel: React.FC = () => {
                         }
                         showCancel={true}
                         onCancel={async () => {
-                            // Task 6.6: 取消按钮点击时调用 cancelRefresh()
+                            // Task 6.6: 取消按钮点击时调�?cancelRefresh()
                             await asyncRefresh.cancelRefresh();
                         }}
                         estimatedRemaining={asyncRefresh.estimatedRemaining}
@@ -866,17 +878,15 @@ export const PianoRollPanel: React.FC = () => {
                 </Flex>
             )}
 
-            {/* Task 6.7: 任务完成后显示成功提示 */}
+            {/* Task 6.7: 任务完成后显示成功提�?*/}
             {showSuccessMessage && (
                 <Flex
                     align="center"
                     gap="2"
                     className="px-3 py-2 bg-green-900/20 border-b border-green-700 text-green-300 text-sm"
                 >
-                    <span>✓</span>
-                    <span>
-                        {(t as any)("refresh_completed") || "Refresh completed"}
-                    </span>
+                    <span>&#x2713;</span>
+                    <span></span>
                 </Flex>
             )}
 
@@ -887,7 +897,7 @@ export const PianoRollPanel: React.FC = () => {
                     justify="between"
                     className="px-3 py-2 bg-red-900/20 border-b border-red-700 text-red-300 text-sm"
                 >
-                    <span>{asyncRefresh.error}</span>
+                    <span></span>
                     <Button
                         size="1"
                         variant="soft"
@@ -926,15 +936,12 @@ export const PianoRollPanel: React.FC = () => {
                     <TimeRuler
                         contentWidth={contentWidth}
                         scrollLeft={scrollLeft}
-                        bars={(() => {
+                    bars={(() => {
                             const beatsPerBar = Math.max(
                                 1,
                                 Math.round(s.beats || 4),
                             );
-                            const totalBeats = Math.max(
-                                1,
-                                Math.ceil(s.projectBeats),
-                            );
+                            const totalBeats = Math.max(1, Math.ceil(s.projectSec / secPerBeat));
                             const result: Array<{
                                 beat: number;
                                 label: string;
@@ -951,7 +958,9 @@ export const PianoRollPanel: React.FC = () => {
                             return result;
                         })()}
                         pxPerBeat={pxPerBeat}
-                        playheadBeat={s.playheadBeat}
+                        pxPerSec={pxPerSec}
+                        secPerBeat={secPerBeat}
+                        playheadSec={s.playheadSec}
                         contentRef={rulerContentRef}
                         onMouseDown={interactions.onRulerMouseDown}
                     />
@@ -1016,7 +1025,7 @@ export const PianoRollPanel: React.FC = () => {
                         <div className="flex flex-col items-center gap-3 w-72">
                             {showPitchAnalyzingOverlay ? (
                                 <>
-                                    {/* 主标题 */}
+                                    {/* 主标�?*/}
                                     <Text size="2" color="gray">
                                         {t("pitch_analyzing")}
                                     </Text>
@@ -1034,7 +1043,7 @@ export const PianoRollPanel: React.FC = () => {
                                             ? `"${pitchAnalysisCurrentClip}"`
                                             : t("pitch_analyzing_preparing")}
                                     </Text>
-                                    {/* 进度条 + 计数 */}
+                                    {/* 进度�?+ 计数 */}
                                     <div className="w-full flex flex-col gap-1">
                                         <div className="w-full h-2 bg-qt-surface border border-qt-border rounded overflow-hidden">
                                             <div

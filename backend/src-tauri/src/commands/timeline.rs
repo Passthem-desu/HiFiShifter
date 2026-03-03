@@ -17,15 +17,15 @@ pub(super) fn import_audio_bytes(
     file_name: String,
     base64_data: String,
     track_id: Option<Option<String>>,
-    start_beat: Option<f64>,
+    start_sec: Option<f64>,
 ) -> crate::models::TimelineStatePayload {
     if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
         eprintln!(
-            "import_audio_bytes(file_name={}, base64_len={}, track_id={:?}, start_beat={:?})",
+            "import_audio_bytes(file_name={}, base64_len={}, track_id={:?}, start_sec={:?})",
             file_name,
             base64_data.len(),
             track_id,
-            start_beat
+            start_sec
         );
     }
     let engine = base64::engine::general_purpose::STANDARD;
@@ -53,7 +53,7 @@ pub(super) fn import_audio_bytes(
         Some(None) => Some(tl.add_track(Some("Track".to_string()), None, None)),
     };
 
-    tl.import_audio_item(&path.display().to_string(), resolved_track_id, start_beat);
+    tl.import_audio_item(&path.display().to_string(), resolved_track_id, start_sec);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
@@ -67,12 +67,12 @@ pub(super) fn import_audio_item(
     state: State<'_, AppState>,
     audio_path: String,
     track_id: Option<Option<String>>,
-    start_beat: Option<f64>,
+    start_sec: Option<f64>,
 ) -> crate::models::TimelineStatePayload {
     if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
         eprintln!(
-            "import_audio_item(audio_path={}, track_id={:?}, start_beat={:?})",
-            audio_path, track_id, start_beat
+            "import_audio_item(audio_path={}, track_id={:?}, start_sec={:?})",
+            audio_path, track_id, start_sec
         );
     }
     {
@@ -88,7 +88,7 @@ pub(super) fn import_audio_item(
         Some(None) => Some(tl.add_track(Some("Track".to_string()), None, None)),
     };
 
-    tl.import_audio_item(&audio_path, resolved_track_id, start_beat);
+    tl.import_audio_item(&audio_path, resolved_track_id, start_sec);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
@@ -192,11 +192,11 @@ pub(super) fn select_track(state: State<'_, AppState>, track_id: String) -> crat
 
 pub(super) fn set_project_length(
     state: State<'_, AppState>,
-    project_beats: f64,
+    project_sec: f64,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
-    tl.set_project_length(project_beats);
+    tl.set_project_length(project_sec);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
@@ -210,13 +210,13 @@ pub(super) fn add_clip(
     state: State<'_, AppState>,
     track_id: Option<String>,
     name: Option<String>,
-    start_beat: Option<f64>,
-    length_beats: Option<f64>,
+    start_sec: Option<f64>,
+    length_sec: Option<f64>,
     source_path: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
-    tl.add_clip(track_id, name, start_beat, length_beats, source_path);
+    tl.add_clip(track_id, name, start_sec, length_sec, source_path);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
@@ -242,12 +242,12 @@ pub(super) fn remove_clip(state: State<'_, AppState>, clip_id: String) -> crate:
 pub(super) fn move_clip(
     state: State<'_, AppState>,
     clip_id: String,
-    start_beat: f64,
+    start_sec: f64,
     track_id: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
-    tl.move_clip(&clip_id, start_beat, track_id);
+    tl.move_clip(&clip_id, start_sec, track_id);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
@@ -261,27 +261,27 @@ pub(super) fn move_clip(
 pub(super) fn set_clip_state(
     state: State<'_, AppState>,
     clip_id: String,
-    length_beats: Option<f64>,
+    length_sec: Option<f64>,
     gain: Option<f32>,
     muted: Option<bool>,
-    trim_start_beat: Option<f64>,
-    trim_end_beat: Option<f64>,
+    trim_start_sec: Option<f64>,
+    trim_end_sec: Option<f64>,
     playback_rate: Option<f32>,
-    fade_in_beats: Option<f64>,
-    fade_out_beats: Option<f64>,
+    fade_in_sec: Option<f64>,
+    fade_out_sec: Option<f64>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
     tl.set_clip_state(
         &clip_id,
-        length_beats,
+        length_sec,
         gain,
         muted,
-        trim_start_beat,
-        trim_end_beat,
+        trim_start_sec,
+        trim_end_sec,
         playback_rate,
-        fade_in_beats,
-        fade_out_beats,
+        fade_in_sec,
+        fade_out_sec,
     );
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
@@ -295,11 +295,11 @@ pub(super) fn set_clip_state(
 pub(super) fn split_clip(
     state: State<'_, AppState>,
     clip_id: String,
-    split_beat: f64,
+    split_sec: f64,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
-    tl.split_clip(&clip_id, split_beat);
+    tl.split_clip(&clip_id, split_sec);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());

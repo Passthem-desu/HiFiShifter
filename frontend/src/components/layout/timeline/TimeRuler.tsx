@@ -6,18 +6,24 @@ export const TimeRuler: React.FC<{
     scrollLeft: number;
     bars: Array<{ beat: number; label: string }>;
     pxPerBeat: number;
-    playheadBeat: number;
+    pxPerSec: number;
+    secPerBeat: number;
+    playheadSec: number;
     onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
     contentRef?: React.Ref<HTMLDivElement>;
 }> = ({
     contentWidth,
     scrollLeft,
     bars,
-    pxPerBeat,
-    playheadBeat,
+    pxPerBeat: _pxPerBeat,
+    pxPerSec,
+    secPerBeat,
+    playheadSec,
     onMouseDown,
     contentRef,
 }) => {
+    // 统一用 sec 坐标系：beat 位置 = beat * secPerBeat * pxPerSec
+    void _pxPerBeat;
     const boundaryLeft = contentWidth - 1;
 
     // If the parent passes a ref, it may be doing imperative scroll syncing
@@ -56,7 +62,7 @@ export const TimeRuler: React.FC<{
                     <div
                         key={m.beat}
                         className="absolute top-0 bottom-0 text-[10px] text-qt-text-muted pt-1"
-                        style={{ left: m.beat * pxPerBeat }}
+                        style={{ left: m.beat * secPerBeat * pxPerSec }}
                     >
                         <div className="pl-1 border-l border-qt-border h-2">
                             {m.label}
@@ -78,12 +84,12 @@ export const TimeRuler: React.FC<{
                 {/* Playhead (content-coordinates; container is shifted) */}
                 <div
                     className="absolute top-0 bottom-0 w-px bg-qt-playhead z-20"
-                    style={{ left: playheadBeat * pxPerBeat }}
+                    style={{ left: playheadSec * pxPerSec }}
                 />
                 <div
                     className="absolute top-0 z-30"
                     style={{
-                        left: playheadBeat * pxPerBeat,
+                        left: playheadSec * pxPerSec,
                         transform: "translateX(-6px)",
                     }}
                 >

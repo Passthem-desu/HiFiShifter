@@ -25,12 +25,11 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
             .unwrap_or_else(|e| e.into_inner())
             .clone();
         let bpm = timeline.bpm;
-        let playhead_beat = timeline.playhead_beat;
+        let playhead_sec = timeline.playhead_sec;
         if !(bpm.is_finite() && bpm > 0.0) {
             return serde_json::json!({"ok": false, "error": "invalid bpm"});
         }
-        let playhead_sec = (playhead_beat.max(0.0)) * 60.0 / bpm;
-        let start_sec = playhead_sec + start_sec.max(0.0);
+        let start_sec = playhead_sec.max(0.0) + start_sec.max(0.0);
 
         // IMPORTANT: order matters (mpsc is FIFO).
         // Seek first so the snapshot build (and pitch_stream ring.reset) uses the correct base.
@@ -186,15 +185,14 @@ pub(super) fn play_synthesized(state: State<'_, AppState>, start_sec: f64) -> se
         if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
             eprintln!("play_synthesized(start_sec={})", start_sec);
         }
-        let (bpm, playhead_beat) = {
+        let (bpm, playhead_sec) = {
             let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
-            (tl.bpm, tl.playhead_beat)
+            (tl.bpm, tl.playhead_sec)
         };
         if !(bpm.is_finite() && bpm > 0.0) {
             return serde_json::json!({"ok": false, "error": "invalid bpm"});
         }
-        let playhead_sec = (playhead_beat.max(0.0)) * 60.0 / bpm;
-        let start_sec = playhead_sec + start_sec.max(0.0);
+        let start_sec = playhead_sec.max(0.0) + start_sec.max(0.0);
 
         let mut synthesized_path = {
             state

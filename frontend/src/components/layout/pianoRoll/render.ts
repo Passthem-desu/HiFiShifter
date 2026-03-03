@@ -54,7 +54,7 @@ function drawCurveTimed(args: {
         typeof window !== "undefined" &&
         window.localStorage?.getItem("hifishifter.debugPianoRoll") === "1";
 
-    // DEBUG: 验证曲线时间参数（使用统一转换函数）
+    // DEBUG: 验证曲线时间参数（使用统一转换函数�?
     const curveStartSec = framesToTime(startFrame, fp);
     const curveEndSec = framesToTime(
         startFrame + (values.length - 1) * step,
@@ -101,7 +101,7 @@ function drawCurveTimed(args: {
         }
         lastPoint = { frame, tSec, x };
 
-        // pitch 曲线：MIDI 值 N 应绘制在 N 键中心（N 到 N+1 区间的中点），加 0.5 偏移
+        // pitch 曲线：MIDI �?N 应绘制在 N 键中心（N �?N+1 区间的中点），加 0.5 偏移
         const rawValue = values[i] ?? 0;
         const mappedValue = param === "pitch" ? rawValue + 0.5 : rawValue;
         const y = valueToY(param, mappedValue, h);
@@ -156,16 +156,16 @@ function drawCurveTimed(args: {
 
 /**
  * per-clip 检测音高曲线（来自后端 clip_pitch_data 事件），
- * 在参数面板 pitch 视图中作为参考线渲染。
+ * 在参数面�?pitch 视图中作为参考线渲染�?
  */
 export interface DetectedPitchCurve {
     /** clip 在时间线上的起始采样帧（引擎采样率） */
     startFrame: number;
     /** MIDI 音高曲线，每帧一个值，0 表示无声 */
     midiCurve: number[];
-    /** WORLD 帧周期（毫秒） */
+    /** WORLD 帧周期（毫秒�?*/
     framePeriodMs: number;
-    /** 引擎采样率（Hz），用于将 startFrame 转换为秒 */
+    /** 引擎采样率（Hz），用于�?startFrame 转换为秒 */
     sampleRate?: number;
 }
 
@@ -184,13 +184,13 @@ export function drawPianoRoll(args: {
     overlayText?: string | null;
     liveEditOverride: { key: string; edit: number[] } | null;
     selection: { aBeat: number; bBeat: number } | null;
-    pxPerBeat: number;
+    pxPerSec: number;
     scrollLeft: number;
     secPerBeat: number;
-    playheadBeat: number;
+    playheadSec: number; // 播放头位置（秒）
     pitchAnalysisPending?: boolean;
     waveformColors?: { fill: string; stroke: string };
-    /** 检测音高曲线列表，在 pitch 模式下渲染为参考线 */
+    /** 检测音高曲线列表，�?pitch 模式下渲染为参考线 */
     detectedPitchCurves?: DetectedPitchCurve[];
 }) {
     const {
@@ -208,10 +208,10 @@ export function drawPianoRoll(args: {
         overlayText,
         liveEditOverride,
         selection,
-        pxPerBeat,
+        pxPerSec,
         scrollLeft,
         secPerBeat,
-        playheadBeat,
+        playheadSec,
         pitchAnalysisPending,
         waveformColors = {
             fill: "rgba(255,255,255,0.2)",
@@ -288,7 +288,7 @@ export function drawPianoRoll(args: {
                         ctx.fillRect(w * 0.62, top, w * 0.1, keyH);
                     }
 
-                    // C 音名标注：使用高亮蓝色
+                    // C 音名标注：使用高亮蓝�?
                     if (pc === 0) {
                         ctx.fillStyle = "#3b82f6";
                         ctx.font = "bold 9px sans-serif";
@@ -345,38 +345,11 @@ export function drawPianoRoll(args: {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const visibleStartBeat = scrollLeft / Math.max(1e-9, pxPerBeat);
-    const visibleDurBeats = w / Math.max(1e-9, pxPerBeat);
-    const visibleStartSec = visibleStartBeat * secPerBeat;
-    const visibleDurSec = visibleDurBeats * secPerBeat;
-
-    // DEBUG: 验证时间参数
-    console.log("[PianoRoll] Visible time range:", {
-        visibleStartSec,
-        visibleDurSec,
-        scrollLeft,
-        pxPerBeat,
-        secPerBeat,
-        w,
-        // CRITICAL: Show the conversion chain
-        calculation: {
-            scrollLeftPx: scrollLeft,
-            widthPx: w,
-            pxPerBeat: pxPerBeat,
-            visibleStartBeat: visibleStartBeat,
-            visibleDurBeats: visibleDurBeats,
-            secPerBeat: secPerBeat,
-            visibleStartSec: visibleStartSec,
-            visibleDurSec: visibleDurSec,
-            // Derived values
-            pxPerSec: pxPerBeat / secPerBeat,
-            expectedVisibleDurSec: w / (pxPerBeat / secPerBeat),
-        },
-        clipPeaksCount: clipPeaks.length,
-        paramViewTime: paramView
-            ? `startFrame: ${paramView.startFrame}, period: ${paramView.framePeriodMs}ms, length: ${paramView.orig.length}`
-            : "N/A",
-    });
+    // 统一用 sec 坐标系：所有 x 坐标 = timeSec * pxPerSec - scrollLeft
+    const visibleStartSec = scrollLeft / Math.max(1e-9, pxPerSec);
+    const visibleDurSec = w / Math.max(1e-9, pxPerSec);
+    // beat 坐标系辅助（仅用于 selection 等仍以 beat 为单位的数据）
+    const pxPerBeat = pxPerSec * secPerBeat;
 
     // Horizontal pitch grid
     if (editParam === "pitch") {
@@ -412,34 +385,16 @@ export function drawPianoRoll(args: {
         } = entry.peaks;
         if (pMin.length < 2 || pMax.length < 2) continue;
 
-        // clip 在 canvas 上的 x 范围
-        const clipStartSec = entry.startBeat * secPerBeat;
-        const clipEndSec = (entry.startBeat + entry.lengthBeats) * secPerBeat;
-        const clipStartX = clipStartSec * (pxPerBeat / secPerBeat) - scrollLeft;
-        const clipWidthPx =
-            (clipEndSec - clipStartSec) * (pxPerBeat / secPerBeat);
-
-        // DEBUG: 波形clip时间参数
-        console.log(`[WaveformClip] clipId=${entry.clipId}:`, {
-            startBeat: entry.startBeat,
-            lengthBeats: entry.lengthBeats,
-            clipStartSec,
-            clipEndSec,
-            clipDurationSec: clipEndSec - clipStartSec,
-            clipWidthPx,
-            peaksDurSec: entry.peaks?.durSec, // 波形实际audio段的时长
-        });
-
+        // clip 在 canvas 上的 x 范围（统一用 sec 坐标系）
+        // entry.startSec / entry.lengthSec 已是秒，直接乘 pxPerSec
+        const clipStartX = entry.startSec * pxPerSec - scrollLeft;
+        const clipWidthPx = entry.lengthSec * pxPerSec;
         if (clipWidthPx <= 0) continue;
 
-        // 裁剪到 clip 的 x 范围，避免溢出到相邻 clip 区域
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(clipStartX, 0, clipWidthPx, h);
-        ctx.clip();
-        // 平移坐标系到 clip 起始 x，让 renderWaveformCanvas 从 x=0 开始绘制
-        ctx.translate(clipStartX, 0);
+        // peaks 数据的自然列数（不随 trim 拖动变化�?
+        const peaksCols = pMin.length;
 
+        // 处理波形：targetWidth �?peaks 实际列数，保�?1:1 映射，不�?lengthSec 变化而拉�?
         const processed = processWaveformPeaks({
             min: pMin,
             max: pMax,
@@ -447,12 +402,23 @@ export function drawPianoRoll(args: {
             durSec: pDurSec,
             visibleStartSec: pStartSec,
             visibleDurSec: pDurSec,
-            targetWidth: clipWidthPx,
+            targetWidth: peaksCols,
         });
 
-        // 将 clip 的波形映射到其在 canvas 上的 x 位置
+        // 裁剪�?clip �?x 范围，避免溢出到相邻 clip 区域
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(clipStartX, 0, clipWidthPx, h);
+        ctx.clip();
+        // 平移�?clip 起始 x，并缩放�?peaks 自然宽度（peaksCols）映射到 clipWidthPx
+        ctx.translate(clipStartX, 0);
+        if (peaksCols > 0) {
+            ctx.scale(clipWidthPx / peaksCols, 1);
+        }
+
+        // renderWaveformCanvas �?width �?peaksCols，与 processed.timestamps 的时间范围一�?
         renderWaveformCanvas(ctx, processed, {
-            width: clipWidthPx,
+            width: peaksCols,
             height: h,
             fillColor: waveformColors.fill,
             strokeColor: waveformColors.stroke,
@@ -481,19 +447,19 @@ export function drawPianoRoll(args: {
         return;
     }
 
-    // 检测音高参考线：在 pitch 模式下，将后端推送的 per-clip 检测曲线渲染为半透明彩色参考线。
-    // 渲染在用户编辑曲线下方，不干扰主曲线的视觉层次。
+    // 检测音高参考线：在 pitch 模式下，将后端推送的 per-clip 检测曲线渲染为半透明彩色参考线�?
+    // 渲染在用户编辑曲线下方，不干扰主曲线的视觉层次�?
     if (
         editParam === "pitch" &&
         detectedPitchCurves &&
         detectedPitchCurves.length > 0
     ) {
-        // 多 clip 时循环颜色，增强区分度
+        // �?clip 时循环颜色，增强区分�?
         const DETECTED_COLORS = [
             "rgba(80, 220, 180, 0.55)", // 青绿
             "rgba(255, 180, 60, 0.55)", // 橙黄
-            "rgba(180, 120, 255, 0.55)", // 紫
-            "rgba(60, 180, 255, 0.55)", // 蓝
+            "rgba(180, 120, 255, 0.55)", // �?
+            "rgba(60, 180, 255, 0.55)", // �?
         ];
 
         for (let ci = 0; ci < detectedPitchCurves.length; ci++) {
@@ -505,22 +471,6 @@ export function drawPianoRoll(args: {
             // clip 起始时间（秒）：startFrame 是引擎采样帧
             const clipStartSec = curve.startFrame / sr;
 
-            // 使用和波形相同的坐标计算方式：秒 -> beat -> 像素
-            const clipStartBeat = clipStartSec / secPerBeat;
-            const pxPerSec = pxPerBeat / secPerBeat;
-
-            // DEBUG: 输出关键时间参数
-            console.log(`[DetectedPitch] Curve #${ci}:`, {
-                startFrame: curve.startFrame,
-                sampleRate: sr,
-                framePeriodMs: fp,
-                clipStartSec: clipStartSec,
-                clipStartBeat: clipStartBeat,
-                midiCurveLength: curve.midiCurve.length,
-                calculatedDurationSec: (curve.midiCurve.length * fp) / 1000,
-                pxPerSec: pxPerSec,
-            });
-
             ctx.save();
             ctx.strokeStyle = DETECTED_COLORS[ci % DETECTED_COLORS.length];
             ctx.lineWidth = 1.5;
@@ -529,33 +479,30 @@ export function drawPianoRoll(args: {
 
             // 使用和波形相同的坐标转换：beat * pxPerBeat - scrollLeft
             ctx.beginPath();
-            let firstX = -1,
-                lastX = -1;
+            let firstX = -1;
             let hasStarted = false;
 
             for (let i = 0; i < curve.midiCurve.length; i++) {
                 const midi = curve.midiCurve[i];
                 if (midi == null || !isFinite(midi)) continue;
 
-                // 计算当前帧的时间（秒），然后转换为beat和像素
+            // 计算当前帧的时间（秒），统一用 sec 坐标系
                 const frameSec = clipStartSec + (i * fp) / 1000;
-                const frameBeat = frameSec / secPerBeat;
-                const x = frameBeat * pxPerBeat - scrollLeft;
-
-                // 裁剪到可见区域
+                const x = frameSec * pxPerSec - scrollLeft;
+                // 裁剪到可见区�?
                 if (x < -10 || x > w + 10) continue;
 
                 if (firstX < 0) firstX = x;
-                lastX = x;
 
-                // 无声帧（midi <= 0）：画在底部或跳过，但保持连续性
+                // 无声�?
+                // 无声帧（midi <= 0）：画在底部或跳过，但保持连续�?
                 if (midi <= 0) {
                     // 用户要求保持绘制，所以即使是0也画出来
-                    // 可以选择画一条底部基准线，或者简单跳过
+                    // 可以选择画一条底部基准线，或者简单跳�?
                     continue;
                 }
 
-                // pitch 曲线加 0.5 偏移，使点落在键中心
+                // pitch 曲线�?0.5 偏移，使点落在键中心
                 const y = valueToY("pitch", midi + 0.5, h);
 
                 if (!hasStarted) {
@@ -567,24 +514,17 @@ export function drawPianoRoll(args: {
             }
             ctx.stroke();
             ctx.restore();
-
-            console.log(`[DetectedPitch] Rendered Curve #${ci}:`, {
-                firstX,
-                lastX,
-                renderedWidthPx: lastX - firstX,
-                expectedDurationSec: (curve.midiCurve.length * fp) / 1000,
-            });
         }
     }
 
     // Curves
-    // 副参数曲线（半透明、细线，绘制在主参数曲线下方）
+    // 副参数曲线（半透明、细线，绘制在主参数曲线下方�?
     if (
         showSecondaryParam &&
         secondaryParamView &&
         secondaryParamView.edit.length >= 2
     ) {
-        // 根据副参数类型选择颜色：pitch 用蓝色，tension 用橙色
+        // 根据副参数类型选择颜色：pitch 用蓝色，tension 用橙�?
         const secondaryParam: ParamName = secondaryParamView.key.includes(
             "|pitch|",
         )
@@ -671,8 +611,8 @@ export function drawPianoRoll(args: {
         ctx.restore();
     }
 
-    // Playhead
-    const phx = playheadBeat * pxPerBeat - scrollLeft;
+    // Playhead（统一用 sec 坐标系）
+    const phx = playheadSec * pxPerSec - scrollLeft;
     ctx.strokeStyle = "rgba(255,255,255,0.25)";
     ctx.lineWidth = 1;
     ctx.beginPath();
