@@ -99,6 +99,8 @@ struct ClipPitchKey {
     frame_period_ms: f64,
     sample_rate: u32,
     pre_silence_sec: f64,
+    /// true = playback_rate==1，分析源音频全量，cache key 不含 trim
+    is_full_source: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -296,17 +298,23 @@ fn build_clip_pitch_key(
     hasher.update(&quantize_u32(fp, 1000.0).to_le_bytes());
 
     // 只有影响音频内容的字段才参与 hash：
-    //   source_path、trim_start_sec、trim_end_sec、playback_rate
+    //   source_path、playback_rate（以及 playback_rate!=1 时的 trim 参数）
     // 注意：start_sec（clip 位置）和 length_sec 不参与 hash，
     //       clip 移动不会触发重新检测。
     hasher.update(&quantize_u32(playback_rate, 10000.0).to_le_bytes());
-    hasher.update(&quantize_i64(clip.trim_start_sec, 1000.0).to_le_bytes());
-    hasher.update(&quantize_u32(clip.trim_end_sec, 1000.0).to_le_bytes());
 
-    // Pre-silence 由 trim_start_sec 和 playback_rate 决定，已隐含在上面的字段中。
-    hasher.update(&quantize_u32(pre_silence_sec, 1000.0).to_le_bytes());
-    hasher.update(&quantize_u32(trim_start_sec, 1000.0).to_le_bytes());
-    hasher.update(&quantize_u32(trim_end_sec, 1000.0).to_le_bytes());
+    let is_full_source = (playback_rate - 1.0).abs() <= 1e-6;
+
+    if !is_full_source {
+        // playback_rate != 1：拉伸后 PCM 依赖 trim，trim 参与 hash
+        hasher.update(&quantize_i64(clip.trim_start_sec, 1000.0).to_le_bytes());
+        hasher.update(&quantize_u32(clip.trim_end_sec, 1000.0).to_le_bytes());
+        hasher.update(&quantize_u32(pre_silence_sec, 1000.0).to_le_bytes());
+        hasher.update(&quantize_u32(trim_start_sec, 1000.0).to_le_bytes());
+        hasher.update(&quantize_u32(trim_end_sec, 1000.0).to_le_bytes());
+    }
+    // playback_rate == 1：全量分析源音频，cache key 不含 trim，
+    // trim 变化不触发重新分析。
 
     let key = hasher.finalize().to_hex().to_string();
 
@@ -316,6 +324,7 @@ fn build_clip_pitch_key(
         frame_period_ms: fp,
         sample_rate: 44100,
         pre_silence_sec,
+        is_full_source,
     })
 }
 
@@ -370,6 +379,7 @@ pub fn schedule_clip_pitch_jobs(
     engine_tx: &mpsc::Sender<crate::audio_engine::types::EngineCommand>,
     stretch_cache: &Arc<Mutex<HashMap<crate::audio_engine::types::StretchKey, ResampledStereo>>>,
     app_handle: Option<&tauri::AppHandle>,
+    out_rate: u32,
 ) {
     eprintln!("[pitch_clip] schedule_clip_pitch_jobs called, clips={}, app_handle={}",
         tl.clips.len(), app_handle.is_some());
@@ -455,7 +465,7 @@ pub fn schedule_clip_pitch_jobs(
         let stretched_pcm: Option<ResampledStereo> = if (playback_rate - 1.0).abs() > 1e-6 {
             let sk = make_stretch_key(
                 Path::new(source_path),
-                44100,
+                out_rate,
                 clip.trim_start_sec,
                 clip.trim_end_sec,
                 playback_rate,
@@ -618,18 +628,16 @@ pub fn compute_clip_pitch_midi(
     let bs = beat_sec(bpm);
 
     // ── 选择分析用 PCM ────────────────────────────────────────────────────
-    // 优先使用拉伸后 PCM（已包含 trim + 时间拉伸），直接用于分析；
-    // 若无拉伸缓存，则解码原始文件并手动 trim。
+    // playback_rate == 1（is_full_source）：解码源音频全部，不做 trim 截取，
+    //   缓存覆盖整个源文件，trim 变化只需重新推送而无需重新分析。
+    // playback_rate != 1：使用拉伸后 PCM（已包含 trim + 时间拉伸），直接分析。
     let (analysis_pcm, analysis_rate, analysis_channels): (Vec<f32>, u32, usize) =
         if let Some(stretched) = stretched_pcm {
             // 拉伸后 PCM 已经是 interleaved stereo，直接使用
             ((*stretched.pcm).clone(), stretched.sample_rate, 2)
         } else {
+            // playback_rate == 1：解码源音频全部（不做 trim 截取）
             let source_path = clip.source_path.as_deref()?;
-            let trim_start_sec_src = clip.trim_start_sec.max(0.0);
-            let trim_end_sec_src = clip.trim_end_sec.max(0.0);
-            let trim_start_sec = trim_start_sec_src;
-            let trim_end_sec = trim_end_sec_src;
 
             let (in_rate, in_channels, pcm) =
                 crate::audio_utils::decode_audio_f32_interleaved(Path::new(source_path)).ok()?;
@@ -639,28 +647,8 @@ pub fn compute_clip_pitch_midi(
                 return None;
             }
 
-            let total_sec = (in_frames as f64) / (in_rate.max(1) as f64);
-            if !(total_sec.is_finite() && total_sec > 0.0) {
-                return None;
-            }
-
-            let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
-            if src_end_limit_sec - trim_start_sec <= 1e-9 {
-                return None;
-            }
-
-            let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
-            let src_i1 = (src_end_limit_sec * in_rate as f64)
-                .ceil()
-                .max(src_i0 as f64) as usize;
-            let src_i1 = src_i1.min(in_frames);
-            if src_i1 <= src_i0 + 1 {
-                return None;
-            }
-
-            let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
             let segment = crate::mixdown::linear_resample_interleaved(
-                segment,
+                &pcm,
                 in_channels_usize,
                 in_rate,
                 ck.sample_rate,
@@ -761,28 +749,34 @@ pub fn compute_clip_pitch_midi(
         midi.push(hz_to_midi(hz));
     }
 
-    // timeline alignment
-    let clip_timeline_len_sec = clip.length_sec.max(0.0);
-    let clip_frames = ((clip_timeline_len_sec * 1000.0) / frame_period_tl_ms)
-        .round()
-        .max(1.0) as usize;
-    let mut midi = resample_curve_linear(&midi, clip_frames);
+    // ── timeline alignment ──────────────────────────────────────────────
+    // is_full_source (playback_rate==1)：全量曲线直接返回，前端负责裁剪。
+    // stretched (playback_rate!=1)：resample 到 clip timeline 长度。
+    if !ck.is_full_source {
+        let clip_timeline_len_sec = clip.length_sec.max(0.0);
+        let clip_frames = ((clip_timeline_len_sec * 1000.0) / frame_period_tl_ms)
+            .round()
+            .max(1.0) as usize;
+        midi = resample_curve_linear(&midi, clip_frames);
 
-    // Apply pre-silence shift.
-    let pre_frames = ((ck.pre_silence_sec * 1000.0) / frame_period_tl_ms)
-        .round()
-        .max(0.0) as usize;
-    if pre_frames > 0 {
-        let mut shifted = vec![0.0f32; clip_frames];
-        for (i, v) in shifted.iter_mut().enumerate() {
-            if let Some(src) = i.checked_sub(pre_frames) {
-                if let Some(&m) = midi.get(src) {
-                    *v = m;
+        // Apply pre-silence shift (仅 stretched 分支需要).
+        let pre_frames = ((ck.pre_silence_sec * 1000.0) / frame_period_tl_ms)
+            .round()
+            .max(0.0) as usize;
+        if pre_frames > 0 {
+            let mut shifted = vec![0.0f32; clip_frames];
+            for (i, v) in shifted.iter_mut().enumerate() {
+                if let Some(src) = i.checked_sub(pre_frames) {
+                    if let Some(&m) = midi.get(src) {
+                        *v = m;
+                    }
                 }
             }
+            midi = shifted;
         }
-        midi = shifted;
     }
+    // is_full_source 时 midi 长度直接对应源音频帧数（WORLD 输出），
+    // 前端通过 ctx.clip() + clipStartSec/clipLengthSec 裁剪显示。
 
     // Small gap fill.
     let gap_ms = std::env::var("HIFISHIFTER_WORLD_F0_GAP_MS")

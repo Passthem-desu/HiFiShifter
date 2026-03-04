@@ -26,6 +26,10 @@ pub(crate) struct StretchJob {
     pub(crate) trim_start_sec: f64,
     pub(crate) trim_end_sec: f64,
     pub(crate) playback_rate: f64,
+    /// clip 名称，用于向前端推送拉伸进度信息
+    pub(crate) clip_name: String,
+    /// Tauri app handle，用于 emit 事件
+    pub(crate) app_handle: Option<Arc<tauri::AppHandle>>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,16 +88,6 @@ pub(crate) struct EngineClip {
     pub(crate) fade_in_frames: u64,
     pub(crate) fade_out_frames: u64,
     pub(crate) gain: f32,
-
-    // Per-clip WORLD 音高合成缓存 ring。
-    // 当音高编辑激活时，后台 worker 将该 clip 的合成 PCM 写入此 ring；
-    // 播放时优先从此 ring 读取，未覆盖区域 fallback 到 stretch_stream / src。
-    pub(crate) synth_ring: Option<Arc<StreamRingStereo>>,
-
-    // 合成 epoch：每当该 clip 的音高曲线发生变化时递增，
-    // 使旧的合成 worker 自动退出，触发重新合成。
-    // 与 clip_stretch_epochs 机制一致，使用 Arc<AtomicU64> 跨线程共享。
-    pub(crate) synth_epoch: u64,
 }
 
 #[allow(dead_code)]

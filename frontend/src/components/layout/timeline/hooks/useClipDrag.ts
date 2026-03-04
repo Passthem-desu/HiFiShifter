@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { batch } from "react-redux";
 import type { AppDispatch } from "../../../../app/store";
 import type { SessionState } from "../../../../features/session/sessionSlice";
@@ -14,6 +14,20 @@ import {
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 
 const NEW_TRACK_SENTINEL = "__hs_new_track__";
+
+/** copyMode 拖动时的 ghost 预览信息 */
+export type GhostDragInfo = {
+    /** 参与复制拖动的 clip id 列表 */
+    clipIds: string[];
+    /** 每个 clip 的初始位置（秒）和 trackId */
+    initialById: Record<string, { startSec: number; trackId: string }>;
+    /** 相对于初始位置的偏移量（秒） */
+    deltaSec: number;
+    /** 目标 trackId（null 表示新轨道） */
+    targetTrackId: string | null;
+    /** 是否允许跨轨道移动 */
+    allowTrackMove: boolean;
+};
 
 export type ClipDragState = {
     pointerId: number;
@@ -60,6 +74,7 @@ export function useClipDrag(deps: {
     } = deps;
 
     const clipDragRef = useRef<ClipDragState | null>(null);
+    const [ghostDrag, setGhostDrag] = useState<GhostDragInfo | null>(null);
 
     function startSlipDrag(
         e: React.PointerEvent<HTMLDivElement>,
@@ -173,26 +188,37 @@ export function useClipDrag(deps: {
                 setClipDropNewTrack(false);
             }
 
-            batch(() => {
-                for (const id of drag.clipIds) {
-                    const initial = drag.initialById[id];
-                    if (!initial) continue;
-                    dispatch(
-                        moveClipStart({
-                            clipId: id,
-                            startSec: Math.max(0, initial.startSec + deltaBeat),
-                        }),
-                    );
-                    if (drag.allowTrackMove) {
+            // copyMode 时不移动原 clip，只更新 ghost 预览位置
+            if (drag.copyMode) {
+                setGhostDrag({
+                    clipIds: drag.clipIds,
+                    initialById: drag.initialById,
+                    deltaSec: deltaBeat,
+                    targetTrackId: nextTrackId,
+                    allowTrackMove: drag.allowTrackMove,
+                });
+            } else {
+                batch(() => {
+                    for (const id of drag.clipIds) {
+                        const initial = drag.initialById[id];
+                        if (!initial) continue;
                         dispatch(
-                            moveClipTrack({
+                            moveClipStart({
                                 clipId: id,
-                                trackId: nextTrackId ?? NEW_TRACK_SENTINEL,
+                                startSec: Math.max(0, initial.startSec + deltaBeat),
                             }),
                         );
+                        if (drag.allowTrackMove) {
+                            dispatch(
+                                moveClipTrack({
+                                    clipId: id,
+                                    trackId: nextTrackId ?? NEW_TRACK_SENTINEL,
+                                }),
+                            );
+                        }
                     }
-                }
-            });
+                });
+            }
         }
 
         function end() {
@@ -200,6 +226,9 @@ export function useClipDrag(deps: {
             if (!drag || drag.pointerId !== e.pointerId) return;
             clipDragRef.current = null;
             setClipDropNewTrack(false);
+
+            // 清除 ghost 预览
+            setGhostDrag(null);
 
             if (!drag.hasMoved) {
                 window.removeEventListener("pointermove", onMove);
@@ -228,19 +257,19 @@ export function useClipDrag(deps: {
             }
 
             if (drag.copyMode) {
+                // copyMode 下原 clip 未被移动，直接根据 ghost 偏移量计算副本位置
                 const templates: ClipTemplate[] = [];
                 for (const id of drag.clipIds) {
                     const initial = drag.initialById[id];
                     const now = session.clips.find((c) => c.id === id);
                     if (!initial || !now) continue;
-                    const effectiveTrackId =
-                        String(now.trackId) === NEW_TRACK_SENTINEL
-                            ? null
-                            : String(now.trackId);
+                    const targetTrackId = drag.allowTrackMove
+                        ? (drag.lastTrackId ?? null)
+                        : initial.trackId;
                     templates.push({
-                        trackId: effectiveTrackId ?? initial.trackId,
+                        trackId: targetTrackId ?? initial.trackId,
                         name: String(now.name),
-                        startSec: Number(now.startSec),
+                        startSec: Math.max(0, initial.startSec + drag.lastDeltaBeat),
                         lengthSec: Number(now.lengthSec),
                         sourcePath: now.sourcePath,
                         durationSec: now.durationSec,
@@ -252,8 +281,6 @@ export function useClipDrag(deps: {
                         fadeInSec: Number(now.fadeInSec ?? 0) || 0,
                         fadeOutSec: Number(now.fadeOutSec ?? 0) || 0,
                     });
-                    dispatch(moveClipStart({ clipId: id, startSec: initial.startSec }));
-                    dispatch(moveClipTrack({ clipId: id, trackId: initial.trackId }));
                 }
                 if (templates.length > 0) {
                     dispatch(checkpointHistory());
@@ -335,5 +362,5 @@ export function useClipDrag(deps: {
         window.addEventListener("pointercancel", end);
     }
 
-    return { clipDragRef, startClipDrag };
+    return { clipDragRef, startClipDrag, ghostDrag };
 }

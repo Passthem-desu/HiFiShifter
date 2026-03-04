@@ -1,54 +1,54 @@
-//! 声码器管线抽象层。
+﻿//! 澹扮爜鍣ㄧ绾挎娊璞″眰銆?
 //!
-//! 通过 [`VocoderPipeline`] trait 将合成链路与调用方解耦，
-//! 未来新增声码器只需实现该 trait 并在 [`get_pipeline`] 中注册，
-//! 无需修改 `pitch_editing.rs` 等核心逻辑。
+//! 閫氳繃 [`VocoderPipeline`] trait 灏嗗悎鎴愰摼璺笌璋冪敤鏂硅В鑰︼紝
+//! 鏈潵鏂板澹扮爜鍣ㄥ彧闇€瀹炵幇璇?trait 骞跺湪 [`get_pipeline`] 涓敞鍐岋紝
+//! 鏃犻渶淇敼 `pitch_editing.rs` 绛夋牳蹇冮€昏緫銆?
 
 use crate::state::SynthPipelineKind;
 
-// ─── 上下文 ────────────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ 涓婁笅鏂?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/// 传递给声码器的处理上下文（借用，零拷贝）。
+/// 浼犻€掔粰澹扮爜鍣ㄧ殑澶勭悊涓婁笅鏂囷紙鍊熺敤锛岄浂鎷疯礉锛夈€?
 pub struct VocoderContext<'a> {
-    /// 单声道 PCM 输入（f32，已归一化）。
+    /// 鍗曞０閬?PCM 杈撳叆锛坒32锛屽凡褰掍竴鍖栵級銆?
     pub mono_pcm: &'a [f32],
-    /// 采样率（Hz）。
+    /// 閲囨牱鐜囷紙Hz锛夈€?
     pub sample_rate: u32,
-    /// 当前片段在时间轴上的起始时间（秒）。
+    /// 褰撳墠鐗囨鍦ㄦ椂闂磋酱涓婄殑璧峰鏃堕棿锛堢锛夈€?
     pub seg_start_sec: f64,
-    /// 当前片段在时间轴上的结束时间（秒）。
+    /// 褰撳墠鐗囨鍦ㄦ椂闂磋酱涓婄殑缁撴潫鏃堕棿锛堢锛夈€?
     pub seg_end_sec: f64,
-    /// 所属 Clip 在时间轴上的起始时间（秒），用于 MIDI 曲线对齐。
+    /// 鎵€灞?Clip 鍦ㄦ椂闂磋酱涓婄殑璧峰鏃堕棿锛堢锛夛紝鐢ㄤ簬 MIDI 鏇茬嚎瀵归綈銆?
     pub clip_start_sec: f64,
-    /// 分析帧周期（毫秒）。
+    /// 鍒嗘瀽甯у懆鏈燂紙姣锛夈€?
     pub frame_period_ms: f64,
-    /// 全局 pitch_edit 曲线（绝对 MIDI，0 表示无编辑）。
+    /// 鍏ㄥ眬 pitch_edit 鏇茬嚎锛堢粷瀵?MIDI锛? 琛ㄧず鏃犵紪杈戯級銆?
     pub pitch_edit: &'a [f32],
-    /// Clip 原始 MIDI 曲线（时间轴对齐）。
+    /// Clip 鍘熷 MIDI 鏇茬嚎锛堟椂闂磋酱瀵归綈锛夈€?
     pub clip_midi: &'a [f32],
-    /// 所属 Clip 的唯一标识，用于 per-segment 推理缓存。
+    /// 鎵€灞?Clip 鐨勫敮涓€鏍囪瘑锛岀敤浜?per-segment 鎺ㄧ悊缂撳瓨銆?
     pub clip_id: &'a str,
 }
 
-// ─── Trait ─────────────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ Trait 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/// 声码器管线接口。
+/// 澹扮爜鍣ㄧ绾挎帴鍙ｃ€?
 ///
-/// 实现者必须是 `Send + Sync`，以便在多线程渲染中安全使用。
+/// 瀹炵幇鑰呭繀椤绘槸 `Send + Sync`锛屼互渚垮湪澶氱嚎绋嬫覆鏌撲腑瀹夊叏浣跨敤銆?
 pub trait VocoderPipeline: Send + Sync {
-    /// 返回该管线对应的 [`SynthPipelineKind`]。
+    /// 杩斿洖璇ョ绾垮搴旂殑 [`SynthPipelineKind`]銆?
     fn kind(&self) -> SynthPipelineKind;
 
-    /// 检查后端是否可用（动态库已加载 / ONNX 模型已就绪等）。
+    /// 妫€鏌ュ悗绔槸鍚﹀彲鐢紙鍔ㄦ€佸簱宸插姞杞?/ ONNX 妯″瀷宸插氨缁瓑锛夈€?
     fn is_available(&self) -> bool;
 
-    /// 对输入 PCM 执行音高编辑，返回处理后的单声道 PCM。
+    /// 瀵硅緭鍏?PCM 鎵ц闊抽珮缂栬緫锛岃繑鍥炲鐞嗗悗鐨勫崟澹伴亾 PCM銆?
     fn process(&self, ctx: &VocoderContext<'_>) -> Result<Vec<f32>, String>;
 }
 
-// ─── 辅助函数（供实现内部使用）────────────────────────────────────────────────
+// 鈹€鈹€鈹€ 杈呭姪鍑芥暟锛堜緵瀹炵幇鍐呴儴浣跨敤锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/// 在 pitch_edit 曲线中插值，返回目标 MIDI（无编辑时返回 None）。
+/// 鍦?pitch_edit 鏇茬嚎涓彃鍊硷紝杩斿洖鐩爣 MIDI锛堟棤缂栬緫鏃惰繑鍥?None锛夈€?
 fn edit_midi_at_time_or_none(
     frame_period_ms: f64,
     pitch_edit: &[f32],
@@ -89,7 +89,7 @@ fn edit_midi_at_time_or_none(
     }
 }
 
-/// 在 clip_midi 曲线中插值，返回原始 MIDI（无效时返回 0.0）。
+/// 鍦?clip_midi 鏇茬嚎涓彃鍊硷紝杩斿洖鍘熷 MIDI锛堟棤鏁堟椂杩斿洖 0.0锛夈€?
 fn clip_midi_at_time(
     frame_period_ms: f64,
     clip_start_sec: f64,
@@ -129,9 +129,9 @@ fn clip_midi_at_time(
     if v.is_finite() { v } else { 0.0 }
 }
 
-// ─── WorldVocoderPipeline ──────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ WorldVocoderPipeline 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/// 基于 WORLD 声码器的管线实现。
+/// 鍩轰簬 WORLD 澹扮爜鍣ㄧ殑绠＄嚎瀹炵幇銆?
 pub struct WorldVocoderPipeline;
 
 impl VocoderPipeline for WorldVocoderPipeline {
@@ -174,18 +174,18 @@ impl VocoderPipeline for WorldVocoderPipeline {
     }
 }
 
-// ─── NsfHifiganPipeline ────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ NsfHifiganPipeline 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/// 基于 NSF-HiFiGAN ONNX 的管线实现。
+/// 鍩轰簬 NSF-HiFiGAN ONNX 鐨勭绾垮疄鐜般€?
 ///
-/// # F0 数据源
+/// # F0 鏁版嵁婧?
 ///
-/// `midi_at_time` 回调与 [`WorldVocoderPipeline`] 共用同一套 F0 数据源：
-/// - `clip_midi`：由 Harvest 分析得到的原始 MIDI 曲线（时间轴对齐）
-/// - `pitch_edit`：用户编辑的目标 MIDI 曲线（0 表示无编辑）
+/// `midi_at_time` 鍥炶皟涓?[`WorldVocoderPipeline`] 鍏辩敤鍚屼竴濂?F0 鏁版嵁婧愶細
+/// - `clip_midi`锛氱敱 Harvest 鍒嗘瀽寰楀埌鐨勫師濮?MIDI 鏇茬嚎锛堟椂闂磋酱瀵归綈锛?
+/// - `pitch_edit`锛氱敤鎴风紪杈戠殑鐩爣 MIDI 鏇茬嚎锛? 琛ㄧず鏃犵紪杈戯級
 ///
-/// 两条链路切换时无需重新分析，直接复用已有的 `clip_midi`。
-/// 若 `clip_midi` 为空（Harvest 尚未完成），则跳过推理并返回原始 PCM。
+/// 涓ゆ潯閾捐矾鍒囨崲鏃舵棤闇€閲嶆柊鍒嗘瀽锛岀洿鎺ュ鐢ㄥ凡鏈夌殑 `clip_midi`銆?
+/// 鑻?`clip_midi` 涓虹┖锛圚arvest 灏氭湭瀹屾垚锛夛紝鍒欒烦杩囨帹鐞嗗苟杩斿洖鍘熷 PCM銆?
 pub struct NsfHifiganPipeline;
 
 impl VocoderPipeline for NsfHifiganPipeline {
@@ -203,8 +203,8 @@ impl VocoderPipeline for NsfHifiganPipeline {
         let pitch_edit = ctx.pitch_edit;
         let clip_midi = ctx.clip_midi;
 
-        // clip_midi 为空时明确跳过，与 WORLD 链路行为一致。
-        // Harvest 分析尚未完成时 clip_midi 可能为空，此时返回原始 PCM。
+        // clip_midi 涓虹┖鏃舵槑纭烦杩囷紝涓?WORLD 閾捐矾琛屼负涓€鑷淬€?
+        // Harvest 鍒嗘瀽灏氭湭瀹屾垚鏃?clip_midi 鍙兘涓虹┖锛屾鏃惰繑鍥炲師濮?PCM銆?
         if clip_midi.is_empty() {
             if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                 eprintln!(
@@ -215,32 +215,32 @@ impl VocoderPipeline for NsfHifiganPipeline {
             return Ok(ctx.mono_pcm.to_vec());
         }
 
-        // ── 查询 per-segment 缓存 ─────────────────────────────────────────────
-        // 用 clip_id + seg 范围 + pitch_edit 片段 计算 param_hash，
-        // 实现离线渲染路径的推理结果复用。
+        // 鈹€鈹€ 鏌ヨ per-segment 缂撳瓨 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+        // 鐢?clip_id + seg 鑼冨洿 + pitch_edit 鐗囨 璁＄畻 param_hash锛?
+        // 瀹炵幇绂荤嚎娓叉煋璺緞鐨勬帹鐞嗙粨鏋滃鐢ㄣ€?
         let sr = ctx.sample_rate;
         let seg_start_frame = (ctx.seg_start_sec * sr as f64).round().max(0.0) as u64;
         let seg_end_frame = (ctx.seg_end_sec * sr as f64).round().max(0.0) as u64;
         let curves_snapshot = crate::pitch_editing::PitchCurvesSnapshot {
             frame_period_ms: fp,
-            pitch_orig: vec![],  // 离线路径不需要 pitch_orig 参与 hash
+            pitch_orig: vec![],  // 绂荤嚎璺緞涓嶉渶瑕?pitch_orig 鍙備笌 hash
             pitch_edit: pitch_edit.to_vec(),
         };
-        let param_hash = crate::onnx_clip_cache::compute_param_hash(
+        let param_hash = crate::synth_clip_cache::compute_param_hash(
             ctx.clip_id,
             seg_start_frame,
             seg_end_frame,
             sr,
             &curves_snapshot,
         );
-        let cache_key = crate::onnx_clip_cache::OnnxClipCacheKey {
+        let cache_key = crate::synth_clip_cache::SynthClipCacheKey {
             clip_id: ctx.clip_id.to_string(),
             param_hash,
         };
 
-        // 命中缓存：直接返回 mono PCM（从 stereo 取左声道）
+        // 鍛戒腑缂撳瓨锛氱洿鎺ヨ繑鍥?mono PCM锛堜粠 stereo 鍙栧乏澹伴亾锛?
         {
-            let mut cache = crate::onnx_clip_cache::global_onnx_clip_cache()
+            let mut cache = crate::synth_clip_cache::global_synth_clip_cache()
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             if let Some(entry) = cache.get(&cache_key) {
@@ -253,10 +253,10 @@ impl VocoderPipeline for NsfHifiganPipeline {
             }
         }
 
-        // 未命中：推理后写入缓存
-        // midi_at_time 回调使用 clip_midi_at_time + edit_midi_at_time_or_none
-        // 的组合逻辑，与 WorldVocoderPipeline 共用同一套 F0 查询语义。
-        // 区别：WORLD 返回 semitone shift，ONNX 返回目标绝对 MIDI（模型输入语义不同）。
+        // 鏈懡涓細鎺ㄧ悊鍚庡啓鍏ョ紦瀛?
+        // midi_at_time 鍥炶皟浣跨敤 clip_midi_at_time + edit_midi_at_time_or_none
+        // 鐨勭粍鍚堥€昏緫锛屼笌 WorldVocoderPipeline 鍏辩敤鍚屼竴濂?F0 鏌ヨ璇箟銆?
+        // 鍖哄埆锛歐ORLD 杩斿洖 semitone shift锛孫NNX 杩斿洖鐩爣缁濆 MIDI锛堟ā鍨嬭緭鍏ヨ涔変笉鍚岋級銆?
         let chunk_sec = crate::nsf_hifigan_onnx::env_chunk_sec();
         let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
 
@@ -265,12 +265,12 @@ impl VocoderPipeline for NsfHifiganPipeline {
             sr,
             ctx.seg_start_sec,
             move |abs_time_sec| {
-                // 原始 MIDI（来自 Harvest，与 WORLD 链路共用同一数据源）
+                // 鍘熷 MIDI锛堟潵鑷?Harvest锛屼笌 WORLD 閾捐矾鍏辩敤鍚屼竴鏁版嵁婧愶級
                 let orig = clip_midi_at_time(fp, clip_start, clip_midi, abs_time_sec);
                 if !(orig.is_finite() && orig > 0.0) {
                     return 0.0;
                 }
-                // 目标 MIDI：有编辑时用编辑值，否则用原始值（保持音高不变）
+                // 鐩爣 MIDI锛氭湁缂栬緫鏃剁敤缂栬緫鍊硷紝鍚﹀垯鐢ㄥ師濮嬪€硷紙淇濇寔闊抽珮涓嶅彉锛?
                 let target = match edit_midi_at_time_or_none(fp, pitch_edit, abs_time_sec) {
                     Some(v) => v,
                     None => orig,
@@ -281,7 +281,7 @@ impl VocoderPipeline for NsfHifiganPipeline {
             overlap_sec,
         )?;
 
-        // 写入缓存（stereo = mono 复制到双声道）
+        // 鍐欏叆缂撳瓨锛坰tereo = mono 澶嶅埗鍒板弻澹伴亾锛?
         if !result.is_empty() {
             let mut stereo = Vec::with_capacity(result.len() * 2);
             for &v in &result {
@@ -289,12 +289,12 @@ impl VocoderPipeline for NsfHifiganPipeline {
                 stereo.push(v);
             }
             let frames = result.len() as u64;
-            let mut cache = crate::onnx_clip_cache::global_onnx_clip_cache()
+            let mut cache = crate::synth_clip_cache::global_synth_clip_cache()
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             cache.insert(
                 cache_key,
-                crate::onnx_clip_cache::OnnxClipCacheEntry {
+                crate::synth_clip_cache::SynthClipCacheEntry {
                     pcm_stereo: std::sync::Arc::new(stereo),
                     frames,
                     sample_rate: sr,
@@ -306,15 +306,15 @@ impl VocoderPipeline for NsfHifiganPipeline {
     }
 }
 
-// ─── 注册表 ────────────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ 娉ㄥ唽琛?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 static WORLD_PIPELINE: WorldVocoderPipeline = WorldVocoderPipeline;
 static NSF_PIPELINE: NsfHifiganPipeline = NsfHifiganPipeline;
 
-/// 根据 [`SynthPipelineKind`] 返回对应的静态管线实例。
+/// 鏍规嵁 [`SynthPipelineKind`] 杩斿洖瀵瑰簲鐨勯潤鎬佺绾垮疄渚嬨€?
 ///
-/// 使用静态分发（`&'static dyn VocoderPipeline`）避免堆分配，
-/// 声码器数量固定，静态分发足够高效。
+/// 浣跨敤闈欐€佸垎鍙戯紙`&'static dyn VocoderPipeline`锛夐伩鍏嶅爢鍒嗛厤锛?
+/// 澹扮爜鍣ㄦ暟閲忓浐瀹氾紝闈欐€佸垎鍙戣冻澶熼珮鏁堛€?
 pub fn get_pipeline(kind: SynthPipelineKind) -> &'static dyn VocoderPipeline {
     match kind {
         SynthPipelineKind::WorldVocoder => &WORLD_PIPELINE,

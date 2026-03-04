@@ -1,7 +1,9 @@
 import React from "react";
 
 import type { ClipInfo, TrackInfo } from "../../../features/session/sessionTypes";
+import type { GhostDragInfo } from "./hooks/useClipDrag";
 import { ClipItem } from "./ClipItem";
+import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
 
 type WaveformPreview = number[] | { l: number[]; r: number[] };
 
@@ -56,6 +58,11 @@ export const TrackLane = React.memo(function TrackLane(props: {
     onRenameCommit?: (clipId: string, newName: string) => void;
     onRenameDone?: () => void;
     onGainCommit?: (clipId: string, db: number) => void;
+
+    /** Ctrl+拖动复制时的 ghost 预览信息 */
+    ghostDrag?: GhostDragInfo | null;
+    /** 所有 clip 数据（用于跨轨道 ghost 查找） */
+    allClips?: ClipInfo[];
 }) {
     const {
         track,
@@ -80,7 +87,34 @@ export const TrackLane = React.memo(function TrackLane(props: {
         onRenameCommit,
         onRenameDone,
         onGainCommit,
+        ghostDrag,
+        allClips,
     } = props;
+
+    // 计算当前轨道上需要渲染的 ghost clip 列表
+    const ghostClips = React.useMemo(() => {
+        if (!ghostDrag) return [];
+        const result: { clip: ClipInfo; ghostStartSec: number }[] = [];
+        for (const clipId of ghostDrag.clipIds) {
+            const initial = ghostDrag.initialById[clipId];
+            if (!initial) continue;
+            // 判断 ghost 是否应出现在当前轨道上
+            const ghostTrackId = ghostDrag.allowTrackMove
+                ? (ghostDrag.targetTrackId ?? initial.trackId)
+                : initial.trackId;
+            if (ghostTrackId !== track.id) continue;
+            // 优先从当前轨道 clips 查找，跨轨道时从全部 clips 中查找
+            const clip = trackClips.find((c) => c.id === clipId)
+                ?? allClips?.find((c) => c.id === clipId)
+                ?? undefined;
+            if (!clip) continue;
+            result.push({
+                clip,
+                ghostStartSec: Math.max(0, initial.startSec + ghostDrag.deltaSec),
+            });
+        }
+        return result;
+    }, [ghostDrag, track.id, trackClips, allClips]);
 
     return (
         <div
@@ -120,6 +154,44 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         onRenameDone={onRenameDone}
                         onGainCommit={onGainCommit}
                     />
+            );
+            })}
+            {/* Ghost clip 预览：Ctrl+拖动复制时显示半透明副本 */}
+            {ghostClips.map(({ clip, ghostStartSec }) => {
+                const ghostLeft = Math.max(0, ghostStartSec * pxPerSec);
+                const ghostWidth = Math.max(1, clip.lengthSec * pxPerSec);
+                return (
+                    <div
+                        key={`ghost-${clip.id}`}
+                        className="absolute pointer-events-none opacity-50"
+                        style={{
+                            left: ghostLeft,
+                            width: ghostWidth,
+                            top: 0,
+                            height: rowHeight - CLIP_BODY_PADDING_Y,
+                        }}
+                    >
+                        {/* Ghost header 条 */}
+                        <div
+                            className="absolute left-0 right-0 top-0 rounded-t-sm"
+                            style={{
+                                height: CLIP_HEADER_HEIGHT,
+                                backgroundColor: trackColor
+                                    ? `color-mix(in oklab, ${trackColor} 50%, transparent)`
+                                    : "color-mix(in oklab, var(--qt-highlight) 50%, transparent)",
+                            }}
+                        />
+                        {/* Ghost body 区域 */}
+                        <div
+                            className="absolute left-0 right-0 bottom-0 rounded-sm border border-dashed border-white/60"
+                            style={{
+                                top: CLIP_HEADER_HEIGHT,
+                                backgroundColor: trackColor
+                                    ? `color-mix(in oklab, ${trackColor} 20%, transparent)`
+                                    : "color-mix(in oklab, var(--qt-highlight) 20%, transparent)",
+                            }}
+                        />
+                    </div>
                 );
             })}
         </div>

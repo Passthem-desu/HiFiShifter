@@ -541,7 +541,7 @@ export const TimelinePanel: React.FC = () => {
         beatFromClientX,
     });
 
-    const { clipDragRef: _clipDragRef, startClipDrag: _startClipDragInner } = useClipDrag({
+    const { clipDragRef: _clipDragRef, startClipDrag: _startClipDragInner, ghostDrag } = useClipDrag({
         scrollRef,
         sessionRef,
         rowHeight,
@@ -973,6 +973,8 @@ export const TimelinePanel: React.FC = () => {
                                             commit,
                                         );
                                     }}
+                                    ghostDrag={ghostDrag}
+                                    allClips={s.clips}
                                     startClipDrag={startClipDrag}
                                     startEditDrag={startEditDrag}
                                     toggleClipMuted={(clipId, nextMuted) => {
@@ -1178,7 +1180,7 @@ export const TimelinePanel: React.FC = () => {
                                 void dispatch(
                                     splitClipRemote({
                                         clipId,
-                                        splitBeat: sessionRef.current.playheadSec,
+                                        splitSec: sessionRef.current.playheadSec,
                                     }),
                                 );
                             }}

@@ -26,8 +26,6 @@ pub(super) fn get_waveform_peaks_segment(
                 ok: false,
                 min: vec![],
                 max: vec![],
-                sample_rate: 44100,
-                hop: hop as u32,
             }
         }
     };
@@ -85,8 +83,6 @@ pub(super) fn get_root_mix_waveform_peaks_segment(
                 ok: false,
                 min: vec![],
                 max: vec![],
-                sample_rate: 44100,
-                hop: 1,
             };
         };
 
@@ -144,15 +140,13 @@ pub(super) fn get_root_mix_waveform_peaks_segment(
             quality_preset: crate::mixdown::QualityPreset::Realtime,
         };
 
-        let (sr, ch, _dur, mix) = match crate::mixdown::render_mixdown_interleaved(&tl, opts) {
+        let (_sr, ch, _dur, mix) = match crate::mixdown::render_mixdown_interleaved(&tl, opts) {
             Ok(v) => v,
             Err(_) => {
                 return waveform::WaveformPeaksSegmentPayload {
                     ok: false,
                     min: vec![],
                     max: vec![],
-                    sample_rate: 44100,
-                    hop: 1,
                 }
             }
         };
@@ -164,8 +158,6 @@ pub(super) fn get_root_mix_waveform_peaks_segment(
                 ok: true,
                 min: vec![0.0; cols],
                 max: vec![0.0; cols],
-                sample_rate: sr,
-                hop: 1,
             };
         }
 
@@ -201,8 +193,6 @@ pub(super) fn get_root_mix_waveform_peaks_segment(
             ok: true,
             min: out_min,
             max: out_max,
-            sample_rate: sr,
-            hop: 1,
         }
     })
 }
@@ -236,8 +226,6 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
                 ok: false,
                 min: vec![],
                 max: vec![],
-                sample_rate: 44100,
-                hop: 1,
             };
         }
 
@@ -295,15 +283,13 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
             quality_preset: crate::mixdown::QualityPreset::Realtime,
         };
 
-        let (sr, ch, _dur, mix) = match crate::mixdown::render_mixdown_interleaved(&tl, opts) {
+        let (_sr, ch, _dur, mix) = match crate::mixdown::render_mixdown_interleaved(&tl, opts) {
             Ok(v) => v,
             Err(_) => {
                 return waveform::WaveformPeaksSegmentPayload {
                     ok: false,
                     min: vec![],
                     max: vec![],
-                    sample_rate: 44100,
-                    hop: 1,
                 }
             }
         };
@@ -315,8 +301,6 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
                 ok: true,
                 min: vec![0.0; cols],
                 max: vec![0.0; cols],
-                sample_rate: sr,
-                hop: 1,
             };
         }
 
@@ -352,8 +336,6 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
             ok: true,
             min: out_min,
             max: out_max,
-            sample_rate: sr,
-            hop: 1,
         }
     })
 }

@@ -114,6 +114,7 @@ pub struct Clip {
 
 #[derive(Debug, Clone, Default)]
 pub struct ClipStatePatch {
+    pub start_sec: Option<f64>,
     pub length_sec: Option<f64>,
     pub gain: Option<f32>,
     pub muted: Option<bool>,
@@ -896,6 +897,7 @@ impl TimelineState {
         self.patch_clip_state(
             clip_id,
             ClipStatePatch {
+                start_sec: None,
                 length_sec,
                 gain,
                 muted,
@@ -911,6 +913,9 @@ impl TimelineState {
     pub fn patch_clip_state(&mut self, clip_id: &str, patch: ClipStatePatch) {
         let mut end_sec: Option<f64> = None;
         if let Some(c) = self.clips.iter_mut().find(|c| c.id == clip_id) {
+            if let Some(v) = patch.start_sec {
+                c.start_sec = v.max(0.0);
+            }
             if let Some(v) = patch.length_sec {
                 c.length_sec = v.max(0.0);
             }

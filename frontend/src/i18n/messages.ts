@@ -151,6 +151,8 @@ export const messages = {
         onnx_unavailable_label: " (unavailable)",
         solo: "Solo",
         status_analyzing_pitch: "Analyzing pitch",
+        status_stretching: "Stretching",
+        refreshing_pitch_data: "Refreshing pitch data",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -300,6 +302,8 @@ export const messages = {
         onnx_unavailable_label: "（不可用）",
         solo: "独奏",
         status_analyzing_pitch: "正在分析音高",
+        status_stretching: "正在拉伸",
+        refreshing_pitch_data: "刷新音高数据",
     },
 } as const;
 

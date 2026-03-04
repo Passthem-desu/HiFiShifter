@@ -51,6 +51,7 @@ import { useAsyncPitchRefresh } from "../../hooks/useAsyncPitchRefresh";
 import { ProgressBar } from "../ProgressBar";
 import { LoadingSpinner } from "../LoadingSpinner";
 import { usePitchAnalysis } from "../../contexts/PitchAnalysisContext";
+import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -184,6 +185,28 @@ export const PianoRollPanel: React.FC = () => {
         if (!rootTrackId) return null;
         return s.tracks.find((tr) => tr.id === rootTrackId) ?? null;
     }, [s.tracks, rootTrackId]);
+
+    // 收集轨道组内所有 trackId（root + 递归所有子轨道）
+    const groupTrackIds = useMemo(() => {
+        const ids = new Set<string>();
+        if (!rootTrackId) return ids;
+        ids.add(rootTrackId);
+        const frontier = [rootTrackId];
+        let idx = 0;
+        while (idx < frontier.length) {
+            const cur = frontier[idx++];
+            const track = s.tracks.find((t) => t.id === cur);
+            if (track?.childTrackIds) {
+                for (const childId of track.childTrackIds) {
+                    if (!ids.has(childId)) {
+                        ids.add(childId);
+                        frontier.push(childId);
+                    }
+                }
+            }
+        }
+        return ids;
+    }, [rootTrackId, s.tracks]);
 
     const pitchHardDisableReason = useMemo(() => {
         if (editParam !== "pitch") return null;
@@ -429,9 +452,9 @@ export const PianoRollPanel: React.FC = () => {
     const pitchAnalysis = usePitchAnalysis();
     const pitchAnalysisPending = pitchAnalysis.pending;
     const pitchAnalysisProgress = pitchAnalysis.progress;
-    const pitchAnalysisCurrentClip = pitchAnalysis.currentClip;
-    const pitchAnalysisCompletedClips = pitchAnalysis.completedClips;
-    const pitchAnalysisTotalClips = pitchAnalysis.totalClips;
+
+    // 将 PianoRoll 加载状态同步到全局 Context（供 status bar 使用）
+    const updatePianoRollStatus = usePianoRollStatusUpdate();
 
     // 用于通知 usePianoRollData 当前是否处于 live 编辑状态（pointer down 期间�?true）�?
     // pitch_orig_updated 事件到达时若�?true，则延迟曲线刷新�?pointer-up 后执行�?
@@ -466,9 +489,10 @@ export const PianoRollPanel: React.FC = () => {
     });
 
     // 获取当前 track 下的所�?clips，用�?per-clip 波形叠加绘制
+    // 获取轨道组内所有 clips（包含 root 轨道及所有子轨道的 clip）
     const trackClips = useMemo(
-        () => s.clips.filter((c) => c.trackId === rootTrackId),
-        [s.clips, rootTrackId],
+        () => s.clips.filter((c) => groupTrackIds.has(c.trackId)),
+        [s.clips, groupTrackIds],
     );
 
     // 可见区域的 sec 范围（统一用 sec 坐标系）
@@ -533,13 +557,24 @@ export const PianoRollPanel: React.FC = () => {
     // 仅在 pitch 模式下有意义，其他模式下传空数组以避免不必要的计算�?
     const detectedPitchCurves = useMemo((): DetectedPitchCurve[] => {
         if (editParam !== "pitch") return [];
-        return Object.values(s.clipPitchCurves).map((c) => ({
-            startFrame: c.startFrame,
-            midiCurve: c.midiCurve,
-            framePeriodMs: c.framePeriodMs,
-            sampleRate: c.sampleRate,
-        }));
-    }, [editParam, s.clipPitchCurves]);
+        return Object.entries(s.clipPitchCurves)
+            .filter(([clipId]) => {
+                // 只保留属于当前轨道组内的 clip，显示 root 及所有子轨道的 detected curve
+                const clip = s.clips.find((cl) => cl.id === clipId);
+                return clip && groupTrackIds.has(clip.trackId);
+            })
+            .map(([clipId, c]) => {
+                // 通过 clipId 查找对应 clip 的当前 startSec 和 lengthSec，用于裁剪渲染区域
+                const clip = s.clips.find((cl) => cl.id === clipId);
+                return {
+                    curveStartSec: c.curveStartSec,
+                    midiCurve: c.midiCurve,
+                    framePeriodMs: c.framePeriodMs,
+                    clipStartSec: clip ? Number(clip.startSec ?? 0) : c.curveStartSec,
+                    clipLengthSec: clip ? Number(clip.lengthSec ?? 0) : Infinity,
+                };
+            });
+    }, [editParam, s.clipPitchCurves, s.clips, groupTrackIds]);
 
     // 检测音高曲线更新时触发重绘
     useEffect(() => {
@@ -636,23 +671,23 @@ export const PianoRollPanel: React.FC = () => {
     // Silence unused state warnings; selectionUi is future UI.
     void selectionUi;
 
-    const showPitchAnalyzingOverlay =
-        editParam === "pitch" &&
-        pitchEnabled &&
-        Boolean(rootTrackId) &&
-        pitchAnalysisPending;
-
-    const showOverlay = isLoading || showPitchAnalyzingOverlay;
-
-    const pitchPercent =
-        pitchAnalysisProgress != null &&
-        Number.isFinite(pitchAnalysisProgress) &&
-        pitchAnalysisProgress >= 0
-            ? Math.max(
-                  0,
-                  Math.min(100, Math.round(pitchAnalysisProgress * 100)),
-              )
-            : null;
+    // 同步 isLoading 和 asyncRefresh 状态到全局 Context
+    useEffect(() => {
+        updatePianoRollStatus({
+            dataLoading: isLoading,
+            asyncRefreshActive: asyncRefresh.isLoading,
+            asyncRefreshProgress: asyncRefresh.progress,
+            asyncRefreshStatus: asyncRefresh.status,
+            asyncRefreshError: asyncRefresh.error,
+        });
+    }, [
+        isLoading,
+        asyncRefresh.isLoading,
+        asyncRefresh.progress,
+        asyncRefresh.status,
+        asyncRefresh.error,
+        updatePianoRollStatus,
+    ]);
 
     return (
         <Flex
@@ -774,7 +809,7 @@ export const PianoRollPanel: React.FC = () => {
                         color="gray"
                         disabled={
                             isLoading ||
-                            showPitchAnalyzingOverlay ||
+                            pitchAnalysisPending ||
                             asyncRefresh.isLoading
                         }
                         onClick={async () => {
@@ -1020,75 +1055,6 @@ export const PianoRollPanel: React.FC = () => {
                     </div>
                 </Flex>
 
-                {showOverlay ? (
-                    <div className="absolute inset-0 z-50 flex items-center justify-center qt-overlay">
-                        <div className="flex flex-col items-center gap-3 w-72">
-                            {showPitchAnalyzingOverlay ? (
-                                <>
-                                    {/* 主标�?*/}
-                                    <Text size="2" color="gray">
-                                        {t("pitch_analyzing")}
-                                    </Text>
-                                    {/* clip 名称：有值时显示具体名称，无值时显示占位 */}
-                                    <Text
-                                        size="1"
-                                        color="gray"
-                                        className="max-w-full truncate"
-                                        title={
-                                            pitchAnalysisCurrentClip ??
-                                            undefined
-                                        }
-                                    >
-                                        {pitchAnalysisCurrentClip
-                                            ? `"${pitchAnalysisCurrentClip}"`
-                                            : t("pitch_analyzing_preparing")}
-                                    </Text>
-                                    {/* 进度�?+ 计数 */}
-                                    <div className="w-full flex flex-col gap-1">
-                                        <div className="w-full h-2 bg-qt-surface border border-qt-border rounded overflow-hidden">
-                                            <div
-                                                className={
-                                                    "h-full bg-qt-highlight transition-[width] duration-150" +
-                                                    (pitchPercent == null
-                                                        ? " animate-pulse"
-                                                        : "")
-                                                }
-                                                style={{
-                                                    width:
-                                                        pitchPercent != null
-                                                            ? `${pitchPercent}%`
-                                                            : "15%",
-                                                    opacity:
-                                                        pitchPercent != null
-                                                            ? 1
-                                                            : 0.6,
-                                                }}
-                                            />
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <Text size="1" color="gray">
-                                                {pitchAnalysisTotalClips !=
-                                                    null &&
-                                                pitchAnalysisTotalClips > 0
-                                                    ? `${pitchAnalysisCompletedClips ?? 0} / ${pitchAnalysisTotalClips} clips`
-                                                    : ""}
-                                            </Text>
-                                            <Text size="1" color="gray">
-                                                {pitchPercent != null
-                                                    ? `${pitchPercent}%`
-                                                    : ""}
-                                            </Text>
-                                        </div>
-                                    </div>
-                                </>
-                            ) : (
-                                <Text size="2" color="gray">
-                                    {t("loading")}
-                                </Text>
-                            )}
-                        </div>
-                    </div>
-                ) : null}
             </Flex>
         </Flex>
     );

@@ -261,6 +261,7 @@ pub(super) fn move_clip(
 pub(super) fn set_clip_state(
     state: State<'_, AppState>,
     clip_id: String,
+    start_sec: Option<f64>,
     length_sec: Option<f64>,
     gain: Option<f32>,
     muted: Option<bool>,
@@ -272,16 +273,19 @@ pub(super) fn set_clip_state(
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
-    tl.set_clip_state(
+    tl.patch_clip_state(
         &clip_id,
-        length_sec,
-        gain,
-        muted,
-        trim_start_sec,
-        trim_end_sec,
-        playback_rate,
-        fade_in_sec,
-        fade_out_sec,
+        crate::state::ClipStatePatch {
+            start_sec,
+            length_sec,
+            gain,
+            muted,
+            trim_start_sec,
+            trim_end_sec,
+            playback_rate,
+            fade_in_sec,
+            fade_out_sec,
+        },
     );
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();

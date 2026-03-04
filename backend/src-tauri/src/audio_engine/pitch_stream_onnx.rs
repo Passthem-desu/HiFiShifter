@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+﻿use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 
@@ -7,7 +7,7 @@ use crate::pitch_editing::PitchCurvesSnapshot;
 use crate::state::TimelineState;
 use crate::time_stretch::StretchAlgorithm;
 
-// ─── 环境变量读取 ──────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ 鐜鍙橀噺璇诲彇 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 fn env_f64(name: &str) -> Option<f64> {
     std::env::var(name)
@@ -20,7 +20,7 @@ fn clamp01(x: f32) -> f32 {
     x.clamp(0.0, 1.0)
 }
 
-// ─── PCM 工具函数 ──────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ PCM 宸ュ叿鍑芥暟 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 fn read_base_stereo_from_ring(
     base_ring: &StreamRingStereo,
@@ -38,9 +38,46 @@ fn read_base_stereo_from_ring(
     }
     let samples = (frames as usize).saturating_mul(2);
     out.resize(samples, 0.0);
-    if !base_ring.read_interleaved_into(start_frame, out.as_mut_slice()) {
+    if base_ring.read_interleaved_into(start_frame, out.as_mut_slice()) {
+        return Some((start_frame, end_frame));
+    }
+
+    // 完整区间不可用：可能 playhead 在 clip 中间，base_ring 只覆盖 [base_frame, write_frame)。
+    // 将 [start_frame, base_frame) 填零，只读取 [base_frame, min(end_frame, write_frame)) 的可用部分。
+    let ring_base = base_ring.base_frame.load(Ordering::Acquire);
+    let ring_write = base_ring.write_frame.load(Ordering::Acquire);
+
+    // base_ring 还完全没有覆盖到 end_frame → 真的需要等
+    if ring_write <= start_frame {
         return None;
     }
+
+    // 计算可读取的区间
+    let read_start = start_frame.max(ring_base);
+    let read_end = end_frame.min(ring_write);
+    if read_end <= read_start {
+        // 可读区间为空但 ring_write > start_frame，说明数据在中间缺失，
+        // 返回全零填充的 buffer 让推理继续。
+        out.fill(0.0);
+        return Some((start_frame, end_frame));
+    }
+
+    // 前段填零
+    out.fill(0.0);
+
+    // 读取可用部分
+    let offset_frames = read_start.saturating_sub(start_frame) as usize;
+    let read_frames = read_end.saturating_sub(read_start) as usize;
+    let read_samples = read_frames * 2;
+    let mut tmp = vec![0.0f32; read_samples];
+    if base_ring.read_interleaved_into(read_start, &mut tmp) {
+        let dst_start = offset_frames * 2;
+        let dst_end = dst_start + read_samples;
+        if dst_end <= out.len() {
+            out[dst_start..dst_end].copy_from_slice(&tmp);
+        }
+    }
+    // 即使部分读取失败（竞态），也返回部分填零的 buffer，避免死循环
     Some((start_frame, end_frame))
 }
 
@@ -83,13 +120,10 @@ fn fit_stereo_to_frames(pcm: &mut Vec<f32>, expected_frames: u64) {
     }
 }
 
-// ─── Crossfade ─────────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ Crossfade 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/// 在 clip 边界处将 prev_tail 与 curr_head 做等功率 crossfade，
-/// 并将混合结果写入 ring buffer 的 [boundary_frame - actual_frames, boundary_frame) 区间。
-///
-/// 等功率权重：w_prev = cos(t * π/2)，w_curr = sin(t * π/2)，满足 w_prev² + w_curr² = 1。
-fn crossfade_into_ring(
+/// 鍦?clip 杈圭晫澶勫皢 prev_tail 涓?curr_head 鍋氱瓑鍔熺巼 crossfade锛?/// 骞跺皢娣峰悎缁撴灉鍐欏叆 ring buffer 鐨?[boundary_frame - actual_frames, boundary_frame) 鍖洪棿銆?///
+/// 绛夊姛鐜囨潈閲嶏細w_prev = cos(t * 蟺/2)锛寃_curr = sin(t * 蟺/2)锛屾弧瓒?w_prev虏 + w_curr虏 = 1銆?fn crossfade_into_ring(
     ring: &StreamRingStereo,
     boundary_frame: u64,
     prev_tail: &[f32],
@@ -135,47 +169,35 @@ fn crossfade_into_ring(
     ring.write_interleaved(boundary_frame - actual_frames as u64, &blended);
 }
 
-// ─── 流式写入状态 ──────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ 娴佸紡鍐欏叆鐘舵€?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/// 已完成推理的 clip 数据，等待分批流式写入 ring。
-struct PendingClip {
-    /// 在全局 ring 中的写入起始帧
-    start_frame: u64,
-    /// 在全局 ring 中的写入结束帧（exclusive）
-    end_frame: u64,
-    /// 推理结果（stereo interleaved）
-    buf: Arc<Vec<f32>>,
-    /// buf 中有效主体数据的样本范围 [main_start, main_end)
+/// 宸插畬鎴愭帹鐞嗙殑 clip 鏁版嵁锛岀瓑寰呭垎鎵规祦寮忓啓鍏?ring銆?struct PendingClip {
+    /// 鍦ㄥ叏灞€ ring 涓殑鍐欏叆璧峰甯?    start_frame: u64,
+    /// 鍦ㄥ叏灞€ ring 涓殑鍐欏叆缁撴潫甯э紙exclusive锛?    end_frame: u64,
+    /// 鎺ㄧ悊缁撴灉锛坰tereo interleaved锛?    buf: Arc<Vec<f32>>,
+    /// buf 涓湁鏁堜富浣撴暟鎹殑鏍锋湰鑼冨洿 [main_start, main_end)
     main_start: usize,
     main_end: usize,
-    /// 期望写入的总帧数（= end_frame - start_frame）
-    expected_frames: u64,
-    /// buf 中实际可用的主体帧数
+    /// 鏈熸湜鍐欏叆鐨勬€诲抚鏁帮紙= end_frame - start_frame锛?    expected_frames: u64,
+    /// buf 涓疄闄呭彲鐢ㄧ殑涓讳綋甯ф暟
     available_frames: u64,
-    /// 已写入的帧数偏移
+    /// 宸插啓鍏ョ殑甯ф暟鍋忕Щ
     write_offset: u64,
-    /// 用于下一次 crossfade 的尾部数据
-    tail: Vec<f32>,
+    /// 鐢ㄤ簬涓嬩竴娆?crossfade 鐨勫熬閮ㄦ暟鎹?    tail: Vec<f32>,
 }
 
-// ─── Clip 描述 ─────────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ Clip 鎻忚堪 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
-/// 从 timeline 提取的 clip 时间线信息（按 start_frame 排序）。
-#[derive(Clone)]
+/// 浠?timeline 鎻愬彇鐨?clip 鏃堕棿绾夸俊鎭紙鎸?start_frame 鎺掑簭锛夈€?#[derive(Clone)]
 struct ClipInfo {
     clip_id: String,
-    /// clip 在 timeline 上的起始帧（绝对）
-    start_frame: u64,
-    /// clip 在 timeline 上的结束帧（exclusive）
-    end_frame: u64,
+    /// clip 鍦?timeline 涓婄殑璧峰甯э紙缁濆锛?    start_frame: u64,
+    /// clip 鍦?timeline 涓婄殑缁撴潫甯э紙exclusive锛?    end_frame: u64,
 }
 
-/// 计算 clip 的参数哈希，用于 [`crate::onnx_clip_cache::OnnxClipCacheKey`]。
-///
-/// 委托给 [`crate::onnx_clip_cache::compute_param_hash`]，
-/// 覆盖 clip_id、帧范围、采样率和 pitch_edit 曲线片段。
-fn compute_clip_param_hash(clip: &ClipInfo, sr: u32, curves: &PitchCurvesSnapshot) -> u64 {
-    crate::onnx_clip_cache::compute_param_hash(
+/// 璁＄畻 clip 鐨勫弬鏁板搱甯岋紝鐢ㄤ簬 [`crate::synth_clip_cache::SynthClipCacheKey`]銆?///
+/// 濮旀墭缁?[`crate::synth_clip_cache::compute_param_hash`]锛?/// 瑕嗙洊 clip_id銆佸抚鑼冨洿銆侀噰鏍风巼鍜?pitch_edit 鏇茬嚎鐗囨銆?fn compute_clip_param_hash(clip: &ClipInfo, sr: u32, curves: &PitchCurvesSnapshot) -> u64 {
+    crate::synth_clip_cache::compute_param_hash(
         &clip.clip_id,
         clip.start_frame,
         clip.end_frame,
@@ -184,10 +206,9 @@ fn compute_clip_param_hash(clip: &ClipInfo, sr: u32, curves: &PitchCurvesSnapsho
     )
 }
 
-/// 从 TimelineState 提取所有有效 clip 的时间线信息，按 start_frame 升序排列。
-fn collect_clip_infos(timeline: &TimelineState, sr: u32) -> Vec<ClipInfo> {
+/// 浠?TimelineState 鎻愬彇鎵€鏈夋湁鏁?clip 鐨勬椂闂寸嚎淇℃伅锛屾寜 start_frame 鍗囧簭鎺掑垪銆?fn collect_clip_infos(timeline: &TimelineState, sr: u32) -> Vec<ClipInfo> {
     let bpm = timeline.bpm.max(1.0);
-    let bs = 60.0 / bpm; // beats → seconds
+    let bs = 60.0 / bpm; // beats 鈫?seconds
 
     let mut infos: Vec<ClipInfo> = timeline
         .clips
@@ -213,7 +234,7 @@ fn collect_clip_infos(timeline: &TimelineState, sr: u32) -> Vec<ClipInfo> {
     infos
 }
 
-// ─── 主入口 ────────────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ 涓诲叆鍙?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 pub(crate) fn spawn_pitch_stream_onnx(
     timeline: TimelineState,
@@ -228,7 +249,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
     debug: bool,
 ) {
     thread::spawn(move || {
-        // ── 参数读取 ──────────────────────────────────────────────────────────
+        // 鈹€鈹€ 鍙傛暟璇诲彇 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
         let xfade_ms = env_f64("HIFISHIFTER_ONNX_VAD_XFADE_MS")
             .unwrap_or(80.0)
             .max(0.0);
@@ -237,44 +258,37 @@ pub(crate) fn spawn_pitch_stream_onnx(
         let chunk_sec = crate::nsf_hifigan_onnx::env_chunk_sec();
         let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
 
-        // 选择时间拉伸算法：优先使用 RubberBand（音高保持），不可用时回退到线性重采样。
-        let stretch = if crate::rubberband::is_available() {
+        // 閫夋嫨鏃堕棿鎷変几绠楁硶锛氫紭鍏堜娇鐢?RubberBand锛堥煶楂樹繚鎸侊級锛屼笉鍙敤鏃跺洖閫€鍒扮嚎鎬ч噸閲囨牱銆?        let stretch = if crate::rubberband::is_available() {
             StretchAlgorithm::RubberBand
         } else {
             StretchAlgorithm::LinearResample
         };
 
         let warmup_ahead_frames = {
-            // HIFISHIFTER_ONNX_WARMUP_MS：warmup 前瞻时长（毫秒），默认 250ms。
-            // 控制播放开始时快速填充缓冲的目标帧数。
-            let ms = env_f64("HIFISHIFTER_ONNX_WARMUP_MS")
+            // HIFISHIFTER_ONNX_WARMUP_MS锛歸armup 鍓嶇灮鏃堕暱锛堟绉掞級锛岄粯璁?250ms銆?            // 鎺у埗鎾斁寮€濮嬫椂蹇€熷～鍏呯紦鍐茬殑鐩爣甯ф暟銆?            let ms = env_f64("HIFISHIFTER_ONNX_WARMUP_MS")
                 .unwrap_or(250.0)
                 .max(0.0);
             ((ms / 1000.0) * sr as f64).round().max(256.0) as u64
         };
         let lookahead_frames_normal = {
-            // HIFISHIFTER_ONNX_LOOKAHEAD_SEC：正常播放时的前瞻时长（秒），默认 1.0s。
-            // 控制 ring buffer 中维持的前瞻数据量。
-            let sec = env_f64("HIFISHIFTER_ONNX_LOOKAHEAD_SEC")
+            // HIFISHIFTER_ONNX_LOOKAHEAD_SEC锛氭甯告挱鏀炬椂鐨勫墠鐬绘椂闀匡紙绉掞級锛岄粯璁?1.0s銆?            // 鎺у埗 ring buffer 涓淮鎸佺殑鍓嶇灮鏁版嵁閲忋€?            let sec = env_f64("HIFISHIFTER_ONNX_LOOKAHEAD_SEC")
                 .unwrap_or(1.0)
                 .max(0.0);
             ((sec * sr as f64).round().max(256.0) as u64).max(warmup_ahead_frames)
         };
         let prefetch_ahead_frames = {
-            // HIFISHIFTER_ONNX_PREFETCH_SEC：prefetch 触发距离（秒），默认 2.0s。
-            // 当 out_cursor 距离下一个 clip 的 start_frame 小于此值时，提前异步推理。
-            let sec = env_f64("HIFISHIFTER_ONNX_PREFETCH_SEC")
+            // HIFISHIFTER_ONNX_PREFETCH_SEC锛歱refetch 瑙﹀彂璺濈锛堢锛夛紝榛樿 2.0s銆?            // 褰?out_cursor 璺濈涓嬩竴涓?clip 鐨?start_frame 灏忎簬姝ゅ€兼椂锛屾彁鍓嶅紓姝ユ帹鐞嗐€?            let sec = env_f64("HIFISHIFTER_ONNX_PREFETCH_SEC")
                 .unwrap_or(2.0)
                 .max(0.0);
             (sec * sr as f64).round().max(0.0) as u64
         };
 
-        // ── Clip 列表 ─────────────────────────────────────────────────────────
+        // 鈹€鈹€ Clip 鍒楄〃 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
         let clips = collect_clip_infos(&timeline, sr);
         let project_sec = timeline.project_duration_sec();
         let project_frames = (project_sec * sr as f64).round().max(0.0) as u64;
 
-        // ── 状态 ──────────────────────────────────────────────────────────────
+        // 鈹€鈹€ 鐘舵€?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
         let mut out_cursor: u64 = position_frames.load(Ordering::Relaxed);
         let mut clip_idx: usize = 0;
         let mut prev_tail: Vec<f32> = vec![];
@@ -293,14 +307,13 @@ pub(crate) fn spawn_pitch_stream_onnx(
             let base = ring.base_frame.load(Ordering::Acquire);
             let write = ring.write_frame.load(Ordering::Acquire);
 
-            // ── Seek 检测 ─────────────────────────────────────────────────────
+            // 鈹€鈹€ Seek 妫€娴?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
             if now_abs < base || now_abs > write.saturating_add(sr as u64) {
                 out_cursor = now_abs;
                 ring.reset(now_abs);
                 pending = None;
                 prev_tail.clear();
-                // 重新定位 clip_idx 到当前播放位置
-                clip_idx = clips
+                // 閲嶆柊瀹氫綅 clip_idx 鍒板綋鍓嶆挱鏀句綅缃?                clip_idx = clips
                     .iter()
                     .position(|c| c.end_frame > now_abs)
                     .unwrap_or(clips.len());
@@ -312,7 +325,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
                 out_cursor = now_abs;
             }
 
-            // ── 前瞻控制 ──────────────────────────────────────────────────────
+            // 鈹€鈹€ 鍓嶇灮鎺у埗 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
             let need_until = if write <= now_abs.saturating_add(warmup_ahead_frames) {
                 now_abs.saturating_add(warmup_ahead_frames)
             } else {
@@ -323,7 +336,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
                 continue;
             }
 
-            // ── 流式写入 pending clip ─────────────────────────────────────────
+            // 鈹€鈹€ 娴佸紡鍐欏叆 pending clip 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
             if let Some(p) = pending.as_mut() {
                 let total_frames = p.expected_frames;
                 if p.write_offset >= total_frames {
@@ -341,7 +354,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
 
                 let mut wrote_frames: u64 = 0;
 
-                // 写入推理结果
+                // 鍐欏叆鎺ㄧ悊缁撴灉
                 if p.write_offset < p.available_frames {
                     let can = (p.available_frames - p.write_offset).min(chunk_frames);
                     let start = p.main_start + (p.write_offset as usize) * 2;
@@ -357,7 +370,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     }
                 }
 
-                // 推理帧不足时补零
+                // 鎺ㄧ悊甯т笉瓒虫椂琛ラ浂
                 let remain_in_chunk = chunk_frames.saturating_sub(wrote_frames);
                 if remain_in_chunk > 0 {
                     let zeros = vec![0.0f32; (remain_in_chunk as usize) * 2];
@@ -369,25 +382,25 @@ pub(crate) fn spawn_pitch_stream_onnx(
                 continue;
             }
 
-            // ── 工程结束 ──────────────────────────────────────────────────────
+            // 鈹€鈹€ 宸ョ▼缁撴潫 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
             if out_cursor >= project_frames && project_frames > 0 {
                 thread::sleep(std::time::Duration::from_millis(8));
                 continue;
             }
 
-            // ── 推进 clip_idx ─────────────────────────────────────────────────
-            // 跳过已经在 out_cursor 之前结束的 clip
+            // 鈹€鈹€ 鎺ㄨ繘 clip_idx 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+            // 璺宠繃宸茬粡鍦?out_cursor 涔嬪墠缁撴潫鐨?clip
             while clip_idx < clips.len() && clips[clip_idx].end_frame <= out_cursor {
                 clip_idx += 1;
             }
 
-            // ── 判断当前位置属于 clip 内还是 clip 间隙 ───────────────────────
+            // 鈹€鈹€ 鍒ゆ柇褰撳墠浣嶇疆灞炰簬 clip 鍐呰繕鏄?clip 闂撮殭 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
             let in_clip = clip_idx < clips.len()
                 && clips[clip_idx].start_frame <= out_cursor
                 && out_cursor < clips[clip_idx].end_frame;
 
             if in_clip {
-                // ── 处理当前 clip ─────────────────────────────────────────────
+                // 鈹€鈹€ 澶勭悊褰撳墠 clip 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
                 let clip = &clips[clip_idx];
                 let clip_start_sec = (clip.start_frame as f64) / (sr as f64);
                 let clip_end_sec = (clip.end_frame as f64) / (sr as f64);
@@ -400,22 +413,22 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     );
                 }
 
-                // ── 查询 per-clip 缓存 ────────────────────────────────────────
+                // 鈹€鈹€ 鏌ヨ per-clip 缂撳瓨 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
                 let param_hash = compute_clip_param_hash(clip, sr, &curves);
-                let cache_key = crate::onnx_clip_cache::OnnxClipCacheKey {
+                let cache_key = crate::synth_clip_cache::SynthClipCacheKey {
                     clip_id: clip.clip_id.clone(),
                     param_hash,
                 };
 
                 let cached_pcm: Option<std::sync::Arc<Vec<f32>>> = {
-                    let mut cache = crate::onnx_clip_cache::global_onnx_clip_cache()
+                    let mut cache = crate::synth_clip_cache::global_synth_clip_cache()
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
                     cache.get(&cache_key).map(|e| e.pcm_stereo.clone())
                 };
 
                 let inferred_stereo: std::sync::Arc<Vec<f32>> = if let Some(pcm) = cached_pcm {
-                    // 缓存命中：直接复用，跳过推理
+                    // 缂撳瓨鍛戒腑锛氱洿鎺ュ鐢紝璺宠繃鎺ㄧ悊
                     if debug {
                         eprintln!(
                             "pitch_stream_onnx: cache hit for clip={} hash={:#x}",
@@ -424,8 +437,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     }
                     pcm
                 } else {
-                    // 缓存未命中：读取 PCM 并推理
-                    let mut pcm: Vec<f32> = vec![];
+                    // 缂撳瓨鏈懡涓細璇诲彇 PCM 骞舵帹鐞?                    let mut pcm: Vec<f32> = vec![];
                     let ok = read_base_stereo_from_ring(
                         base_ring.as_ref(),
                         sr,
@@ -440,8 +452,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
 
                     let mono = stereo_to_mono(&pcm);
 
-                    // 调用分块推理（自动处理长 clip）
-                    let inferred = match crate::nsf_hifigan_onnx::infer_pitch_edit_chunked(
+                    // 璋冪敤鍒嗗潡鎺ㄧ悊锛堣嚜鍔ㄥ鐞嗛暱 clip锛?                    let inferred = match crate::nsf_hifigan_onnx::infer_pitch_edit_chunked(
                         &mono,
                         sr,
                         clip_start_sec,
@@ -464,7 +475,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
                         continue;
                     }
 
-                    // 对齐推理输出帧数到 clip 期望帧数
+                    // 瀵归綈鎺ㄧ悊杈撳嚭甯ф暟鍒?clip 鏈熸湜甯ф暟
                     let clip_total_frames = ((clip_end_sec - clip_start_sec) * sr as f64)
                         .round()
                         .max(1.0) as usize;
@@ -482,14 +493,14 @@ pub(crate) fn spawn_pitch_stream_onnx(
 
                     let stereo = std::sync::Arc::new(mono_to_stereo(&aligned_mono));
 
-                    // 写入缓存
+                    // 鍐欏叆缂撳瓨
                     {
-                        let mut cache = crate::onnx_clip_cache::global_onnx_clip_cache()
+                        let mut cache = crate::synth_clip_cache::global_synth_clip_cache()
                             .lock()
                             .unwrap_or_else(|e| e.into_inner());
                         cache.insert(
                             cache_key,
-                            crate::onnx_clip_cache::OnnxClipCacheEntry {
+                            crate::synth_clip_cache::SynthClipCacheEntry {
                                 pcm_stereo: stereo.clone(),
                                 frames: (stereo.len() / 2) as u64,
                                 sample_rate: sr,
@@ -500,12 +511,12 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     stereo
                 };
 
-                // 计算当前 out_cursor 在 clip 内的偏移
+                // 璁＄畻褰撳墠 out_cursor 鍦?clip 鍐呯殑鍋忕Щ
                 let cursor_off_in_clip = out_cursor.saturating_sub(clip.start_frame) as usize;
                 let main_start = cursor_off_in_clip * 2;
                 let mut main_end = inferred_stereo.len();
 
-                // 截断到 expected_frames
+                // 鎴柇鍒?expected_frames
                 let max_end = main_start + (expected_frames as usize) * 2;
                 if main_end > max_end {
                     main_end = max_end;
@@ -514,8 +525,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
                 let available_frames = ((main_end.saturating_sub(main_start)) / 2) as u64;
                 let available_frames = available_frames.min(expected_frames);
 
-                // Crossfade：与上一段（clip 或间隙）的尾部混合
-                if !prev_tail.is_empty() && xfade_frames > 0 && main_start < inferred_stereo.len() {
+                // Crossfade锛氫笌涓婁竴娈碉紙clip 鎴栭棿闅欙級鐨勫熬閮ㄦ贩鍚?                if !prev_tail.is_empty() && xfade_frames > 0 && main_start < inferred_stereo.len() {
                     let head_end = (main_start + (xfade_frames as usize) * 2).min(inferred_stereo.len());
                     crossfade_into_ring(
                         &ring,
@@ -544,31 +554,31 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     tail,
                 });
             } else {
-                // ── 处理 clip 间隙（passthrough from base_ring）───────────────
+                // 鈹€鈹€ 澶勭悊 clip 闂撮殭锛坧assthrough from base_ring锛夆攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
                 let gap_end_frame = if clip_idx < clips.len() {
                     clips[clip_idx].start_frame
                 } else {
                     project_frames.max(out_cursor + 1)
                 };
 
-                // ── Prefetch：提前推理下一个 clip ────────────────────────────
+                // 鈹€鈹€ Prefetch锛氭彁鍓嶆帹鐞嗕笅涓€涓?clip 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
                 if clip_idx < clips.len() {
                     let next_clip = &clips[clip_idx];
                     let dist = next_clip.start_frame.saturating_sub(out_cursor);
                     if dist < prefetch_ahead_frames {
                         let next_hash = compute_clip_param_hash(next_clip, sr, &curves);
-                        let next_key = crate::onnx_clip_cache::OnnxClipCacheKey {
+                        let next_key = crate::synth_clip_cache::SynthClipCacheKey {
                             clip_id: next_clip.clip_id.clone(),
                             param_hash: next_hash,
                         };
                         let already_cached = {
-                            let mut cache = crate::onnx_clip_cache::global_onnx_clip_cache()
+                            let mut cache = crate::synth_clip_cache::global_synth_clip_cache()
                                 .lock()
                                 .unwrap_or_else(|e| e.into_inner());
                             cache.get(&next_key).is_some()
                         };
                         if !already_cached {
-                            // 异步推理：在独立线程中推理并写入缓存
+                            // 寮傛鎺ㄧ悊锛氬湪鐙珛绾跨▼涓帹鐞嗗苟鍐欏叆缂撳瓨
                             let prefetch_clip = next_clip.clone();
                             let prefetch_curves = curves.clone();
                             let prefetch_base_ring = base_ring.clone();
@@ -635,12 +645,12 @@ pub(crate) fn spawn_pitch_stream_onnx(
                                 };
 
                                 let stereo = std::sync::Arc::new(mono_to_stereo(&aligned_mono));
-                                let mut cache = crate::onnx_clip_cache::global_onnx_clip_cache()
+                                let mut cache = crate::synth_clip_cache::global_synth_clip_cache()
                                     .lock()
                                     .unwrap_or_else(|e| e.into_inner());
                                 cache.insert(
                                     prefetch_key,
-                                    crate::onnx_clip_cache::OnnxClipCacheEntry {
+                                    crate::synth_clip_cache::SynthClipCacheEntry {
                                         pcm_stereo: stereo.clone(),
                                         frames: (stereo.len() / 2) as u64,
                                         sample_rate: prefetch_sr,
@@ -651,7 +661,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
                     }
                 }
 
-                // 每次最多处理 0.5s 的间隙，避免大块阻塞
+                // 姣忔鏈€澶氬鐞?0.5s 鐨勯棿闅欙紝閬垮厤澶у潡闃诲
                 let max_gap_frames = (sr as u64) / 2;
                 let seg_end_frame = gap_end_frame.min(out_cursor + max_gap_frames);
 
@@ -686,7 +696,7 @@ pub(crate) fn spawn_pitch_stream_onnx(
 
                 fit_stereo_to_frames(&mut pcm, expected_frames);
 
-                // Crossfade：与上一段的尾部混合
+                // Crossfade锛氫笌涓婁竴娈电殑灏鹃儴娣峰悎
                 if !prev_tail.is_empty() && xfade_frames > 0 && !pcm.is_empty() {
                     let head_end = ((xfade_frames as usize) * 2).min(pcm.len());
                     crossfade_into_ring(

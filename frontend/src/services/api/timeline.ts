@@ -130,10 +130,11 @@ export const timelineApi = {
 
     setClipState: (payload: {
         clipId: string;
+        startSec?: number;
         lengthSec?: number;
         gain?: number;
         muted?: boolean;
-        trimstartSec?: number;
+        trimStartSec?: number;
         trimEndSec?: number;
         playbackRate?: number;
         fadeInSec?: number;
@@ -142,18 +143,19 @@ export const timelineApi = {
         invoke<TimelineResult>(
             "set_clip_state",
             payload.clipId,
+            payload.startSec,
             payload.lengthSec,
             payload.gain,
             payload.muted,
-            payload.trimstartSec,
+            payload.trimStartSec,
             payload.trimEndSec,
             payload.playbackRate,
             payload.fadeInSec,
             payload.fadeOutSec,
         ),
 
-    splitClip: (clipId: string, splitBeat: number) =>
-        invoke<TimelineResult>("split_clip", clipId, splitBeat),
+    splitClip: (clipId: string, splitSec: number) =>
+        invoke<TimelineResult>("split_clip", clipId, splitSec),
 
     glueClips: (clipIds: string[]) =>
         invoke<TimelineResult>("glue_clips", clipIds),

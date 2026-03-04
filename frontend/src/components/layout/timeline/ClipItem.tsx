@@ -261,13 +261,16 @@ export const ClipItem: React.FC<{
 
         const w = renderCols;
         const totalH = 24;
-        const gap = 2;
-        const bandH = (totalH - gap) / 2;
-        const halfH = bandH / 2;
-        const centerTop = halfH;
-        const centerBot = bandH + gap + halfH;
+        // 单 band 全高布局，波形顶满 clip body
+        const centerY = totalH / 2;
+        const halfH = totalH / 2; // 波形占满整个 viewBox 高度
 
-        const lenBeats = Number(clip.lengthSec ?? 0) || 0;
+        // 使用 peaks.cycleLenSecTimeline（稳定值）作为 fade 增益的映射基准，
+        // 而非 clip.lengthSec（trim 拖动时持续变化导致波形拉伸）。
+        // 对于 fallback 的 waveform preview 路径，仍使用 sourceAvailSec。
+        const lenBeats = peaks?.ok
+            ? (peaks.cycleLenSecTimeline || Number(clip.lengthSec ?? 0) || 0)
+            : (Number(clip.lengthSec ?? 0) || 0);
         const fadeIn = Number(clip.fadeInSec ?? 0) || 0;
         const fadeOut = Number(clip.fadeOutSec ?? 0) || 0;
         const fadeInCurve: FadeCurveType = clip.fadeInCurve ?? "sine";
@@ -279,10 +282,8 @@ export const ClipItem: React.FC<{
         // preview 状态用降低 opacity 表示加载中，不使用虚�?
         const waveformOpacity = peaks?.isPreview ? 0.6 : 1.0;
 
-        let topMin: number[] | null = null;
-        let topMax: number[] | null = null;
-        let botMin: number[] | null = null;
-        let botMax: number[] | null = null;
+        let wMin: number[] | null = null;
+        let wMax: number[] | null = null;
 
         if (
             peaks &&
@@ -290,11 +291,8 @@ export const ClipItem: React.FC<{
             peaks.min.length >= 2 &&
             peaks.max.length >= 2
         ) {
-            // Backend peaks are currently mono; duplicate into two bands for DAW-style look.
-            topMin = peaks.min;
-            topMax = peaks.max;
-            botMin = peaks.min;
-            botMax = peaks.max;
+            wMin = peaks.min;
+            wMax = peaks.max;
         } else if (stereo) {
             const wf = waveform as { l: number[]; r: number[] };
             const leftSamples = sliceWaveformSamples(
@@ -307,36 +305,31 @@ export const ClipItem: React.FC<{
             );
             const leftEnv = minMaxEnvelopeFromSamples(leftSamples, w);
             const rightEnv = minMaxEnvelopeFromSamples(rightSamples, w);
-            topMin = leftEnv.min;
-            topMax = leftEnv.max;
-            botMin = rightEnv.min;
-            botMax = rightEnv.max;
+            // 合并 L/R：取两个声道的 max 极值
+            // waveform_preview 是绝对值数据（0~1），需要镜像为对称的 min/max
+            const n = Math.min(leftEnv.max.length, rightEnv.max.length);
+            wMax = new Array(n);
+            wMin = new Array(n);
+            for (let i = 0; i < n; i++) {
+                const peak = Math.max(leftEnv.max[i], rightEnv.max[i]);
+                wMax[i] = peak;
+                wMin[i] = -peak;
+            }
         } else if (Array.isArray(waveform) && waveform.length > 0) {
             const mono = sliceWaveformSamples(waveform, clipForWaveform);
             if (mono.length < 2) return null;
             const env = minMaxEnvelopeFromSamples(mono, w);
-            topMin = env.min;
-            topMax = env.max;
-            botMin = env.min;
-            botMax = env.max;
+            // waveform_preview 是绝对值数据（0~1），需要镜像为对称的 min/max
+            wMax = env.max;
+            wMin = env.max.map(v => -v);
         } else {
             return null;
         }
 
-        // 应用淡入淡出效果到波形数�?
-        const topFaded = applyFadeGainToPeaks(
-            topMin,
-            topMax,
-            waveformVisualAmpScale,
-            lenBeats,
-            fadeIn,
-            fadeOut,
-            fadeInCurve,
-            fadeOutCurve,
-        );
-        const botFaded = applyFadeGainToPeaks(
-            botMin,
-            botMax,
+        // 应用淡入淡出效果到波形数据
+        const faded = applyFadeGainToPeaks(
+            wMin,
+            wMax,
             waveformVisualAmpScale,
             lenBeats,
             fadeIn,
@@ -345,69 +338,49 @@ export const ClipItem: React.FC<{
             fadeOutCurve,
         );
 
-        // 使用共享渲染函数生成 SVG 路径
-        const topD = renderWaveformSvg(
+        // 使用共享渲染函数生成 SVG 路径（单 band 全高）
+        const pathD = renderWaveformSvg(
             {
-                min: topFaded.min,
-                max: topFaded.max,
+                min: faded.min,
+                max: faded.max,
                 timestamps: [], // 空数组表示使用均匀分布
                 stride: 1,
             },
             {
                 width: w,
                 height: totalH,
-                centerY: centerTop,
+                centerY,
                 halfHeight: halfH,
-                amplitudeScale: 1.0, // 振幅已在 applyFadeGainToPeaks 中处�?
+                amplitudeScale: 1.0, // 振幅已在 applyFadeGainToPeaks 中处理
             },
         );
+        // 波形 SVG 固定宽度 = source 可用窗口的 timeline 像素宽度。
+        // trim 拖动时此值不变，外层 overflow-hidden 裁掉超出部分，波形不拉伸。
+        const svgFixedWidthPx = peaks?.ok
+            ? peaks.cycleLenSecTimeline * pxPerSec
+            : width;
 
-        const botD = renderWaveformSvg(
-            {
-                min: botFaded.min,
-                max: botFaded.max,
-                timestamps: [],
-                stride: 1,
-            },
-            {
-                width: w,
-                height: totalH,
-                centerY: centerBot,
-                halfHeight: halfH,
-                amplitudeScale: 1.0,
-            },
-        );
-
-        if (!topD && !botD) return null;
+        if (!pathD) return null;
         return (
             <svg
                 viewBox={`0 0 ${w} ${totalH}`}
                 preserveAspectRatio="none"
-                className="w-full h-full"
-                style={{ opacity: waveformOpacity }}
+                style={{
+                    width: svgFixedWidthPx,
+                    height: "100%",
+                    opacity: waveformOpacity,
+                    flexShrink: 0,
+                }}
             >
-                {topD ? (
-                    <path
-                        d={topD}
-                        fill={fill}
-                        stroke={stroke}
-                        strokeWidth="1"
-                        vectorEffect="non-scaling-stroke"
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                    />
-                ) : null}
-                {botD ? (
-                    <path
-                        d={botD}
-                        fill={fill}
-                        stroke={stroke}
-                        strokeWidth="1"
-                        vectorEffect="non-scaling-stroke"
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                    />
-                ) : null}
+                <path
+                    d={pathD}
+                    fill={fill}
+                    stroke={stroke}
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                />
             </svg>
         );
     }, [
@@ -418,14 +391,12 @@ export const ClipItem: React.FC<{
         clip.fadeOutCurve,
         clip.lengthSec,
         peaks,
+        pxPerSec,
+        width,
         stereo,
         waveform,
         waveformAmpScale,
         waveformVisualAmpScale,
-        // 注意：不依赖 width，trim 拖动时 width 变化不应触发波形重渲染。
-        // peaks?.ok 时 w = peaks.columns（固定值），与 width 无关。
-        // peaks 为 null 时 quantizeCols(width) 只影响初始占位列数，可接受延迟更新。
-        // 不依赖 bpm：波形内容基于秒域计算，BPM 变化不影响波形显示。
     ]);
 
     return (
@@ -716,8 +687,22 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                         ) : null}
                     </div>
 
-                    <div className="absolute inset-x-0 inset-y-1 opacity-80">
-                        {waveformSvg}
+                    <div
+                        className="absolute inset-0 opacity-80 overflow-hidden"
+                    >
+                        {/* 内层容器：通过负 marginLeft 将 trimStart 对应位置的波形对齐到容器左边缘。
+                            peaks 数据覆盖整个 source 文件（0 → durationSec），SVG 固定宽度 = durationSec/pr*pxPerSec，
+                            外层 overflow-hidden 裁掉左侧 trim 和右侧超出部分。 */}
+                        <div
+                            style={{
+                                height: "100%",
+                                marginLeft: peaks?.ok
+                                    ? -(Math.max(0, Number(clip.trimStartSec ?? 0) || 0) / Math.max(1e-6, Number(clip.playbackRate ?? 1) || 1)) * pxPerSec
+                                    : 0,
+                            }}
+                        >
+                            {waveformSvg}
+                        </div>
                     </div>
                 </div>
             </div>

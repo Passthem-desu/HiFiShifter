@@ -101,7 +101,7 @@ export const createClipsRemote = createAsyncThunk(
                     lengthSec: tpl.lengthSec,
                     gain: tpl.gain,
                     muted: tpl.muted,
-                    trimstartSec: tpl.trimStartSec,
+                    trimStartSec: tpl.trimStartSec,
                     trimEndSec: tpl.trimEndSec,
                     playbackRate: tpl.playbackRate,
                     fadeInSec: tpl.fadeInSec,
@@ -159,6 +159,7 @@ export const setClipStateRemote = createAsyncThunk(
         clipId: string;
         name?: string;
         color?: string;
+        startSec?: number;
         lengthSec?: number;
         gain?: number;
         muted?: boolean;
@@ -168,14 +169,14 @@ export const setClipStateRemote = createAsyncThunk(
         fadeInSec?: number;
         fadeOutSec?: number;
     }) => {
-        return webApi.setClipState({ ...payload, trimstartSec: payload.trimStartSec });
+        return webApi.setClipState(payload);
     },
 );
 
 export const splitClipRemote = createAsyncThunk(
     "session/splitClipRemote",
-    async (payload: { clipId: string; splitBeat: number }) => {
-        return webApi.splitClip(payload.clipId, payload.splitBeat);
+    async (payload: { clipId: string; splitSec: number }) => {
+        return webApi.splitClip(payload.clipId, payload.splitSec);
     },
 );
 

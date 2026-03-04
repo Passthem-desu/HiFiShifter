@@ -326,8 +326,6 @@ export function renderWaveformSvg(
     if (n === 0) return "";
 
     const scale = halfHeight * amplitudeScale;
-    const y0 = centerY - halfHeight;
-    const y1 = centerY + halfHeight;
 
     // 处理均匀分布的数据点（Clip场景）或基于时间戳的数据点（Piano Roll场景）
     const useTimestamp = timestamps.length > 0 && timestamps.length === n;
@@ -366,10 +364,6 @@ export function renderWaveformSvg(
         if (Math.abs(bot - top) < 0.75) {
             bot = top + (bot >= top ? 0.75 : -0.75);
         }
-
-        // 限制在 viewBox 范围内
-        top = Math.max(y0, Math.min(y1, top));
-        bot = Math.max(y0, Math.min(y1, bot));
 
         xCoords[i] = x;
         yMax[i] = Math.max(0, Math.min(height, top));

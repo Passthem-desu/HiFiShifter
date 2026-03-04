@@ -151,8 +151,6 @@ export interface WaveformPeaksSegmentPayload {
     ok: boolean;
     min: number[];
     max: number[];
-    sample_rate: number;
-    hop: number;
 }
 
 export interface ParamFramesPayload {
@@ -175,7 +173,7 @@ export interface PitchProgressPayload {
     rootTrackId: string;
     progress: number;
     etaSeconds?: number;
-    /** 当前正在分析�?clip 名称 */
+    /** 当前正在分析�?clip 名称 */
     currentClipName?: string | null;
     /** 已完成的 clip 数量 */
     completedClips?: number;

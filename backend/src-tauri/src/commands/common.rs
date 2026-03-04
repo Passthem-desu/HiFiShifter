@@ -36,8 +36,6 @@ pub(crate) fn guard_waveform_command(
                 ok: false,
                 min: vec![],
                 max: vec![],
-                sample_rate: 0,
-                hop: 0,
             }
         }
     }

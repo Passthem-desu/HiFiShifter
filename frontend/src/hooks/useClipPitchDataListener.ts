@@ -8,10 +8,9 @@ import { setClipPitchData } from "../features/session/sessionSlice";
  */
 interface ClipPitchDataPayload {
     clip_id: string;
-    start_frame: number;
+    curve_start_sec: number;
     midi_curve: number[];
     frame_period_ms: number;
-    sample_rate: number;
 }
 
 /**
@@ -38,10 +37,9 @@ export function useClipPitchDataListener(): void {
                         dispatch(
                             setClipPitchData({
                                 clipId: p.clip_id,
-                                startFrame: Number(p.start_frame ?? 0),
+                                curveStartSec: Number(p.curve_start_sec ?? 0),
                                 midiCurve: p.midi_curve as number[],
                                 framePeriodMs: Number(p.frame_period_ms ?? 5),
-                                sampleRate: Number(p.sample_rate ?? 44100),
                             }),
                         );
                     },

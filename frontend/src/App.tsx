@@ -25,6 +25,10 @@ import {
     PitchAnalysisProvider,
     usePitchAnalysis,
 } from "./contexts/PitchAnalysisContext";
+import {
+    PianoRollStatusProvider,
+    usePianoRollStatus,
+} from "./contexts/PianoRollStatusContext";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -51,6 +55,7 @@ function AppInner() {
     const dispatch = useAppDispatch();
     const { t } = useI18n();
     const pitchAnalysis = usePitchAnalysis();
+    const pianoRollStatus = usePianoRollStatus();
 
     const status = useAppSelector((state) => state.session.status);
     const error = useAppSelector((state) => state.session.error);
@@ -178,6 +183,47 @@ function AppInner() {
         progress: number | null;
         target: string | null;
     }>({ active: false, progress: null, target: null });
+
+    const [stretching, setStretching] = useState<{
+        active: boolean;
+        clipName: string | null;
+    }>({ active: false, clipName: null });
+
+    // Listen for backend stretch progress notifications (Tauri only).
+    useEffect(() => {
+        let disposed = false;
+        let unlisten: null | (() => void) = null;
+
+        async function setup() {
+            try {
+                const mod = await import("@tauri-apps/api/event");
+                unlisten = await mod.listen(
+                    "stretch_progress",
+                    (event: any) => {
+                        if (disposed) return;
+                        const payload = (event?.payload ?? {}) as {
+                            active?: boolean;
+                            clipName?: string | null;
+                        };
+                        const active = Boolean(payload?.active);
+                        const clipName =
+                            typeof payload?.clipName === "string"
+                                ? payload.clipName
+                                : null;
+                        setStretching({ active, clipName });
+                    },
+                );
+            } catch {
+                // Safe no-op for non-Tauri builds.
+            }
+        }
+
+        void setup();
+        return () => {
+            disposed = true;
+            if (unlisten) unlisten();
+        };
+    }, []);
 
     // Listen for backend playback priming notifications (Tauri only).
     useEffect(() => {
@@ -418,6 +464,15 @@ function AppInner() {
                 className="h-6 bg-qt-window border-t border-qt-border px-1 select-none gap-2"
             >
                 <Text size="1" color={error ? "red" : "gray"} className="truncate min-w-0">
+                    {stretching.active ? (
+                        <>
+                            <span style={{ color: "var(--accent-9)" }}>
+                                {t("status_stretching" as any)}
+                                {stretching.clipName ? ` "${stretching.clipName}"` : ""}
+                            </span>
+                            {" | "}
+                        </>
+                    ) : null}
                     {pitchAnalysisText ? (
                         <>
                             <span style={{ color: "var(--accent-9)" }}>
@@ -427,6 +482,25 @@ function AppInner() {
                         </>
                     ) : null}
                     {errorText}
+                    {pianoRollStatus.dataLoading ? (
+                        <>
+                            {" | "}
+                            <span style={{ color: "var(--accent-9)" }}>
+                                {t("loading")}
+                            </span>
+                        </>
+                    ) : null}
+                    {pianoRollStatus.asyncRefreshActive ? (
+                        <>
+                            {" | "}
+                            <span style={{ color: "var(--accent-9)" }}>
+                                {(t as any)("refreshing_pitch_data") || "Refreshing pitch data"}
+                                {pianoRollStatus.asyncRefreshProgress > 0
+                                    ? ` ${Math.round(pianoRollStatus.asyncRefreshProgress)}%`
+                                    : ""}
+                            </span>
+                        </>
+                    ) : null}
                     {rendering.active ? (
                         <>
                             {" | "}
@@ -451,7 +525,9 @@ function AppInner() {
 function App() {
     return (
         <PitchAnalysisProvider>
-            <AppInner />
+            <PianoRollStatusProvider>
+                <AppInner />
+            </PianoRollStatusProvider>
         </PitchAnalysisProvider>
     );
 }

@@ -134,8 +134,8 @@ export function useKeyboardShortcuts(deps: {
                 if (!clipId) return;
                 e.preventDefault();
                 e.stopPropagation();
-                const splitBeat = Math.max(0, Number(s.playheadSec ?? 0) || 0);
-                void dispatch(splitClipRemote({ clipId, splitBeat }));
+                const splitSec = Math.max(0, Number(s.playheadSec ?? 0) || 0);
+                void dispatch(splitClipRemote({ clipId, splitSec }));
             }
         }
         window.addEventListener("keydown", onKeyDown, true);

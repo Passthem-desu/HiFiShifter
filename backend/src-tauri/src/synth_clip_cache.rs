@@ -1,10 +1,10 @@
-//! ONNX per-clip 推理结果缓存。
+//! 通用 per-clip 合成结果缓存（WORLD / ONNX 共享）。
 //!
-//! 以 `(clip_id, param_hash)` 为 key，缓存推理结果（stereo interleaved PCM）。
-//! 参数不变时直接复用缓存，避免重复推理；参数变化时自动失效并重新推理。
+//! 以 `(clip_id, param_hash)` 为 key，缓存合成结果（stereo interleaved PCM）。
+//! 参数不变时直接复用缓存，避免重复合成；参数变化时自动失效并重新合成。
 //!
 //! # 设计
-//! - 进程级全局 `Mutex<OnnxClipCache>`，实时路径与离线路径共享
+//! - 进程级全局 `Mutex<SynthClipCache>`，实时路径与离线路径共享
 //! - LRU 淘汰，容量上限 64 个 clip
 //! - `param_hash` 使用 FNV-1a 64-bit，覆盖 clip 时间参数 + pitch_edit 曲线片段
 
@@ -22,14 +22,14 @@ const DEFAULT_CAPACITY: usize = 64;
 
 /// 缓存 key：clip 唯一标识 + 参数哈希。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct OnnxClipCacheKey {
+pub struct SynthClipCacheKey {
     pub clip_id: String,
     pub param_hash: u64,
 }
 
-/// 缓存 entry：推理结果（stereo interleaved PCM）。
+/// 缓存 entry：合成结果（stereo interleaved PCM）。
 #[derive(Debug, Clone)]
-pub struct OnnxClipCacheEntry {
+pub struct SynthClipCacheEntry {
     /// Stereo interleaved PCM，长度 = `frames * 2`。
     pub pcm_stereo: Arc<Vec<f32>>,
     /// 有效帧数。
@@ -40,15 +40,15 @@ pub struct OnnxClipCacheEntry {
 
 // ─── Cache ─────────────────────────────────────────────────────────────────────
 
-/// LRU 缓存，存储 ONNX per-clip 推理结果。
-pub struct OnnxClipCache {
-    inner: HashMap<OnnxClipCacheKey, OnnxClipCacheEntry>,
+/// LRU 缓存，存储 per-clip 合成结果（WORLD 和 ONNX 共享）。
+pub struct SynthClipCache {
+    inner: HashMap<SynthClipCacheKey, SynthClipCacheEntry>,
     /// 按访问顺序排列的 key 列表（front = 最近使用，back = 最久未使用）。
-    order: VecDeque<OnnxClipCacheKey>,
+    order: VecDeque<SynthClipCacheKey>,
     capacity: usize,
 }
 
-impl OnnxClipCache {
+impl SynthClipCache {
     /// 创建指定容量的缓存。
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -59,7 +59,7 @@ impl OnnxClipCache {
     }
 
     /// 查询缓存。命中时将 key 移到 front（最近使用）。
-    pub fn get(&mut self, key: &OnnxClipCacheKey) -> Option<&OnnxClipCacheEntry> {
+    pub fn get(&mut self, key: &SynthClipCacheKey) -> Option<&SynthClipCacheEntry> {
         if !self.inner.contains_key(key) {
             return None;
         }
@@ -72,7 +72,7 @@ impl OnnxClipCache {
     }
 
     /// 插入缓存。若已满则淘汰最久未使用的 entry。
-    pub fn insert(&mut self, key: OnnxClipCacheKey, entry: OnnxClipCacheEntry) {
+    pub fn insert(&mut self, key: SynthClipCacheKey, entry: SynthClipCacheEntry) {
         if self.inner.contains_key(&key) {
             // 更新已有 entry，移到 front
             self.inner.insert(key.clone(), entry);
@@ -98,7 +98,7 @@ impl OnnxClipCache {
 
     /// 使指定 clip_id 的所有缓存失效（不论 param_hash）。
     pub fn invalidate(&mut self, clip_id: &str) {
-        let keys_to_remove: Vec<OnnxClipCacheKey> = self
+        let keys_to_remove: Vec<SynthClipCacheKey> = self
             .inner
             .keys()
             .filter(|k| k.clip_id == clip_id)
@@ -128,13 +128,14 @@ impl OnnxClipCache {
 
 // ─── 全局实例 ──────────────────────────────────────────────────────────────────
 
-static GLOBAL_ONNX_CLIP_CACHE: OnceLock<Mutex<OnnxClipCache>> = OnceLock::new();
+static GLOBAL_SYNTH_CLIP_CACHE: OnceLock<Mutex<SynthClipCache>> = OnceLock::new();
 
-/// 获取进程级全局 ONNX clip 缓存。
+/// 获取进程级全局合成 clip 缓存。
 ///
 /// 首次调用时初始化，容量为 [`DEFAULT_CAPACITY`]（64）。
-pub fn global_onnx_clip_cache() -> &'static Mutex<OnnxClipCache> {
-    GLOBAL_ONNX_CLIP_CACHE.get_or_init(|| Mutex::new(OnnxClipCache::new(DEFAULT_CAPACITY)))
+/// WORLD 和 ONNX 共享同一个缓存实例。
+pub fn global_synth_clip_cache() -> &'static Mutex<SynthClipCache> {
+    GLOBAL_SYNTH_CLIP_CACHE.get_or_init(|| Mutex::new(SynthClipCache::new(DEFAULT_CAPACITY)))
 }
 
 // ─── param_hash 计算 ───────────────────────────────────────────────────────────
@@ -147,7 +148,7 @@ pub fn global_onnx_clip_cache() -> &'static Mutex<OnnxClipCache> {
 /// - `sr`：采样率
 /// - `pitch_edit` 曲线中与 clip 时间范围重叠的片段
 ///
-/// 任意参数变化 → hash 变化 → 缓存失效 → 重新推理。
+/// 任意参数变化 → hash 变化 → 缓存失效 → 重新合成。
 pub fn compute_param_hash(
     clip_id: &str,
     start_frame: u64,

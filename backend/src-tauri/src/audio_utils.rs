@@ -213,22 +213,23 @@ fn compute_minmax_peaks_hound(
     // Reopen for samples iterator.
     let mut reader = WavReader::open(path).map_err(|e| e.to_string())?;
 
-    let mut push_frame = |v: f32| {
-        if v < acc_min {
-            acc_min = v;
-        }
-        if v > acc_max {
-            acc_max = v;
-        }
-        frame_count += 1;
-        if frame_count >= hop {
-            min.push(if acc_min.is_finite() { acc_min } else { 0.0 });
-            max.push(if acc_max.is_finite() { acc_max } else { 0.0 });
-            acc_min = f32::INFINITY;
-            acc_max = f32::NEG_INFINITY;
-            frame_count = 0;
-        }
-    };
+    // 宏：将一帧的各声道极值 (ch_min, ch_max) 合入累积器，到达 hop 时输出一个 peak
+    macro_rules! flush_frame {
+        ($ch_min:expr, $ch_max:expr) => {{
+            let cmin = $ch_min;
+            let cmax = $ch_max;
+            if cmin < acc_min { acc_min = cmin; }
+            if cmax > acc_max { acc_max = cmax; }
+            frame_count += 1;
+            if frame_count >= hop {
+                min.push(if acc_min.is_finite() { acc_min } else { 0.0 });
+                max.push(if acc_max.is_finite() { acc_max } else { 0.0 });
+                acc_min = f32::INFINITY;
+                acc_max = f32::NEG_INFINITY;
+                frame_count = 0;
+            }
+        }};
+    }
 
     match (spec.sample_format, spec.bits_per_sample) {
         (SampleFormat::Int, 16) => {
@@ -239,11 +240,15 @@ fn compute_minmax_peaks_hound(
                 i += 1;
                 if i >= channels {
                     i = 0;
-                    let mut sum = 0.0f32;
+                    // 取各声道极值而非求平均，避免双声道相位抵消导致波形变瘦
+                    let mut ch_min = f32::INFINITY;
+                    let mut ch_max = f32::NEG_INFINITY;
                     for &x in &buf {
-                        sum += x as f32 / i16::MAX as f32;
+                        let v = x as f32 / i16::MAX as f32;
+                        if v < ch_min { ch_min = v; }
+                        if v > ch_max { ch_max = v; }
                     }
-                    push_frame(sum / channels as f32);
+                    flush_frame!(ch_min, ch_max);
                 }
             }
         }
@@ -256,11 +261,14 @@ fn compute_minmax_peaks_hound(
                 i += 1;
                 if i >= channels {
                     i = 0;
-                    let mut sum = 0.0f32;
+                    let mut ch_min = f32::INFINITY;
+                    let mut ch_max = f32::NEG_INFINITY;
                     for &x in &buf {
-                        sum += x as f32 / denom;
+                        let v = x as f32 / denom;
+                        if v < ch_min { ch_min = v; }
+                        if v > ch_max { ch_max = v; }
                     }
-                    push_frame(sum / channels as f32);
+                    flush_frame!(ch_min, ch_max);
                 }
             }
         }
@@ -272,11 +280,14 @@ fn compute_minmax_peaks_hound(
                 i += 1;
                 if i >= channels {
                     i = 0;
-                    let mut sum = 0.0f32;
+                    let mut ch_min = f32::INFINITY;
+                    let mut ch_max = f32::NEG_INFINITY;
                     for &x in &buf {
-                        sum += x as f32 / i32::MAX as f32;
+                        let v = x as f32 / i32::MAX as f32;
+                        if v < ch_min { ch_min = v; }
+                        if v > ch_max { ch_max = v; }
                     }
-                    push_frame(sum / channels as f32);
+                    flush_frame!(ch_min, ch_max);
                 }
             }
         }
@@ -288,11 +299,13 @@ fn compute_minmax_peaks_hound(
                 i += 1;
                 if i >= channels {
                     i = 0;
-                    let mut sum = 0.0f32;
+                    let mut ch_min = f32::INFINITY;
+                    let mut ch_max = f32::NEG_INFINITY;
                     for &x in &buf {
-                        sum += x;
+                        if x < ch_min { ch_min = x; }
+                        if x > ch_max { ch_max = x; }
                     }
-                    push_frame(sum / channels as f32);
+                    flush_frame!(ch_min, ch_max);
                 }
             }
         }
@@ -387,17 +400,20 @@ fn compute_minmax_peaks_symphonia(
 
         for f in 0..frames {
             let base = f * channels;
-            let mut sum = 0.0f32;
+            // 取各声道极值而非求平均，避免双声道相位抵消导致波形变瘦
+            let mut ch_min = f32::INFINITY;
+            let mut ch_max = f32::NEG_INFINITY;
             for ch in 0..channels {
-                sum += samples.get(base + ch).copied().unwrap_or(0.0);
+                let v = samples.get(base + ch).copied().unwrap_or(0.0);
+                if v < ch_min { ch_min = v; }
+                if v > ch_max { ch_max = v; }
             }
-            let v = sum / channels as f32;
 
-            if v < acc_min {
-                acc_min = v;
+            if ch_min < acc_min {
+                acc_min = ch_min;
             }
-            if v > acc_max {
-                acc_max = v;
+            if ch_max > acc_max {
+                acc_max = ch_max;
             }
             frame_count += 1;
             if frame_count >= hop {

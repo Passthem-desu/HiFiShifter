@@ -6,7 +6,7 @@ mod models;
 mod pitch_analysis;
 mod pitch_clip;
 mod pitch_editing;
-mod onnx_clip_cache;
+mod synth_clip_cache;
 mod clip_pitch_cache;
 mod pitch_progress;
 mod vocoder_pipeline;

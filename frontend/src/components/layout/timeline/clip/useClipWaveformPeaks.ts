@@ -18,22 +18,24 @@ export type PeaksRenderState = {
     // Base segment peaks used for preview remapping while new peaks are loading.
     segmentMin: number[];
     segmentMax: number[];
-    segmentLenBeats: number;
+    segmentLenSec: number;
     segmentColumns: number;
-    // Leading silence in CLIP domain (timeline beats).
-    leadSilenceBeats: number;
+    // Leading silence in CLIP domain (timeline sec).
+    leadSilenceSec: number;
     isPreview?: boolean;
+    // source 可用窗口在 timeline 域的长度（秒），用于固定波形 SVG 宽度
+    cycleLenSecTimeline: number;
 };
 
 function lerp(a: number, b: number, t: number): number {
     return a + (b - a) * t;
 }
 
-function sampleSegmentMinMaxAtBeat(
+function sampleSegmentMinMaxAtTime(
     segmentMin: number[],
     segmentMax: number[],
-    segmentLenBeats: number,
-    beat: number,
+    segmentLenSec: number,
+    sec: number,
 ): { min: number; max: number } {
     const srcN = Math.min(segmentMin.length, segmentMax.length);
     if (srcN <= 0) return { min: 0, max: 0 };
@@ -43,8 +45,8 @@ function sampleSegmentMinMaxAtBeat(
         return { min: vMin, max: vMax };
     }
 
-    const len = Math.max(1e-9, Number(segmentLenBeats) || 0);
-    const t = clamp(beat / len, 0, 1);
+    const len = Math.max(1e-9, Number(segmentLenSec) || 0);
+    const t = clamp(sec / len, 0, 1);
     const x = t * (srcN - 1);
     const i0 = Math.floor(x);
     const i1 = Math.min(srcN - 1, i0 + 1);
@@ -193,17 +195,13 @@ export function useClipWaveformPeaks(args: {
 
         const trimStartRaw = Number(clip.trimStartSec ?? 0) || 0;
         const preSilenceSecSrc = Math.max(0, -trimStartRaw);
-        const trimStart = Math.max(0, trimStartRaw);
-        const trimEnd = Math.max(0, Number(clip.trimEndSec ?? 0) || 0);
-        const startSec = clamp(trimStart, 0, durationSec);
-        const maxEndSec = Math.max(startSec, durationSec - trimEnd);
-        const cycleLenSec = Math.max(0, maxEndSec - startSec);
+        // peaks 覆盖整个 source 文件（startSec=0, segmentLenSec=durationSec），
+        // 这样无论 trim_left 还是 trim_right 拖动，peaks 请求参数都完全稳定。
+        const startSec = 0;
+        const cycleLenSec = durationSec;
         if (cycleLenSec <= 1e-9) return null;
 
-        // 非循环：超出 source 可用窗口的部分为静音
-        // 负 trimStart 引入前置静音，也消耗 clip 时间
-        const playableSecSrc = Math.max(0, desiredLenSrc - preSilenceSecSrc);
-        const segmentLenSec = Math.min(playableSecSrc, cycleLenSec);
+        const segmentLenSec = cycleLenSec;
         if (segmentLenSec <= 1e-9) return null;
 
         if (!Number.isFinite(startSec) || !Number.isFinite(segmentLenSec)) {
@@ -224,15 +222,20 @@ export function useClipWaveformPeaks(args: {
         // Request columns in coarse steps so trim drags don't spam unique requests.
         // We render at the current pixel width anyway (interpolated), so request resolution
         // only needs to be "good enough" and stable.
-        const rawColumns = clamp(Math.floor(widthPx), 16, 8192);
+        // rawColumns 按 SVG 实际宽度（覆盖整个 source 文件）计算，而非按 clip 可见区域宽度。
+        // 否则只有 widthPx 那么多列却要覆盖更长的 durationSec，每列间距更大，波形变瘦。
+        const svgWidthRatio = desiredLenSrc > 1e-9 ? durationSec / desiredLenSrc : 1;
+        const rawColumns = clamp(Math.floor(widthPx * svgWidthRatio), 16, 8192);
         const outColumns = clamp(Math.round(rawColumns / 64) * 64, 16, 8192);
         const segmentColumns = altPressed
             ? clamp(Math.round(outColumns / 4), 16, 2048)
             : outColumns;
 
         // 转换回 timeline 域（秒）
-        const leadSilenceBeats = preSilenceSecSrc / Math.max(1e-6, pr);
-        const segmentLenBeatsTimeline = segmentLenSec / Math.max(1e-6, pr);
+        const leadSilenceSec = preSilenceSecSrc / Math.max(1e-6, pr);
+        const segmentLenSecTimeline = segmentLenSec / Math.max(1e-6, pr);
+        // source 可用窗口在 timeline 域的长度（秒），用于固定波形 SVG 宽度
+        const cycleLenSecTimeline = cycleLenSec / Math.max(1e-6, pr);
 
         return {
             sourcePath,
@@ -240,8 +243,9 @@ export function useClipWaveformPeaks(args: {
             durationSec: segmentLenSecQ,
             outColumns,
             segmentColumns,
-            leadSilenceBeats,
-            segmentLenBeatsTimeline,
+            leadSilenceSec,
+            segmentLenSecTimeline,
+            cycleLenSecTimeline,
         };
     // 注意：不依赖 bpm，波形内容基于秒域计算，BPM 变化不影响波形显示
     }, [altPressed, clip, widthPx]);
@@ -265,8 +269,9 @@ export function useClipWaveformPeaks(args: {
             durationSec: segSec,
             outColumns,
             segmentColumns,
-            leadSilenceBeats,
-            segmentLenBeatsTimeline,
+            leadSilenceSec,
+            segmentLenSecTimeline,
+            cycleLenSecTimeline,
         } = peaksRequest;
 
         const key = `${sourcePath}|${startSec.toFixed(3)}|${segSec.toFixed(3)}|${segmentColumns}`;
@@ -279,13 +284,13 @@ export function useClipWaveformPeaks(args: {
         ): PeaksRenderState => {
             const outCols = clamp(Math.floor(outColumns), 16, 8192);
             const segCols = Math.min(segMin.length, segMax.length);
-            const segLen = Math.max(1e-9, Number(segmentLenBeatsTimeline) || 0);
+            const segLen = Math.max(1e-9, Number(segmentLenSecTimeline) || 0);
             const denom = Math.max(1, outCols - 1);
 
             const outMin: number[] = new Array(outCols);
             const outMax: number[] = new Array(outCols);
 
-            const lead = Math.max(0, Number(leadSilenceBeats) || 0);
+            const lead = Math.max(0, Number(leadSilenceSec) || 0);
             // 使用当前请求的实际长度（segLen + lead），而非 clip.lengthSec�?
             // clip.lengthSec �?trim 拖动时持续变化，会导�?buildOutput 每次
             // 用不同的 clipLenBeats 重新映射波形，产生拉�?压缩视觉效果�?
@@ -294,18 +299,18 @@ export function useClipWaveformPeaks(args: {
 
             for (let i = 0; i < outCols; i += 1) {
                 const t = i / denom;
-                const beatAtClip = t * clipLenBeats;
-                const beatInSeg = beatAtClip - lead;
-                if (beatInSeg < 0 || beatInSeg > segLen) {
+                const secAtClip = t * clipLenBeats;
+                const secInSeg = secAtClip - lead;
+                if (secInSeg < 0 || secInSeg > segLen) {
                     outMin[i] = 0;
                     outMax[i] = 0;
                     continue;
                 }
-                const mm = sampleSegmentMinMaxAtBeat(
+                const mm = sampleSegmentMinMaxAtTime(
                     segMin,
                     segMax,
                     segLen,
-                    beatInSeg,
+                    secInSeg,
                 );
                 outMin[i] = mm.min;
                 outMax[i] = mm.max;
@@ -318,10 +323,11 @@ export function useClipWaveformPeaks(args: {
                 columns: outCols,
                 segmentMin: segMin,
                 segmentMax: segMax,
-                segmentLenBeats: segLen,
+                segmentLenSec: segLen,
                 segmentColumns: segCols,
-                leadSilenceBeats: lead,
+                leadSilenceSec: lead,
                 isPreview,
+                cycleLenSecTimeline,
             };
         };
 

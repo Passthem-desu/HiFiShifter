@@ -20,14 +20,7 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
     let src_frames = clip.src.frames as u64;
     let loop_len = clip.src_end_frame.saturating_sub(clip.src_start_frame) as f64;
 
-    // 最高优先级：synth_ring（per-clip 音高合成预计算缓存）
-    if let Some(synth) = clip.synth_ring.as_ref() {
-        if let Some((sl, sr)) = synth.read_frame(local) {
-            return Some((sl, sr));
-        }
-    }
-
-    // 次优先级：stretch_stream ring（实时拉伸缓存）
+    // 最高优先级：stretch_stream ring（实时拉伸缓存）
     if let Some(stream) = clip.stretch_stream.as_ref() {
         if let Some((sl, sr)) = stream.read_frame(local) {
             return Some((sl, sr));
@@ -144,10 +137,9 @@ pub(crate) fn mix_snapshot_clips_pitch_edited_into_scratch(
     }
     scratch.fill(0.0);
 
-    // Per-clip synth_ring 已在 build_snapshot 中预计算好，
-    // sample_clip_pcm 会优先读取 synth_ring，fallback 到 stretch_stream，
-    // 再 fallback 到原始 PCM。此处直接复用 mix_snapshot_clips_into_scratch 路径，
-    // 不再在实时回调中执行 WORLD 合成（避免 CPU 尖峰和音频 underrun）。
+    // 音高编辑的合成结果通过全局 pitch_stream ring 传递，
+    // 不在此处做合成计算。此处只生成原始 PCM 数据写入 base_stream ring，
+    // 供 pitch_stream_world / pitch_stream_onnx 读取并合成。
     mix_snapshot_clips_into_scratch(_frames, snap, pos0, pos1, scratch);
 }
 

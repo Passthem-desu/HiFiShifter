@@ -3,7 +3,6 @@ import type { AppDispatch } from "../../../../app/store";
 import type { SessionState } from "../../../../features/session/sessionSlice";
 import {
     checkpointHistory,
-    moveClipRemote,
     moveClipStart,
     setClipFades,
     setClipGain,
@@ -194,13 +193,11 @@ export function useEditDrag(deps: {
             if (!clipNow) return;
 
             if (drag.type === "trim_left") {
-                void dispatch(moveClipRemote({ clipId: drag.clipId, startSec: clipNow.startSec, trackId: clipNow.trackId }));
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, trimStartSec: clipNow.trimStartSec }));
+                void dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, trimStartSec: clipNow.trimStartSec }));
             } else if (drag.type === "trim_right") {
                 void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, trimEndSec: clipNow.trimEndSec }));
             } else if (drag.type === "stretch_left") {
-                void dispatch(moveClipRemote({ clipId: drag.clipId, startSec: clipNow.startSec, trackId: clipNow.trackId }));
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate }));
+                void dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate }));
             } else if (drag.type === "stretch_right") {
                 void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate }));
             } else if (drag.type === "fade_in") {

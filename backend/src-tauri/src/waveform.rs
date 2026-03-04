@@ -23,8 +23,6 @@ pub struct WaveformPeaksSegmentPayload {
     pub ok: bool,
     pub min: Vec<f32>,
     pub max: Vec<f32>,
-    pub sample_rate: u32,
-    pub hop: u32,
 }
 
 pub fn segment_from_cached(
@@ -38,8 +36,6 @@ pub fn segment_from_cached(
             ok: false,
             min: vec![],
             max: vec![],
-            sample_rate: peaks.sample_rate,
-            hop: peaks.hop as u32,
         };
     }
 
@@ -51,8 +47,6 @@ pub fn segment_from_cached(
             ok: true,
             min: vec![0.0; columns],
             max: vec![0.0; columns],
-            sample_rate: peaks.sample_rate,
-            hop: peaks.hop as u32,
         };
     }
 
@@ -68,8 +62,6 @@ pub fn segment_from_cached(
             ok: true,
             min: vec![0.0; columns],
             max: vec![0.0; columns],
-            sample_rate: peaks.sample_rate,
-            hop: peaks.hop as u32,
         };
     }
 
@@ -110,7 +102,5 @@ pub fn segment_from_cached(
         ok: true,
         min: out_min,
         max: out_max,
-        sample_rate: peaks.sample_rate,
-        hop: peaks.hop as u32,
     }
 }

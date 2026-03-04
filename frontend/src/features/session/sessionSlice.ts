@@ -122,20 +122,19 @@ export interface SessionState {
     clipPitchRanges: Record<string, { min: number; max: number }>;
 
     /**
-     * 后端推送的 per-clip 音高检测结果（MIDI 曲线）�?
+     * 后端推送的 per-clip 音高检测结果（MIDI 曲线）。
      * key: clip_id
-     * value: { startFrame, midiCurve, framePeriodMs, sampleRate }
+     * value: { curveStartSec, midiCurve, framePeriodMs }
      */
     clipPitchCurves: Record<
         string,
         {
-            startFrame: number;
+            /** MIDI 曲线第 0 帧对应的 timeline 绝对时间（秒） */
+            curveStartSec: number;
             midiCurve: number[];
             framePeriodMs: number;
-            sampleRate: number;
         }
     >;
-
     modelDir: string;
     audioPath: string;
     outputPath: string;
@@ -371,6 +370,12 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
     for (const clipId of Object.keys(state.clipAutomation)) {
         if (!availableClipIds.has(clipId)) {
             delete state.clipAutomation[clipId];
+        }
+    }
+    // 清理已删除 clip 的音高曲线数据，避免 PianoRoll 残留已删除 clip 的 detectedPitchCurve
+    for (const clipId of Object.keys(state.clipPitchCurves)) {
+        if (!availableClipIds.has(clipId)) {
+            delete state.clipPitchCurves[clipId];
         }
     }
 
@@ -938,20 +943,20 @@ const sessionSlice = createSlice({
             state,
             action: PayloadAction<{
                 clipId: string;
-                startFrame: number;
+                curveStartSec: number;
                 midiCurve: number[];
                 framePeriodMs: number;
-                sampleRate: number;
             }>,
         ) {
-            const { clipId, startFrame, midiCurve, framePeriodMs, sampleRate } =
+            const { clipId, curveStartSec, midiCurve, framePeriodMs } =
                 action.payload;
             state.clipPitchCurves[clipId] = {
-                startFrame,
+                curveStartSec,
                 midiCurve,
                 framePeriodMs,
-                sampleRate,
             };
+            // 同步触发轨道总体音高线刷新
+            state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
         },
         /** 移除某个 clip 的音高曲线（clip 被删除时清理�?*/
         removeClipPitchData(state, action: PayloadAction<string>) {

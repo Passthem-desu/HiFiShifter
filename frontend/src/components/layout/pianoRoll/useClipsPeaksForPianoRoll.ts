@@ -19,7 +19,14 @@ export interface ClipPeaksEntry {
     /** clip 在 timeline 上的起始位置（秒，来自 ClipInfo.startSec） */
     startSec: number;
     /** clip 的长度（秒，来自 ClipInfo.lengthSec），用于绘制宽度，不影响 peaks 请求 */
-    lengthSec: number;    peaks: {
+    lengthSec: number;
+    /** clip 的 trimStartSec（秒），渲染时用于计算波形偏移 */
+    trimStartSec: number;
+    /** source 文件总时长（秒），peaks 覆盖整个 source */
+    sourceDurationSec: number;
+    /** 播放速率 */
+    playbackRate: number;
+    peaks: {
         min: number[];
         max: number[];
         startSec: number;
@@ -96,29 +103,10 @@ function buildClipPeaksRequest(
         },
     );
 
-    const playbackRate = Number(clip.playbackRate ?? 1);
-    const pr =
-        Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
-
-    // trimStartSec / trimEndSec 是秒单位，直接用于计算源文件内的起始和结束时间
-    const trimStart = Math.max(0, Number(clip.trimStartSec ?? 0) || 0); // 秒
-    const trimEnd = Math.max(0, Number(clip.trimEndSec ?? 0) || 0);     // 秒
-    const startSec = Math.min(trimStart, durationSec);                  // clip 在源文件中的起始秒
-    const endSec = Math.max(startSec, durationSec - trimEnd);           // clip 在源文件中的结束秒
-
-    // clip 在 timeline 上的时长（秒）= lengthSec（已是秒），受 playbackRate 影响
-    // 源文件中实际读取的时长 = min(lengthSec * pr, endSec - startSec)
-    const segLenSec = Math.min(lengthSec * pr, endSec - startSec);
-    if (
-        !Number.isFinite(startSec) ||
-        !Number.isFinite(segLenSec) ||
-        segLenSec <= 0
-    ) {
-        return null;
-    }
-
-    const startSecQ = qsec(startSec);
-    const durSecQ = Math.max(0.005, qsec(segLenSec));
+    // 固定请求整个 source 文件的 peaks，不依赖 trim 值
+    // 这样 trim 拖动不会导致 peaks 重新请求或波形变化
+    const startSecQ = 0;
+    const durSecQ = Math.max(0.005, qsec(durationSec));
 
     // columns �?64 量化，与 ClipItem 保持一�?
     const rawCols = Math.max(16, Math.min(8192, Math.floor(widthPx)));
@@ -296,11 +284,25 @@ export function useClipsPeaksForPianoRoll(args: {
 
     return visibleClips.map((clip): ClipPeaksEntry => {
         const entry = peaksMap.get(clip.id) ?? null;
+
+        // 计算 source 文件总时长
+        let sourceDurationSec: number;
+        if (clip.durationFrames && clip.sourceSampleRate && clip.sourceSampleRate > 0) {
+            sourceDurationSec = clip.durationFrames / clip.sourceSampleRate;
+        } else {
+            sourceDurationSec = Number(clip.durationSec ?? 0);
+        }
+
+        const playbackRate = Number(clip.playbackRate ?? 1);
+        const pr = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
+
         return {
             clipId: clip.id,
             startSec: clip.startSec,
-            // lengthSec 直接从 clip 读取，trim 拖动时实时更新，不触发 peaks 重请求
             lengthSec: clip.lengthSec,
+            trimStartSec: Math.max(0, Number(clip.trimStartSec ?? 0) || 0),
+            sourceDurationSec: sourceDurationSec > 0 ? sourceDurationSec : 0,
+            playbackRate: pr,
             peaks: entry
                 ? {
                       min: entry.min,

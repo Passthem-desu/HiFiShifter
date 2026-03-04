@@ -1667,55 +1667,35 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
             .max(1.0) as usize;
         let ratio = actual_audio_sec / clip_timeline_len_sec.max(1e-9);
         
-        // Print warning if there's a significant mismatch (>5%)
-        let use_audio_length = ratio < 0.95 || ratio > 1.05;
-        
-        if debug || use_audio_length {
+        // 当 playback_rate != 1 时，actual_audio_sec 与 clip_timeline_len_sec 不同是正常的
+        // （actual_audio_sec ≈ clip_timeline_len_sec × playback_rate），不应被当作错误
+        if debug {
             eprintln!(
-                "pitch: [ALIGNMENT] clip_id={} clip_timeline_len_sec={:.3} actual_audio_sec={:.3} ratio={:.3}",
+                "pitch: [ALIGNMENT] clip_id={} clip_timeline_len_sec={:.3} actual_audio_sec={:.3} ratio={:.3} playback_rate={:.2}",
                 clip.id,
                 clip_timeline_len_sec,
                 actual_audio_sec,
                 ratio,
+                playback_rate
             );
             eprintln!(
-                "  frames_from_timeline={} frames_from_audio={} midi_len={} playback_rate={:.2}",
+                "  frames_from_timeline={} frames_from_audio={} midi_len={}",
                 clip_frames_from_timeline,
                 clip_frames_from_audio,
                 midi.len(),
-                playback_rate
             );
-            if use_audio_length {
-                eprintln!(
-                    "  WARNING: Significant mismatch detected! Pitch curve will use AUDIO length to avoid time scaling error."
-                );
-                eprintln!(
-                    "  This may indicate clip.length_sec is incorrect. Audio: {:.3}s, Timeline: {:.3}s",
-                    actual_audio_sec,
-                    clip_timeline_len_sec
-                );
-            }
         }
         
-        // CRITICAL FIX: When there's a mismatch, use actual audio length to prevent time scaling errors.
-        // Using timeline length when audio is different causes pitch to play at wrong speed (e.g., 2x).
-        let clip_frames = if use_audio_length {
-            clip_frames_from_audio
-        } else {
-            clip_frames_from_timeline
-        };
+        // 始终使用 timeline 帧数：源时域的 F0 曲线需要 resample 到 timeline 时域
+        // 这样 pitch_orig 中每帧对应的就是 timeline 上的 frame_period 步进
+        let clip_frames = clip_frames_from_timeline;
         
         let midi = resample_curve_linear(&midi, clip_frames);
 
         let tg = track_gain.get(&clip.track_id).copied().unwrap_or(1.0);
 
-        // CRITICAL FIX: When audio length mismatches timeline length, adjust the end time
-        // to match actual audio duration. This ensures proper time mapping during fusion.
-        let adjusted_end_sec = if use_audio_length {
-            clip_start_sec + actual_audio_sec
-        } else {
-            clip_end_sec
-        };
+        // 始终使用 clip_end_sec（timeline 域），确保融合后曲线长度与 clip 显示范围一致
+        let adjusted_end_sec = clip_end_sec;
 
         clip_pitches.push(ClipPitch {
             clip_id: clip.id.clone(),
@@ -1811,8 +1791,8 @@ fn assemble_pitch_orig_from_cache(
         let cached = match cache.get(&clip.id) {
             Some(c) => c,
             None => {
-                // 缓存未命中，组装失败，等待异步分析
-                return None;
+                // 缓存未命中，跳过该 clip 继续组装（渐进更新）
+                continue;
             }
         };
 
@@ -1832,18 +1812,35 @@ fn assemble_pitch_orig_from_cache(
         // 计算 clip 在 timeline 中的起始帧
         let clip_start_sec = clip.start_sec.max(0.0);
         let clip_start_frame = ((clip_start_sec * 1000.0) / fp).round().max(0.0) as usize;
-        let clip_len_frames = cached.midi.len();
 
-        // 将 clip 的 MIDI 曲线写入 out，后面的 clip 覆盖前面的（非零覆盖）
-        for (local_i, &pitch) in cached.midi.iter().enumerate() {
+        // 判断是否为全量源音频缓存（playback_rate == 1）
+        let is_full_source = (clip.playback_rate as f64 - 1.0).abs() <= 1e-6;
+
+        // 对于全量缓存：cached.midi 覆盖源音频全部，需要从 trim_start_sec 处偏移截取
+        // 对于拉伸缓存：cached.midi 已经是 trim 后的长度，直接使用
+        let src_offset = if is_full_source {
+            let trim_start_sec = clip.trim_start_sec.max(0.0);
+            ((trim_start_sec * 1000.0) / fp).round().max(0.0) as usize
+        } else {
+            0
+        };
+
+        // clip 在时间线上的可见长度（帧数）
+        let clip_len_sec = clip.length_sec.max(0.0);
+        let clip_len_frames = ((clip_len_sec * 1000.0) / fp).round().max(0.0) as usize;
+
+        // 将 clip 的 MIDI 曲线写入 out，后面的 clip 覆盖前面的
+        for local_i in 0..clip_len_frames {
+            let src_i = src_offset + local_i;
             let global_i = clip_start_frame + local_i;
             if global_i >= target_frames {
                 break;
             }
+            let pitch = cached.midi.get(src_i).copied().unwrap_or(0.0);
             // 非零值覆盖（零值 = 无声/未检测到音高，不覆盖）
             if pitch.is_finite() && pitch > 0.0 {
                 out[global_i] = pitch;
-            } else if clip_len_frames > 0 {
+            } else {
                 // 当前 clip 覆盖了这一帧但没有音高，清除下方 clip 的音高
                 out[global_i] = 0.0;
             }

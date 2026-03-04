@@ -4,7 +4,6 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Arc, Mutex,
 };
-use std::thread;
 
 use crate::state::{Clip, TimelineState, Track};
 
@@ -135,6 +134,7 @@ pub(crate) fn schedule_stretch_jobs(
     stretch_tx: &mpsc::Sender<StretchJob>,
     inflight: &Mutex<HashSet<StretchKey>>,
     stretch_cache: &Arc<Mutex<HashMap<StretchKey, ResampledStereo>>>,
+    app_handle: Option<&tauri::AppHandle>,
 ) {
     let bpm = if timeline.bpm.is_finite() && timeline.bpm > 0.0 {
         timeline.bpm
@@ -201,11 +201,18 @@ pub(crate) fn schedule_stretch_jobs(
             continue;
         }
 
+        let clip_name = clip.source_path.as_deref()
+            .and_then(|p| Path::new(p).file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
         let _ = stretch_tx.send(StretchJob {
             key,
             trim_start_sec: clip.trim_start_sec.max(0.0),
             trim_end_sec: clip.trim_end_sec,
             playback_rate,
+            clip_name,
+            app_handle: app_handle.map(|h| std::sync::Arc::new(h.clone())),
         });
     }
 }
@@ -219,7 +226,6 @@ pub(crate) fn build_snapshot(
     is_playing: &Arc<AtomicBool>,
     stretch_stream_epoch: &Arc<AtomicU64>,
     clip_stretch_epochs: &HashMap<String, Arc<AtomicU64>>,
-    clip_synth_epochs: &HashMap<String, Arc<AtomicU64>>,
 ) -> EngineSnapshot {
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
     let bpm = if timeline.bpm.is_finite() && timeline.bpm > 0.0 {
@@ -385,60 +391,6 @@ pub(crate) fn build_snapshot(
             .round()
             .max(0.0) as u64;
 
-        // 读取该 clip 当前的合成 epoch（用于失效控制）。
-        let synth_epoch = clip_synth_epochs
-            .get(&clip.id)
-            .map(|e| e.load(std::sync::atomic::Ordering::Relaxed))
-            .unwrap_or(0);
-
-        // 若 pitch edit 激活且 WORLD 后端可用，为该 clip 启动后台合成 worker，
-        // 将合成结果预写入 synth_ring，播放时优先读取。
-        let synth_ring: Option<Arc<StreamRingStereo>> =
-            if crate::pitch_editing::is_pitch_edit_active(timeline)
-                && crate::pitch_editing::is_pitch_edit_backend_available(timeline)
-                && !matches!(
-                    crate::pitch_editing::selected_pitch_edit_algorithm(timeline),
-                    crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx
-                )
-            {
-                let cap_frames = length_frames.max(1);
-                let ring = Arc::new(StreamRingStereo::new(cap_frames));
-
-                // 构建一个轻量 snapshot 供 worker 使用（只含当前 clip）
-                let snap_for_synth = EngineSnapshot {
-                    bpm,
-                    sample_rate: out_rate,
-                    duration_frames,
-                    clips: Arc::new(clips_out.clone()),
-                    base_stream: None,
-                    pitch_stream: None,
-                    pitch_stream_algo: None,
-                };
-
-                let per_clip_epoch = clip_synth_epochs
-                    .get(&clip.id)
-                    .cloned()
-                    .unwrap_or_else(|| Arc::new(std::sync::atomic::AtomicU64::new(0)));
-
-                super::synth_stream::spawn_synth_stream(
-                    ring.clone(),
-                    snap_for_synth,
-                    clip.clone(),
-                    timeline.clone(),
-                    start_frame,
-                    length_frames,
-                    out_rate,
-                    position_frames.clone(),
-                    is_playing.clone(),
-                    per_clip_epoch,
-                    synth_epoch,
-                );
-
-                Some(ring)
-            } else {
-                None
-            };
-
         clips_out.push(EngineClip {
             clip_id: clip.id.clone(),
             track_id: clip.track_id.clone(),
@@ -454,8 +406,6 @@ pub(crate) fn build_snapshot(
             fade_in_frames,
             fade_out_frames,
             gain,
-            synth_ring,
-            synth_epoch,
         });
     }
 
@@ -627,91 +577,37 @@ pub(crate) fn build_snapshot(
                 }
             }
             _ => {
-                let snap_for_pitch = EngineSnapshot {
-                    bpm,
-                    sample_rate: sr,
-                    duration_frames,
-                    clips: Arc::new(clips_out.clone()),
-                    base_stream: None,
-                    pitch_stream: None,
-                    pitch_stream_algo: None,
-                };
-
-                thread::spawn(move || {
-                    // 使用较小的分块（0.5s）以减少每块处理完成后 ring buffer 停止写入的间隙，
-                    // 避免播放头追上 write_frame 后触发 hard-start 静音造成周期性卡顿。
-                    let warmup_block_frames = ((sr as u64) / 2).max(256); // ~0.5s
-                    let warmup_ahead_frames = ((sr as u64) / 2).max(256); // keep at least ~0.5s initially
-                    let block_frames_normal = (sr as u64) / 2; // 0.5s blocks（原 2s，缩小以减少卡顿间隙）
-                    let lookahead_frames_normal = (sr as u64).saturating_mul(3) / 2; // keep ~1.5s ahead（原 3s）
-
-                    let mut out_cursor: u64 = pos.load(Ordering::Relaxed);
-                    let mut pcm: Vec<f32> = vec![];
-
-                    loop {
-                        if epoch.load(Ordering::Relaxed) != my_epoch {
-                            break;
+                let curves = crate::pitch_editing::selected_pitch_curves_snapshot(&tl_for_thread);
+                if let Some(curves) = curves {
+                    let Some(base_ring) = base_stream.clone() else {
+                        if debug {
+                            eprintln!("AudioEngine: pitch_stream WORLD not started (missing base_stream)");
                         }
-                        if !playing.load(Ordering::Relaxed) {
-                            std::thread::sleep(std::time::Duration::from_millis(8));
-                            continue;
-                        }
-
-                        let now_abs = pos.load(Ordering::Relaxed);
-                        let base = ring_for_thread.base_frame.load(Ordering::Acquire);
-                        let write = ring_for_thread.write_frame.load(Ordering::Acquire);
-
-                        // Reset on large jumps (seek / transport changes).
-                        if now_abs < base || now_abs > write.saturating_add(sr as u64) {
-                            out_cursor = now_abs;
-                            ring_for_thread.reset(now_abs);
-                            std::thread::sleep(std::time::Duration::from_millis(2));
-                            continue;
-                        }
-
-                        // Don't render behind the playhead.
-                        if out_cursor < now_abs {
-                            out_cursor = now_abs;
-                        }
-
-                        // Warm up quickly so playback can start without falling back.
-                        let need_until = if write <= now_abs.saturating_add(warmup_ahead_frames) {
-                            now_abs.saturating_add(warmup_ahead_frames)
-                        } else {
-                            now_abs.saturating_add(lookahead_frames_normal)
+                        return EngineSnapshot {
+                            bpm,
+                            sample_rate: out_rate,
+                            duration_frames,
+                            clips: Arc::new(clips_out),
+                            base_stream,
+                            pitch_stream: None,
+                            pitch_stream_algo,
                         };
-                        if write >= need_until {
-                            std::thread::sleep(std::time::Duration::from_millis(3));
-                            continue;
-                        }
-
-                        let block_frames = if write <= now_abs.saturating_add(warmup_ahead_frames) {
-                            warmup_block_frames
-                        } else {
-                            block_frames_normal
-                        };
-
-                        let frames_u = block_frames.max(1);
-                        let frames = frames_u as usize;
-                        pcm.resize(frames * 2, 0.0);
-                        pcm.fill(0.0);
-
-                        // v2 realtime pitch edit for WORLD: per-clip render + per-clip pitch edit.
-                        let pos0 = out_cursor;
-                        let pos1 = out_cursor.saturating_add(frames_u);
-                        crate::audio_engine::mix::mix_snapshot_clips_pitch_edited_into_scratch(
-                            frames,
-                            &tl_for_thread,
-                            &snap_for_pitch,
-                            pos0,
-                            pos1,
-                            pcm.as_mut_slice(),
-                        );
-
-                        ring_for_thread.write_interleaved(out_cursor, pcm.as_slice());
-                        out_cursor = out_cursor.saturating_add(frames_u);
-                    }
-                });
+                    };
+                    super::pitch_stream_world::spawn_pitch_stream_world(
+                        tl_for_thread,
+                        sr,
+                        base_ring,
+                        ring_for_thread,
+                        pos,
+                        playing,
+                        epoch,
+                        my_epoch,
+                        curves,
+                        debug,
+                    );
+                } else if debug {
+                    eprintln!("AudioEngine: pitch_stream WORLD not started (missing pitch curves)");
+                }
             }
         }
 
@@ -794,8 +690,6 @@ pub(crate) fn build_snapshot_for_file(
             fade_in_frames: 0,
             fade_out_frames: 0,
             gain: 1.0,
-            synth_ring: None,
-            synth_epoch: 0,
         }]),
         base_stream: None,
         pitch_stream: None,

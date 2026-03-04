@@ -42,12 +42,20 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
         if let Some(app) = state.app_handle.get().cloned() {
             let engine = state.audio_engine.clone();
             std::thread::spawn(move || {
-                // Small delay to let the engine thread build the snapshot.
-                std::thread::sleep(Duration::from_millis(5));
-
-                let (algo, base, write0, hard_start) = match engine.pitch_stream_priming_info() {
-                    Some(v) => v,
-                    None => return,
+                // 等待 engine worker 完成 snapshot 构建（含 pitch_stream 创建）。
+                // set_playing 在 channel FIFO 中排在 update_timeline 之后，
+                // 所以需要等到 is_playing 为 true 且 pitch_stream 存在。
+                let wait_start = Instant::now();
+                let max_wait = Duration::from_secs(2);
+                let (algo, base, write0, hard_start) = loop {
+                    if wait_start.elapsed() >= max_wait {
+                        // 超时：snapshot 可能不包含 pitch_stream（条件不满足），直接退出
+                        return;
+                    }
+                    if let Some(v) = engine.pitch_stream_priming_info() {
+                        break v;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
                 };
 
                 if !hard_start {
