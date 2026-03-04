@@ -314,8 +314,10 @@ pub struct StreamingWorldSynthesizer {
     fft_size: usize,
     /// 持有已送入 AddParameters 的帧数据所有权，防止悬空指针。
     /// 每次 push_frames 成功后追加一条，pull_samples 消费完毕后清理。
-    /// 元素：(f0, spectrogram, aperiodicity)
-    pending_data: std::collections::VecDeque<(Vec<f64>, Vec<Vec<f64>>, Vec<Vec<f64>>)>,
+    /// 元素：(f0, spectrogram, aperiodicity, sp_ptrs, ap_ptrs)
+    /// 注意：sp_ptrs/ap_ptrs 是 WORLD 内部 synth->spectrogram[i] 所指向的指针数组，
+    /// 必须与数据一起存活，否则 Synthesis2 解引用时会产生 ACCESS_VIOLATION。
+    pending_data: std::collections::VecDeque<(Vec<f64>, Vec<Vec<f64>>, Vec<Vec<f64>>, Vec<*mut f64>, Vec<*mut f64>)>,
     /// 环形缓冲区槽位数（用于判断何时可以安全释放旧数据）
     number_of_pointers: usize,
 }
@@ -377,20 +379,24 @@ impl StreamingWorldSynthesizer {
         if !self.initialized {
             return false;
         }
-        // 将数据移入内部存储，确保在 Synthesis2 消费前数据不被释放
-        self.pending_data.push_back((f0, spectrogram, aperiodicity));
+        // 将数据移入内部存储，确保在 Synthesis2 消费前数据不被释放。
+        // sp_ptrs/ap_ptrs 先用空 Vec 占位，后面填充。
+        self.pending_data.push_back((f0, spectrogram, aperiodicity, Vec::new(), Vec::new()));
         let entry = self.pending_data.back_mut().unwrap();
 
         let f0_len = entry.0.len() as i32;
-        let mut sp_ptrs: Vec<*mut f64> = entry.1.iter_mut().map(|r| r.as_mut_ptr()).collect();
-        let mut ap_ptrs: Vec<*mut f64> = entry.2.iter_mut().map(|r| r.as_mut_ptr()).collect();
+        // 构建指针数组，并存入 entry，确保其生命周期与数据一致。
+        // WORLD 的 AddParameters 只存储 sp_ptrs/ap_ptrs 的指针，不拷贝数据，
+        // 因此这两个 Vec 必须在 Synthesis2 消费完毕前保持存活。
+        entry.3 = entry.1.iter_mut().map(|r| r.as_mut_ptr()).collect();
+        entry.4 = entry.2.iter_mut().map(|r| r.as_mut_ptr()).collect();
 
         let ok = unsafe {
             AddParameters(
                 entry.0.as_mut_ptr(),
                 f0_len,
-                sp_ptrs.as_mut_ptr(),
-                ap_ptrs.as_mut_ptr(),
+                entry.3.as_mut_ptr(),
+                entry.4.as_mut_ptr(),
                 self.inner.as_mut(),
             )
         };

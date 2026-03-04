@@ -1335,14 +1335,13 @@ const sessionSlice = createSlice({
                 const nextPositionSec = payload.position_sec ?? 0;
                 const nextDurationSec = payload.duration_sec ?? 0;
 
-                // 0.5ms 阈值：避免轮询带来的浮点抖动导致无意义�?Redux 更新�?
+                // 0.5ms 阈值：避免轮询带来的浮点抖动导致无意义的 Redux 更新
                 const EPS_SEC = 0.0005;
-                const epsBeat = (state.bpm / 60) * EPS_SEC;
 
                 let nextplayheadSec = state.playheadSec;
                 if (nextIsPlaying) {
                     const absSec = (payload.base_sec ?? 0) + nextPositionSec;
-                    nextplayheadSec = Math.max(0, (absSec * state.bpm) / 60);
+                    nextplayheadSec = Math.max(0, absSec);
                 }
 
                 const shouldUpdatePlaybackFields =
@@ -1356,7 +1355,7 @@ const sessionSlice = createSlice({
                     ) > EPS_SEC ||
                     (nextIsPlaying &&
                         Math.abs(nextplayheadSec - state.playheadSec) >
-                            epsBeat);
+                            EPS_SEC);
 
                 if (!shouldUpdatePlaybackFields) {
                     // 即使播放已停止，也避免重复写入相同值（Immer 会把赋值视�?mutation）�?
