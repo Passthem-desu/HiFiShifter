@@ -180,6 +180,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 volume: args[3],
                 composeEnabled: args[4],
                 pitchAnalysisAlgo: args[5],
+                color: args[6],
             };
 
         case "select_track":
@@ -222,6 +223,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 playbackRate: args[7],
                 fadeInSec: args[8],
                 fadeOutSec: args[9],
+                color: args[10],
             };
 
         case "split_clip":

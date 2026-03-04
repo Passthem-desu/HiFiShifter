@@ -84,6 +84,7 @@ export const timelineApi = {
         volume?: number;
         composeEnabled?: boolean;
         pitchAnalysisAlgo?: string;
+        color?: string;
     }) =>
         invoke<TimelineResult>(
             "set_track_state",
@@ -93,6 +94,7 @@ export const timelineApi = {
             payload.volume,
             payload.composeEnabled,
             payload.pitchAnalysisAlgo,
+            payload.color,
         ),
 
     selectTrack: (trackId: string) =>
@@ -139,6 +141,7 @@ export const timelineApi = {
         playbackRate?: number;
         fadeInSec?: number;
         fadeOutSec?: number;
+        color?: string;
     }) =>
         invoke<TimelineResult>(
             "set_clip_state",
@@ -152,6 +155,7 @@ export const timelineApi = {
             payload.playbackRate,
             payload.fadeInSec,
             payload.fadeOutSec,
+            payload.color,
         ),
 
     splitClip: (clipId: string, splitSec: number) =>

@@ -254,6 +254,15 @@ function AppInner() {
                                 : null;
 
                         setRendering({ active, progress: p, target });
+
+                        // 渲染从 active→inactive（完成）时，延迟同步一次播放状态，
+                        // 使前端能感知后端已真正开始播放。
+                        if (!active && renderingWasActiveRef.current) {
+                            setTimeout(() => {
+                                dispatch(syncPlaybackState());
+                            }, 200);
+                        }
+                        renderingWasActiveRef.current = active;
                     },
                 );
             } catch {
@@ -274,6 +283,7 @@ function AppInner() {
     });
 
     const playbackSyncInFlightRef = useRef(false);
+    const renderingWasActiveRef = useRef(false);
 
     useEffect(() => {
         void dispatch(fetchTimeline());

@@ -3,10 +3,7 @@ use std::sync::Arc;
 
 use crate::state::TimelineState;
 
-use crate::pitch_editing::PitchEditAlgorithm;
-
 use super::ring::StreamRingStereo;
-use super::realtime_stats::RealtimeRenderStatsSnapshot;
 
 pub(crate) type AudioKey = (PathBuf, u32);
 
@@ -41,11 +38,6 @@ pub struct AudioEngineStateSnapshot {
     pub duration_sec: f64,
     #[allow(dead_code)]
     pub sample_rate: u32,
-
-    // Debug only: lock-free counters for diagnosing realtime stream coverage.
-    // Not serialized to frontend; commands pick only the fields they need.
-    #[allow(dead_code)]
-    pub realtime_stats: Option<RealtimeRenderStatsSnapshot>,
 }
 
 #[allow(dead_code)]
@@ -88,6 +80,11 @@ pub(crate) struct EngineClip {
     pub(crate) fade_in_frames: u64,
     pub(crate) fade_out_frames: u64,
     pub(crate) gain: f32,
+
+    /// 预渲染后的 stereo interleaved PCM（优先级最高）。
+    /// 当有 pitch edit 时，由后台线程预渲染并填充。
+    /// 长度 = clip_length_frames * 2（stereo），采样从 local frame 0 开始。
+    pub(crate) rendered_pcm: Option<Arc<Vec<f32>>>,
 }
 
 #[allow(dead_code)]
@@ -97,17 +94,6 @@ pub(crate) struct EngineSnapshot {
     pub(crate) sample_rate: u32,
     pub(crate) duration_frames: u64,
     pub(crate) clips: Arc<Vec<EngineClip>>,
-
-    // Optional: base mixdown streamer (low latency). It pre-renders the mix (without pitch edits)
-    // into this ring buffer in absolute timeline frames.
-    pub(crate) base_stream: Option<Arc<StreamRingStereo>>,
-
-    // Optional: when pitch edit is active, a background worker renders the full mixdown
-    // (including WORLD-based pitch edits) into this ring buffer in absolute timeline frames.
-    pub(crate) pitch_stream: Option<Arc<StreamRingStereo>>,
-
-    // Captures which algorithm was selected when building `pitch_stream`.
-    pub(crate) pitch_stream_algo: Option<PitchEditAlgorithm>,
 }
 
 impl EngineSnapshot {
@@ -117,9 +103,6 @@ impl EngineSnapshot {
             sample_rate,
             duration_frames: 0,
             clips: Arc::new(vec![]),
-            base_stream: None,
-            pitch_stream: None,
-            pitch_stream_algo: None,
         }
     }
 }

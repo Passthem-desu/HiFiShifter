@@ -9,7 +9,7 @@ use serde::Deserialize;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 static ORT_INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
@@ -502,18 +502,18 @@ fn linear_resample_mono_into(input: &[f32], in_rate: u32, out_rate: u32, out: &m
 }
 
 /// 进程级全局共享的 ORT Session。
-/// ORT Session::run() 是线程安全的，多线程可并发调用，无需 Mutex。
-static SHARED_SESSION: OnceLock<Arc<Session>> = OnceLock::new();
+/// ORT Session::run() 需要 &mut self，因此用 Mutex 保护。
+static SHARED_SESSION: OnceLock<Arc<Mutex<Session>>> = OnceLock::new();
 
 /// 初始化（或获取已有的）全局 Session。
-fn get_or_init_shared_session() -> Result<Arc<Session>, String> {
+fn get_or_init_shared_session() -> Result<Arc<Mutex<Session>>, String> {
     if let Some(s) = SHARED_SESSION.get() {
         return Ok(Arc::clone(s));
     }
     ensure_ort_init()?;
     let (onnx_path, _cfg_path) = resolve_model_paths()?;
     let session = build_session_with_ep(&onnx_path)?;
-    let arc = Arc::new(session);
+    let arc = Arc::new(Mutex::new(session));
     // get_or_init 保证只有一个线程真正写入，其余线程拿到同一个 Arc。
     Ok(Arc::clone(SHARED_SESSION.get_or_init(|| Arc::clone(&arc))))
 }
@@ -527,8 +527,8 @@ pub struct NsfHifiganOnnx {
     fft_buf: Vec<Complex32>,
     pad_buf: Vec<f32>,
     audio_resample_buf: Vec<f32>,
-    /// 共享的 ORT Session，Arc 保证多线程安全复用。
-    session: Arc<Session>,
+    /// 共享的 ORT Session，Arc<Mutex<>> 保证多线程安全复用。
+    session: Arc<Mutex<Session>>,
 }
 
 impl NsfHifiganOnnx {
@@ -705,21 +705,27 @@ impl NsfHifiganOnnx {
         let f0_tensor = Tensor::from_array(([1usize, t], f0.into_boxed_slice()))
             .map_err(|e| format!("build f0 tensor failed: {e}"))?;
 
-        // 通过 Arc<Session> 调用 run()，Session 线程安全，无需 &mut self。
-        let outputs = self
-            .session
-            .run(ort::inputs![mel_tensor, f0_tensor])
-            .map_err(|e| format!("ort run failed: {e}"))?;
-        let output0 = outputs
-            .into_iter()
-            .next()
-            .ok_or_else(|| "onnx returned no outputs".to_string())?;
-
-        let (_shape, data) = output0
-            .1
-            .try_extract_tensor::<f32>()
-            .map_err(|e| format!("ort output type mismatch: {e}"))?;
-        Ok(data.to_vec())
+        // 通过 Mutex 获取 &mut Session 来调用 run()。
+        // 用块作用域限制 guard 的生命周期，确保 lock 尽快释放。
+        let result: Vec<f32> = {
+            let mut session_guard = self
+                .session
+                .lock()
+                .map_err(|e| format!("ort session lock poisoned: {e}"))?;
+            let outputs = session_guard
+                .run(ort::inputs![mel_tensor, f0_tensor])
+                .map_err(|e| format!("ort run failed: {e}"))?;
+            let output0 = outputs
+                .into_iter()
+                .next()
+                .ok_or_else(|| "onnx returned no outputs".to_string())?;
+            let (_shape, data) = output0
+                .1
+                .try_extract_tensor::<f32>()
+                .map_err(|e| format!("ort output type mismatch: {e}"))?;
+            data.to_vec()
+        };
+        Ok(result)
     }
 
     pub fn infer_from_audio_and_midi(
@@ -731,7 +737,8 @@ impl NsfHifiganOnnx {
     ) -> Result<Vec<f32>, String> {
         let model_sr = self.cfg.sampling_rate;
 
-        // Avoid unnecessary allocations when sample rate already matches the model.
+        // 将重采样后的音频存入局部变量，避免 self 的不可变/可变借用冲突。
+        let audio_owned: Vec<f32>;
         let audio_model: &[f32] = if sample_rate == model_sr {
             audio_mono
         } else {
@@ -741,7 +748,9 @@ impl NsfHifiganOnnx {
                 model_sr,
                 &mut self.audio_resample_buf,
             );
-            self.audio_resample_buf.as_slice()
+            // clone 到局部变量以断开对 self 的借用
+            audio_owned = self.audio_resample_buf.clone();
+            &audio_owned
         };
 
         // Fast path: key_shift=0 is the only mode used by the app currently.

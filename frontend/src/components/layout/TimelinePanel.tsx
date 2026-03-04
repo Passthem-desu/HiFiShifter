@@ -654,6 +654,14 @@ export const TimelinePanel: React.FC = () => {
                 onAddTrack={() => {
                     dispatch(addTrackRemote({}));
                 }}
+                onTrackColorChange={(trackId, color) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            color,
+                        }),
+                    );
+                }}
             />
 
             {/* Timeline View (Right) */}

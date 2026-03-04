@@ -12,8 +12,6 @@ import { EyeOpenIcon, EyeClosedIcon, UpdateIcon } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
-import type { OnnxDiagnosticResult, OnnxStatusResult } from "../../types/api";
-import { coreApi } from "../../services/api";
 import {
     setEditParam,
     setTrackStateRemote,
@@ -68,30 +66,7 @@ export const PianoRollPanel: React.FC = () => {
     const asyncRefresh = useAsyncPitchRefresh();
     const [showSuccessMessage, setShowSuccessMessage] = useState(false);
 
-    const [onnxStatus, setOnnxStatus] = useState<OnnxStatusResult | null>(null);
-    const [onnxDiagnostic, setOnnxDiagnostic] =
-        useState<OnnxDiagnosticResult | null>(null);
 
-    // Task 1.9: 调用诊断API
-    useEffect(() => {
-        coreApi
-            .getOnnxStatus()
-            .then((result) => {
-                setOnnxStatus(result);
-            })
-            .catch(() => {
-                // Non-Tauri env (storybook/tests), ignore.
-            });
-
-        coreApi
-            .getOnnxDiagnostic()
-            .then((result) => {
-                setOnnxDiagnostic(result);
-            })
-            .catch(() => {
-                // Non-Tauri env, ignore.
-            });
-    }, []);
 
     const effectiveSelectedTrackId = useMemo(() => {
         if (s.selectedTrackId) return s.selectedTrackId;
@@ -220,33 +195,7 @@ export const PianoRollPanel: React.FC = () => {
     const pitchEnabled =
         editParam !== "pitch" || pitchHardDisableReason == null;
 
-    const onnxUnavailable = Boolean(onnxStatus && !onnxStatus.available);
 
-    // Task 1.10: 根据诊断信息构建tolltip内容
-    const onnxCompileHint = useMemo(() => {
-        if (!onnxDiagnostic) {
-            return onnxStatus && !onnxStatus.compiled
-                ? t("onnx_compile_required")
-                : undefined;
-        }
-
-        if (onnxDiagnostic.available) {
-            return undefined;
-        }
-
-        const hints: string[] = [];
-        if (onnxDiagnostic.error) {
-            hints.push(onnxDiagnostic.error);
-        }
-        if (onnxDiagnostic.ep_choice) {
-            hints.push(`EP: ${onnxDiagnostic.ep_choice}`);
-        }
-        hints.push("Run: cargo tauri dev --features onnx");
-
-        return hints.join(" | ");
-    }, [onnxDiagnostic, onnxStatus, t]);
-
-    const onnxLabelSuffix = onnxUnavailable ? t("onnx_unavailable_label") : "";
 
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
     const contentWidth = Math.max(8, Math.ceil(s.projectSec * pxPerSec));
@@ -553,11 +502,38 @@ export const PianoRollPanel: React.FC = () => {
         [commitStrokeBase, notifyLiveEditEnded],
     );
 
-    // �?store 中的 clipPitchCurves 转换�?DetectedPitchCurve[] �?drawPianoRoll 使用�?
-    // 仅在 pitch 模式下有意义，其他模式下传空数组以避免不必要的计算�?
+    // C 键按下时才显示 detectedPitchCurve
+    const [cKeyDown, setCKeyDown] = useState(false);
+    const cKeyDownRef = useRef(false);
+
+    useEffect(() => {
+        function onKeyDown(e: KeyboardEvent) {
+            if (e.key === "c" || e.key === "C") {
+                if (!cKeyDownRef.current) {
+                    cKeyDownRef.current = true;
+                    setCKeyDown(true);
+                }
+            }
+        }
+        function onKeyUp(e: KeyboardEvent) {
+            if (e.key === "c" || e.key === "C") {
+                cKeyDownRef.current = false;
+                setCKeyDown(false);
+            }
+        }
+        window.addEventListener("keydown", onKeyDown);
+        window.addEventListener("keyup", onKeyUp);
+        return () => {
+            window.removeEventListener("keydown", onKeyDown);
+            window.removeEventListener("keyup", onKeyUp);
+        };
+    }, []);
+
+    // 从 store 中的 clipPitchCurves 转换为 DetectedPitchCurve[] 供 drawPianoRoll 使用。
+    // 仅在 pitch 模式下且 C 键按下时有意义，其他情况下传空数组以避免不必要的计算。
     const detectedPitchCurves = useMemo((): DetectedPitchCurve[] => {
         if (editParam !== "pitch") return [];
-        return Object.entries(s.clipPitchCurves)
+        if (!cKeyDown) return [];        return Object.entries(s.clipPitchCurves)
             .filter(([clipId]) => {
                 // 只保留属于当前轨道组内的 clip，显示 root 及所有子轨道的 detected curve
                 const clip = s.clips.find((cl) => cl.id === clipId);
@@ -574,7 +550,7 @@ export const PianoRollPanel: React.FC = () => {
                     clipLengthSec: clip ? Number(clip.lengthSec ?? 0) : Infinity,
                 };
             });
-    }, [editParam, s.clipPitchCurves, s.clips, groupTrackIds]);
+    }, [editParam, cKeyDown, s.clipPitchCurves, s.clips, groupTrackIds]);
 
     // 检测音高曲线更新时触发重绘
     useEffect(() => {
@@ -872,17 +848,7 @@ export const PianoRollPanel: React.FC = () => {
                                         world
                                     </Select.Item>
                                     <Select.Item value="nsf_hifigan_onnx">
-                                        <span
-                                            className={
-                                                onnxUnavailable
-                                                    ? "text-yellow-400"
-                                                    : undefined
-                                            }
-                                            title={onnxCompileHint}
-                                        >
-                                            nsf-hifigan
-                                            {onnxLabelSuffix}
-                                        </span>
+                                        nsf-hifigan
                                     </Select.Item>
                                     <Select.Item value="none">
                                         {t("none")}

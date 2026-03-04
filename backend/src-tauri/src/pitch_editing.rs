@@ -434,14 +434,14 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             mono[f] = pcm_stereo[f * 2];
         }
 
-        // 通过 VocoderPipeline trait 调用，解耦合成链路。
+        // 通过 Renderer trait 调用，解耦合成链路。
         let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
-        let pipeline = crate::vocoder_pipeline::get_pipeline(kind);
-        if !pipeline.is_available() {
+        let renderer = crate::renderer::get_renderer(kind);
+        if !renderer.is_available() {
             return Ok(None);
         }
 
-        let ctx = crate::vocoder_pipeline::VocoderContext {
+        let ctx = crate::renderer::RenderContext {
             mono_pcm: mono.as_slice(),
             sample_rate,
             seg_start_sec,
@@ -452,7 +452,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             clip_midi: &clip_pitch.midi,
             clip_id: &clip.id,
         };
-        let out = pipeline.process(&ctx)?;
+        let out = renderer.render(&ctx)?;
         Ok(Some(out))
     })?;
 

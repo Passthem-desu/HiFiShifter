@@ -283,10 +283,11 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         solo: Boolean(track.solo),
         volume: clamp(Number(track.volume ?? 0.9), 0, 1),
 
-        composeEnabled: Boolean((track as any).compose_enabled),
+        composeEnabled: Boolean(track.compose_enabled),
         pitchAnalysisAlgo: String(
-            (track as any).pitch_analysis_algo ?? "world_dll",
+            track.pitch_analysis_algo ?? "world_dll",
         ),
+        color: track.color || undefined,
     }));
 
     state.clips = timeline.clips.map((clip: TimelineClip) => {

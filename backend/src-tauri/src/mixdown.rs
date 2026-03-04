@@ -153,7 +153,7 @@ fn compute_track_gains(tracks: &[Track]) -> HashMap<String, (f32, bool, bool)> {
     out
 }
 
-fn clip_duration_sec_from_wav(sample_rate: u32, channels: u16, pcm: &[f32]) -> Option<f64> {
+pub(crate) fn clip_duration_sec_from_wav(sample_rate: u32, channels: u16, pcm: &[f32]) -> Option<f64> {
     let ch = channels as usize;
     if sample_rate == 0 || ch == 0 {
         return None;

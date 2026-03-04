@@ -3,24 +3,29 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 
-#[cfg(feature = "onnx")]
-use crate::audio_engine::pitch_stream_onnx;
-use crate::state::TimelineState;
-
 use super::types::EngineSnapshot;
 use super::util::clamp11;
-use super::realtime_stats::RealtimeRenderStats;
 use super::types::EngineClip;
 
 /// 采样 clip 在 local 帧处的原始 PCM（不含 gain/fade）。
 /// 返回 None 表示该帧应静音（越界、leading silence 等）。
 #[inline]
 fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32, f32)> {
+    // 最高优先级：预渲染 PCM（有 pitch edit 时由后台线程渲染）
+    if let Some(ref rendered) = clip.rendered_pcm {
+        let idx = (local as usize) * 2;
+        if idx + 1 < rendered.len() {
+            return Some((rendered[idx], rendered[idx + 1]));
+        }
+        // rendered_pcm 存在但越界时返回静音
+        return None;
+    }
+
     let src_pcm = clip.src.pcm.as_slice();
     let src_frames = clip.src.frames as u64;
     let loop_len = clip.src_end_frame.saturating_sub(clip.src_start_frame) as f64;
 
-    // 最高优先级：stretch_stream ring（实时拉伸缓存）
+    // 次高优先级：stretch_stream ring（实时拉伸缓存）
     if let Some(stream) = clip.stretch_stream.as_ref() {
         if let Some((sl, sr)) = stream.read_frame(local) {
             return Some((sl, sr));
@@ -124,24 +129,7 @@ pub(crate) fn mix_snapshot_clips_into_scratch(
     }
 }
 
-pub(crate) fn mix_snapshot_clips_pitch_edited_into_scratch(
-    _frames: usize,
-    _timeline: &TimelineState,
-    snap: &EngineSnapshot,
-    pos0: u64,
-    pos1: u64,
-    scratch: &mut [f32],
-) {
-    if scratch.is_empty() {
-        return;
-    }
-    scratch.fill(0.0);
 
-    // 音高编辑的合成结果通过全局 pitch_stream ring 传递，
-    // 不在此处做合成计算。此处只生成原始 PCM 数据写入 base_stream ring，
-    // 供 pitch_stream_world / pitch_stream_onnx 读取并合成。
-    mix_snapshot_clips_into_scratch(_frames, snap, pos0, pos1, scratch);
-}
 
 fn mix_into_scratch_stereo(
     frames: usize,
@@ -149,18 +137,12 @@ fn mix_into_scratch_stereo(
     is_playing: &AtomicBool,
     position_frames: &AtomicU64,
     duration_frames: &AtomicU64,
-    stats: &RealtimeRenderStats,
     scratch: &mut Vec<f32>,
 ) {
     scratch.resize(frames * 2, 0.0);
     scratch.fill(0.0);
 
-    stats.callbacks_total.fetch_add(1, Ordering::Relaxed);
-
     if !is_playing.load(Ordering::Relaxed) {
-        stats
-            .callbacks_silenced_not_playing
-            .fetch_add(1, Ordering::Relaxed);
         return;
     }
 
@@ -168,94 +150,8 @@ fn mix_into_scratch_stereo(
     let pos0 = position_frames.load(Ordering::Relaxed);
     let pos1 = pos0.saturating_add(frames as u64);
 
-    if let Some(stream) = snap.pitch_stream.as_ref() {
-        stats.pitch_callbacks_total.fetch_add(1, Ordering::Relaxed);
-        let base = stream.base_frame.load(Ordering::Acquire);
-        let write = stream.write_frame.load(Ordering::Acquire);
-
-        // If pitch-stream is enabled, the user expects to hear pitch-edited audio.
-        // We intentionally avoid doing expensive fallback mixing in the real-time callback,
-        // because it can cause CPU spikes (underruns) and an audible "original -> pitched"
-        // transition.
-        //
-        // When hard-start is enabled, we output silence and DO NOT advance playback until
-        // the requested window is covered by [base_frame, write_frame).
-        let hard_start = stream.is_hard_start_enabled();
-        if hard_start {
-            // Optional: require a small prebuffer before starting, so we don't oscillate
-            // between covered/not-covered right after starting.
-            let prime_sec: f64 = std::env::var("HIFISHIFTER_PITCH_STREAM_PRIME_SEC")
-                .ok()
-                .and_then(|s| s.trim().parse::<f64>().ok())
-                .filter(|v| v.is_finite() && *v > 0.0)
-                .unwrap_or(0.25);
-            let sr = snap.sample_rate.max(1) as f64;
-            let prime_frames = (prime_sec * sr).round().max(1.0) as u64;
-
-            if pos0 == base {
-                let need = base.saturating_add(prime_frames);
-                if write < need {
-                    stats
-                        .pitch_callbacks_prime_waiting
-                        .fetch_add(1, Ordering::Relaxed);
-                    return;
-                }
-            }
-
-            if pos0 < base || pos1 > write {
-                stats
-                    .pitch_callbacks_silenced_waiting
-                    .fetch_add(1, Ordering::Relaxed);
-                return;
-            }
-        }
-
-        // Fully covered: stream-only fast path.
-        if pos0 >= base && pos1 <= write {
-            for f in 0..frames {
-                let abs_f = pos0.saturating_add(f as u64);
-                if let Some((l, r)) = stream.read_frame(abs_f) {
-                    scratch[f * 2] = l;
-                    scratch[f * 2 + 1] = r;
-                }
-            }
-        } else {
-            // Best-effort fallback (debug): keep legacy behavior when hard-start is disabled.
-            stats
-                .pitch_callbacks_fallback_mixed
-                .fetch_add(1, Ordering::Relaxed);
-            mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch.as_mut_slice());
-            for f in 0..frames {
-                let abs_f = pos0.saturating_add(f as u64);
-                if let Some((l, r)) = stream.read_frame(abs_f) {
-                    scratch[f * 2] = l;
-                    scratch[f * 2 + 1] = r;
-                }
-            }
-        }
-    } else if let Some(base) = snap.base_stream.as_ref() {
-        stats.base_callbacks_total.fetch_add(1, Ordering::Relaxed);
-        let base0 = base.base_frame.load(Ordering::Acquire);
-        let write = base.write_frame.load(Ordering::Acquire);
-        if pos0 >= base0 && pos1 <= write {
-            stats.base_callbacks_covered.fetch_add(1, Ordering::Relaxed);
-            for f in 0..frames {
-                let abs_f = pos0.saturating_add(f as u64);
-                if let Some((l, r)) = base.read_frame(abs_f) {
-                    scratch[f * 2] = l;
-                    scratch[f * 2 + 1] = r;
-                }
-            }
-        } else {
-            stats
-                .base_callbacks_fallback_mixed
-                .fetch_add(1, Ordering::Relaxed);
-            mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch.as_mut_slice());
-        }
-    } else {
-        stats.legacy_callbacks_mixed.fetch_add(1, Ordering::Relaxed);
-        mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch.as_mut_slice());
-    }
+    // Legacy mixing: 直接在 audio callback 中混合所有 clip
+    mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch.as_mut_slice());
 
     let new_pos = pos0.saturating_add(frames as u64);
     position_frames.store(new_pos, Ordering::Relaxed);
@@ -273,7 +169,6 @@ pub(crate) fn render_callback_f32(
     is_playing: &AtomicBool,
     position_frames: &AtomicU64,
     duration_frames: &AtomicU64,
-    stats: &RealtimeRenderStats,
     scratch: &mut Vec<f32>,
 ) {
     let frames = if out_channels == 0 {
@@ -297,7 +192,6 @@ pub(crate) fn render_callback_f32(
         is_playing,
         position_frames,
         duration_frames,
-        stats,
         scratch,
     );
 
@@ -324,7 +218,6 @@ pub(crate) fn render_callback_i16(
     is_playing: &AtomicBool,
     position_frames: &AtomicU64,
     duration_frames: &AtomicU64,
-    stats: &RealtimeRenderStats,
     scratch: &mut Vec<f32>,
 ) {
     let frames = if out_channels == 0 {
@@ -347,7 +240,6 @@ pub(crate) fn render_callback_i16(
         is_playing,
         position_frames,
         duration_frames,
-        stats,
         scratch,
     );
 
@@ -375,7 +267,6 @@ pub(crate) fn render_callback_u16(
     is_playing: &AtomicBool,
     position_frames: &AtomicU64,
     duration_frames: &AtomicU64,
-    stats: &RealtimeRenderStats,
     scratch: &mut Vec<f32>,
 ) {
     let frames = if out_channels == 0 {
@@ -398,7 +289,6 @@ pub(crate) fn render_callback_u16(
         is_playing,
         position_frames,
         duration_frames,
-        stats,
         scratch,
     );
 

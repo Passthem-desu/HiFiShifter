@@ -224,6 +224,7 @@ pub fn set_track_state(
     volume: Option<f32>,
     compose_enabled: Option<bool>,
     pitch_analysis_algo: Option<String>,
+    color: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     timeline::set_track_state(
         state,
@@ -233,6 +234,7 @@ pub fn set_track_state(
         volume,
         compose_enabled,
         pitch_analysis_algo,
+        color,
     )
 }
 
@@ -292,6 +294,7 @@ pub fn set_clip_state(
     playback_rate: Option<f32>,
     fade_in_sec: Option<f64>,
     fade_out_sec: Option<f64>,
+    color: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     timeline::set_clip_state(
         state,
@@ -305,6 +308,7 @@ pub fn set_clip_state(
         playback_rate,
         fade_in_sec,
         fade_out_sec,
+        color,
     )
 }
 #[tauri::command(rename_all = "camelCase")]

@@ -4,6 +4,18 @@ import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
 import type { TrackInfo } from "../../../features/session/sessionTypes";
 import type { MessageKey } from "../../../i18n/messages";
 
+/** 轨道颜色调色板（与后端 add_track 预设一致） */
+const TRACK_COLOR_PALETTE = [
+    { value: "#4f8ef7", label: "蓝" },
+    { value: "#a78bfa", label: "紫" },
+    { value: "#34d399", label: "绿" },
+    { value: "#fb923c", label: "橙" },
+    { value: "#f472b6", label: "粉" },
+    { value: "#38bdf8", label: "天蓝" },
+    { value: "#facc15", label: "黄" },
+    { value: "#f87171", label: "红" },
+];
+
 export const TrackList: React.FC<{
     t: (key: MessageKey) => string;
     tracks: TrackInfo[];
@@ -23,6 +35,7 @@ export const TrackList: React.FC<{
     onVolumeUiChange: (trackId: string, nextVolume: number) => void;
     onVolumeCommit: (trackId: string, nextVolume: number) => void;
     onAddTrack: () => void;
+    onTrackColorChange?: (trackId: string, color: string) => void;
 }> = ({
     t,
     tracks,
@@ -38,6 +51,7 @@ export const TrackList: React.FC<{
     onVolumeUiChange,
     onVolumeCommit,
     onAddTrack,
+    onTrackColorChange,
 }) => {
     const listRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{
@@ -56,6 +70,21 @@ export const TrackList: React.FC<{
         mode: "reorder" | "nest";
         indicatorY: number | null;
     } | null>(null);
+
+    // 轨道颜色选择器弹出状态
+    const [colorPickerTrackId, setColorPickerTrackId] = useState<string | null>(null);
+
+    // 点击其他区域关闭颜色选择器
+    useEffect(() => {
+        if (!colorPickerTrackId) return;
+        const handler = (e: PointerEvent) => {
+            const target = e.target as HTMLElement | null;
+            if (target?.closest?.("[data-track-color-picker]")) return;
+            setColorPickerTrackId(null);
+        };
+        window.addEventListener("pointerdown", handler, true);
+        return () => window.removeEventListener("pointerdown", handler, true);
+    }, [colorPickerTrackId]);
 
     const parentById = useMemo(() => {
         const m = new Map<string, string | null>();
@@ -441,13 +470,56 @@ export const TrackList: React.FC<{
                                     justify="center"
                                 >
                                     <Flex justify="between" align="center">
-                                        <Text
-                                            size="2"
-                                            weight="medium"
-                                            className={`text-qt-text truncate pr-2 ${depth > 0 ? "opacity-90" : ""}`}
-                                        >
-                                            {track.name}
-                                        </Text>
+                                        <Flex align="center" gap="1" className="min-w-0 flex-1">
+                                            {/* 轨道颜色小圆点，点击弹出调色板 */}
+                                            <div className="relative shrink-0" data-track-color-picker>
+                                                <button
+                                                    className="w-3.5 h-3.5 rounded-full border border-white/20 hover:scale-125 transition-transform cursor-pointer"
+                                                    style={{ backgroundColor: track.color || "#4f8ef7" }}
+                                                    title="更改轨道颜色"
+                                                    onPointerDown={(e) => e.stopPropagation()}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setColorPickerTrackId(
+                                                            colorPickerTrackId === track.id ? null : track.id,
+                                                        );
+                                                    }}
+                                                />
+                                                {colorPickerTrackId === track.id && (
+                                                    <div
+                                                        className="absolute left-0 top-full mt-1 z-50 p-1.5 rounded border border-qt-border bg-qt-window shadow-lg flex gap-1 flex-wrap"
+                                                        style={{ width: 120 }}
+                                                        data-track-color-picker
+                                                    >
+                                                        {TRACK_COLOR_PALETTE.map((opt) => (
+                                                            <button
+                                                                key={opt.value}
+                                                                title={opt.label}
+                                                                className={`w-4 h-4 rounded-full transition-transform hover:scale-125 ${
+                                                                    (track.color || "#4f8ef7") === opt.value
+                                                                        ? "ring-2 ring-white/80 scale-110"
+                                                                        : ""
+                                                                }`}
+                                                                style={{ backgroundColor: opt.value }}
+                                                                onPointerDown={(e) => e.stopPropagation()}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    onTrackColorChange?.(track.id, opt.value);
+                                                                    setColorPickerTrackId(null);
+                                                                }}
+                                                            />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <Text
+                                                size="2"
+                                                weight="medium"
+                                                className={`text-qt-text truncate pr-2 ${depth > 0 ? "opacity-90" : ""}`}
+                                            >
+                                                {track.name}
+                                            </Text>
+                                        </Flex>
                                         <IconButton
                                             size="1"
                                             variant="ghost"

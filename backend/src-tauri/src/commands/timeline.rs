@@ -159,6 +159,7 @@ pub(super) fn set_track_state(
     volume: Option<f32>,
     compose_enabled: Option<bool>,
     pitch_analysis_algo: Option<String>,
+    color: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
@@ -168,7 +169,7 @@ pub(super) fn set_track_state(
         "none" => crate::state::PitchAnalysisAlgo::None,
         _ => crate::state::PitchAnalysisAlgo::Unknown,
     });
-    tl.set_track_state(&track_id, muted, solo, volume, compose_enabled, algo);
+    tl.set_track_state(&track_id, muted, solo, volume, compose_enabled, algo, color);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
@@ -270,6 +271,7 @@ pub(super) fn set_clip_state(
     playback_rate: Option<f32>,
     fade_in_sec: Option<f64>,
     fade_out_sec: Option<f64>,
+    color: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
@@ -285,6 +287,7 @@ pub(super) fn set_clip_state(
             playback_rate,
             fade_in_sec,
             fade_out_sec,
+            color,
         },
     );
     state.audio_engine.update_timeline(tl.clone());

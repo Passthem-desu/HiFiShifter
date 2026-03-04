@@ -123,6 +123,7 @@ pub struct ClipStatePatch {
     pub playback_rate: Option<f32>,
     pub fade_in_sec: Option<f64>,
     pub fade_out_sec: Option<f64>,
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -740,6 +741,7 @@ impl TimelineState {
         volume: Option<f32>,
         compose_enabled: Option<bool>,
         pitch_analysis_algo: Option<PitchAnalysisAlgo>,
+        color: Option<String>,
     ) {
         if let Some(t) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(v) = muted {
@@ -757,6 +759,9 @@ impl TimelineState {
             }
             if let Some(v) = pitch_analysis_algo {
                 t.pitch_analysis_algo = v;
+            }
+            if let Some(v) = color {
+                t.color = v;
             }
         }
     }
@@ -906,6 +911,7 @@ impl TimelineState {
                 playback_rate,
                 fade_in_sec,
                 fade_out_sec,
+                color: None,
             },
         );
     }
@@ -943,6 +949,9 @@ impl TimelineState {
             }
             if let Some(v) = patch.fade_out_sec {
                 c.fade_out_sec = v.max(0.0);
+            }
+            if let Some(v) = patch.color {
+                c.color = v;
             }
 
             end_sec = Some(c.start_sec + c.length_sec);

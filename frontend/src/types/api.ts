@@ -28,6 +28,7 @@ export interface TimelineTrack {
 
     compose_enabled: boolean;
     pitch_analysis_algo: string;
+    color: string;
 }
 
 export interface TimelineClip {

@@ -46,5 +46,5 @@ num-complex = "0.4"
 ndarray = { version = "0.16", optional = true }
 
 [features]
-default = []
+default = ["onnx"]
 onnx = ["dep:ort", "dep:ndarray"]

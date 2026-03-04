@@ -1,7 +1,6 @@
 use crate::models::PlaybackStatePayload;
 use crate::state::AppState;
 use std::path::Path;
-use std::time::{Duration, Instant};
 use tauri::Emitter;
 use tauri::State;
 
@@ -31,74 +30,31 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
         }
         let start_sec = playhead_sec.max(0.0) + start_sec.max(0.0);
 
-        // IMPORTANT: order matters (mpsc is FIFO).
-        // Seek first so the snapshot build (and pitch_stream ring.reset) uses the correct base.
-        state.audio_engine.seek_sec(start_sec);
-        state.audio_engine.update_timeline(timeline);
-        state.audio_engine.set_playing(true, Some("original"));
+        // 检测是否有活跃的 pitch edit
+        let pitch_active = crate::pitch_editing::is_pitch_edit_active(&timeline);
+        let pitch_backend_ok = crate::pitch_editing::is_pitch_edit_backend_available(&timeline);
+        let need_prerender = pitch_active && pitch_backend_ok;
 
-        // If ONNX pitch streaming is active, we may be in A-mode hard-start (silent, not advancing)
-        // until enough frames are rendered. Emit a UI hint so the user sees "渲染中".
+        if !need_prerender {
+            // 无 pitch edit：直接走实时 clip mixing（零延迟）
+            state.audio_engine.seek_sec(start_sec);
+            state.audio_engine.update_timeline(timeline);
+            state.audio_engine.set_playing(true, Some("original"));
+            return serde_json::json!({"ok": true, "playing": "original", "start_sec": start_sec});
+        }
+
+        // ── 有 pitch edit：Clip 级预渲染 + 实时混音 ──────────────────────────
+        // 后台线程逐 clip 渲染，渲染完成后写入 RenderedClipCache，
+        // 然后通过 update_timeline 触发 rebuild snapshot（自动查询缓存填充 rendered_pcm），
+        // 最后 set_playing 开始播放。
         if let Some(app) = state.app_handle.get().cloned() {
             let engine = state.audio_engine.clone();
+            let tl_for_render = timeline.clone();
+            let render_start_sec = start_sec;
+            let engine_sr = state.audio_engine.sample_rate_hz();
+
             std::thread::spawn(move || {
-                // 等待 engine worker 完成 snapshot 构建（含 pitch_stream 创建）。
-                // set_playing 在 channel FIFO 中排在 update_timeline 之后，
-                // 所以需要等到 is_playing 为 true 且 pitch_stream 存在。
-                let wait_start = Instant::now();
-                let max_wait = Duration::from_secs(2);
-                let (algo, base, write0, hard_start) = loop {
-                    if wait_start.elapsed() >= max_wait {
-                        // 超时：snapshot 可能不包含 pitch_stream（条件不满足），直接退出
-                        return;
-                    }
-                    if let Some(v) = engine.pitch_stream_priming_info() {
-                        break v;
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
-                };
-
-                if !hard_start {
-                    return;
-                }
-
-                // Configure priming window.
-                let prime_sec: f64 = if algo == crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx {
-                    std::env::var("HIFISHIFTER_ONNX_STREAM_PRIME_SEC")
-                        .ok()
-                        .and_then(|s| s.trim().parse::<f64>().ok())
-                        .filter(|v| v.is_finite() && *v > 0.0)
-                        .unwrap_or(0.25)
-                } else {
-                    std::env::var("HIFISHIFTER_PITCH_STREAM_PRIME_SEC")
-                        .ok()
-                        .and_then(|s| s.trim().parse::<f64>().ok())
-                        .filter(|v| v.is_finite() && *v > 0.0)
-                        .unwrap_or(0.25)
-                };
-                let timeout_ms: u64 = if algo == crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx {
-                    std::env::var("HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS")
-                        .ok()
-                        .and_then(|s| s.trim().parse::<u64>().ok())
-                        .filter(|v| *v > 0)
-                        .unwrap_or(4000)
-                } else {
-                    std::env::var("HIFISHIFTER_PITCH_STREAM_PRIME_TIMEOUT_MS")
-                        .ok()
-                        .and_then(|s| s.trim().parse::<u64>().ok())
-                        .filter(|v| *v > 0)
-                        .unwrap_or(4000)
-                };
-
-                let sr = engine.sample_rate_hz() as f64;
-                let prime_frames = (prime_sec * sr).round().max(1.0) as u64;
-                let need_frame = base.saturating_add(prime_frames);
-
-                // If already covered, don't flash UI.
-                if write0 >= need_frame {
-                    return;
-                }
-
+                // 推送渲染开始
                 let _ = app.emit(
                     "playback_rendering_state",
                     PlaybackRenderingStateEvent {
@@ -108,81 +64,319 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     },
                 );
 
-                let t0 = Instant::now();
-                let mut last_progress_bucket: i64 = -1;
-                loop {
-                    if !engine.is_playing() {
-                        break;
+                // 收集需要预渲染的 clip 列表
+                let clips_to_render = collect_clips_needing_render(&tl_for_render, engine_sr);
+                let total = clips_to_render.len().max(1);
+                let mut rendered_count = 0u32;
+                let mut any_error = false;
+
+                for clip_render_info in &clips_to_render {
+                    // 检查缓存是否已命中
+                    {
+                        let mut cache = crate::synth_clip_cache::global_rendered_clip_cache()
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        if cache.get(&clip_render_info.cache_key).is_some() {
+                            rendered_count += 1;
+                            let progress = rendered_count as f64 / total as f64;
+                            let _ = app.emit(
+                                "playback_rendering_state",
+                                PlaybackRenderingStateEvent {
+                                    active: true,
+                                    progress: Some(progress),
+                                    target: Some("original".to_string()),
+                                },
+                            );
+                            continue;
+                        }
                     }
 
-                    let (_algo_now, base_now, write_now, _hard_start_now) =
-                        match engine.pitch_stream_priming_info() {
-                            Some(v) => v,
-                            None => break,
-                        };
-                    let _ = (_algo_now, _hard_start_now);
-
-                    // If the stream base moved (seek/reset), recompute the target.
-                    let need_frame = base_now.saturating_add(prime_frames);
-
-                    if write_now >= need_frame {
-                        let _ = app.emit(
-                            "playback_rendering_state",
-                            PlaybackRenderingStateEvent {
-                                active: false,
-                                progress: Some(1.0),
-                                target: Some("original".to_string()),
-                            },
-                        );
-                        return;
+                    // 缓存未命中：调用渲染器
+                    match render_single_clip(
+                        &tl_for_render,
+                        &clip_render_info.clip,
+                        clip_render_info.sr,
+                    ) {
+                        Ok(stereo_pcm) => {
+                            let frames = (stereo_pcm.len() / 2) as u64;
+                            let entry = crate::synth_clip_cache::RenderedClipCacheEntry {
+                                pcm_stereo: std::sync::Arc::new(stereo_pcm),
+                                frames,
+                                sample_rate: clip_render_info.sr,
+                            };
+                            let mut cache = crate::synth_clip_cache::global_rendered_clip_cache()
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner());
+                            cache.insert(clip_render_info.cache_key.clone(), entry);
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "play_original: clip render failed: clip_id={} err={}",
+                                clip_render_info.clip.id, e
+                            );
+                            any_error = true;
+                        }
                     }
 
-                    let denom = prime_frames.max(1) as f64;
-                    let p = ((write_now.saturating_sub(base_now)) as f64 / denom).clamp(0.0, 1.0);
-                    let bucket = (p * 100.0).floor() as i64;
-                    if bucket != last_progress_bucket {
-                        last_progress_bucket = bucket;
-                        let _ = app.emit(
-                            "playback_rendering_state",
-                            PlaybackRenderingStateEvent {
-                                active: true,
-                                progress: Some(p),
-                                target: Some("original".to_string()),
-                            },
-                        );
-                    }
-
-                    if t0.elapsed().as_millis() as u64 >= timeout_ms {
-                        // Fail-safe: if pitch streaming fails to prime, stop playback instead of
-                        // disabling hard-start (which would leak unpitched realtime fallback).
-                        engine.stop();
-                        let _ = app.emit(
-                            "playback_rendering_state",
-                            PlaybackRenderingStateEvent {
-                                active: false,
-                                progress: None,
-                                target: Some("original".to_string()),
-                            },
-                        );
-                        return;
-                    }
-
-                    std::thread::sleep(Duration::from_millis(15));
+                    rendered_count += 1;
+                    let progress = rendered_count as f64 / total as f64;
+                    let _ = app.emit(
+                        "playback_rendering_state",
+                        PlaybackRenderingStateEvent {
+                            active: true,
+                            progress: Some(progress),
+                            target: Some("original".to_string()),
+                        },
+                    );
                 }
 
+                // 推送渲染完成
                 let _ = app.emit(
                     "playback_rendering_state",
                     PlaybackRenderingStateEvent {
                         active: false,
-                        progress: None,
+                        progress: Some(1.0),
                         target: Some("original".to_string()),
                     },
                 );
+
+                // 渲染完成 → 通过 update_timeline 触发 rebuild snapshot
+                // snapshot 中会自动查询 RenderedClipCache 填充 rendered_pcm
+                engine.seek_sec(render_start_sec);
+                engine.update_timeline(tl_for_render);
+                engine.set_playing(true, Some("original"));
             });
         }
 
-        serde_json::json!({"ok": true, "playing": "original", "start_sec": start_sec})
+        serde_json::json!({"ok": true, "playing": "original", "start_sec": start_sec, "prerendering": true})
     })
+}
+
+// ─── Clip 级预渲染辅助 ─────────────────────────────────────────────────────────
+
+/// 需要预渲染的单个 clip 的信息。
+struct ClipRenderInfo {
+    clip: crate::state::Clip,
+    cache_key: crate::synth_clip_cache::RenderedClipCacheKey,
+    sr: u32,
+}
+
+/// 收集 timeline 中所有需要预渲染的 clip。
+///
+/// 返回值中只包含 compose_enabled 且 pitch_edit 有实际变化的 clip。
+fn collect_clips_needing_render(
+    timeline: &crate::state::TimelineState,
+    engine_sr: u32,
+) -> Vec<ClipRenderInfo> {
+    let mut out = Vec::new();
+    let sr = if engine_sr > 0 { engine_sr } else { 44100 };
+
+    for clip in &timeline.clips {
+        if clip.muted {
+            continue;
+        }
+        let Some(source_path) = clip.source_path.as_deref() else {
+            continue;
+        };
+        let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
+            continue;
+        };
+        let track = match timeline.tracks.iter().find(|t| t.id == clip_root) {
+            Some(t) => t,
+            None => continue,
+        };
+        if !track.compose_enabled {
+            continue;
+        }
+        let entry = match timeline.params_by_root_track.get(&clip_root) {
+            Some(e) => e,
+            None => continue,
+        };
+        let pitch_edit = entry.pitch_edit.as_slice();
+        let frame_period_ms = entry.frame_period_ms.max(0.1);
+
+        // 只渲染有实际 pitch 变化的 clip
+        let has_edit = pitch_edit.iter().any(|&v| v.is_finite() && v > 0.0);
+        if !has_edit {
+            continue;
+        }
+
+        let playback_rate = {
+            let r = clip.playback_rate as f64;
+            if r.is_finite() && r > 0.0 { r } else { 1.0 }
+        };
+        let start_frame = (clip.start_sec.max(0.0) * sr as f64).round().max(0.0) as u64;
+        let end_frame = start_frame
+            + (clip.length_sec.max(0.0) * sr as f64).round().max(1.0) as u64;
+
+        let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
+            &clip.id,
+            source_path,
+            start_frame,
+            end_frame,
+            sr,
+            pitch_edit,
+            frame_period_ms,
+            playback_rate,
+        );
+        let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
+            clip_id: clip.id.clone(),
+            param_hash,
+        };
+
+        out.push(ClipRenderInfo {
+            clip: clip.clone(),
+            cache_key,
+            sr,
+        });
+    }
+    out
+}
+
+/// 渲染单个 clip 的完整 stereo PCM（从源文件解码 → resample → pitch edit → stereo）。
+///
+/// 复用 mixdown.rs 中的解码和 resample 逻辑，通过 Renderer trait 调用 pitch edit。
+fn render_single_clip(
+    timeline: &crate::state::TimelineState,
+    clip: &crate::state::Clip,
+    out_rate: u32,
+) -> Result<Vec<f32>, String> {
+    let source_path = clip
+        .source_path
+        .as_deref()
+        .ok_or_else(|| "clip has no source_path".to_string())?;
+
+    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+
+    // 1. 解码源文件
+    let (in_rate, in_channels, pcm) =
+        crate::audio_utils::decode_audio_f32_interleaved(std::path::Path::new(source_path))?;
+    let in_channels_usize = in_channels as usize;
+    let in_frames = pcm.len() / in_channels_usize;
+    if in_frames < 2 {
+        return Err("source audio too short".to_string());
+    }
+
+    // 2. 源裁剪
+    let playback_rate = {
+        let r = clip.playback_rate as f64;
+        if r.is_finite() && r > 0.0 { r } else { 1.0 }
+    };
+    let trim_start_sec = clip.trim_start_sec.max(0.0);
+    let trim_end_sec = clip.trim_end_sec.max(0.0);
+    let pre_silence_sec = (-clip.trim_start_sec).max(0.0) / playback_rate.max(1e-6);
+
+    let total_sec = crate::mixdown::clip_duration_sec_from_wav(in_rate, in_channels, &pcm)
+        .ok_or_else(|| "cannot determine clip duration".to_string())?;
+    if !(total_sec.is_finite() && total_sec > 0.0) {
+        return Err("invalid clip duration".to_string());
+    }
+
+    let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
+    if src_end_limit_sec - trim_start_sec <= 1e-9 {
+        return Err("trimmed clip too short".to_string());
+    }
+
+    // 3. 切片 + resample
+    let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
+    let src_i1 = ((src_end_limit_sec * in_rate as f64).ceil().max(src_i0 as f64) as usize)
+        .min(in_frames);
+    if src_i1 <= src_i0 + 1 {
+        return Err("source slice too short".to_string());
+    }
+
+    let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
+    let segment =
+        crate::mixdown::linear_resample_interleaved(segment, in_channels_usize, in_rate, out_rate);
+
+    // 4. 转 stereo
+    let segment = if in_channels == 1 {
+        let frames = segment.len();
+        let mut stereo = Vec::with_capacity(frames * 2);
+        for s in segment {
+            stereo.push(s);
+            stereo.push(s);
+        }
+        stereo
+    } else if in_channels >= 2 {
+        let frames = segment.len() / in_channels_usize;
+        let mut stereo = Vec::with_capacity(frames * 2);
+        for f in 0..frames {
+            stereo.push(segment[f * in_channels_usize]);
+            stereo.push(segment[f * in_channels_usize + 1]);
+        }
+        stereo
+    } else {
+        return Err("unsupported channel count".to_string());
+    };
+
+    // 5. 时间拉伸（playback_rate != 1）
+    let mut segment = segment;
+    if (playback_rate - 1.0).abs() > 1e-6 {
+        let seg_frames_in = segment.len() / 2;
+        let target_frames = ((seg_frames_in as f64) / playback_rate).round().max(2.0) as usize;
+        segment = crate::time_stretch::time_stretch_interleaved(
+            &segment,
+            2,
+            out_rate,
+            target_frames,
+            crate::time_stretch::StretchAlgorithm::RubberBand,
+        );
+    }
+
+    // 6. Pitch edit（核心：通过 Renderer trait 应用音高编辑）
+    let clip_start_sec = clip.start_sec.max(0.0);
+    let seg_start_sec = clip_start_sec + pre_silence_sec;
+    let seg_frames = segment.len() / 2;
+    if seg_frames >= 16 {
+        match crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
+            timeline,
+            clip,
+            clip_start_sec,
+            seg_start_sec,
+            out_rate,
+            &mut segment,
+        ) {
+            Ok(true) => {
+                if debug {
+                    eprintln!(
+                        "render_single_clip: pitch_edit applied to clip_id={}",
+                        &clip.id
+                    );
+                }
+            }
+            Ok(false) => {}
+            Err(e) => {
+                if debug {
+                    eprintln!(
+                        "render_single_clip: pitch_edit error for clip_id={}: {}",
+                        &clip.id, e
+                    );
+                }
+            }
+        }
+    }
+
+    // 7. 前置静音（负 trim_start 导致的 pre-silence）
+    if pre_silence_sec > 1e-6 {
+        let pre_frames = (pre_silence_sec * out_rate as f64).round().max(0.0) as usize;
+        let mut with_silence = vec![0.0f32; pre_frames * 2];
+        with_silence.extend_from_slice(&segment);
+        segment = with_silence;
+    }
+
+    // 8. 截断到 clip 的时间线长度
+    let clip_timeline_frames =
+        (clip.length_sec.max(0.0) * out_rate as f64).round().max(1.0) as usize;
+    let clip_stereo_len = clip_timeline_frames * 2;
+    if segment.len() > clip_stereo_len {
+        segment.truncate(clip_stereo_len);
+    } else if segment.len() < clip_stereo_len {
+        // 不够长时补零（正常情况下不应发生）
+        segment.resize(clip_stereo_len, 0.0);
+    }
+
+    Ok(segment)
 }
 
 

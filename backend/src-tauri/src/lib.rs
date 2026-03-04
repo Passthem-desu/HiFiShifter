@@ -9,7 +9,7 @@ mod pitch_editing;
 mod synth_clip_cache;
 mod clip_pitch_cache;
 mod pitch_progress;
-mod vocoder_pipeline;
+mod renderer;
 
 #[cfg(feature = "onnx")]
 mod nsf_hifigan_onnx;
