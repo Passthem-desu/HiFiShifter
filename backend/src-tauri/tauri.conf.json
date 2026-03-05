@@ -15,7 +15,7 @@
                 "title": "HiFiShifter",
                 "width": 800,
                 "height": 600,
-                "visible": false,
+                "visible": true,
                 "dragDropEnabled": true
             }
         ],
@@ -25,7 +25,9 @@
     },
     "bundle": {
         "active": true,
-        "targets": ["nsis"],
+        "targets": [
+            "nsis"
+        ],
         "resources": {
             "resources/models/nsf_hifigan/pc_nsf_hifigan.onnx": "models/nsf_hifigan/pc_nsf_hifigan.onnx",
             "resources/models/nsf_hifigan/config.json": "models/nsf_hifigan/config.json"
