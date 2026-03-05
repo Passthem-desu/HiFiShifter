@@ -1,660 +1,789 @@
-# Development
+# HiFiShifter Development Documentation
 
-For now, the developer handbook is maintained in Chinese:
+> Version: 2026-03 · Copyright © ARounder · License: GPL v2
 
-- [DEVELOPMENT_zh.md](DEVELOPMENT_zh.md)
+---
 
-## Recent notes
+## Table of Contents
 
-	- The audio callback reads from the pitch-stream when covered.
-	- Async pitch refresh is now wired to real backend analysis: `start_pitch_refresh_task` accepts `rootTrackId`, builds a `PitchJob` snapshot, and runs `compute_pitch_curve` inside `tokio::task::spawn_blocking`.
-	- Task progress in `pitch_refresh_tasks` is updated via the analysis callback; cancellation is forwarded through `cancel_flag` into `compute_pitch_curve`.
-	- For WORLD (and most cases), realtime playback must never block: if the pitch-stream hasn't rendered coverage yet, the callback falls back to normal realtime mixing and continues advancing the playhead.
-	- For slow ONNX (NSF-HiFiGAN) pitch editing, we default to an A-mode hard-start: output silence + do not advance until a short prebuffer window is ready, to avoid the audible "original -> pitched" transition.
-		- Disable ONNX hard-start via `HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START=0`.
-		- Tune priming via `HIFISHIFTER_ONNX_STREAM_PRIME_SEC` (default `0.25`) and `HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS` (default `4000`).
-		- The frontend listens for `playback_rendering_state` and shows a minimal "渲染中..." indicator in the bottom-left status bar while priming.
-	- ONNX availability is exposed via `get_onnx_status` so the UI can mark the Algo option as unavailable and block playback when needed.
-		- The diagnostic system provides detailed error information: `OnnxStatus` includes `available: bool`, `reason: Option<String>`, and `details: Option<String>`.
-		- Frontend displays availability status in the Algo dropdown and shows diagnostic tooltips on unavailable options.
-		- Common diagnostic reasons: "Feature disabled (not compiled)", "Model file missing", "ONNX Runtime initialization failed", "Execution provider unavailable".
-	- Legacy override: force hard-start for any pitch-stream via `HIFISHIFTER_PITCH_STREAM_HARD_START=1`.
-	- If the stream temporarily lags later, we still do best-effort fallback: mix realtime and override the frames that are already covered.
+* [1. Project Overview](https://www.google.com/search?q=%231-project-overview)
+* [2. Tech Stack](https://www.google.com/search?q=%232-tech-stack)
+* [3. Directory Structure](https://www.google.com/search?q=%233-directory-structure)
+* [4. Backend Architecture](https://www.google.com/search?q=%234-backend-architecture)
+* [5. Frontend Architecture](https://www.google.com/search?q=%235-frontend-architecture)
+* [6. IPC API Documentation](https://www.google.com/search?q=%236-ipc-api-documentation)
+* [7. Build System](https://www.google.com/search?q=%237-build-system)
+* [8. Environment Variables Reference](https://www.google.com/search?q=%238-environment-variables-reference)
+* [9. Pitch Analysis Pipeline](https://www.google.com/search?q=%239-pitch-analysis-pipeline)
+* [10. Renderer System](https://www.google.com/search?q=%2310-renderer-system)
+* [11. Audio Engine](https://www.google.com/search?q=%2311-audio-engine)
+* [12. Project File Format](https://www.google.com/search?q=%2312-project-file-format)
 
-## Pitch / Tension editing
+---
 
-### Async pitch refresh task system
+## 1. Project Overview
 
-The pitch analysis is now fully asynchronous to prevent UI blocking during long audio analysis operations.
+HiFiShifter is a desktop audio pitch editor based on **Tauri 2**, designed for vocal synthesis and tuning scenarios. Core capabilities include:
 
-#### Architecture
+* Multi-track timeline editing (CRUD, drag-and-drop, splitting, gluing of tracks/clips).
+* Real-time pitch (F0) analysis and visualization (based on WORLD Harvest/Dio).
+* Manual pitch curve editing (draw / select modes).
+* Dual-renderer pitch synthesis (WORLD Vocoder / NSF-HiFiGAN ONNX).
+* Real-time playback and mixing (cpal audio engine, supports Time Stretch).
+* Waveform visualization (Canvas + SVG dual-mode).
+* File browser panel (sidebar drag-and-drop import).
+* Internationalization (Chinese / English).
+* Project file saving/loading (MessagePack + JSON compatible).
+
+---
+
+## 2. Tech Stack
+
+### Backend (Rust)
+
+| Component | Technology | Version |
+| --- | --- | --- |
+| App Framework | Tauri 2 | 2.x |
+| Audio I/O | cpal | 0.15 |
+| Audio Decoding | symphonia | 0.5 |
+| WAV Encoding | hound | 3.x |
+| Pitch Analysis | WORLD (Statically Linked) | — |
+| Time Stretching | Rubber Band Library (Statically Linked) | v4.0.0 |
+| ONNX Inference | ort (optional feature) | 2.0.0-rc.11 |
+| Serialization | serde + serde_json + rmp-serde | — |
+| Parallel Computing | rayon | 1.7 |
+| Caching | lru | 0.12 |
+| Hashing | blake3 | 1.x |
+| UUID | uuid v4 | 1.x |
+
+### Frontend (TypeScript / React)
+
+| Component | Technology | Version |
+| --- | --- | --- |
+| UI Framework | React | 19.x |
+| State Management | Redux Toolkit | 2.x |
+| UI Component Library | Radix UI Themes | 3.x |
+| CSS Solution | Tailwind CSS | 3.4 |
+| Build Tool | Vite | 7.x |
+| Type System | TypeScript | 5.9 |
+| IPC Communication | @tauri-apps/api | 2.x |
+
+### Third-party C/C++ Libraries (Statically Linked)
+
+| Library | Usage | License | Location |
+| --- | --- | --- | --- |
+| [WORLD](https://github.com/mmorise/World) | F0 Analysis + Vocoder Synthesis | Modified BSD | `third_party/world-static/World/` |
+| [Rubber Band](https://github.com/breakfastquay/rubberband) | High-quality Time Stretch/Pitch Shift | GPL v2 | `third_party/rubberband-static/rubberband/` |
+
+---
+
+## 3. Directory Structure
 
 ```
-Frontend (PianoRollPanel)
-  → useAsyncPitchRefresh Hook
-      → calls coreApi.startPitchRefreshTask(rootTrackId)
-          → Backend: start_pitch_refresh_task() creates async task
-              ├── Generate UUID task_id
-              ├── Register task in pitch_refresh_tasks (AppState)
-              ├── Spawn tokio::task
-              │     ├── Build PitchJob snapshot
-              │     ├── Run compute_pitch_curve in spawn_blocking
-              │     ├── Update progress via callback
-              │     └── Update task status (Completed/Failed/Cancelled)
-              └── Return task_id immediately
-  → Frontend polls getPitchRefreshStatus(taskId) every 500ms
-      ├── Update progress bar (0-100%)
-      ├── Calculate estimated remaining time
-      └── Stop polling when status = completed/failed/cancelled
+HiFiShifter/
+├── backend/                          # Tauri Backend
+│   └── src-tauri/
+│       ├── Cargo.toml                # Rust dependencies and feature config
+│       ├── build.rs                  # Build script (Static compilation of WORLD/Rubber Band)
+│       ├── tauri.conf.json           # Tauri configuration
+│       ├── src/
+│       │   ├── main.rs              # Entry point
+│       │   ├── lib.rs               # Tauri Builder registration (commands, plugins, setup)
+│       │   ├── state.rs             # Global AppState (Track/Clip/Timeline)
+│       │   ├── models.rs            # Shared data transfer structures
+│       │   ├── commands.rs          # Tauri command facade
+│       │   ├── commands/            # Command implementations by domain
+│       │   │   ├── core.rs          #   Core (ping/runtime/transport/undo)
+│       │   │   ├── project.rs       #   Project operations (new/open/save)
+│       │   │   ├── timeline.rs      #   Timeline (CRUD for tracks/clips)
+│       │   │   ├── playback.rs      #   Playback control
+│       │   │   ├── params.rs        #   Parameter curve read/write
+│       │   │   ├── waveform.rs      #   Waveform peak querying
+│       │   │   ├── synth.rs         #   Synthesis (model loading/processing/synthesis)
+│       │   │   ├── dialogs.rs       #   System dialogs
+│       │   │   ├── file_browser.rs  #   File browser
+│       │   │   ├── pitch_cache.rs   #   Pitch cache management
+│       │   │   ├── pitch_progress.rs#   Analysis progress querying
+│       │   │   ├── onnx_status.rs   #   ONNX status querying
+│       │   │   └── debug.rs         #   Debug commands
+│       │   ├── audio_engine/        # Real-time audio engine
+│       │   │   ├── mod.rs           #   Module entry
+│       │   │   ├── engine.rs        #   AudioEngine core (cpal callback)
+│       │   │   ├── snapshot.rs      #   Playback snapshot (track/clip mapping)
+│       │   │   ├── mix.rs           #   Multi-track mixing
+│       │   │   ├── io.rs            #   Audio I/O (decoder)
+│       │   │   ├── ring.rs          #   Ring buffer
+│       │   │   ├── stretch_stream.rs#   Pitch Stream
+│       │   │   ├── resource_manager.rs # Resource management
+│       │   │   ├── types.rs         #   Type definitions
+│       │   │   └── util.rs          #   Utility functions
+│       │   ├── renderer/            # Renderer plugin system
+│       │   │   ├── mod.rs           #   Registry + Factory
+│       │   │   ├── traits.rs        #   Renderer trait definition
+│       │   │   ├── world.rs         #   WORLD Vocoder renderer
+│       │   │   ├── hifigan.rs       #   NSF-HiFiGAN ONNX renderer
+│       │   │   └── utils.rs         #   MIDI curve alignment tools
+│       │   ├── pitch_analysis.rs    # Pitch analysis pipeline
+│       │   ├── pitch_config.rs      # Analysis config (VAD/Chunking/Crossfade)
+│       │   ├── pitch_clip.rs        # Clip-level pitch processing
+│       │   ├── pitch_editing.rs     # Pitch editing core logic
+│       │   ├── pitch_progress.rs    # Progress tracker
+│       │   ├── clip_pitch_cache.rs  # LRU pitch cache
+│       │   ├── clip_rendering_state.rs # Clip rendering state
+│       │   ├── synth_clip_cache.rs  # Synthesis cache
+│       │   ├── project.rs           # Project file serialization
+│       │   ├── audio_utils.rs       # Audio utility functions
+│       │   ├── waveform.rs          # Waveform processing
+│       │   ├── waveform_disk_cache.rs # Waveform disk cache
+│       │   ├── mixdown.rs           # Mixdown export
+│       │   ├── nsf_hifigan_onnx.rs  # ONNX inference implementation
+│       │   ├── nsf_hifigan_onnx_stub.rs # Stub module when ONNX is disabled
+│       │   ├── world.rs             # WORLD FFI bindings
+│       │   ├── world_lock.rs        # WORLD thread safety
+│       │   ├── world_vocoder.rs     # WORLD vocoder wrapper
+│       │   ├── streaming_world.rs   # Streaming WORLD processing
+│       │   ├── rubberband.rs        # Rubber Band FFI bindings
+│       │   └── time_stretch.rs      # Time stretch interface
+│       ├── third_party/
+│       │   ├── world-static/World/  # WORLD source (static compilation)
+│       │   └── rubberband-static/rubberband/ # Rubber Band source (static compilation)
+│       └── tests/                   # Integration tests
+│
+├── frontend/                         # React Frontend
+│   ├── package.json
+│   ├── vite.config.ts
+│   ├── tailwind.config.js
+│   ├── index.html
+│   └── src/
+│       ├── main.tsx                 # React entry
+│       ├── App.tsx                  # Root component (layout, shortcuts, playback polling)
+│       ├── App.css                  # Global styles
+│       ├── index.css                # Tailwind entry
+│       ├── app/
+│       │   ├── store.ts             # Redux Store config
+│       │   └── hooks.ts             # useAppDispatch / useAppSelector
+│       ├── components/
+│       │   ├── LoadingSpinner.tsx    # Generic loading indicator
+│       │   ├── ProgressBar.tsx      # Progress bar component
+│       │   ├── PitchAnalysisProgressBar.tsx # Pitch analysis progress bar
+│       │   └── layout/
+│       │       ├── MenuBar.tsx      # Top menu bar
+│       │       ├── ActionBar.tsx    # Action toolbar
+│       │       ├── TimelinePanel.tsx # Timeline panel (main edit area)
+│       │       ├── PianoRollPanel.tsx # Piano roll panel (pitch editing)
+│       │       ├── FileBrowserPanel.tsx # File browser panel
+│       │       ├── PitchStatusBadge.tsx # Pitch status badge
+│       │       ├── timeline/        # Timeline sub-components
+│       │       │   ├── TimeRuler.tsx        # Time ruler
+│       │       │   ├── TrackList.tsx         # Track list
+│       │       │   ├── TrackLane.tsx         # Track lane
+│       │       │   ├── BackgroundGrid.tsx    # Background grid
+│       │       │   ├── TimelineScrollArea.tsx # Scroll container
+│       │       │   ├── ClipItem.tsx          # Clip rendering
+│       │       │   ├── ClipContextMenu.tsx   # Clip context menu
+│       │       │   ├── GlueContextMenu.tsx   # Glue menu
+│       │       │   ├── clip/                 # Clip sub-components
+│       │       │   │   ├── ClipEdgeHandles.tsx # Trim handles
+│       │       │   │   ├── ClipHeader.tsx      # Clip header
+│       │       │   │   └── useClipWaveformPeaks.ts # Waveform peak hook
+│       │       │   ├── hooks/                # Timeline interaction hooks
+│       │       │   │   ├── useClipDrag.ts    # Clip dragging
+│       │       │   │   ├── useEditDrag.ts    # Edit dragging
+│       │       │   │   ├── useSlipDrag.ts    # Slip editing
+│       │       │   │   └── useKeyboardShortcuts.ts # Shortcuts
+│       │       │   └── (constants/math/grid/paths/dnd/clipWaveform).ts
+│       │       └── pianoRoll/       # Piano roll sub-module
+│       │           ├── render.ts             # Canvas rendering
+│       │           ├── usePianoRollData.ts   # Data hook
+│       │           ├── usePianoRollInteractions.ts # Interaction hook
+│       │           ├── useLiveParamEditing.ts # Live parameter editing
+│       │           ├── useClipsPeaksForPianoRoll.ts # Waveform data
+│       │           ├── types.ts / constants.ts / utils.ts
+│       │           └── peaksCache.ts
+│       ├── features/
+│       │   ├── session/             # Core session state (Redux Slice)
+│       │   │   ├── sessionSlice.ts  # Redux Slice (tracks/clips/UI state)
+│       │   │   ├── sessionTypes.ts  # TypeScript type definitions
+│       │   │   ├── trackUtils.ts    # Track utilities
+│       │   │   └── thunks/          # Async Thunks
+│       │   │       ├── transportThunks.ts  # Playback/Transport
+│       │   │       ├── timelineThunks.ts   # Timeline operations
+│       │   │       ├── projectThunks.ts    # Project operations
+│       │   │       ├── importThunks.ts     # Audio import
+│       │   │       ├── audioThunks.ts      # Audio processing
+│       │   │       ├── modelThunks.ts      # Model loading
+│       │   │       ├── trackThunks.ts      # Track operations
+│       │   │       └── runtimeThunks.ts    # Runtime status
+│       │   └── fileBrowser/
+│       │       ├── fileBrowserSlice.ts # File browser state
+│       │       └── audioPreview.ts     # Audio preview
+│       ├── services/
+│       │   ├── invoke.ts            # IPC wrapper layer
+│       │   ├── webviewApi.ts        # WebView API wrapper
+│       │   └── api/                 # API modules by domain
+│       │       ├── index.ts         # Exports summary
+│       │       ├── core.ts          # Core API
+│       │       ├── project.ts       # Project API
+│       │       ├── timeline.ts      # Timeline API
+│       │       ├── params.ts        # Params API
+│       │       ├── waveform.ts      # Waveform API
+│       │       └── fileBrowser.ts   # File browser API
+│       ├── contexts/
+│       │   ├── PitchAnalysisContext.tsx  # Pitch analysis context
+│       │   └── PianoRollStatusContext.tsx # Piano roll status context
+│       ├── hooks/
+│       │   ├── useAsyncPitchRefresh.ts  # Async pitch refresh hook
+│       │   └── useClipPitchDataListener.ts # Pitch data listener
+│       ├── i18n/
+│       │   ├── I18nProvider.tsx     # i18n Provider
+│       │   └── messages.ts          # Translation texts
+│       ├── theme/
+│       │   ├── AppThemeProvider.tsx  # Theme Provider (Dark/Light)
+│       │   └── waveformColors.ts    # Waveform color config
+│       ├── types/
+│       │   └── api.ts               # Backend interface types
+│       └── utils/
+│           └── waveformRenderer.ts  # Unified waveform rendering tool
+│
+├── assets/                           # Static assets
+│   ├── icon.png                     # App icon
+│   └── lang/                        # Language files
+├── docs/                             # Supplementary docs
+├── pc_nsf_hifigan_44.1k_hop512_128bin_2025.02/  # ONNX model files
+├── README.md                         # User README
+├── DEVELOPMENT.md                    # English dev doc
+├── DEVELOPMENT_zh.md                 # Chinese dev doc
+├── USER_MANUAL_zh.md                 # Chinese user manual
+├── LICENSE                           # GPL v2 License
+└── rust-toolchain.toml               # Rust toolchain config
+
 ```
 
-#### Key features
+---
 
-- **Task state management**: `AppState.pitch_refresh_tasks: Arc<Mutex<HashMap<String, PitchTaskInfo>>>`
-  - `PitchTaskInfo` contains: status, progress (0-100), error, start_time, result_key, cancel_flag
-  - `PitchTaskStatus` enum: Running, Completed, Failed, Cancelled
-- **Concurrency control**: Max 3 concurrent tasks; returns "Too many active tasks" error if exceeded
-- **Cancellation support**: 
-  - Frontend calls `cancelPitchTask(taskId)`
-  - Sets `cancel_flag: Arc<AtomicBool>` in task info
-  - `compute_pitch_curve` checks the flag after each clip analysis
-  - Returns `Err("Task cancelled by user")` when detected
-- **Auto cleanup**: Tasks are automatically removed 5 minutes after completion/failure
-- **Progress tracking**: 
-  - Real-time progress updates via `PitchAnalysisProgressBar` component
-  - Backend reports progress per clip: `(clips_completed / total_clips) * 100`
-  - Frontend displays: "Processed X/Y clips", progress percentage, estimated remaining time
-  - Progress bar auto-fades out (1s transition) after completion
-- **Race condition handling**: 
-  - Frontend maintains `latestTaskId` reference
-  - New refresh auto-cancels previous task
-  - Component unmount cancels active tasks
-  - Poll checks `taskId === latestTaskId` to ignore stale updates
+## 4. Backend Architecture
 
-#### UI components
+### 4.1 Overall Architecture
 
-- **LoadingSpinner**: Generic spinner component (`sm/md/lg` sizes, customizable color)
-- **ProgressBar**: Shows percentage, label, estimated time remaining, and cancel button
-- **PitchAnalysisProgressBar** (NEW): Specialized progress component for pitch analysis tasks
-  - Auto-polls backend every 500ms for progress updates
-  - Displays: "Analyzing pitch" title, "Processed X/Y clips", progress bar, estimated time
-  - Auto-hides with 1s fade-out animation after completion
-  - Integrated into PianoRollPanel above success/error messages
-- **Integration in PianoRollPanel**:
-  - Refresh button shows spinner when loading
-  - Progress bar appears at panel top during refresh
-  - Success message displays for 1 second after completion
-  - Error message with retry button on failure
+The backend uses the **Tauri 2** framework. All business logic is implemented in Rust, and the frontend calls backend commands via `invoke` IPC.
 
-#### Frontend API
+```
+┌─────────────────────────────────────────────────────┐
+│                   Frontend (React)                  │
+│    invoke("command_name", { args })                  │
+└──────────────────────┬──────────────────────────────┘
+                       │ IPC (Tauri invoke)
+┌──────────────────────▼──────────────────────────────┐
+│              commands.rs (Command Facade)           │
+│  #[tauri::command] → forward to commands/*.rs       │
+├─────────────────────────────────────────────────────┤
+│              state.rs (Global AppState)             │
+│  Mutex<TimelineState> / AudioEngine / Various Caches│
+├─────────────────────────────────────────────────────┤
+│                  Business Logic Layer               │
+│  pitch_analysis / pitch_editing / renderer / mixdown│
+├─────────────────────────────────────────────────────┤
+│                  FFI / Third-party Layer            │
+│  world.rs (WORLD) / rubberband.rs / nsf_hifigan_onnx│
+└─────────────────────────────────────────────────────┘
 
-```typescript
-// services/api/core.ts
-startPitchRefreshTask(rootTrackId: string): Promise<string>
-getPitchRefreshStatus(taskId: string): Promise<PitchTaskInfo | null>
-getPitchAnalysisProgress(): Promise<PitchProgressPayload | null>  // NEW: Direct progress polling
-cancelPitchTask(taskId: string): Promise<void>
-
-// components/PitchAnalysisProgressBar.tsx (NEW)
-interface PitchProgressPayload {
-  total: number;
-  completed: number;
-  elapsedMs: number;
-  estimatedRemainingMs: number | null;
-}
-
-// hooks/useAsyncPitchRefresh.ts
-const {
-  isLoading,      // boolean
-  progress,       // 0-100
-  status,         // 'running' | 'completed' | 'failed' | 'cancelled'
-  error,          // string | null
-  estimatedRemaining,  // seconds | null
-  startRefresh,   // (rootTrackId: string) => Promise<void>
-  cancelRefresh,  // () => Promise<void>
-  reset,          // () => void
-} = useAsyncPitchRefresh();
 ```
 
-#### Backend commands
+### 4.2 Command System
+
+All frontend-callable commands are registered in `commands.rs` using the `#[tauri::command]` macro, with specific implementations split into the `commands/` subdirectory by domain.
+
+**Conventions**:
+
+* `#[tauri::command]` only appears in `commands.rs` (facade layer).
+* Sub-module functions use `pub(super)` / `pub(crate)` visibility.
+* Naming convention: `#[tauri::command(rename_all = "camelCase")]`.
+
+**Command Groups**:
+
+| Module | File | Responsibility |
+| --- | --- | --- |
+| core | `commands/core.rs` | ping, runtime info, transport control, undo/redo |
+| project | `commands/project.rs` | Create/Open/Save project |
+| timeline | `commands/timeline.rs` | CRUD for tracks/clips, audio import |
+| playback | `commands/playback.rs` | Play/Stop/Status querying |
+| params | `commands/params.rs` | Param curves (pitch/tension) read/write |
+| waveform | `commands/waveform.rs` | Waveform peak segment querying |
+| synth | `commands/synth.rs` | Model loading, audio processing, synthesis |
+| dialogs | `commands/dialogs.rs` | System file dialogs |
+| file_browser | `commands/file_browser.rs` | Directory listing, audio file info |
+| pitch_cache | `commands/pitch_cache.rs` | Pitch cache management |
+| pitch_progress | `commands/pitch_progress.rs` | Analysis progress querying |
+| onnx_status | `commands/onnx_status.rs` | ONNX availability querying |
+| debug | `commands/debug.rs` | Debug statistics |
+
+### 4.3 Global State (AppState)
+
+`AppState` in `state.rs` is the core state container, injected via `tauri::manage()`. All commands access it through `State<'_, AppState>`.
 
 ```rust
-// commands/pitch_refresh_async.rs
-#[tauri::command]
-async fn start_pitch_refresh_task(
-    root_track_id: String,
-    state: State<'_, AppState>
-) -> Result<String, String>
-
-#[tauri::command]
-fn get_pitch_refresh_status(
-    task_id: String,
-    state: State<'_, AppState>
-) -> Result<PitchTaskStatusPayload, String>
-
-#[tauri::command]
-fn get_pitch_analysis_progress(
-    state: State<'_, AppState>
-) -> Result<Option<PitchProgressPayload>, String>  // NEW
-
-#[tauri::command]
-fn cancel_pitch_task(
-    task_id: String,
-    state: State<'_, AppState>
-) -> Result<(), String>
-```
-
-### Frontend loading sync for pitch analysis
-
-Pitch F0 analysis runs in the backend on a background thread. The frontend should show a loading overlay (optionally with progress) until the pitch curve is ready.
-
-- `get_param_frames` returns `analysis_pending` for `param=pitch` to indicate whether analysis is scheduled/inflight.
-- Tauri events:
-	- `pitch_orig_analysis_started` (root track + analysis key)
-	- `pitch_orig_analysis_progress` (root track + `progress` in 0..1)
-	- `pitch_orig_updated` (analysis finished; frontend should refresh + stop loading)
-
-## Pitch analysis pipeline (v2)
-
-`src/pitch_config.rs` holds `PitchAnalysisConfig` — loaded once at startup via `PitchAnalysisConfig::global()`.
-
-### Architecture
-
-```
-decoded PCM
-  → resample to analysis_sr (default 16 kHz)
-  → mono downmix + DC removal
-  → RMS VAD scan (50 ms non-overlapping windows)
-      ├── classify_voiced_ranges(): RMS-based voice activity detection
-      │     ├── silent windows (RMS < threshold) → mark as unvoiced
-      │     └── voiced windows (RMS ≥ threshold) → mark as voiced
-      ├── merge_adjacent_voiced_ranges(): merge ranges with gap < vad_merge_gap_ms (default 50ms)
-      │     └── prevents over-fragmentation from brief signal dips
-      ├── voiced ranges: f0 extraction via WORLD Harvest/Dio
-      └── silent ranges: f0 = 0.0 (skipped, no WORLD call)
-  → split_into_chunks(chunk_sec=30 s default)
-      ├── each chunk: extend ±ctx_sec (0.3 s) context, call WORLD Harvest
-      ├── extract core frames (trim context portion from WORLD output)
-      └── apply linear crossfade at chunk boundaries (ctx_frames region)
-  → f0 Vec<f64> (full timeline length, silent regions = 0.0)
-  → convert to MIDI → resample to clip timeline frames
-```
-
-### VAD Performance Optimization
-
-The VAD system significantly improves analysis speed by skipping silent regions:
-
-**Key components:**
-- `classify_voiced_ranges()`: RMS-based segmentation (50ms non-overlapping windows)
-  - Threshold: configurable via `HIFISHIFTER_VAD_RMS_THRESHOLD` (default 0.02, ~-34 dBFS)
-  - Returns: `Vec<Range<usize>>` of voiced sample ranges
-- `merge_adjacent_voiced_ranges()`: Post-processing to reduce fragmentation
-  - Merges ranges if gap ≤ `vad_merge_gap_ms` (default 50ms)
-  - Prevents excessive chunk splitting from brief signal dips
-  - Example: `[0..1000, 1100..2000]` with 50ms gap threshold → `[0..2000]` (merged)
-
-**Performance logging:**
-- Debug output format: `"VAD: X% voiced (...), skipped Y% silence"`
-- `voiced_pct`: `(voiced_samples / total_samples) * 100`
-- `skip_pct`: `(1.0 - voiced_samples / total_samples) * 100`
-- Typical improvement: 40-70% speedup on vocal recordings with pauses
-
-**Tuning knobs:**
-```rust
-// pitch_config.rs: PitchAnalysisConfig
-pub silence_rms_threshold: f64,  // Default: 0.02 (was 0.001 in v1)
-pub vad_merge_gap_ms: f64,        // Default: 50.0 ms
-```
-
-### Time-Range Caching
-
-The pitch analysis system now supports intelligent caching based on time ranges:
-
-**Architecture:**
-- `PitchCacheEntry` stores: `cache_key` (hash), `time_start/time_end` (timeline positions), `data` (f0 curve)
-- Cache key includes: audio file hash, clip timeline positions, playback rate, algorithm
-- Enables incremental updates: only reanalyze changed clips
-
-**Key features:**
-- **Time-range lookup**: `find_entry_by_time_range(start, end, tolerance)` 
-  - Fuzzy matching with ±1 frame tolerance for floating-point imprecision
-  - Returns cached entry if `[cached_start, cached_end]` contains `[query_start, query_end]`
-- **Automatic invalidation**: Cache entries invalidate when:
-  - Clip timeline position changes (drag/move)
-  - Playback rate changes (Time Stretch)
-  - Audio content changes (re-import)
-  - Algorithm changes (WORLD → DIO)
-- **Memory management**: 
-  - Unused entries are pruned during analysis
-  - Cache size is bounded by project complexity (typical: < 100 entries)
-
-**Implementation:**
-```rust
-// pitch_analysis.rs
-struct PitchCacheEntry {
-    cache_key: u64,           // Blake3 hash of analysis parameters
-    time_start: f64,          // Timeline start (seconds)
-    time_end: f64,            // Timeline end (seconds)
-    data: Arc<Vec<f64>>,      // F0 curve (MIDI values)
+pub struct AppState {
+    // Timeline state (tracks, clips, selections, etc.)
+    pub timeline: Mutex<TimelineState>,
+    // Undo/Redo history stacks
+    pub undo_stack: Mutex<Vec<TimelineState>>,
+    pub redo_stack: Mutex<Vec<TimelineState>>,
+    // Project metadata
+    pub project: Mutex<ProjectState>,
+    // Real-time audio engine
+    pub audio_engine: AudioEngine,
+    // Pitch cache (LRU)
+    pub clip_pitch_cache: Mutex<ClipPitchCache>,
+    // Waveform cache directory
+    pub waveform_cache_dir: Mutex<PathBuf>,
+    // Pitch analysis progress
+    pub pitch_progress: Mutex<Option<PitchProgressState>>,
+    // Tauri app handle
+    pub app_handle: OnceLock<tauri::AppHandle>,
+    // ...
 }
 
-fn find_entry_by_time_range(
-    cache: &[PitchCacheEntry],
-    start: f64,
-    end: f64,
-    tolerance: f64,  // Default: 1 frame @ 44.1kHz ≈ 0.000023s
-) -> Option<&PitchCacheEntry>
 ```
 
-### Env-var reference
-
-| Variable                            | Default | Range      | Effect                                                                                                                             |
-| ----------------------------------- | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `HIFISHIFTER_PITCH_ANALYSIS_SR`     | `16000` | 8000–44100 | WORLD analysis sample rate. Lower = faster; 16 kHz retains full human-voice F0 accuracy.                                           |
-| `HIFISHIFTER_VAD_RMS_THRESHOLD`     | `0.02`  | ≥0.0       | RMS VAD threshold (~−34 dBFS). Windows below this are classified silent. Changed from `HIFISHIFTER_PITCH_SILENCE_RMS` (was 0.001). |
-| `HIFISHIFTER_VAD_MERGE_GAP_MS`      | `50.0`  | ≥0.0       | Merge adjacent voiced ranges if gap ≤ this value (ms). Prevents VAD over-fragmentation from brief signal dips.                     |
-| `HIFISHIFTER_PITCH_CHUNK_SEC`       | `30.0`  | ≥5.0       | Max voiced-segment chunk duration (seconds). Long clips are split into N chunks.                                                   |
-| `HIFISHIFTER_PITCH_CHUNK_CTX_SEC`   | `0.3`   | ≥0.0       | Context audio added to each side of a chunk before WORLD call to eliminate WORLD start-up instability.                             |
-| `HIFISHIFTER_PITCH_MAX_SEGMENT_SEC` | `60.0`  | ≥1.0       | Truncate overly long clip segments before WORLD analysis; remainder is padded as unvoiced.                                         |
-| `HIFISHIFTER_PITCH_PARALLEL_CLIPS`  | unset   | ≥1         | Limit the Rayon thread pool size for per-clip decoding/analysis stages.                                                            |
-
-## Pitch analysis performance optimization (v3)
-
-**Status**: Implemented in `parallel-incremental-pitch-analysis` change (2026-02)
-
-This optimization reduces pitch analysis time by **3-9x** for typical workflows through parallel processing, intelligent caching, and incremental refresh.
-
-### Architecture
-
-```
-Frontend triggers analysis (rootTrackId)
-  → Backend: entry point in pitch_analysis.rs
-      ├── 1. Build Timeline Snapshot
-      │     ├── Capture: clips (id, audio_path, trim, playback_rate, etc.)
-      │     ├── Capture: global_bpm, timeline_frame_period_ms, analysis_sr
-      │     └── Generate cache key (Blake3 hash) for each clip
-      ├── 2. Compare with Previous Snapshot (if exists)
-      │     ├── Detect: New clips (cache_key not in old snapshot)
-      │     ├── Detect: Modified clips (cache_key changed)
-      │     ├── Ignore: Position-only changes (cache_key unchanged)
-      │     └── Result: List of clips needing analysis
-      ├── 3. Parallel Clip Analysis (rayon)
-      │     ├── Sort clips by workload (duration * cache_miss_factor)
-      │     ├── Rayon par_iter: analyze_clip_with_cache()
-      │     │     ├── Query ClipPitchCache (LRU) by cache_key
-      │     │     ├── Cache hit: return Arc<Vec<f32>> (instant)
-      │     │     └── Cache miss: decode audio → WORLD F0 → store in cache
-      │     └── Progress tracking: weighted by clip duration
-      ├── 4. Fusion Algorithm (optimized)
-      │     ├── Build interval coverage table: Vec<Option<Vec<usize>>>
-      │     ├── For each timeline frame (10ms):
-      │     │     ├── 0 clips: write 0.0 (skip weight computation)
-      │     │     ├── 1 clip: direct read (skip winner-take-most)
-      │     │     └── N clips: weighted winner-take-most + hysteresis
-      │     └── Output: timeline-length pitch curve
-      └── 5. Update Snapshot & Emit Events
-            ├── Store current snapshot in AppState.pitch_timeline_snapshot
-            ├── Emit: pitch_orig_analysis_progress (0–1)
-            └── Emit: pitch_orig_updated (frontend refresh)
-```
-
-### Key Components
-
-#### 1. ClipPitchCache (LRU)
-- **Implementation**: `backend/src-tauri/src/clip_pitch_cache.rs`
-- **Type**: `LruCache<String, Arc<Vec<f32>>>` (lru = 0.12)
-- **Capacity**: 100 clips (configurable)
-- **Cache Key**: Blake3 hash of:
-  - Audio file path + size + mtime
-  - Clip trim_start_sec, duration_sec, playback_rate
-  - Analysis algorithm (WORLD/Harvest/Dio)
-  - Global: analysis_sr, frame_period_ms, BPM
-- **Statistics**: `.stats()` returns entries, capacity, hits, misses, hit_rate
-- **Commands**: `clear_pitch_cache`, `get_pitch_cache_stats` (Tauri)
-
-**Key insight**: Position-independent caching — cache key does NOT include `start_beat`. Moving a clip doesn't invalidate cache.
-
-#### 2. Timeline Snapshot Comparison
-- **Snapshot**: `{ clips: HashMap<id, cache_key>, bpm, frame_period_ms }`
-- **Comparison logic**:
-  - New clip: `new_snap.contains(id) && !old_snap.contains(id)`
-  - Modified: `old_snap[id].cache_key != new_snap[id].cache_key`
-  - Position-only: `old_snap[id].cache_key == new_snap[id].cache_key` → **skip analysis**
-- **Storage**: `AppState.pitch_timeline_snapshot: Mutex<HashMap<...>>`
-
-#### 3. Parallel Analysis (Rayon)
-- **Thread pool**: Rayon default (CPU count)
-- **Workload sorting**: `clips.sort_by_key(|c| c.duration * cache_miss_factor)`
-  - Large uncached clips analyzed first (better load balancing)
-- **Progress tracking**: 
-  - `ProgressTracker` with atomic counters
-  - Weighted by clip duration (cache hits count as 5% workload)
-  - Frontend polls `progress` (0.0–1.0) every 500ms
-
-**WORLD lock handling**: WORLD F0 analysis is thread-safe (no global mutex needed). All clips use completely parallel path.
-
-#### 4. Fusion Algorithm Optimization
-- **Coverage table**: Pre-build `Vec<Option<Vec<usize>>>` (one entry per timeline frame)
-  - `None`: no clips covering this frame (write 0.0)
-  - `Some(vec![i])`: single clip covering (direct read)
-  - `Some(vec![i1, i2, ...])`: multiple clips (weighted fusion)
-- **Performance**: Typical timeline (300s @ 10ms frames = 30k frames):
-  - Old fusion: 150-250ms (hash lookups per frame)
-  - New fusion: 20-50ms (table lookup + fast path)
-
-### Performance Targets & Results
-
-| Scenario                        | Old Implementation | Target | Implementation Status      |
-| ------------------------------- | ------------------ | ------ | -------------------------- |
-| **First analysis** (10 clips)   | 22-45s             | 3-7s   | ✅ Parallel (rayon)         |
-| **Repeat analysis** (cached)    | 22-45s             | <100ms | ✅ LRU cache                |
-| **Incremental** (edit 1 clip)   | 22-45s (full scan) | 1-4s   | ✅ Snapshot comparison      |
-| **Position change** (drag clip) | 22-45s             | <100ms | ✅ Position-independent key |
-| **Fusion algorithm**            | 150-250ms          | <100ms | ✅ Coverage table           |
-| **Memory usage** (100 clips)    | —                  | <500MB | ✅ Arc sharing + LRU        |
-
-**Actual measurements**: Pending user testing with real project data. (See tasks.md Group 18)
-
-### Cache Management
-
-#### Commands
-- `clear_pitch_cache()`: Clears all cached pitch curves
-  - Returns: `{ ok: true, message: "..." }` or `{ ok: false, error: "..." }`
-- `get_pitch_cache_stats()`: Returns cache statistics
-  - Returns: `{ cached_clips, total_capacity, cache_hit_rate }`
-
-#### Automatic Invalidation
-Cache entries are invalidated when:
-- Clip timeline position changes → NO (position-independent key)
-- Playback rate changes → YES (included in cache key)
-- Audio file modified (mtime changed) → YES (file signature in key)
-- Global BPM changes → YES (BPM in cache key)
-- Analysis algorithm changes → YES (algorithm in key)
-
-#### Manual Cache Control
-- **Clear cache**: Call `clearPitchCache()` from frontend (or Tauri command)
-- **Stats query**: Call `getPitchCacheStats()` to inspect hit rate
-- **Automatic cleanup**: LRU eviction when capacity (100) exceeded
-
-### Implementation Details
-
-#### File Structure
-```
-backend/src-tauri/src/
-  ├── clip_pitch_cache.rs        # LRU cache implementation
-  ├── pitch_analysis.rs          # Main analysis pipeline
-  │     ├── fuse_clip_pitches_optimized()  # Fusion with coverage table
-  │     ├── compute_pitch_curve_parallel() # Rayon parallel entry (DEPRECATED in this impl)
-  │     └── analyze_clip_with_cache()      # Per-clip cache query + analysis
-  ├── pitch_progress.rs          # ProgressTracker (weighted progress)
-  ├── commands/pitch_cache.rs    # Tauri commands for cache management
-  ├── commands.rs                # Command exports
-  ├── lib.rs                     # Command registration
-  └── state.rs                   # AppState (clip_pitch_cache, pitch_timeline_snapshot)
-```
-
-#### Dependencies
-```toml
-[dependencies]
-rayon = "1.7"          # Parallel iteration (par_iter)
-lru = "0.12"           # LRU cache implementation
-blake3 = "1.5"         # Fast hash for cache keys
-```
-
-#### Error Handling
-- **Partial failures**: If <50% clips fail analysis, continue with successful clips
-- **Cache failures**: Cache query errors fallback to full analysis (non-blocking)
-- **Thread panics**: Rayon isolates panics (one clip failure doesn't stop others)
-
-### Testing Notes
-
-**Groups 16-19 in tasks.md** are marked for manual testing:
-- Unit tests: Cache key correctness, LRU eviction, progress tracking
-- Integration tests: End-to-end analysis, cache hit rate validation
-- Performance benchmarks: Measure speedup on real projects
-- Stress tests: 100 clips, long audio (10+ min), concurrent refresh
-
-**Action required**: Run manual tests with real audio projects and record results in DEVELOPMENT.md.
-
-### Troubleshooting
-
-**Q: Cache hit rate is low (<50%)**
-- Check: Are clips being modified frequently? (trim, playback_rate changes invalidate cache)
-- Check: Is BPM changing often? (BPM is part of cache key)
-- Check: File mtime changing without content change? (forces reanalysis)
-
-**Q: First analysis not faster**
-- Verify: Rayon thread pool active? (check debug logs)
-- Verify: Clips are long enough to benefit from parallelism (>5s each)
-- Note: Speedup is proportional to CPU core count (expect 2-4x on quad-core)
-
-**Q: Memory usage high**
-- Check: Cache capacity (default 100 clips, ~3-5MB per clip)
-- Action: Reduce capacity or call `clear_pitch_cache()` periodically
-- Note: Arc sharing minimizes duplication (cached curves shared across timeline snapshots)
-
-**Q: Progress bar not updating smoothly**
-- Check: Frontend poll interval (should be ~500ms)
-- Check: Clip count (very few clips = chunky progress updates)
-- Note: Progress is weighted by duration (small clips contribute less to progress)
-
-### Future Improvements
-
-- [ ] Persistent disk cache (survive app restart)
-- [ ] Compression for cached curves (reduce memory 2-3x)
-- [ ] Multi-level cache (RAM + disk)
-- [ ] Predictive prefetch (analyze next likely edit target)
-- [ ] GPU-accelerated WORLD F0 (if CUDA available)
-
-### Progress events
-
-`pitch_orig_analysis_progress` (0–1) is emitted per chunk:
-- 0.02 at analysis start
-- 0.05–0.84 per chunk (proportional to clip/chunk count)
-- 0.85 when all clips done
-- 1.0 when fuse + MIDI conversion complete
-
-`pitch_orig_analysis_progress` (0–1) is emitted per chunk:
-- 0.02 at analysis start
-- 0.05–0.84 per chunk (proportional to clip/chunk count)
-- 0.85 when all clips done
-- 1.0 when fuse + MIDI conversion complete
-
-## Pitch edit algorithms
-
-By default, pitch edit uses WORLD-vocoder.
-
-An experimental alternative uses the bundled NSF-HiFiGAN ONNX model (ORT via the `ort` crate + ONNX Runtime).
-Enable via UI:
-
-- In the bottom param panel (Pitch), switch `Algo` to `NSF-HiFiGAN (ONNX)`.
-
-Or force/override via env:
-
-- `HIFISHIFTER_PITCH_EDIT_ALGO=nsf_hifigan_onnx`
-- Model path:
-	- `HIFISHIFTER_NSF_HIFIGAN_ONNX=.../pc_nsf_hifigan.onnx`, or
-	- `HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR=.../pc_nsf_hifigan_44.1k_hop512_128bin_2025.02`
-
-### ONNX Runtime linkage
-
-The Rust backend is configured to download prebuilt ONNX Runtime binaries at build time and link them in, so you
-typically don't need to install `onnxruntime.dll` yourself.
-
-- Offline builds: set `ORT_SKIP_DOWNLOAD=1` and provide a system/custom ONNX Runtime build via `ort`/`ort-sys` linking options.
-
-### ONNX Runtime execution provider (CUDA)
-
-This project enables the CUDA EP in `ort` (downloads a `cu12`-enabled prebuilt runtime at build time).
-
-Runtime selection is controlled by env vars:
-
-- `HIFISHIFTER_ORT_EP=auto|cuda|cpu`
-	- `auto` (default): try CUDA first, fall back to CPU if unavailable.
-	- `cuda`: require CUDA EP; session creation fails if CUDA is unavailable.
-	- `cpu`: force CPU EP.
-- `HIFISHIFTER_ORT_CUDA_DEVICE_ID=0`
-	- Which CUDA device to use when `cuda` is selected.
-
-Notes:
-
-- If CUDA EP cannot be initialized (missing DLL dependencies / driver, etc.), `auto` will fall back to CPU.
-- Set `HIFISHIFTER_DEBUG_COMMANDS=1` to print which EP was selected.
-
-### Realtime ONNX: voiced-segment inference (VAD)
-
-For realtime playback (`play_original`) when pitch edit is set to **NSF-HiFiGAN (ONNX)**, the backend avoids fixed time-window ONNX calls.
-Instead, it uses the already-computed `pitch_orig/pitch_edit` curves as a lightweight VAD signal:
-
-- **Voiced** ranges are inferred as one contiguous ONNX invocation (with extra context padding).
-- **Unvoiced** ranges are passed through as the base mix (no ONNX), reducing noise.
-
-Tuning knobs (env vars):
-
-- `HIFISHIFTER_ONNX_VAD_PAD_MS` (default `120`)
-	- Expands voiced ranges on both sides to keep breathy edges inside voiced segments.
-- `HIFISHIFTER_ONNX_VAD_CTX_SEC` (default `1.5`)
-	- Extra audio context rendered around voiced ranges before ONNX inference.
-- `HIFISHIFTER_ONNX_VAD_XFADE_MS` (default `40`)
-	- Crossfade size at voiced/unvoiced boundaries (uses preroll to avoid clicks).
-- `HIFISHIFTER_ONNX_VAD_MAX_SEC` (default `60`)
-	- Safety cap for a single ONNX invocation size (protects memory usage on extremely long segments).
-	- Set to `0` to disable the cap (infer the whole voiced segment in one go).
-
-### F0 detection (WORLD)
-
-- The Rust backend uses WORLD for F0 tracking and WORLD-vocoder pitch shifting.
-- To reduce octave errors and noisy artifacts from unstable F0, the default F0 tracker is now **Harvest**.
-- You can switch the tracker at runtime:
-	- `HIFISHIFTER_WORLD_F0=harvest` (default)
-	- `HIFISHIFTER_WORLD_F0=dio`
-- The default F0 range is aligned with the previous Python demo (`utils/wav2F0.py`):
-	- `f0_floor = 40 Hz`
-	- `f0_ceil = 1600 Hz`
-
-#### WORLD-vocoder F0 cleanup (anti "gargling")
-
-- WORLD analysis can occasionally output very short 0Hz gaps inside voiced regions.
-  This can cause unstable analysis/synthesis and a "gargling / throat" noise after pitch edits.
-- The vocoder now fills short unvoiced gaps in F0 by default (similar to the Python demo's `interp_uv` idea).
-- Tune or disable with:
-	- `HIFISHIFTER_WORLD_F0_GAP_MS=15` (default)
-	- `HIFISHIFTER_WORLD_F0_GAP_MS=0` (disable)
-
-### Stability notes
-- `fatal runtime error: Rust cannot catch foreign exceptions, aborting` is a different class: it indicates a non-Rust exception crossing into Rust (often via FFI / external libraries). `catch_unwind` cannot catch it; treat it as a separate investigation track.
-## Frontend Architecture
-
-### Waveform Rendering System
-
-**Location**: `frontend/src/utils/waveformRenderer.ts`
-
-The waveform rendering system provides a unified interface for rendering audio waveforms across the application, supporting both Canvas (Piano Roll) and SVG (Timeline Clips) rendering modes.
-
-#### Core Functions
-
-1. **`processWaveformPeaks(options: WaveformProcessOptions): ProcessedWaveformData`**
-   - Processes min/max peaks data into renderable format
-   - Adaptive sampling: `stride=4` for >2000 points, `stride=2` for >1000 points, `stride=1` otherwise
-   - Time range cropping: only processes samples within visible viewport
-   - Returns: processed peaks with timestamps and stride information
-
-2. **`renderWaveformCanvas(ctx, data, options): void`**
-   - Renders waveform to Canvas 2D context (used in Piano Roll)
-   - **Rendering mode**: Continuous polyline (closed path) instead of discrete vertical bars
-   - Creates closed polygon: forward traversal of `max` values (upper edge), reverse traversal of `min` values (lower edge)
-   - Area fill: uses `ctx.fill()` to fill the enclosed region
-   - Configurable colors: `fillColor` (used), `strokeColor` (reserved for future outlining)
-   - Performance: single `beginPath()` → `fill()` call per render, O(n) complexity
-
-3. **`renderWaveformSvg(data, options): string`**
-   - Generates SVG path `d` attribute string (used in Timeline Clips)
-   - Creates closed polygon: forward traversal of `max` values, reverse traversal of `min` values
-   - Dual-mode positioning:
-     - **Timestamp-based** (Piano Roll): uses `timestamps` array for X coordinates with time-to-pixel mapping
-     - **Uniform distribution** (Clip): empty `timestamps` array triggers index-based positioning
-   - Stereo support: call twice with different `centerY` values for top/bottom bands
-   - Minimum visible height: computed in SVG coordinate space
-
-#### Usage Examples
-
-**Piano Roll (Canvas rendering):**
-```typescript
-const processed = processWaveformPeaks({
-  min: peaks.min,
-  max: peaks.max,
-  startSec: peaks.startSec,
-  durSec: peaks.durSec,
-  visibleStartSec: viewport.startSec,
-  visibleDurSec: viewport.durSec,
-  targetWidth: canvasWidth
-});
-
-renderWaveformCanvas(ctx, processed, {
-  width: canvasWidth,
-  height: canvasHeight,
-  fillColor: waveformColors.fill,
-  strokeColor: waveformColors.stroke,
-  centerY: canvasHeight * 0.5,
-  amplitude: canvasHeight * 0.45
-});
-```
-
-**Timeline Clip (SVG rendering with fade effects):**
-```typescript
-// Apply fade-in/fade-out to peaks data
-const fadedData = applyFadeGainToPeaks(
-  peaks.min, peaks.max,
-  ampScale, lengthBeats, fadeInBeats, fadeOutBeats,
-  fadeInCurve, fadeOutCurve
-);
-
-// Generate SVG path (uniform distribution mode)
-const pathD = renderWaveformSvg({
-  min: fadedData.min,
-  max: fadedData.max,
-  timestamps: [], // Empty array triggers uniform distribution
-  stride: 1
-}, {
-  width: clipWidth,
-  height: clipHeight,
-  centerY: clipHeight / 2,
-  halfHeight: clipHeight / 2
-});
-
-// Render SVG
-<path d={pathD} fill={waveformColors.fill} stroke={waveformColors.stroke} />
-```
-
-#### Theme Integration
-
-**Location**: `frontend/src/theme/waveformColors.ts`
-
-```typescript
-interface WaveformColors {
-  fill: string;   // Waveform fill color
-  stroke: string; // Waveform stroke color
+#### Key Data Structures
+
+**Track**:
+
+```rust
+pub struct Track {
+    pub id: String,           // UUID
+    pub name: String,
+    pub parent_id: Option<String>,  // Parent track (supports nesting)
+    pub order: i32,
+    pub muted: bool,
+    pub solo: bool,
+    pub volume: f32,          // 0.0 ~ 1.0
+    pub compose_enabled: bool,
+    pub pitch_analysis_algo: PitchAnalysisAlgo,  // WorldDll / NsfHifiganOnnx / None
+    pub color: String,        // hex color
 }
 
-// Dark theme
-{ fill: "rgba(255,255,255,0.2)", stroke: "rgba(255,255,255,0.7)" }
-
-// Light theme
-{ fill: "rgba(0,0,0,0.15)", stroke: "rgba(0,0,0,0.6)" }
 ```
 
-**Usage:**
+**Clip**:
+
+```rust
+pub struct Clip {
+    pub id: String,            // UUID
+    pub track_id: String,      // Associated track
+    pub name: String,
+    pub start_sec: f64,        // Timeline start position
+    pub length_sec: f64,       // Visible length
+    pub source_path: Option<String>,  // Audio source file
+    pub duration_sec: Option<f64>,    // Source file total duration
+    pub duration_frames: Option<u64>, // Source file frame count
+    pub source_sample_rate: Option<u32>,
+    pub gain: f32,             // Gain
+    pub muted: bool,
+    pub trim_start_sec: f64,   // Trimming start
+    pub trim_end_sec: f64,     // Trimming end
+    pub playback_rate: f32,    // Playback rate (Time Stretch)
+    pub fade_in_sec: f64,      // Fade in duration
+    pub fade_out_sec: f64,     // Fade out duration
+}
+
+```
+
+**TrackParamsState**:
+
+```rust
+pub struct TrackParamsState {
+    pub frame_period_ms: f64,     // Analysis frame period (default 5ms)
+    pub pitch_orig: Vec<f32>,     // Original pitch curve (MIDI values)
+    pub pitch_edit: Vec<f32>,     // Edited pitch curve
+    pub pitch_edit_user_modified: bool,
+    pub tension_orig: Vec<f32>,   // Tension curve
+    pub tension_edit: Vec<f32>,
+}
+
+```
+
+### 4.4 Audio Engine
+
+The audio engine is located in the `audio_engine/` module and is responsible for real-time playback and mixing.
+
+```
+AudioEngine
+├── engine.rs        # cpal audio callback + playback state machine
+├── snapshot.rs      # Playback snapshot (frozen timeline state for callback)
+├── mix.rs           # Multi-track mixing logic
+├── io.rs            # Audio I/O (symphonia decoding)
+├── ring.rs          # Lock-free ring buffer (callback → main thread comms)
+├── stretch_stream.rs # Pitch editing stream (Pitch Stream)
+├── resource_manager.rs # Decoder resource management
+├── types.rs         # Type definitions
+└── util.rs          # Utility functions
+
+```
+
+**Workflow**:
+
+1. Playback starts → `engine.rs` creates a snapshot (`snapshot.rs`), freezing the current track/clip states.
+2. cpal audio callback loop:
+* Finds all clips overlapping the current playback position.
+* For each clip: Decodes audio → Applies Time Stretch (if needed) → Applies Pitch Editing (if needed).
+* Multi-track mixing (`mix.rs`) → Output to audio device.
+
+
+3. Pitch Stream (`stretch_stream.rs`):
+* If `compose_enabled` is on for the track, use renderers (WORLD/HiFiGAN) to process audio.
+* WORLD Renderer: Real-time rendering, low latency.
+* ONNX Renderer: Optional hard-start mode (pre-buffering before playback).
+
+
+
+### 4.5 Renderer System
+
+The renderer uses a **Trait plugin architecture** (similar to OpenUTAU's IRenderer), located in the `renderer/` module.
+
+```rust
+pub trait Renderer: Send + Sync {
+    fn id(&self) -> &str;
+    fn display_name(&self) -> &str;
+    fn kind(&self) -> SynthPipelineKind;
+    fn is_available(&self) -> bool;
+    fn render(&self, ctx: &RenderContext<'_>) -> Result<Vec<f32>, String>;
+    fn capabilities(&self) -> RendererCapabilities;
+}
+
+```
+
+**Registered Renderers**:
+
+| Renderer | ID | Features |
+| --- | --- | --- |
+| WORLD Vocoder | `world_vocoder` | Real-time, low latency, CPU-based |
+| NSF-HiFiGAN ONNX | `nsf_hifigan_onnx` | High quality, requires ONNX Runtime, CUDA support |
+
+Selection logic: Use `get_renderer(SynthPipelineKind)` to get the corresponding renderer instance (static dispatch, zero heap allocation).
+
+### 4.6 FFI Bindings
+
+| Module | Binding Method | Description |
+| --- | --- | --- |
+| `world.rs` | C FFI (Static Link) | WORLD Vocoder: Dio/Harvest F0 analysis, CheapTrick spectral envelope, D4C aperiodicity, Synthesis |
+| `streaming_world.rs` | Based on `world.rs` | Streaming WORLD processing (chunked analysis + synthesis) |
+| `world_vocoder.rs` | Based on `world.rs` | High-level WORLD Vocoder wrapper (Analysis → Editing → Synthesis pipeline) |
+| `rubberband.rs` | C FFI (Static Link) | Rubber Band Time Stretch/Pitch Shift (R2 + R3 engines) |
+| `nsf_hifigan_onnx.rs` | `ort` crate (ONNX Runtime) | NSF-HiFiGAN neural network inference |
+
+---
+
+## 5. Frontend Architecture
+
+### 5.1 Overall Structure
+
+The frontend is built with **React 19 + Redux Toolkit + Radix UI + Tailwind CSS**, bundled via Vite.
+
+```
+App.tsx (Root Component)
+├── MenuBar         # Top menu (File/Edit/View/Track/Help)
+├── ActionBar       # Action toolbar (Model loading/Analysis/Synthesis/Playback control)
+├── Main Edit Area (Flex)
+│   ├── FileBrowserPanel  # Left sidebar (Toggleable)
+│   ├── TimelinePanel     # Timeline (Track list + Clip editing)
+│   └── PianoRollPanel    # Piano roll (Pitch/Tension curve editing)
+└── StatusBar       # Bottom status bar (Status info + Render indicators)
+
+```
+
+### 5.2 State Management
+
+Uses **Redux Toolkit** for global state management.
+
+#### Redux Store Structure
+
 ```typescript
-const { mode } = useAppTheme();
-const waveformColors = useMemo(() => getWaveformColors(mode), [mode]);
+{
+  session: {           // Core session state (sessionSlice.ts)
+    status: string,
+    error: string | null,
+    runtime: {         // Backend runtime info
+      device: string,
+      modelLoaded: boolean,
+      audioLoaded: boolean,
+      hasSynthesized: boolean,
+      isPlaying: boolean,
+      playbackTarget: string | null,
+    },
+    timeline: {        // Timeline state (Backend authority)
+      tracks: TrackInfo[],
+      clips: ClipInfo[],
+      selectedTrackId: string | null,
+      selectedClipId: string | null,
+      bpm: number,
+      playheadSec: number,
+      projectSec: number,
+    },
+    project: {         // Project metadata
+      name: string,
+      path: string | null,
+      dirty: boolean,
+      recent: string[],
+    },
+    // UI State
+    toolMode: "draw" | "select",
+    editParam: "pitch" | "tension",
+    gridSize: "1/4" | "1/8" | "1/16" | "1/32",
+    fadeCurves: { in: FadeCurveType, out: FadeCurveType },
+    pianoRollOpen: boolean,
+    // ...
+  },
+  fileBrowser: {       // File browser state (fileBrowserSlice.ts)
+    visible: boolean,
+    currentDir: string,
+    entries: FileEntry[],
+    // ...
+  }
+}
+
 ```
 
-The `drawPianoRoll()` function accepts optional `waveformColors` parameter, and `ClipItem` component reads colors from theme via `useAppTheme()` hook.
+#### Thunks Groups
 
-#### Design Decisions
+Async operations implemented via `createAsyncThunk`, split into the `thunks/` directory by domain:
 
-- **Unified rendering**: Both Piano Roll and Clip use the same processing logic, ensuring visual consistency
-- **Adaptive sampling**: Automatically adjusts point density based on data size to maintain 60fps performance
-- **Time-aware cropping**: Only processes visible viewport data to optimize large audio files
-- **Dual rendering modes**: Canvas for high-frequency pixel-perfect updates (Piano Roll drag/zoom), SVG for scalable vector graphics (Clip display)
-- **Theme-aware colors**: Waveform colors adapt to dark/light theme for optimal contrast
+| File | Responsibility |
+| --- | --- |
+| `transportThunks.ts` | Playback control (play/stop/seek), status polling |
+| `timelineThunks.ts` | Track/Clip operations (CRUD, drag, split, glue) |
+| `projectThunks.ts` | Project operations (new/open/save/undo/redo) |
+| `importThunks.ts` | Audio file import (dialog/DND/path/base64) |
+| `audioThunks.ts` | Audio processing (analysis/pitch-shift/synth/export) |
+| `modelThunks.ts` | Model loading |
+| `trackThunks.ts` | Track state settings, clip deletion |
+| `runtimeThunks.ts` | Runtime status refresh, cache clearing |
+
+### 5.3 IPC Invocation Layer
+
+The frontend uses `services/invoke.ts` to wrap IPC calls, compatible with two backends:
+
+* **Tauri Mode**: `window.__TAURI__.core.invoke(cmd, namedArgs)`
+* **pywebview Mode**: `window.pywebview.api[method](...positionalArgs)` (legacy Python backend support)
+
+The `buildTauriArgs()` function handles converting positional arguments into Tauri's named argument format.
+
+#### API Modules
+
+The API layer is split by domain and exported together:
+
+```typescript
+// services/api/index.ts
+export { coreApi }        // Core: ping, runtime, playback, model, ONNX
+export { projectApi }     // Project: new/open/save
+export { timelineApi }    // Timeline: track/clip operations
+export { paramsApi }      // Params: pitch/tension curve read/write
+export { waveformApi }    // Waveform: peak segment querying
+export { fileBrowserApi } // File Browser: directory list/audio info
+
+```
+
+### 5.4 Component Hierarchy
+
+#### TimelinePanel
+
+The most complex component, split into sub-components and hooks:
+
+```
+TimelinePanel.tsx (Entry, state orchestration + event handling)
+├── TrackList.tsx          # Left track list (select/mute/solo/vol/CRUD)
+├── TimeRuler.tsx          # Top time ruler (bar markers + playhead)
+├── BackgroundGrid.tsx     # Timeline background grid
+├── TimelineScrollArea.tsx # Scroll container (Ctrl/Alt wheel zoom, persistence)
+├── TrackLane.tsx          # Track lane (clip arrangement area)
+├── ClipItem.tsx           # Single clip rendering (waveform/fade/gain/mute)
+│   ├── ClipHeader.tsx     #   Clip header (name, color badge)
+│   ├── ClipEdgeHandles.tsx #   Trim/Fade handles
+│   └── useClipWaveformPeaks.ts  # Waveform peak data hook
+├── ClipContextMenu.tsx    # Clip context menu
+├── GlueContextMenu.tsx    # Glue menu
+├── hooks/
+│   ├── useClipDrag.ts     # Clip dragging logic
+│   ├── useEditDrag.ts     # Edit dragging (trim/fade handles)
+│   ├── useSlipDrag.ts     # Slip editing
+│   └── useKeyboardShortcuts.ts  # Keyboard shortcuts
+└── Utility Modules
+    ├── constants.ts       # Constants (row height, min width, etc.)
+    ├── math.ts            # Math tools (time ↔ pixels conversion)
+    ├── grid.ts            # Grid snapping
+    ├── paths.ts           # SVG path generation (fade curves)
+    ├── dnd.ts             # DND import parsing
+    └── clipWaveform.ts    # Waveform rendering utilities
+
+```
+
+#### PianoRollPanel
+
+Responsible for visualization and editing of pitch/tension curves:
+
+```
+PianoRollPanel.tsx (Entry)
+├── pianoRoll/render.ts              # Canvas rendering (drawPianoRoll)
+├── pianoRoll/usePianoRollData.ts    # Data fetching hook (getParamFrames)
+├── pianoRoll/usePianoRollInteractions.ts  # Interaction hook (draw/select/drag)
+├── pianoRoll/useLiveParamEditing.ts # Live param editing hook
+├── pianoRoll/useClipsPeaksForPianoRoll.ts # Waveform data hook
+└── pianoRoll/peaksCache.ts          # Peaks cache
+
+```
+
+**Editing Modes**:
+
+* **Draw Mode**: Mouse drawing/dragging to modify pitch curves.
+* **Select Mode**: Marquee selection → move/scale curves within selection.
+* Supported params: `pitch` (MIDI values), `tension`.
+
+---
+
+## 6. IPC API Documentation
+
+All frontend-backend communication is done via Tauri `invoke`. Frontend calls `invoke("commandName", { ...args })`, and backend registers the corresponding `#[tauri::command]` in `commands.rs`.
+
+### 6.1 Core Commands
+
+| Command | Args | Returns | Description |
+| --- | --- | --- | --- |
+| `ping` | None | `{ ok, message }` | Health check |
+| `get_runtime_info` | None | `RuntimeInfoPayload` | Get backend runtime info |
+| `get_timeline_state` | None | `TimelineStatePayload` | Get full timeline state |
+| `set_transport` | `playheadSec?, bpm?` | `{ ok, playhead_sec, bpm }` | Set playhead/BPM |
+| `undo_timeline` | None | `TimelineStatePayload` | Undo operation |
+| `redo_timeline` | None | `TimelineStatePayload` | Redo operation |
+
+### 6.2 Project Commands
+
+| Command | Args | Returns | Description |
+| --- | --- | --- | --- |
+| `close_window` | None | `{ ok }` | Close window (triggers save check) |
+| `get_project_meta` | None | `ProjectMetaPayload` | Get project metadata |
+| `new_project` | None | `TimelineStatePayload` | New project |
+| `open_project_dialog` | None | `{ ok, canceled?, path? }` | Popup open dialog |
+| `open_project` | `projectPath` | `TimelineStatePayload` | Open specific project |
+| `save_project` | None | `{ ok }` | Save project |
+| `save_project_as` | None | `{ ok }` | Save as |
+
+### 6.3 Timeline Commands
+
+#### Track Operations
+
+| Command | Args | Returns | Description |
+| --- | --- | --- | --- |
+| `add_track` | `name?, parentTrackId?, index?` | `TimelineStatePayload` | Add track |
+| `remove_track` | `trackId` | `TimelineStatePayload` | Remove track |
+| `move_track` | `trackId, targetIndex, parentTrackId?` | `TimelineStatePayload` | Move track |
+| `set_track_state` | `trackId, muted?, solo?, volume?, composeEnabled?, pitchAnalysisAlgo?, color?` | `TimelineStatePayload` | Set track state |
+| `select_track` | `trackId` | `TimelineStatePayload` | Select track |
+
+#### Clip Operations
+
+| Command | Args | Returns | Description |
+| --- | --- | --- | --- |
+| `add_clip` | `trackId?, name?, startSec?, lengthSec?, sourcePath?` | `TimelineStatePayload` | Add clip |
+| `remove_clip` | `clipId` | `TimelineStatePayload` | Remove clip |
+| `move_clip` | `clipId, startSec, trackId?` | `TimelineStatePayload` | Move clip |
+| `set_clip_state` | `clipId, name?, ..., playbackRate?, fadeInSec?, fadeOutSec?, color?` | `TimelineStatePayload` | Set clip state |
+| `split_clip` | `clipId, splitSec` | `TimelineStatePayload` | Split clip at position |
+| `glue_clips` | `clipIds` | `TimelineStatePayload` | Glue multiple clips |
+
+### 6.4 Param Curve Commands
+
+| Command | Args | Returns | Description |
+| --- | --- | --- | --- |
+| `get_param_frames` | `trackId, param, startFrame, frameCount, stride?` | `ParamFramesPayload` | Get param frame data |
+| `set_param_frames` | `trackId, param, startFrame, values, checkpoint?` | `{ ok }` | Write edited frames |
+
+---
+
+## 7. Build System
+
+### 7.1 Build Flow
+
+The project uses Tauri 2's standard build flow with extra stages in `build.rs`:
+
+1. `build_frontend()`: Automatically runs `npm run build` if `frontend/dist` is missing.
+2. `tauri_build::build()`: Standard Tauri build.
+3. `build_world_static()`: Compiles WORLD source via `cc` crate.
+4. `build_rubberband_static()`: Compiles Rubber Band source via `cc` crate.
+
+### 7.2 Cargo Features
+
+| Feature | Default | Description |
+| --- | --- | --- |
+| `onnx` | ✅ Enabled | Enables ONNX inference (`ort` + `ndarray`) |
+
+To build without ONNX: `cargo build --no-default-features`
+
+---
+
+## 8. Environment Variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `HIFISHIFTER_PITCH_ANALYSIS_SR` | `16000` | WORLD analysis sample rate |
+| `HIFISHIFTER_VAD_RMS_THRESHOLD` | `0.02` | VAD silence threshold (~−34 dBFS) |
+| `HIFISHIFTER_ORT_EP` | `auto` | Execution Provider: `auto` / `cuda` / `cpu` |
+| `HIFISHIFTER_ONNX_STREAM_PRIME_SEC` | `0.25` | Pre-buffering duration for ONNX stream |
+
+---
+
+## 9. Pitch Analysis Pipeline
+
+### 9.1 VAD Optimization
+
+Analysis speed is significantly improved (40-70% typical) by skipping silent regions using an RMS VAD system.
+
+### 9.2 Parallel Incremental Analysis (v3)
+
+Achieves **3-9x** speedup through parallel processing and LRU caching.
+
+* **Rayon**: Parallelizes analysis across clips.
+* **LRU Cache**: Caches results using a Blake3 hash of file metadata and clip parameters.
+* **Position Independence**: Dragging a clip does not invalidate its cache.
+
+---
+
+## 10. Renderer System
+
+### 10.1 WORLD Vocoder
+
+* **ID**: `world_vocoder`
+* **Capabilities**: Low latency, CPU-only, supports real-time.
+* **Flow**: PCM → WORLD Analysis → Modify F0 → WORLD Synthesis.
+
+### 10.2 NSF-HiFiGAN ONNX
+
+* **ID**: `nsf_hifigan_onnx`
+* **Capabilities**: High quality, supports CUDA, requires pre-buffering.
+* **Flow**: PCM → Mel extraction → ONNX Inference → Waveform.
+
+---
+
+## 11. Audio Engine
+
+* **Pitch Stream**: Uses `stretch_stream.rs` for real-time synthesis when `compose_enabled` is on.
+* **Hard-start Mode**: For ONNX renderers, outputs silence until the pre-buffer window is ready to ensure smooth playback.
+
+---
+
+## 12. Project File Format
+
+* **Format**: MessagePack (primary) + JSON (fallback).
+* **Extension**: `.hsp` (recommended) or `.json`.
+* **Path Handling**: `source_path` is converted to a relative path (relative to project file) on save and resolved to absolute on load.
+
+---
+
+## Appendix: Key Design Decisions
+
+| Decision | Selection | Reason |
+| --- | --- | --- |
+| Linking | Static WORLD + Rubber Band | Single file distribution, no runtime dependencies. |
+| Authority | Backend Authority | Avoids state desync; Undo/Redo implemented in Rust. |
+| IPC | Tauri invoke | Simple and reliable; returns full timeline snapshots. |
+| Caching | Position-independent LRU | Moving clips doesn't trigger re-analysis. |
+| UI | React + Redux Toolkit | Mature state management for complex UI. |

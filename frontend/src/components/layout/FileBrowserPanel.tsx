@@ -325,7 +325,7 @@ export const FileBrowserPanel: React.FC = () => {
                         size="1"
                         variant="ghost"
                         color="gray"
-                        title="Close"
+                        title={t("fb_close")}
                         onClick={() => dispatch(setVisible(false))}
                     >
                         <Cross2Icon />

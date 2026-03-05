@@ -5,6 +5,7 @@
  */
 
 import React from "react";
+import { useI18n } from "../i18n/I18nProvider";
 
 export interface LoadingSpinnerProps {
     size?: "sm" | "md" | "lg";
@@ -23,6 +24,7 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
     color = "currentColor",
     className = "",
 }) => {
+    const { t } = useI18n();
     const sizeClass = sizeClasses[size];
 
     return (
@@ -33,9 +35,9 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
                 borderTopColor: "transparent",
             }}
             role="status"
-            aria-label="Loading"
+            aria-label={t("aria_loading")}
         >
-            <span className="sr-only">Loading...</span>
+            <span className="sr-only">{t("loading")}</span>
         </div>
     );
 };

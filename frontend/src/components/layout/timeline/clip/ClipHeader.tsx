@@ -120,7 +120,7 @@ export const ClipHeader: React.FC<{
 
             {/* 增益拖拽把手 */}
             <div
-                title="上下拖拽调节增益 / 双击输入精确值"
+                title={t("clip_gain_drag_hint")}
                 style={{ cursor: "ns-resize" }}
                 onPointerDown={(e) => {
                     e.preventDefault();
@@ -191,7 +191,7 @@ export const ClipHeader: React.FC<{
             ) : (
                 <div
                     className="text-xs text-white/80 drop-shadow-md cursor-ns-resize"
-                    title="上下拖拽调节增益 / 双击输入精确值"
+                    title={t("clip_gain_drag_hint")}
                     onDoubleClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();

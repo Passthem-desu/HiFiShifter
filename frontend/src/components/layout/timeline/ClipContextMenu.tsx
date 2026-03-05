@@ -4,6 +4,7 @@ import type {
     FadeCurveType,
 } from "../../../features/session/sessionTypes";
 import { useI18n } from "../../../i18n/I18nProvider";
+import type { MessageKey } from "../../../i18n/messages";
 
 // ── 单条菜单项 ──────────────────────────────────────────────────────────────
 const MenuItem: React.FC<{
@@ -37,27 +38,28 @@ const Divider: React.FC = () => (
 );
 
 // ── 渐变曲线选项 ────────────────────────────────────────────────────────────
-const CURVE_OPTIONS: { value: FadeCurveType; label: string }[] = [
-    { value: "linear", label: "线性" },
-    { value: "sine", label: "正弦" },
-    { value: "exponential", label: "指数" },
-    { value: "logarithmic", label: "对数" },
-    { value: "scurve", label: "S曲线" },
+const CURVE_OPTION_KEYS: { value: FadeCurveType; key: MessageKey }[] = [
+    { value: "linear", key: "fade_curve_linear" },
+    { value: "sine", key: "fade_curve_sine" },
+    { value: "exponential", key: "fade_curve_exponential" },
+    { value: "logarithmic", key: "fade_curve_logarithmic" },
+    { value: "scurve", key: "fade_curve_scurve" },
 ];
 
 const FadeCurveRow: React.FC<{
     label: string;
     current: FadeCurveType;
     onSelect: (c: FadeCurveType) => void;
-}> = ({ label, current, onSelect }) => (
+    t: (key: MessageKey) => string;
+}> = ({ label, current, onSelect, t }) => (
     <div className="px-3 py-1.5 flex items-center gap-1.5 flex-wrap">
         <span className="text-[11px] text-qt-text/60 mr-1 shrink-0">
             {label}
         </span>
-        {CURVE_OPTIONS.map((opt) => (
+        {CURVE_OPTION_KEYS.map((opt) => (
             <button
                 key={opt.value}
-                title={opt.label}
+                title={t(opt.key)}
                 className={`px-1.5 py-0.5 rounded text-[10px] transition-colors
                     ${
                         current === opt.value
@@ -70,7 +72,7 @@ const FadeCurveRow: React.FC<{
                     onSelect(opt.value);
                 }}
             >
-                {opt.label}
+                {t(opt.key)}
             </button>
         ))}
     </div>
@@ -145,11 +147,11 @@ export const ClipContextMenu: React.FC<{
 // ── 多选菜单 ──
                 <>
                     <div className="px-3 py-1 text-[11px] text-qt-text/50 select-none">
-                    已选 {selectedClips.length} 个
+                    {t("ctx_selected_n").replace("{n}", String(selectedClips.length))}
                     </div>
                     <Divider />
                     <MenuItem
-                        label="删除所有"
+                        label={t("ctx_delete_all")}
                         danger
                         onClick={() => {
                             onDelete(ids);
@@ -157,21 +159,21 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                     <MenuItem
-                        label={allMuted ? "取消静音所有" : "静音所有"}
+                        label={allMuted ? t("ctx_unmute_all") : t("ctx_mute_all")}
                         onClick={() => {
                             onMute(ids, !allMuted);
                             close();
                         }}
                     />
                     <MenuItem
-                        label="复制所有"
+                        label={t("ctx_copy_all")}
                         onClick={() => {
                             onCopy(ids);
                             close();
                         }}
                     />
                     <MenuItem
-                        label="规格化所有"
+                        label={t("ctx_normalize_all")}
                         onClick={() => {
                             onNormalize(ids);
                             close();
@@ -191,7 +193,7 @@ export const ClipContextMenu: React.FC<{
 // ── 单选菜单 ──
                 <>
                     <MenuItem
-                        label="删除"
+                        label={t("ctx_delete")}
                         danger
                         onClick={() => {
                             onDelete([clip.id]);
@@ -206,21 +208,21 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                     <MenuItem
-                        label="重命名"
+                        label={t("ctx_rename")}
                         onClick={() => {
                             onRename(clip.id);
                             close();
                         }}
                     />
                     <MenuItem
-                        label="复制"
+                        label={t("ctx_copy")}
                         onClick={() => {
                             onCopy([clip.id]);
                             close();
                         }}
                     />
                     <MenuItem
-                        label="在播放头处分割"
+                        label={t("ctx_split_at_playhead")}
                         disabled={!playheadInClip}
                         onClick={() => {
                             onSplit(clip.id);
@@ -228,7 +230,7 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                     <MenuItem
-                        label="规格化"
+                        label={t("ctx_normalize")}
                         onClick={() => {
                             onNormalize([clip.id]);
                             close();
@@ -240,7 +242,7 @@ export const ClipContextMenu: React.FC<{
                                 <Divider />
                                 {clip.fadeInSec > 0 && (
                                     <FadeCurveRow
-                                        label="淡入"
+                                        label={t("fade_in")}
                                         current={
                                             (clip.fadeInCurve as FadeCurveType) ??
                                             "sine"
@@ -248,11 +250,12 @@ export const ClipContextMenu: React.FC<{
                                         onSelect={(c) => {
                                             onFadeCurveChange(clip.id, "in", c);
                                         }}
+                                        t={t}
                                     />
                                 )}
                                 {clip.fadeOutSec > 0 && (
                                     <FadeCurveRow
-                                        label="淡出"
+                                        label={t("fade_out")}
                                         current={
                                             (clip.fadeOutCurve as FadeCurveType) ??
                                             "sine"
@@ -264,6 +267,7 @@ export const ClipContextMenu: React.FC<{
                                                 c,
                                             );
                                         }}
+                                        t={t}
                                     />
                                 )}
                             </>

@@ -795,7 +795,7 @@ export const PianoRollPanel: React.FC = () => {
                     {editParam === "pitch" && rootTrack ? (
                         <Flex align="center" gap="2">
                             <Text size="1" color="gray">
-                                Algo
+                                {t("algo_label")}
                             </Text>
                             <Select.Root
                                 value={

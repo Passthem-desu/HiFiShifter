@@ -8,6 +8,7 @@ import React, { useEffect, useState } from "react";
 import { coreApi } from "../services/api/core";
 import type { PitchProgressPayload } from "../types/api";
 import { ProgressBar } from "./ProgressBar";
+import { useI18n } from "../i18n/I18nProvider";
 
 export interface PitchAnalysisProgressBarProps {
     /** 轮询间隔（毫秒），默认500ms */
@@ -21,6 +22,7 @@ export interface PitchAnalysisProgressBarProps {
 export const PitchAnalysisProgressBar: React.FC<
     PitchAnalysisProgressBarProps
 > = ({ pollInterval = 500, className = "", fadeOutDuration = 1000 }) => {
+    const { t } = useI18n();
     const [progress, setProgress] = useState<PitchProgressPayload | null>(null);
     const [isVisible, setIsVisible] = useState(false);
     const [isFadingOut, setIsFadingOut] = useState(false);
@@ -77,10 +79,10 @@ export const PitchAnalysisProgressBar: React.FC<
     const clipNameStr = progress.currentClipName
         ? ` "${progress.currentClipName}"`
         : "";
-    const label =
-        totalClips > 0
-            ? `正在分析${clipNameStr}${clipCountStr} ${Math.round(percentage)}%`
-            : `Analyzing... ${Math.round(percentage)}%`;
+    const label = t("pitch_analyzing_clips")
+        .replace("{clipName}", clipNameStr)
+        .replace("{clipCount}", clipCountStr)
+        .replace("{percentage}", String(Math.round(percentage)));
 
     // 预计剩余时间（秒）
     const estimatedRemainingSec = progress.etaSeconds ?? null;

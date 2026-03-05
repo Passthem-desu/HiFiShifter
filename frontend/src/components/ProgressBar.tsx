@@ -6,6 +6,7 @@
 
 import React from "react";
 import { LoadingSpinner } from "./LoadingSpinner";
+import { useI18n } from "../i18n/I18nProvider";
 
 export interface ProgressBarProps {
     percentage: number; // 0-100
@@ -24,6 +25,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
     estimatedRemaining,
     className = "",
 }) => {
+    const { t } = useI18n();
     const clampedPercentage = Math.max(0, Math.min(100, percentage));
 
     const formatTime = (seconds: number): string => {
@@ -47,7 +49,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
                 {estimatedRemaining !== null &&
                     estimatedRemaining !== undefined && (
                         <span className="text-xs text-gray-500">
-                            Est. {formatTime(estimatedRemaining)} remaining
+                            {t("progress_est_remaining").replace("{time}", formatTime(estimatedRemaining))}
                         </span>
                     )}
             </div>
@@ -65,7 +67,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
                     className="self-end rounded px-3 py-1 text-xs text-gray-400 hover:bg-gray-700 hover:text-gray-200 transition-colors"
                     type="button"
                 >
-                    Cancel
+                    {t("progress_cancel")}
                 </button>
             )}
         </div>

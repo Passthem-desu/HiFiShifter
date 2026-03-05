@@ -5,15 +5,15 @@ import type { TrackInfo } from "../../../features/session/sessionTypes";
 import type { MessageKey } from "../../../i18n/messages";
 
 /** 轨道颜色调色板（与后端 add_track 预设一致） */
-const TRACK_COLOR_PALETTE = [
-    { value: "#4f8ef7", label: "蓝" },
-    { value: "#a78bfa", label: "紫" },
-    { value: "#34d399", label: "绿" },
-    { value: "#fb923c", label: "橙" },
-    { value: "#f472b6", label: "粉" },
-    { value: "#38bdf8", label: "天蓝" },
-    { value: "#facc15", label: "黄" },
-    { value: "#f87171", label: "红" },
+const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
+    { value: "#4f8ef7", key: "color_blue" },
+    { value: "#a78bfa", key: "color_purple" },
+    { value: "#34d399", key: "color_green" },
+    { value: "#fb923c", key: "color_orange" },
+    { value: "#f472b6", key: "color_pink" },
+    { value: "#38bdf8", key: "color_sky_blue" },
+    { value: "#facc15", key: "color_yellow" },
+    { value: "#f87171", key: "color_red" },
 ];
 
 export const TrackList: React.FC<{
@@ -480,7 +480,7 @@ export const TrackList: React.FC<{
                                                 <button
                                                     className="w-3.5 h-3.5 rounded-full border border-white/20 hover:scale-125 transition-transform cursor-pointer"
                                                     style={{ backgroundColor: track.color || "#4f8ef7" }}
-                                                    title="更改轨道颜色"
+                                                    title={t("track_change_color")}
                                                     onPointerDown={(e) => e.stopPropagation()}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -495,10 +495,10 @@ export const TrackList: React.FC<{
                                                         style={{ width: 120 }}
                                                         data-track-color-picker
                                                     >
-                                                        {TRACK_COLOR_PALETTE.map((opt) => (
+                                                        {TRACK_COLOR_PALETTE_KEYS.map((opt) => (
                                                             <button
                                                                 key={opt.value}
-                                                                title={opt.label}
+                                                                title={t(opt.key)}
                                                                 className={`w-4 h-4 rounded-full transition-transform hover:scale-125 ${
                                                                     (track.color || "#4f8ef7") === opt.value
                                                                         ? "ring-2 ring-white/80 scale-110"
