@@ -1754,12 +1754,13 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
 /// 后面的 clip 直接覆盖前面的（非零值覆盖，零值不覆盖）。
 ///
 /// # 返回值
-/// - `Some(Vec<f32>)`：所有 clip 缓存均命中，组装成功
-/// - `None`：至少有一个 clip 缓存未命中，等待异步分析完成后重试
+/// - `Some((Vec<f32>, true))`：所有 clip 缓存均命中，组装成功
+/// - `Some((Vec<f32>, false))`：部分 clip 缓存未命中，返回已有部分的曲线（渐进更新）
+/// - `None`：内部错误（实际上不会发生）
 fn assemble_pitch_orig_from_cache(
     tl: &crate::state::TimelineState,
     root_track_id: &str,
-) -> Option<Vec<f32>> {
+) -> Option<(Vec<f32>, bool)> {
     let fp = tl.frame_period_ms();
     let target_frames = tl.target_param_frames(fp);
     let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 { tl.bpm } else { 120.0 };
@@ -1777,13 +1778,14 @@ fn assemble_pitch_orig_from_cache(
         .collect();
 
     if clips.is_empty() {
-        // 没有 clip，直接返回全零曲线
-        return Some(vec![0.0f32; target_frames]);
+        // 没有 clip，直接返回全零曲线（视为全部命中）
+        return Some((vec![0.0f32; target_frames], true));
     }
 
     let cache = crate::pitch_clip::global_cache().lock().unwrap_or_else(|e| e.into_inner());
 
     let mut out = vec![0.0f32; target_frames];
+    let mut all_cache_hit = true;
 
     // 按 z-order 从低到高（tl.clips 顺序）写入，后面的 clip 覆盖前面的
     for clip in &clips {
@@ -1792,6 +1794,7 @@ fn assemble_pitch_orig_from_cache(
             Some(c) => c,
             None => {
                 // 缓存未命中，跳过该 clip 继续组装（渐进更新）
+                all_cache_hit = false;
                 continue;
             }
         };
@@ -1847,7 +1850,7 @@ fn assemble_pitch_orig_from_cache(
         }
     }
 
-    Some(out)
+    Some((out, all_cache_hit))
 }
 
 /// Returns whether pitch analysis is currently pending (scheduled or already inflight).
@@ -1868,9 +1871,9 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
         assemble_pitch_orig_from_cache(&tl, root_track_id)
     };
 
-    let Some(curve) = curve_opt else {
-        // 有 clip 缓存未命中，等待 ClipPitchReady 事件触发重试
-        return true; // 返回 true 表示"仍在等待中"
+    let Some((curve, all_cache_hit)) = curve_opt else {
+        // assemble_pitch_orig_from_cache 目前永远返回 Some，此分支保留作为安全兜底
+        return true;
     };
 
     // 将组装好的曲线写入 state
@@ -1882,7 +1885,13 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
         if current_key == job.key {
             if let Some(entry) = tl.params_by_root_track.get_mut(&job.root_track_id) {
                 entry.pitch_orig = curve;
-                entry.pitch_orig_key = Some(job.key.clone());
+                // 只有所有 clip 缓存均命中时才标记 key 为已完成
+                // 否则保持 pitch_orig_key 为 None，确保后续 clip 完成时仍会触发推送
+                if all_cache_hit {
+                    entry.pitch_orig_key = Some(job.key.clone());
+                } else {
+                    entry.pitch_orig_key = None;
+                }
 
                 // 如果用户尚未手动编辑，保持 edit 与 orig 同步
                 if !entry.pitch_edit_user_modified {

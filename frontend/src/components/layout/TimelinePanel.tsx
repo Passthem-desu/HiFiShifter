@@ -16,15 +16,15 @@ import {
     importAudioAtPosition,
     importAudioFileAtPosition,
     setClipStateRemote,
+    setClipGain,
     setClipFades,
     glueClipsRemote,
-    optimisticUpdateClipColor,
-    rollbackClipColor,
     removeClipRemote,
     splitClipRemote,
 } from "../../features/session/sessionSlice";
 
 import type { ClipTemplate } from "../../features/session/sessionTypes";
+import { dbToGain } from "./timeline/math";
 import { useClipDrag } from "./timeline/hooks/useClipDrag";
 import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
@@ -1207,33 +1207,20 @@ export const TimelinePanel: React.FC = () => {
                                         : { fadeOutCurve: curve }),
                                 }));
                             }}
-                            onColorChange={(clipId, color) => {
-                                // �ֹ۸��£�������ӳ�� UI
-                                const prevClip = sessionRef.current.clips.find(
-                                    (c) => c.id === clipId,
-                                );
-                                const prevColor = prevClip?.color ?? "emerald";
-                                dispatch(
-                                    optimisticUpdateClipColor({ clipId, color }),
-                                );
-                                void dispatch(
-                                    setClipStateRemote({ clipId, color }),
-                                ).then((result) => {
-                                    // ���ʧ��ʱ�ع���ɫ
-                                    if (
-                                        result.type.endsWith("/rejected") ||
-                                        !(result.payload as { ok?: boolean })?.ok
-                                    ) {
-                                        dispatch(
-                                            rollbackClipColor({
-                                                clipId,
-                                                color: prevColor as typeof color,
-                                            }),
-                                        );
-                                    }
-                                });
-                            }}
-                        />
+                            onNormalize={(ids) => {
+                                for (const id of ids) {
+                                    const waveform = sessionRef.current.clipWaveforms[id];
+                                    if (!waveform || waveform.length === 0) continue;
+                                    const peak = Math.max(...waveform.map(Math.abs));
+                                    if (peak <= 0) continue;
+                                    const newGain = Math.min(
+                                        Math.max(1.0 / peak, dbToGain(-12)),
+                                        dbToGain(12),
+                                    );
+                                    dispatch(setClipGain({ clipId: id, gain: newGain }));
+                                    void dispatch(setClipStateRemote({ clipId: id, gain: newGain }));
+                                }
+                            }}                        />
                     );
                 })() : null}
             </Flex>

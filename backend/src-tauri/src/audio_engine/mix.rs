@@ -21,10 +21,11 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
         return None;
     }
 
-    let src_pcm = clip.src.pcm.as_slice();
-    let src_frames = clip.src.frames as u64;
-    let loop_len = clip.src_end_frame.saturating_sub(clip.src_start_frame) as f64;
-
+    // 检查clip是否需要pitch edit
+    // 注意：这里需要timeline状态来检测pitch edit，但在audio callback中无法获取timeline
+    // 因此我们依赖clip.rendered_pcm的存在来判断是否需要pitch edit
+    // 如果clip需要pitch edit但没有rendered_pcm，说明尚未合成完成，返回静音
+    
     // 次高优先级：stretch_stream ring（实时拉伸缓存）
     if let Some(stream) = clip.stretch_stream.as_ref() {
         if let Some((sl, sr)) = stream.read_frame(local) {
@@ -32,40 +33,12 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
         }
     }
 
-    // Fallback: 线性插值采样
-    let src_pos = if clip.repeat {
-        if loop_len <= 1.0 {
-            return None;
-        }
-        let within = (local_adj * clip.playback_rate).rem_euclid(loop_len);
-        (clip.src_start_frame as f64) + within
-    } else {
-        (clip.src_start_frame as f64) + local_adj * clip.playback_rate
-    };
-
-    if !clip.repeat && src_pos + 1.0 >= clip.src_end_frame as f64 {
-        return None;
-    }
-
-    let i0 = src_pos.floor().max(0.0) as u64;
-    if i0 >= src_frames {
-        return None;
-    }
-    let mut i1 = i0.saturating_add(1);
-    if clip.repeat {
-        if i1 >= clip.src_end_frame {
-            i1 = clip.src_start_frame;
-        }
-    } else if i1 >= src_frames {
-        return None;
-    }
-
-    let frac = (src_pos - i0 as f64) as f32;
-    let i0u = i0 as usize;
-    let i1u = i1 as usize;
-    let l = src_pcm[i0u * 2] + (src_pcm[i1u * 2] - src_pcm[i0u * 2]) * frac;
-    let r = src_pcm[i0u * 2 + 1] + (src_pcm[i1u * 2 + 1] - src_pcm[i0u * 2 + 1]) * frac;
-    Some((l, r))
+    // 如果clip需要pitch edit但没有rendered_pcm，返回静音（而不是fallback到源PCM）
+    // 注意：在audio callback中无法检测pitch edit状态，我们依赖clip.rendered_pcm的存在
+    // 如果clip有pitch edit需求，rendered_pcm应该存在；如果不存在，说明尚未合成完成
+    
+    // 返回静音表示clip尚未就绪
+    None
 }
 
 pub(crate) fn mix_snapshot_clips_into_scratch(

@@ -533,3 +533,52 @@ pub fn is_pitch_edit_backend_available(timeline: &TimelineState) -> bool {
 pub fn semitone_to_ratio(semitones: f64) -> f64 {
     semitone_ratio(semitones)
 }
+
+/// 检测指定clip是否需要pitch edit
+/// 返回true表示该clip需要pitch edit处理
+pub fn does_clip_need_pitch_edit(
+    timeline: &TimelineState,
+    clip: &crate::state::Clip,
+    clip_start_sec: f64,
+) -> bool {
+    let selected = timeline
+        .selected_track_id
+        .clone()
+        .or_else(|| timeline.tracks.first().map(|t| t.id.clone()))
+        .unwrap_or_default();
+    let Some(root) = timeline.resolve_root_track_id(&selected) else {
+        return false;
+    };
+
+    let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
+        return false;
+    };
+    if clip_root != root {
+        return false;
+    }
+
+    let track = timeline.tracks.iter().find(|t| t.id == root);
+    let Some(track) = track else {
+        return false;
+    };
+    if !track.compose_enabled {
+        return false;
+    }
+
+    let algo = PitchEditAlgorithm::from_track_algo(&track.pitch_analysis_algo);
+    if matches!(algo, PitchEditAlgorithm::Bypass) {
+        return false;
+    }
+
+    let entry = timeline.params_by_root_track.get(&root);
+    let Some(entry) = entry else {
+        return false;
+    };
+
+    let frame_period_ms = entry.frame_period_ms.max(0.1);
+    let pitch_edit = entry.pitch_edit.as_slice();
+
+    // 检查clip时间范围内是否有用户设置的pitch edit
+    let clip_end_sec = clip_start_sec + clip.duration_sec.unwrap_or(0.0);
+    any_user_edit_in_range(frame_period_ms, pitch_edit, clip_start_sec, clip_end_sec)
+}

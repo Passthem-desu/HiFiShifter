@@ -502,38 +502,12 @@ export const PianoRollPanel: React.FC = () => {
         [commitStrokeBase, notifyLiveEditEnded],
     );
 
-    // C 键按下时才显示 detectedPitchCurve
-    const [cKeyDown, setCKeyDown] = useState(false);
-    const cKeyDownRef = useRef(false);
-
-    useEffect(() => {
-        function onKeyDown(e: KeyboardEvent) {
-            if (e.key === "c" || e.key === "C") {
-                if (!cKeyDownRef.current) {
-                    cKeyDownRef.current = true;
-                    setCKeyDown(true);
-                }
-            }
-        }
-        function onKeyUp(e: KeyboardEvent) {
-            if (e.key === "c" || e.key === "C") {
-                cKeyDownRef.current = false;
-                setCKeyDown(false);
-            }
-        }
-        window.addEventListener("keydown", onKeyDown);
-        window.addEventListener("keyup", onKeyUp);
-        return () => {
-            window.removeEventListener("keydown", onKeyDown);
-            window.removeEventListener("keyup", onKeyUp);
-        };
-    }, []);
-
     // 从 store 中的 clipPitchCurves 转换为 DetectedPitchCurve[] 供 drawPianoRoll 使用。
-    // 仅在 pitch 模式下且 C 键按下时有意义，其他情况下传空数组以避免不必要的计算。
+    // 仅在 pitch 模式下且轨道 Compose 开启时显示，其他情况下传空数组以避免不必要的计算。
     const detectedPitchCurves = useMemo((): DetectedPitchCurve[] => {
         if (editParam !== "pitch") return [];
-        if (!cKeyDown) return [];        return Object.entries(s.clipPitchCurves)
+        if (!rootTrack?.composeEnabled) return [];
+        return Object.entries(s.clipPitchCurves)
             .filter(([clipId]) => {
                 // 只保留属于当前轨道组内的 clip，显示 root 及所有子轨道的 detected curve
                 const clip = s.clips.find((cl) => cl.id === clipId);
@@ -550,7 +524,7 @@ export const PianoRollPanel: React.FC = () => {
                     clipLengthSec: clip ? Number(clip.lengthSec ?? 0) : Infinity,
                 };
             });
-    }, [editParam, cKeyDown, s.clipPitchCurves, s.clips, groupTrackIds]);
+    }, [editParam, rootTrack, s.clipPitchCurves, s.clips, groupTrackIds]);
 
     // 检测音高曲线更新时触发重绘
     useEffect(() => {

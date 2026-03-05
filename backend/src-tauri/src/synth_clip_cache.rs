@@ -14,6 +14,9 @@ use std::sync::Arc;
 
 use crate::pitch_editing::PitchCurvesSnapshot;
 
+// 导入 clip 渲染状态管理器
+use crate::clip_rendering_state::{ClipRenderingState, global_clip_rendering_state};
+
 // ─── 缓存容量 ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_CAPACITY: usize = 64;
@@ -136,6 +139,86 @@ static GLOBAL_SYNTH_CLIP_CACHE: OnceLock<Mutex<SynthClipCache>> = OnceLock::new(
 /// WORLD 和 ONNX 共享同一个缓存实例。
 pub fn global_synth_clip_cache() -> &'static Mutex<SynthClipCache> {
     GLOBAL_SYNTH_CLIP_CACHE.get_or_init(|| Mutex::new(SynthClipCache::new(DEFAULT_CAPACITY)))
+}
+
+// ─── Clip 渲染状态集成 ──────────────────────────────────────────────────────────
+
+/// 检查 clip 是否已渲染完成（缓存命中）
+pub fn is_clip_rendered(clip_id: &str, param_hash: u64) -> bool {
+    let key = SynthClipCacheKey {
+        clip_id: clip_id.to_string(),
+        param_hash,
+    };
+    
+    let mut cache = global_synth_clip_cache()
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    
+    cache.get(&key).is_some()
+}
+
+/// 设置 clip 渲染状态
+pub fn set_clip_rendering_state(clip_id: &str, state: ClipRenderingState, progress: f32, error: Option<String>) {
+    let mut state_manager = global_clip_rendering_state()
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    
+    state_manager.set_state(clip_id, state, progress, error);
+}
+
+/// 获取 clip 渲染状态
+pub fn get_clip_rendering_state(clip_id: &str) -> Option<ClipRenderingState> {
+    let state_manager = global_clip_rendering_state()
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    
+    state_manager.get_state(clip_id).map(|info| info.state)
+}
+
+/// 检查 clip 是否就绪（缓存命中且状态为 Ready）
+pub fn is_clip_ready(clip_id: &str, param_hash: u64) -> bool {
+    let state_manager = global_clip_rendering_state()
+        .lock()
+        .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+    
+    state_manager.is_ready(clip_id) && is_clip_rendered(clip_id, param_hash)
+}
+
+/// 标记 clip 渲染开始
+pub fn mark_clip_rendering_start(clip_id: &str) {
+    set_clip_rendering_state(clip_id, ClipRenderingState::Rendering, 0.0, None);
+}
+
+/// 标记 clip 渲染完成
+pub fn mark_clip_rendering_complete(clip_id: &str, param_hash: u64, entry: SynthClipCacheEntry) {
+    // 插入缓存
+    let key = SynthClipCacheKey {
+        clip_id: clip_id.to_string(),
+        param_hash,
+    };
+    
+    let mut cache = global_synth_clip_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    
+    cache.insert(key, entry);
+    
+    // 更新状态
+    set_clip_rendering_state(clip_id, ClipRenderingState::Ready, 1.0, None);
+}
+
+/// 标记 clip 渲染失败
+pub fn mark_clip_rendering_failed(clip_id: &str, error: String) {
+    set_clip_rendering_state(clip_id, ClipRenderingState::Failed, 0.0, Some(error));
+}
+
+/// 清理超时的渲染任务
+pub fn cleanup_timeout_rendering_tasks() -> Vec<String> {
+    let mut state_manager = global_clip_rendering_state()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    
+    state_manager.cleanup_timeouts()
 }
 
 // ─── param_hash 计算 ───────────────────────────────────────────────────────────

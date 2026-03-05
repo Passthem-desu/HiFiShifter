@@ -113,8 +113,8 @@ export function useEditDrag(deps: {
             if (drag.type === "gain") {
                 const movementY = (ev.movementY ?? 0) as number;
                 const deltaDb = -movementY * 0.25;
-                const nextDb = clamp(gainToDb(clipNow.gain) + deltaDb, -24, 12);
-                const nextGain = clamp(dbToGain(nextDb), 0, 2);
+                const nextDb = clamp(gainToDb(clipNow.gain) + deltaDb, -12, 12);
+                const nextGain = clamp(dbToGain(nextDb), dbToGain(-12), dbToGain(12));
                 dispatch(setClipGain({ clipId: drag.clipId, gain: nextGain }));
                 return;
             }

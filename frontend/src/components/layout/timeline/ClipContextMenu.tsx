@@ -5,15 +5,6 @@ import type {
 } from "../../../features/session/sessionTypes";
 import { useI18n } from "../../../i18n/I18nProvider";
 
-export type ClipColor = "emerald" | "blue" | "violet" | "amber";
-
-const COLOR_OPTIONS: { value: ClipColor; label: string; bg: string }[] = [
-    { value: "emerald", label: "绿", bg: "bg-emerald-500" },
-    { value: "blue", label: "蓝", bg: "bg-blue-500" },
-    { value: "violet", label: "紫", bg: "bg-violet-500" },
-    { value: "amber", label: "橙", bg: "bg-amber-500" },
-];
-
 // ── 单条菜单项 ──────────────────────────────────────────────────────────────
 const MenuItem: React.FC<{
     label: string;
@@ -85,29 +76,6 @@ const FadeCurveRow: React.FC<{
     </div>
 );
 
-// ── 颜色子菜单行 ────────────────────────────────────────────────────────────
-const ColorRow: React.FC<{
-    currentColor: ClipColor;
-    onSelect: (c: ClipColor) => void;
-}> = ({ currentColor, onSelect }) => (
-    <div className="px-3 py-1.5 flex items-center gap-2">
-        <span className="text-[11px] text-qt-text/60 mr-1">颜色</span>
-        {COLOR_OPTIONS.map((opt) => (
-            <button
-                key={opt.value}
-                title={opt.label}
-                className={`w-4 h-4 rounded-full ${opt.bg} transition-transform
-                    ${currentColor === opt.value ? "ring-2 ring-white/80 scale-110" : "hover:scale-110"}`}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    onSelect(opt.value);
-                }}
-            />
-        ))}
-    </div>
-);
-
 // ── 主组件 ──────────────────────────────────────────────────────────────────
 export const ClipContextMenu: React.FC<{
     x: number;
@@ -125,7 +93,7 @@ export const ClipContextMenu: React.FC<{
     onCopy: (ids: string[]) => void;
     onSplit: (clipId: string) => void;
     onGlue: (ids: string[]) => void;
-    onColorChange: (clipId: string, color: ClipColor) => void;
+    onNormalize: (ids: string[]) => void;
     onFadeCurveChange?: (
         clipId: string,
         target: "in" | "out",
@@ -144,7 +112,7 @@ export const ClipContextMenu: React.FC<{
     onCopy,
     onSplit,
     onGlue,
-    onColorChange,
+    onNormalize,
     onFadeCurveChange,
 }) => {
     const { t } = useI18n();
@@ -202,6 +170,13 @@ export const ClipContextMenu: React.FC<{
                             close();
                         }}
                     />
+                    <MenuItem
+                        label="规格化所有"
+                        onClick={() => {
+                            onNormalize(ids);
+                            close();
+                        }}
+                    />
                     <Divider />
                     <MenuItem
                         label={t("glue")}
@@ -252,11 +227,10 @@ export const ClipContextMenu: React.FC<{
                             close();
                         }}
                     />
-                    <Divider />
-                    <ColorRow
-                        currentColor={clip.color as ClipColor}
-                        onSelect={(c) => {
-                            onColorChange(clip.id, c);
+                    <MenuItem
+                        label="规格化"
+                        onClick={() => {
+                            onNormalize([clip.id]);
                             close();
                         }}
                     />

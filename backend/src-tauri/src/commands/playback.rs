@@ -43,10 +43,9 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
             return serde_json::json!({"ok": true, "playing": "original", "start_sec": start_sec});
         }
 
-        // ── 有 pitch edit：Clip 级预渲染 + 实时混音 ──────────────────────────
-        // 后台线程逐 clip 渲染，渲染完成后写入 RenderedClipCache，
-        // 然后通过 update_timeline 触发 rebuild snapshot（自动查询缓存填充 rendered_pcm），
-        // 最后 set_playing 开始播放。
+        // ── 有 pitch edit：Clip 级增量预渲染 + 实时混音 ──────────────────────────
+        // 后台线程按时间线顺序逐 clip 渲染，第一个 clip 渲染完即开始播放
+        // 播放过程中继续后台渲染后续 clip，音频回调中遇到未合成 clip 时静音等待
         if let Some(app) = state.app_handle.get().cloned() {
             let engine = state.audio_engine.clone();
             let tl_for_render = timeline.clone();
@@ -64,11 +63,16 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     },
                 );
 
-                // 收集需要预渲染的 clip 列表
-                let clips_to_render = collect_clips_needing_render(&tl_for_render, engine_sr);
+                // 收集需要预渲染的 clip 列表，按时间线顺序排序
+                let mut clips_to_render = collect_clips_needing_render(&tl_for_render, engine_sr);
+                clips_to_render.sort_by(|a, b| {
+                    a.clip.start_sec.total_cmp(&b.clip.start_sec)
+                });
+                
                 let total = clips_to_render.len().max(1);
                 let mut rendered_count = 0u32;
                 let mut any_error = false;
+                let mut first_clip_rendered = false;
 
                 for clip_render_info in &clips_to_render {
                     // 检查缓存是否已命中
@@ -87,6 +91,14 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                     target: Some("original".to_string()),
                                 },
                             );
+                            
+                            // 如果这是第一个clip且缓存命中，立即开始播放
+                            if !first_clip_rendered {
+                                first_clip_rendered = true;
+                                engine.seek_sec(render_start_sec);
+                                engine.update_timeline(tl_for_render.clone());
+                                engine.set_playing(true, Some("original"));
+                            }
                             continue;
                         }
                     }
@@ -108,6 +120,16 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                 .lock()
                                 .unwrap_or_else(|e| e.into_inner());
                             cache.insert(clip_render_info.cache_key.clone(), entry);
+                            
+                            // 更新clip渲染状态为已完成
+                            if let Ok(mut state_mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
+                                state_mgr.set_state(
+                                    &clip_render_info.clip.id,
+                                    crate::clip_rendering_state::ClipRenderingState::Ready,
+                                    1.0,
+                                    None
+                                );
+                            }
                         }
                         Err(e) => {
                             eprintln!(
@@ -115,6 +137,16 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                 clip_render_info.clip.id, e
                             );
                             any_error = true;
+                            
+                            // 标记clip渲染失败
+                            if let Ok(mut state_mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
+                                state_mgr.set_state(
+                                    &clip_render_info.clip.id,
+                                    crate::clip_rendering_state::ClipRenderingState::Failed,
+                                    0.0,
+                                    Some(e.clone())
+                                );
+                            }
                         }
                     }
 
@@ -128,6 +160,14 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                             target: Some("original".to_string()),
                         },
                     );
+
+                    // 第一个clip渲染完成后立即开始播放
+                    if !first_clip_rendered {
+                        first_clip_rendered = true;
+                        engine.seek_sec(render_start_sec);
+                        engine.update_timeline(tl_for_render.clone());
+                        engine.set_playing(true, Some("original"));
+                    }
                 }
 
                 // 推送渲染完成
@@ -139,12 +179,6 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                         target: Some("original".to_string()),
                     },
                 );
-
-                // 渲染完成 → 通过 update_timeline 触发 rebuild snapshot
-                // snapshot 中会自动查询 RenderedClipCache 填充 rendered_pcm
-                engine.seek_sec(render_start_sec);
-                engine.update_timeline(tl_for_render);
-                engine.set_playing(true, Some("original"));
             });
         }
 
@@ -163,7 +197,7 @@ struct ClipRenderInfo {
 
 /// 收集 timeline 中所有需要预渲染的 clip。
 ///
-/// 返回值中只包含 compose_enabled 且 pitch_edit 有实际变化的 clip。
+/// 返回值中只包含需要 pitch edit 的 clip。
 fn collect_clips_needing_render(
     timeline: &crate::state::TimelineState,
     engine_sr: u32,
@@ -178,26 +212,16 @@ fn collect_clips_needing_render(
         let Some(source_path) = clip.source_path.as_deref() else {
             continue;
         };
-        let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
-            continue;
-        };
-        let track = match timeline.tracks.iter().find(|t| t.id == clip_root) {
-            Some(t) => t,
-            None => continue,
-        };
-        if !track.compose_enabled {
-            continue;
-        }
-        let entry = match timeline.params_by_root_track.get(&clip_root) {
-            Some(e) => e,
-            None => continue,
-        };
-        let pitch_edit = entry.pitch_edit.as_slice();
-        let frame_period_ms = entry.frame_period_ms.max(0.1);
-
-        // 只渲染有实际 pitch 变化的 clip
-        let has_edit = pitch_edit.iter().any(|&v| v.is_finite() && v > 0.0);
-        if !has_edit {
+        
+        // 使用新的检测逻辑：检查clip是否需要pitch edit
+        let clip_start_sec = clip.start_sec.max(0.0);
+        let needs_pitch_edit = crate::pitch_editing::does_clip_need_pitch_edit(
+            timeline,
+            clip,
+            clip_start_sec,
+        );
+        
+        if !needs_pitch_edit {
             continue;
         }
 
@@ -208,6 +232,17 @@ fn collect_clips_needing_render(
         let start_frame = (clip.start_sec.max(0.0) * sr as f64).round().max(0.0) as u64;
         let end_frame = start_frame
             + (clip.length_sec.max(0.0) * sr as f64).round().max(1.0) as u64;
+
+        // 获取pitch edit参数
+        let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
+            continue;
+        };
+        let entry = match timeline.params_by_root_track.get(&clip_root) {
+            Some(e) => e,
+            None => continue,
+        };
+        let pitch_edit = entry.pitch_edit.as_slice();
+        let frame_period_ms = entry.frame_period_ms.max(0.1);
 
         let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
             &clip.id,

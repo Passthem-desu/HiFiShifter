@@ -10,6 +10,7 @@ mod synth_clip_cache;
 mod clip_pitch_cache;
 mod pitch_progress;
 mod renderer;
+mod clip_rendering_state;
 
 #[cfg(feature = "onnx")]
 mod nsf_hifigan_onnx;

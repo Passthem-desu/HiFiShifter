@@ -1,5 +1,4 @@
 import React, { useRef, useState } from "react";
-import { SpeakerOffIcon } from "@radix-ui/react-icons";
 import type { ClipInfo } from "../../../../features/session/sessionTypes";
 import { CLIP_HEADER_HEIGHT } from "../constants";
 import { gainToDb } from "../math";
@@ -54,8 +53,8 @@ export const ClipHeader: React.FC<{
     function commitGainEdit() {
         const parsed = parseFloat(gainInputVal);
         if (!isNaN(parsed)) {
-            // clamp 到 -24 ~ +12 dB
-            const clamped = Math.min(12, Math.max(-24, parsed));
+            // clamp 到 -12 ~ +12 dB
+            const clamped = Math.min(12, Math.max(-12, parsed));
             onGainCommit?.(clip.id, clamped);
         }
         setGainEditing(false);
@@ -104,7 +103,7 @@ export const ClipHeader: React.FC<{
         >
             {/* 静音按钮 */}
             <button
-                className={`w-5 h-4 rounded flex items-center justify-center border transition-all ${clip.muted ? "bg-qt-danger-bg text-qt-danger-text border-qt-danger-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-danger-border hover:bg-qt-danger-bg hover:text-qt-danger-text"}`}
+                className={`w-5 h-4 rounded flex items-center justify-center border transition-all text-[10px] font-bold ${clip.muted ? "bg-qt-danger-bg text-qt-danger-text border-qt-danger-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-danger-border hover:bg-qt-danger-bg hover:text-qt-danger-text"}`}
                 onPointerDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -116,7 +115,7 @@ export const ClipHeader: React.FC<{
                 }}
                 title={clip.muted ? t("clip_unmute") : t("clip_mute")}
             >
-                <SpeakerOffIcon width={10} height={10} />
+                M
             </button>
 
             {/* 增益拖拽把手 */}

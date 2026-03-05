@@ -473,54 +473,83 @@ function AppInner() {
                 justify="between"
                 className="h-6 bg-qt-window border-t border-qt-border px-1 select-none gap-2"
             >
-                <Text size="1" color={error ? "red" : "gray"} className="truncate min-w-0">
+                <Flex align="center" gap="1" className="truncate min-w-0">
                     {stretching.active ? (
-                        <>
-                            <span style={{ color: "var(--accent-9)" }}>
-                                {t("status_stretching" as any)}
-                                {stretching.clipName ? ` "${stretching.clipName}"` : ""}
-                            </span>
-                            {" | "}
-                        </>
+                        <span
+                            className="shrink-0 rounded px-1 py-0 text-xs font-medium"
+                            style={{
+                                background: "var(--accent-3)",
+                                color: "var(--accent-11)",
+                                fontSize: "11px",
+                                lineHeight: "16px",
+                            }}
+                        >
+                            {t("status_stretching" as any)}
+                            {stretching.clipName ? ` "${stretching.clipName}"` : ""}
+                        </span>
                     ) : null}
                     {pitchAnalysisText ? (
-                        <>
-                            <span style={{ color: "var(--accent-9)" }}>
-                                {pitchAnalysisText}
-                            </span>
-                            {" | "}
-                        </>
+                        <span
+                            className="shrink-0 rounded px-1 py-0 text-xs font-medium"
+                            style={{
+                                background: "var(--accent-3)",
+                                color: "var(--accent-11)",
+                                fontSize: "11px",
+                                lineHeight: "16px",
+                            }}
+                        >
+                            {pitchAnalysisText}
+                        </span>
                     ) : null}
-                    {errorText}
                     {pianoRollStatus.dataLoading ? (
-                        <>
-                            {" | "}
-                            <span style={{ color: "var(--accent-9)" }}>
-                                {t("loading")}
-                            </span>
-                        </>
+                        <span
+                            className="shrink-0 rounded px-1 py-0 text-xs font-medium"
+                            style={{
+                                background: "var(--accent-3)",
+                                color: "var(--accent-11)",
+                                fontSize: "11px",
+                                lineHeight: "16px",
+                            }}
+                        >
+                            {t("loading")}
+                        </span>
                     ) : null}
                     {pianoRollStatus.asyncRefreshActive ? (
-                        <>
-                            {" | "}
-                            <span style={{ color: "var(--accent-9)" }}>
-                                {(t as any)("refreshing_pitch_data") || "Refreshing pitch data"}
-                                {pianoRollStatus.asyncRefreshProgress > 0
-                                    ? ` ${Math.round(pianoRollStatus.asyncRefreshProgress)}%`
-                                    : ""}
-                            </span>
-                        </>
+                        <span
+                            className="shrink-0 rounded px-1 py-0 text-xs font-medium"
+                            style={{
+                                background: "var(--accent-3)",
+                                color: "var(--accent-11)",
+                                fontSize: "11px",
+                                lineHeight: "16px",
+                            }}
+                        >
+                            {(t as any)("refreshing_pitch_data") || "Refreshing pitch data"}
+                            {pianoRollStatus.asyncRefreshProgress > 0
+                                ? ` ${Math.round(pianoRollStatus.asyncRefreshProgress)}%`
+                                : ""}
+                        </span>
                     ) : null}
                     {rendering.active ? (
-                        <>
-                            {" | "}
+                        <span
+                            className="shrink-0 rounded px-1 py-0 text-xs font-medium"
+                            style={{
+                                background: "var(--accent-3)",
+                                color: "var(--accent-11)",
+                                fontSize: "11px",
+                                lineHeight: "16px",
+                            }}
+                        >
                             {t("rendering")}
                             {rendering.progress != null
                                 ? ` ${Math.round(rendering.progress * 100)}%`
                                 : ""}
-                        </>
+                        </span>
                     ) : null}
-                </Text>
+                    <Text size="1" color={error ? "red" : "gray"} className="truncate">
+                        {errorText}
+                    </Text>
+                </Flex>
                 <Text size="1" color="gray" className="shrink-0 whitespace-nowrap">
                     {t("status_device")}: {runtimeDevice} · {t("status_model")}:
                     {runtimeModelLoaded ? t("status_ok") : t("status_na")} ·{" "}
