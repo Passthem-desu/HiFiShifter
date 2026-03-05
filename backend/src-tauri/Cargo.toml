@@ -1,12 +1,17 @@
 [package]
-name = "backend"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-edition = "2021"
-default-run = "backend"
+name = "HiFiShifter"
+version = "0.0.1"
+description = "A high-quality audio shifter"
+authors = ["ARounder"]
+edition = "2026"
+default-run = "HiFiShifter"
+autobins = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "HiFiShifter"
+path = "src/main.rs"
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary

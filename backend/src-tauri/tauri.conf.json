@@ -25,7 +25,7 @@
     },
     "bundle": {
         "active": true,
-        "targets": "all",
+        "targets": ["nsis"],
         "resources": {
             "resources/models/nsf_hifigan/pc_nsf_hifigan.onnx": "models/nsf_hifigan/pc_nsf_hifigan.onnx",
             "resources/models/nsf_hifigan/config.json": "models/nsf_hifigan/config.json"
