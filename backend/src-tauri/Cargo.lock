@@ -3,6 +3,34 @@
 version = 4
 
 [[package]]
+name = "HiFiShifter"
+version = "0.0.1"
+dependencies = [
+ "arc-swap",
+ "base64 0.22.1",
+ "blake3",
+ "cc",
+ "cpal",
+ "hound",
+ "lru",
+ "ndarray 0.16.1",
+ "num-complex",
+ "ort",
+ "rayon",
+ "rfd",
+ "rmp-serde",
+ "rodio",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "symphonia",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "uuid",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -305,34 +333,6 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
-
-[[package]]
-name = "backend"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "base64 0.22.1",
- "blake3",
- "cc",
- "cpal",
- "hound",
- "lru",
- "ndarray 0.16.1",
- "num-complex",
- "ort",
- "rayon",
- "rfd",
- "rmp-serde",
- "rodio",
- "rustfft",
- "serde",
- "serde_json",
- "symphonia",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "uuid",
-]
 
 [[package]]
 name = "base64"
