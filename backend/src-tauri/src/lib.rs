@@ -123,8 +123,8 @@ pub fn run() {
                                 name
                             };
                             rfd::FileDialog::new()
-                                .add_filter("HiFiShifter Project", &["hsp", "json"])
-                                .set_file_name(format!("{}.hsp", default_name))
+                                .add_filter("HiFiShifter Project", &["hshp", "hsp", "json"])
+                                .set_file_name(format!("{}.hshp", default_name))
                                 .save_file()
                                 .map(|p| p.display().to_string())
                         };

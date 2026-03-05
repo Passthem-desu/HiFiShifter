@@ -11,7 +11,7 @@ HifiShifter is a graphical vocal editing and synthesis tool based on deep learni
 - **Multi-parameter editing**: Supports editing not only pitch but also tension, with abstract interfaces reserved for future parameter extensions.
 - **Selection editing (generic abstraction)**: Supports selecting sample points, highlighting selected segments, and dragging entire selections up/down (applies to current parameter).
 - **Long audio incremental synthesis**: Automatic segmentation (based on silence/fragment strategy), only re-synthesizes dirty segments to ensure smooth interaction.
-- **Project management**: Save/load projects (`.hsp`) containing timeline and clip information; supports "recent projects", window title shows project name and unsaved marker (`*`), prompts for unsaved changes when closing window.
+- **Project management**: Save/load projects (`.hshp`) containing timeline and clip information; supports "recent projects", window title shows project name and unsaved marker (`*`), prompts for unsaved changes when closing window.
 - **Undo/Redo (backend authority)**: Maintains Undo/Redo stack in Tauri/Rust backend, frontend `Ctrl+Z / Ctrl+Y` directly calls backend undo/redo to avoid "frontend undo being overwritten by backend state".
 - **Bottom parameter panel (Pitch/Tension, independent window)**: Bottom parameter editor has independent `zoom(pxPerBeat)` and `horizontal scroll(scrollLeft)` (not forced to sync with timeline); top provides time ruler and BPM grid; background shows waveform preview of "selected root track (root + subtracks) mix input" for easy alignment.
 - **Root track `C` (synthesis) toggle**: Root track can toggle synthesis output on/off; when `C` is on and editing pitch parameter, backend generates/updates `pitch_orig` for that root track based on "root track (root + subtracks) mix input" (same as parameter panel background waveform). Bottom pitch panel enters loading state (can show progress bar) until pitch detection completes automatically; when `C` is off, pitch panel only shows waveform and prompts to enable `C`.
@@ -101,7 +101,7 @@ $env:HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR = "E:\Code\HifiShifter\pc_nsf_hifigan_44.
 - **Audio source formats**: Real-time playback side attempts to decode common audio formats via `symphonia`; offline export/mixdown format support may differ from real-time playback.
 - **Waveform/duration preview**: After importing audio, backend extracts duration and waveform preview for timeline display. Waveform prioritizes "on-demand peaks (min/max) + caching" drawing method: zooming in requests more columns for clearer details; WAV prioritizes `hound` (supports 16/24/32-bit int + 32-bit float), other formats use `symphonia` generic decoding as fallback.
 - **Waveform caching (performance)**: Backend writes base peaks for each audio file to disk cache to reduce repeated calculations; can manually clear via menu `View` → `Clear Waveform Cache`.
-- **Project save/load**: Manage project files (`.hsp`) via menu `File` → `New Project / Open Project / Save / Save As / Recent Projects`.
+- **Project save/load**: Manage project files (`.hshp`) via menu `File` → `New Project / Open Project / Save / Save As / Recent Projects`.
 - **Unsaved changes prompt**: When project has unsaved changes, window title shows `*`, closing window prompts to save.
 
 ### Loading Audio

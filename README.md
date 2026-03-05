@@ -11,7 +11,7 @@ HifiShifter 是一个基于深度学习神经声码器（NSF-HiFiGAN）的图形
 - **多参数编辑**：不仅可编辑音高（Pitch/Note），也支持编辑张力（Tension），并为后续扩展更多参数预留了抽象接口。
 - **选区编辑（通用抽象）**：支持框选采样点、高亮显示选中段，并可拖拽整体上下偏移（对当前参数生效）。
 - **长音频增量合成**：自动分段（基于静音/片段策略），只对脏片段重合成，保证交互流畅。
-- **工程管理**：保存/加载工程（`.hsp`），包含时间线与剪辑信息；支持"最近打开工程"、窗口标题显示工程名与未保存标记（`*`），关闭窗口时未保存会提示。
+- **工程管理**：保存/加载工程（`.hshp`），包含时间线与剪辑信息；支持"最近打开工程"、窗口标题显示工程名与未保存标记（`*`），关闭窗口时未保存会提示。
 - **撤销/重做（后端权威）**：在 Tauri/Rust 后端维护 Undo/Redo 栈，前端 `Ctrl+Z / Ctrl+Y` 直接调用后端撤销重做，避免"前端撤销后被后端状态覆盖"。
 - **下方参数面板（Pitch/Tension，独立视窗）**：底部参数编辑器拥有独立的 `缩放(pxPerBeat)` 与 `横向滚动(scrollLeft)`（不强制与时间线同步）；顶部提供时间标尺与 BPM 网格；背景显示"选中根轨道（根+子轨）混音输入"的波形预览，便于对齐编辑。
 - **根轨 `C`（是否合成）开关**：根轨道可一键开启/关闭合成输出；当 `C` 开启且编辑参数为 Pitch 时，后端会基于"根轨道（根+子轨）混音输入"（与参数面板背景波形一致）**后台生成/更新**该根轨的 `pitch_orig`（用于虚线原始曲线）。底部 Pitch 面板会进入 loading（可显示进度条）并一直持续到音高检测完成后自动结束；当 `C` 关闭时 Pitch 面板仅显示波形并提示开启 `C`。
@@ -63,33 +63,9 @@ cargo tauri dev
 
 **注意：** WORLD vocoder 和 Rubber band 现已通过 cc crate 静态编译集成，无需额外配置。首次构建时会自动编译C++ 源码（约需 1-2 分钟）。
 
-### ONNX 推理（可选）
-
-如需将 Pitch Edit 的变调算法切换为 **NSF-HiFiGAN ONNX 推理**（实验性，可能更慢）：
-
-- 编译时需启用 feature：`cargo tauri dev --features onnx`
-- 方式 A（推荐）：在底部参数面板（Pitch）里的 `Algo` 下拉选择 `NSF-HiFiGAN (ONNX)`。
-- 方式 B（调试/强制覆盖）：设置 `HIFISHIFTER_PITCH_EDIT_ALGO=nsf_hifigan_onnx`
-- 并提供模型路径（二选一）：
-  - `HIFISHIFTER_NSF_HIFIGAN_ONNX=...\pc_nsf_hifigan.onnx`
-  - 或 `HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR=...\pc_nsf_hifigan_44.1k_hop512_128bin_2025.02`
-- （可选）`HIFISHIFTER_NSF_HIFIGAN_CONFIG=...\config.json`（默认取模型目录内的 `config.json`）
-
-示例（PowerShell）：
-```powershell
-$env:HIFISHIFTER_PITCH_EDIT_ALGO = "nsf_hifigan_onnx"
-$env:HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR = "E:\Code\HifiShifter\pc_nsf_hifigan_44.1k_hop512_128bin_2025.02"
-```
-
 ### Pitch Edit 作用方式
 
-- 默认：`v2`（逐 clip 变调后再按 fade 混回，避免在整段 mixdown 上做一次全局变调导致的边界伪影）
-- 回退到旧实现（整段 mixdown 变调）：
-  - `HIFISHIFTER_PITCH_EDIT_APPLY=v1`
-  - 或 `HIFISHIFTER_PER_CLIP_PITCH_EDIT=0`
-- 强制使用 v2：
-  - `HIFISHIFTER_PITCH_EDIT_APPLY=v2`
-  - 或 `HIFISHIFTER_PER_CLIP_PITCH_EDIT=1`
+- 逐 clip 变调后再按 fade 混回，避免在整段 mixdown 上做一次全局变调导致的边界伪影
 
 ### 播放说明
 
@@ -102,7 +78,7 @@ $env:HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR = "E:\Code\HifiShifter\pc_nsf_hifigan_44.
 - **音频源格式**：实时播放侧会尝试通过 `symphonia` 解码常见音频格式；离线导出/mixdown 的格式支持范围可能与实时播放不同。
 - **波形/时长预览**：导入音频后，后端会提取时长与波形预览用于时间线显示。波形优先使用"按需 peaks（min/max）+ 缓存"的绘制方式：缩放放大时会请求更多列数，从而获得更清晰细节；WAV 优先走 `hound`（支持 16/24/32-bit int + 32-bit float），其他格式走 `symphonia` 通用解码兜底。
 - **波形缓存（性能）**：后端会把每个音频文件的 base peaks 写入磁盘缓存，以减少重复计算；可在菜单 `视图` → `清除波形缓存` 主动清理。
-- **工程保存/读取**：通过菜单 `文件` → `新建工程 / 打开工程 / 保存 / 另存为 / 最近打开` 管理工程文件（`.hsp`）。
+- **工程保存/读取**：通过菜单 `文件` → `新建工程 / 打开工程 / 保存 / 另存为 / 最近打开` 管理工程文件（`.hshp`）。
 - **未保存提示**：工程有修改但未保存时，窗口标题会显示 `*`，关闭窗口会弹窗询问是否保存。
 
 ### 加载音频
@@ -137,7 +113,7 @@ $env:HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR = "E:\Code\HifiShifter\pc_nsf_hifigan_44.
 ## 轴显示（随参数切换）
 
 - 当编辑 **音高** 时：左侧为"钢琴窗"形式的 Pitch 轴（C2 → C8），带半音横线与 C 音名标注，便于按音阶对齐编辑。
-- 当编辑 **张力** 等线性参数时：左侧轴切换为数值刻度（0.0 / 0.5 / 1.0），用于线性参数的直观对齐。
+- 当编辑 **张力** 等线性参数时：左侧轴切换为数值刻度（0.0 / 0.5 / 1.0），用于线性参数的直观对齐。（暂未进行实现）
 
 该机制已抽象化：后续新增参数时，只需补充参数的「轴类型/映射/格式化」实现即可复用现有 UI。
 
@@ -181,8 +157,7 @@ $env:HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR = "E:\Code\HifiShifter\pc_nsf_hifigan_44.
 - **吸附网格**：剪辑移动/裁剪默认吸附网格；按住 `Shift` 可临时关闭吸附。
 - **裁剪/伸缩范围**：拖动剪辑左右边界进行裁剪或延长；当剪辑长度超出源音频可用范围时，超出部分为"空白/静音"（波形预览显示为空白），不再循环重复。
 - **伸缩（Time Stretch）**：按住 `Alt` + 鼠标左键拖动剪辑左右边界，可伸缩音频（联动改变播放速率与剪辑长度）。
-  - 高质量"保音高"实时伸缩使用 Rubber Band Library（GPL）；Windows 下需要在可执行文件同目录放置 `rubberband.dll`，或设置环境变量 `HIFISHIFTER_RUBBERBAND_DLL` 指向该 DLL。
-  - 本仓库提供一键构建脚本：运行 `tools/build_rubberband_windows.cmd`，生成的 DLL 默认在 `backend/src-tauri/third_party/rubberband/source/rubberband-4.0.0/otherbuilds/x64/Release/rubberband.dll`。
+  - 高质量"保音高"实时伸缩使用 Rubber Band Library（GPL）
   - 若未找到 Rubber Band，则会自动回退到线性方法（会变调）。
 - **内部偏移（Slip-Edit）**：按住 `Alt` + 鼠标左键拖动剪辑主体，可左右滑移剪辑的内部内容（等价于修改 Trim In），不改变剪辑在时间线上的位置（不吸附）；偏移会被限制在"源音频时长的 ±1 倍"，允许产生前置/后置空白（静音）。
 - **淡入淡出**：拖动剪辑左上角/右上角的手柄调整淡入/淡出时长。

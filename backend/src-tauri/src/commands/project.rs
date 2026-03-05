@@ -90,7 +90,7 @@ pub(super) fn new_project(state: State<'_, AppState>, window: Window) -> crate::
 
 pub(super) fn open_project_dialog() -> serde_json::Value {
     let picked = rfd::FileDialog::new()
-        .add_filter("HiFiShifter Project", &["hsp", "json"])
+        .add_filter("HiFiShifter Project", &["hshp", "hsp", "json"])
         .pick_file();
     match picked {
         None => serde_json::json!({"ok": true, "canceled": true}),
@@ -174,8 +174,8 @@ pub(super) fn save_project_as(state: State<'_, AppState>, window: Window) -> ser
         }
     };
     let picked = rfd::FileDialog::new()
-        .add_filter("HiFiShifter Project", &["hsp", "json"])
-        .set_file_name(format!("{}.hsp", default_name))
+        .add_filter("HiFiShifter Project", &["hshp", "hsp", "json"])
+        .set_file_name(format!("{}.hshp", default_name))
         .save_file();
     match picked {
         None => serde_json::json!({"ok": true, "canceled": true}),

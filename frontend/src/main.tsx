@@ -19,3 +19,10 @@ createRoot(document.getElementById("root")!).render(
         </Provider>
     </StrictMode>,
 );
+
+// React 渲染完成后显示窗口，避免首屏白屏
+import("@tauri-apps/api/window").then((mod) => {
+    mod.getCurrentWindow().show();
+}).catch(() => {
+    // 非 Tauri 环境（如浏览器开发）忽略错误
+});

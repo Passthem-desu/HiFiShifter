@@ -773,7 +773,7 @@ Achieves **3-9x** speedup through parallel processing and LRU caching.
 ## 12. Project File Format
 
 * **Format**: MessagePack (primary) + JSON (fallback).
-* **Extension**: `.hsp` (recommended) or `.json`.
+* **Extension**: `.hshp` (recommended) or `.json`.
 * **Path Handling**: `source_path` is converted to a relative path (relative to project file) on save and resolved to absolute on load.
 
 ---

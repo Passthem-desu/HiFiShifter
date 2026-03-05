@@ -500,8 +500,23 @@ impl AppState {
         h.redo.clear();
         drop(h);
 
-        let mut p = self.project.lock().unwrap_or_else(|e| e.into_inner());
-        p.dirty = true;
+        let (name, was_clean) = {
+            let mut p = self.project.lock().unwrap_or_else(|e| e.into_inner());
+            let was_clean = !p.dirty;
+            p.dirty = true;
+            (p.name.clone(), was_clean)
+        };
+
+        // 仅在首次变脏时更新窗口标题（添加 * 号）
+        if was_clean {
+            if let Some(handle) = self.app_handle.get() {
+                use tauri::Manager;
+                if let Some(win) = handle.get_webview_window("main") {
+                    let title = format!("HiFiShifter - {}*", name);
+                    let _ = win.set_title(&title);
+                }
+            }
+        }
     }
 
     pub fn clear_history(&self) {
