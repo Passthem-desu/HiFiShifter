@@ -31,6 +31,8 @@ mod pitch_progress;
 mod onnx_status;
 #[path = "commands/pitch_cache.rs"]
 mod pitch_cache;
+#[path = "commands/file_browser.rs"]
+mod file_browser;
 // TODO: 异步音高刷新功能未完成，缺少必要的状态管理和依赖
 // #[path = "commands/pitch_refresh_async.rs"]
 // mod pitch_refresh_async;
@@ -127,6 +129,11 @@ pub fn open_audio_dialog() -> serde_json::Value {
 #[tauri::command(rename_all = "camelCase")]
 pub fn pick_output_path() -> serde_json::Value {
     dialogs::pick_output_path()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn pick_directory() -> serde_json::Value {
+    dialogs::pick_directory()
 }
 
 // ===================== waveform =====================
@@ -467,6 +474,26 @@ pub fn clear_pitch_cache(state: State<'_, AppState>) -> serde_json::Value {
 #[tauri::command(rename_all = "camelCase")]
 pub fn get_pitch_cache_stats(state: State<'_, AppState>) -> pitch_cache::PitchCacheStatsPayload {
     pitch_cache::get_pitch_cache_stats(state)
+}
+
+// ===================== file_browser =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn list_directory(dir_path: String) -> Result<Vec<file_browser::FileEntry>, String> {
+    file_browser::list_directory(dir_path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_audio_file_info(file_path: String) -> Result<file_browser::AudioFileInfo, String> {
+    file_browser::get_audio_file_info(file_path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn read_audio_preview(
+    file_path: String,
+    max_frames: Option<u32>,
+) -> Result<file_browser::AudioPreviewData, String> {
+    file_browser::read_audio_preview(file_path, max_frames)
 }
 
 // ===================== pitch_refresh_async (暂时禁用) =====================

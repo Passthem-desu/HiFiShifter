@@ -153,6 +153,18 @@ export const messages = {
         status_analyzing_pitch: "Analyzing pitch",
         status_stretching: "Stretching",
         refreshing_pitch_data: "Refreshing pitch data",
+
+        fb_title: "File Browser",
+        fb_search_placeholder: "Search files...",
+        fb_open_folder: "Open Folder",
+        fb_refresh: "Refresh",
+        fb_parent_dir: "Parent Directory",
+        fb_preview_volume: "Preview Volume",
+        fb_no_folder: "No folder selected",
+        fb_empty_folder: "Empty folder",
+        fb_no_results: "No matching files",
+        fb_loading: "Loading...",
+        fb_error: "Error loading directory",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -304,6 +316,18 @@ export const messages = {
         status_analyzing_pitch: "正在分析音高",
         status_stretching: "正在拉伸",
         refreshing_pitch_data: "刷新音高数据",
+
+        fb_title: "文件浏览器",
+        fb_search_placeholder: "搜索文件...",
+        fb_open_folder: "打开文件夹",
+        fb_refresh: "刷新",
+        fb_parent_dir: "上级目录",
+        fb_preview_volume: "预览音量",
+        fb_no_folder: "未选择文件夹",
+        fb_empty_folder: "空文件夹",
+        fb_no_results: "没有匹配的文件",
+        fb_loading: "加载中...",
+        fb_error: "加载目录出错",
     },
 } as const;
 

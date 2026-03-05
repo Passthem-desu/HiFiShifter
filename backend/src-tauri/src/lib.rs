@@ -230,6 +230,7 @@ pub fn run() {
             commands::save_project_as,
             commands::open_audio_dialog,
             commands::pick_output_path,
+            commands::pick_directory,
             commands::get_waveform_peaks_segment,
             commands::get_root_mix_waveform_peaks_segment,
             commands::get_track_mix_waveform_peaks_segment,
@@ -268,7 +269,10 @@ pub fn run() {
             commands::get_onnx_status,
             commands::get_onnx_diagnostic,
             commands::clear_pitch_cache,
-            commands::get_pitch_cache_stats
+            commands::get_pitch_cache_stats,
+            commands::list_directory,
+            commands::get_audio_file_info,
+            commands::read_audio_preview
             // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
             // commands::start_pitch_refresh_task,
             // commands::get_pitch_refresh_status,

@@ -13,6 +13,7 @@ import {
     StopIcon,
     CursorArrowIcon,
     Pencil1Icon,
+    FileIcon,
 } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
@@ -28,10 +29,14 @@ import {
     setEditParam,
     setGrid,
 } from "../../features/session/sessionSlice";
+import { toggleVisible } from "../../features/fileBrowser/fileBrowserSlice";
 
 export function ActionBar() {
     const dispatch = useAppDispatch();
     const s = useAppSelector((state: RootState) => state.session);
+    const fileBrowserVisible = useAppSelector(
+        (state: RootState) => state.fileBrowser.visible,
+    );
     const { t } = useI18n();
 
     const [bpmText, setBpmText] = useState(() =>
@@ -211,6 +216,21 @@ export function ActionBar() {
                 >
                     <PlayIcon /> {t("action_play_out")}
                 </Button>
+            </Flex>
+
+            <Separator orientation="vertical" size="2" />
+
+            {/* File Browser Toggle */}
+            <Flex gap="1" className="shrink-0">
+                <IconButton
+                    size="1"
+                    variant={fileBrowserVisible ? "solid" : "ghost"}
+                    color="gray"
+                    title={(t as (key: string) => string)("fb_title")}
+                    onClick={() => dispatch(toggleVisible())}
+                >
+                    <FileIcon />
+                </IconButton>
             </Flex>
         </Flex>
     );

@@ -29,6 +29,7 @@ import {
     PianoRollStatusProvider,
     usePianoRollStatus,
 } from "./contexts/PianoRollStatusContext";
+import { FileBrowserPanel } from "./components/layout/FileBrowserPanel";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -72,6 +73,9 @@ function AppInner() {
     );
     const runtimeAudioLoaded = useAppSelector(
         (state) => state.session.runtime.audioLoaded,
+    );
+    const fileBrowserVisible = useAppSelector(
+        (state) => state.fileBrowser.visible,
     );
 
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -439,33 +443,43 @@ function AppInner() {
             <MenuBar />
             <ActionBar />
 
-            {/* Main Splitter Area */}
-            <div ref={containerRef} className="flex-1 min-h-0 flex flex-col">
-                {/* Top: Timeline / Tracks */}
-                <Box
-                    className="min-h-[200px] border-b border-qt-border relative bg-qt-base"
-                    style={{ flexGrow: splitRatio, flexBasis: 0 }}
-                >
-                    <TimelinePanel />
-                </Box>
+            {/* Main Content Area: Splitter + optional File Browser */}
+            <Flex className="flex-1 min-h-0">
+                {/* Left: Timeline / PianoRoll vertical splitter */}
+                <div ref={containerRef} className="flex-1 min-w-0 min-h-0 flex flex-col">
+                    {/* Top: Timeline / Tracks */}
+                    <Box
+                        className="min-h-[200px] border-b border-qt-border relative bg-qt-base"
+                        style={{ flexGrow: splitRatio, flexBasis: 0 }}
+                    >
+                        <TimelinePanel />
+                    </Box>
 
-                {/* Splitter */}
-                <div
-                    className="h-2 bg-qt-window border-y border-qt-border cursor-ns-resize shrink-0"
-                    onPointerDown={splitter.startDrag}
-                    role="separator"
-                    aria-orientation="horizontal"
-                    aria-label={t("aria_resize_panels")}
-                />
+                    {/* Splitter */}
+                    <div
+                        className="h-2 bg-qt-window border-y border-qt-border cursor-ns-resize shrink-0"
+                        onPointerDown={splitter.startDrag}
+                        role="separator"
+                        aria-orientation="horizontal"
+                        aria-label={t("aria_resize_panels")}
+                    />
 
-                {/* Bottom: Parameter / Piano Roll */}
-                <Box
-                    className="min-h-[150px] relative bg-qt-base"
-                    style={{ flexGrow: 1 - splitRatio, flexBasis: 0 }}
-                >
-                    <PianoRollPanel />
-                </Box>
-            </div>
+                    {/* Bottom: Parameter / Piano Roll */}
+                    <Box
+                        className="min-h-[150px] relative bg-qt-base"
+                        style={{ flexGrow: 1 - splitRatio, flexBasis: 0 }}
+                    >
+                        <PianoRollPanel />
+                    </Box>
+                </div>
+
+                {/* Right: File Browser Panel (可收起) */}
+                {fileBrowserVisible && (
+                    <div className="w-[280px] shrink-0 border-l border-qt-border bg-qt-window flex flex-col">
+                        <FileBrowserPanel />
+                    </div>
+                )}
+            </Flex>
 
             {/* Status Bar */}
             <Flex

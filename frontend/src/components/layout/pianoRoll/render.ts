@@ -447,9 +447,9 @@ export interface DetectedPitchCurve {
         const b = Math.max(selection.aBeat, selection.bBeat);
         const x0 = a * pxPerBeat - scrollLeft;
         const x1 = b * pxPerBeat - scrollLeft;
-        ctx.fillStyle = "rgba(255,255,255,0.06)";
+        ctx.fillStyle = "rgba(100, 200, 255, 0.08)";
         ctx.fillRect(x0, 0, x1 - x0, h);
-        ctx.strokeStyle = "rgba(255,255,255,0.12)";
+        ctx.strokeStyle = "rgba(100, 200, 255, 0.30)";
         ctx.strokeRect(x0 + 0.5, 0.5, Math.max(0, x1 - x0 - 1), h - 1);
     }
 
@@ -614,6 +614,40 @@ export interface DetectedPitchCurve {
             valueToY,
         });
         ctx.restore();
+
+        // 选区内曲线高亮：在选区范围内用亮蓝色加粗重绘编辑曲线
+        if (selection) {
+            const selMinBeat = Math.min(selection.aBeat, selection.bBeat);
+            const selMaxBeat = Math.max(selection.aBeat, selection.bBeat);
+            const selMinSec = selMinBeat * secPerBeat;
+            const selMaxSec = selMaxBeat * secPerBeat;
+            const selX0 = selMinBeat * pxPerBeat - scrollLeft;
+            const selX1 = selMaxBeat * pxPerBeat - scrollLeft;
+
+            ctx.save();
+            // 裁剪到选区范围
+            ctx.beginPath();
+            ctx.rect(selX0, 0, selX1 - selX0, h);
+            ctx.clip();
+
+            ctx.strokeStyle = "rgba(100, 200, 255, 0.95)";
+            ctx.lineWidth = 3;
+            ctx.setLineDash([]);
+            drawCurveTimed({
+                ctx,
+                values: editValues,
+                param: editParam,
+                w,
+                h,
+                startFrame: paramView.startFrame,
+                stride: paramView.stride,
+                framePeriodMs: paramView.framePeriodMs,
+                visibleStartSec,
+                visibleDurSec,
+                valueToY,
+            });
+            ctx.restore();
+        }
     }
 
     if (overlayText) {

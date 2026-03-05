@@ -323,6 +323,76 @@ export const TimelinePanel: React.FC = () => {
         };
     }, [dispatch, pxPerSec, rowHeight]);
 
+    // ========== 监听文件浏览器面板的自定义拖拽事件 ==========
+    useEffect(() => {
+        function onHifiFileDrag(e: Event) {
+            const detail = (e as CustomEvent).detail as {
+                type: string;
+                filePath: string;
+                fileName: string;
+                clientX: number;
+                clientY: number;
+            };
+            if (!detail) return;
+
+            const scroller = scrollRef.current;
+            const bounds = scroller?.getBoundingClientRect() ?? null;
+
+            // 判断鼠标是否在 timeline 滚动区域内
+            const isOverTimeline =
+                bounds &&
+                detail.clientX >= bounds.left &&
+                detail.clientX <= bounds.right &&
+                detail.clientY >= bounds.top &&
+                detail.clientY <= bounds.bottom;
+
+            if (detail.type === "move" || detail.type === "start") {
+                if (isOverTimeline && scroller) {
+                    const beat = beatFromClientX(
+                        detail.clientX,
+                        bounds!,
+                        scroller.scrollLeft,
+                    );
+                    const trackId = trackIdFromClientY(detail.clientY);
+                    setDropPreview({
+                        path: detail.filePath,
+                        fileName: detail.fileName,
+                        trackId,
+                        startSec: beat,
+                    });
+                } else {
+                    setDropPreview(null);
+                }
+                return;
+            }
+
+            if (detail.type === "drop") {
+                setDropPreview(null);
+                if (isOverTimeline && scroller) {
+                    const beat = beatFromClientX(
+                        detail.clientX,
+                        bounds!,
+                        scroller.scrollLeft,
+                    );
+                    const trackId = trackIdFromClientY(detail.clientY);
+                    void dispatch(
+                        importAudioAtPosition({
+                            audioPath: detail.filePath,
+                            trackId,
+                            startSec: beat,
+                        }),
+                    );
+                }
+                return;
+            }
+        }
+
+        window.addEventListener("hifi-file-drag", onHifiFileDrag);
+        return () => {
+            window.removeEventListener("hifi-file-drag", onHifiFileDrag);
+        };
+    }, [dispatch, pxPerSec, rowHeight]);
+
     const [multiSelectedClipIds, setMultiSelectedClipIds] = useState<string[]>(
         [],
     );
@@ -1210,8 +1280,12 @@ export const TimelinePanel: React.FC = () => {
                             onNormalize={(ids) => {
                                 for (const id of ids) {
                                     const waveform = sessionRef.current.clipWaveforms[id];
-                                    if (!waveform || waveform.length === 0) continue;
-                                    const peak = Math.max(...waveform.map(Math.abs));
+                                    if (!waveform) continue;
+                                    const samples = Array.isArray(waveform)
+                                        ? waveform
+                                        : [...waveform.l, ...waveform.r];
+                                    if (samples.length === 0) continue;
+                                    const peak = Math.max(...samples.map(Math.abs));
                                     if (peak <= 0) continue;
                                     const newGain = Math.min(
                                         Math.max(1.0 / peak, dbToGain(-12)),

@@ -437,8 +437,121 @@ export function usePianoRollInteractions(args: {
             }
 
             if (toolMode === "select") {
+                // 右键：取消选区
+                if (e.button === 2) {
+                    e.preventDefault();
+                    selectionRef.current = null;
+                    setSelectionUi(null);
+                    invalidate();
+                    return;
+                }
                 if (e.button !== 0) return;
+
                 const b = pointerBeat(e.clientX);
+                const sel = selectionRef.current;
+
+                // 如果已有选区，且鼠标在选区范围内且靠近曲线，则进入拖拽曲线模式
+                if (sel) {
+                    const aBeat = Math.min(sel.aBeat, sel.bBeat);
+                    const bBeat = Math.max(sel.aBeat, sel.bBeat);
+                    if (b >= aBeat && b <= bBeat) {
+                        // 判断鼠标是否在曲线附近（Y轴距离 < 0.5 半音）
+                        const pv = paramViewRef.current;
+                        if (pv && pv.edit.length > 0) {
+                            const fp = pv.framePeriodMs;
+                            const sec = b * secPerBeat;
+                            const frame = Math.max(0, Math.floor((sec * 1000) / fp));
+                            const idx = Math.round((frame - pv.startFrame) / Math.max(1, pv.stride));
+                            const curveVal = (idx >= 0 && idx < pv.edit.length) ? pv.edit[idx] : null;
+                            const mouseVal = pointerValue(e.clientY);
+
+                            if (curveVal !== null && Math.abs(mouseVal - curveVal) < 0.5) {
+                                // 进入拖拽选中曲线模式
+                                const startMouseVal = mouseVal;
+                                const pid = e.pointerId;
+                                (e.currentTarget as HTMLCanvasElement).setPointerCapture(pid);
+
+                                // 保存选区内曲线原始值
+                                const selStartSec = aBeat * secPerBeat;
+                                const selEndSec = bBeat * secPerBeat;
+                                const selStartFrame = Math.max(0, Math.floor((selStartSec * 1000) / fp));
+                                const selEndFrame = Math.max(0, Math.ceil((selEndSec * 1000) / fp));
+                                const selStartIdx = Math.max(0, Math.round((selStartFrame - pv.startFrame) / Math.max(1, pv.stride)));
+                                const selEndIdx = Math.min(pv.edit.length - 1, Math.round((selEndFrame - pv.startFrame) / Math.max(1, pv.stride)));
+                                const origValues = pv.edit.slice(selStartIdx, selEndIdx + 1);
+
+                                ensureLiveEditBase(pv);
+                                if (liveEditActiveRef) liveEditActiveRef.current = true;
+
+                                // 用闭包变量记录最新偏移量，避免全局污染
+                                let lastDelta = 0;
+
+                                const onMove = (ev: globalThis.PointerEvent) => {
+                                    const currentVal = pointerValue(ev.clientY);
+                                    lastDelta = currentVal - startMouseVal;
+                                    const pvNow = paramViewRef.current;
+                                    if (!pvNow) return;
+
+                                    ensureLiveEditBase(pvNow);
+                                    // 将选区内所有帧偏移 lastDelta
+                                    const len = selEndIdx - selStartIdx + 1;
+                                    const dense = new Array<number>(len);
+                                    for (let i = 0; i < len; i++) {
+                                        dense[i] = (origValues[i] ?? 0) + lastDelta;
+                                    }
+                                    const denseStartFrame = pv.startFrame + selStartIdx * Math.max(1, pv.stride);
+                                    applyDenseToLiveEdit(
+                                        pvNow,
+                                        denseStartFrame,
+                                        dense,
+                                        denseStartFrame,
+                                        denseStartFrame + (len - 1) * Math.max(1, pv.stride),
+                                        "draw",
+                                    );
+                                    invalidate();
+                                };
+
+                                const onUp = () => {
+                                    window.removeEventListener("pointermove", onMove);
+                                    window.removeEventListener("pointerup", onUp);
+                                    window.removeEventListener("pointercancel", onUp);
+
+                                    // 提交拖拽结果到后端
+                                    const pvNow = paramViewRef.current;
+                                    if (pvNow && rootTrackId) {
+                                        const len = selEndIdx - selStartIdx + 1;
+                                        const values = new Array<number>(len);
+                                        for (let i = 0; i < len; i++) {
+                                            values[i] = (origValues[i] ?? 0) + lastDelta;
+                                        }
+                                        const commitStartFrame = pv.startFrame + selStartIdx * Math.max(1, pv.stride);
+                                        void (async () => {
+                                            await paramsApi.setParamFrames(
+                                                rootTrackId,
+                                                editParam,
+                                                commitStartFrame,
+                                                values,
+                                                true,
+                                            );
+                                            if (liveEditActiveRef) liveEditActiveRef.current = false;
+                                            bumpRefreshToken();
+                                        })();
+                                    } else {
+                                        if (liveEditActiveRef) liveEditActiveRef.current = false;
+                                    }
+                                    invalidate();
+                                };
+
+                                window.addEventListener("pointermove", onMove);
+                                window.addEventListener("pointerup", onUp);
+                                window.addEventListener("pointercancel", onUp);
+                                return;
+                            }
+                        }
+                    }
+                }
+
+                // 默认行为：创建新选区
                 selectionRef.current = { aBeat: b, bBeat: b };
                 setSelectionUi(selectionRef.current);
                 const pid = e.pointerId;

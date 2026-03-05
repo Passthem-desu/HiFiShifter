@@ -945,8 +945,8 @@ fn compute_pitch_curve_start_sec(clip: &crate::state::Clip) -> f64 {
     let pr = clip.playback_rate as f64;
     let is_full_source = pr.is_finite() && pr > 0.0 && (pr - 1.0).abs() <= 1e-6;
     if is_full_source {
-        // 全量缓存：源音频第 0 帧在时间线上的绝对位置
-        (clip.start_sec - clip.trim_start_sec.max(0.0)).max(0.0)
+        // 全量缓存：源音频第 0 帧在时间线上的绝对位置（允许负值）
+        clip.start_sec - clip.trim_start_sec.max(0.0)
     } else {
         // 拉伸缓存：clip 的起始位置
         clip.start_sec.max(0.0)

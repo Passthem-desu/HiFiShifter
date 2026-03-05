@@ -129,11 +129,15 @@ export const TrackList: React.FC<{
         if (!el) return { track: null, yInRow: 0, index: -1 };
         const bounds = el.getBoundingClientRect();
         const y = clientY - bounds.top + el.scrollTop;
-        const idx = Math.floor(y / rowHeight);
-        const yInRow = y - idx * rowHeight;
-        if (idx < 0 || idx >= tracks.length)
-            return { track: null, yInRow, index: idx };
-        return { track: tracks[idx] ?? null, yInRow, index: idx };
+        const rawIdx = Math.floor(y / rowHeight);
+        // 当鼠标在列表上方时，clamp 到第一个轨道（yInRow=0），使拖拽可以插入到顶部
+        if (rawIdx < 0) {
+            return { track: tracks[0] ?? null, yInRow: 0, index: 0 };
+        }
+        const yInRow = y - rawIdx * rowHeight;
+        if (rawIdx >= tracks.length)
+            return { track: null, yInRow, index: rawIdx };
+        return { track: tracks[rawIdx] ?? null, yInRow, index: rawIdx };
     }
 
     function computeDropSpec(

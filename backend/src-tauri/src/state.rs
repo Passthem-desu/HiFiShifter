@@ -275,16 +275,18 @@ impl TimelineState {
         let key_changed = entry.pitch_orig_key.as_deref() != Some(&expected_key);
         
         if key_changed && entry.pitch_orig_key.is_some() {
-            // Timeline/clip configuration changed - clear curves to force re-analysis
+            // Timeline/clip configuration changed - clear orig curves to force re-analysis
             entry.pitch_orig.clear();
-            entry.pitch_edit.clear();
             entry.pitch_orig_key = None;
-            entry.pitch_edit_user_modified = false;
+            // 仅当用户未手动编辑时才清空 pitch_edit，保护用户的编辑成果
+            if !entry.pitch_edit_user_modified {
+                entry.pitch_edit.clear();
+            }
             
             if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                 eprintln!(
-                    "state: [INVALIDATE] Cleared stale pitch curves for root_track={} (key changed)",
-                    root_track_id
+                    "state: [INVALIDATE] Cleared stale pitch curves for root_track={} (key changed, user_modified={})",
+                    root_track_id, entry.pitch_edit_user_modified
                 );
             }
         }

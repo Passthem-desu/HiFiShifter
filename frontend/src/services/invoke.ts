@@ -298,6 +298,18 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 checkpoint: args[4],
             };
 
+        case "list_directory":
+            return { dirPath: args[0] };
+
+        case "get_audio_file_info":
+            return { filePath: args[0] };
+
+        case "read_audio_preview":
+            return {
+                filePath: args[0],
+                ...(args[1] !== undefined ? { maxFrames: args[1] } : {}),
+            };
+
         default:
             return { __unwired: true };
     }
