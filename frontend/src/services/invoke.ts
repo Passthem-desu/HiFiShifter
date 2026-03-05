@@ -140,6 +140,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return o;
         }
 
+        case "set_ui_locale":
+            return { locale: args[0] };
+
         case "import_audio_item":
             return {
                 audioPath: args[0],

@@ -105,9 +105,24 @@ pub fn run() {
 
                 api.prevent_close();
 
+                let is_zh = {
+                    let locale = state
+                        .ui_locale
+                        .read()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    locale.to_lowercase().starts_with("zh")
+                };
+
+                let unsaved_desc = if is_zh {
+                    "工程有未保存的更改。是否在退出前保存？"
+                } else {
+                    "Project has unsaved changes. Save before exiting?"
+                };
+
                 let decision = rfd::MessageDialog::new()
                     .set_title("HiFiShifter")
-                    .set_description("Project has unsaved changes. Save before exiting?")
+                    .set_description(unsaved_desc)
                     .set_buttons(rfd::MessageButtons::YesNoCancel)
                     .show();
 
@@ -143,8 +158,13 @@ pub fn run() {
                                 let _ = window.close();
                             }
                             Err(e) => {
+                                let save_failed_title = if is_zh {
+                                    "保存失败"
+                                } else {
+                                    "Save failed"
+                                };
                                 let _ = rfd::MessageDialog::new()
-                                    .set_title("Save failed")
+                                    .set_title(save_failed_title)
                                     .set_description(&e)
                                     .set_buttons(rfd::MessageButtons::Ok)
                                     .show();
@@ -170,6 +190,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::get_runtime_info,
+            commands::set_ui_locale,
             commands::get_timeline_state,
             commands::set_transport,
             commands::close_window,

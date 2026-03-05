@@ -15,6 +15,29 @@ pub(super) fn get_runtime_info(state: State<'_, AppState>) -> crate::models::Run
     state.runtime_info()
 }
 
+pub(super) fn set_ui_locale(state: State<'_, AppState>, locale: String) -> serde_json::Value {
+    let locale = locale.trim();
+    let normalized = if locale.eq_ignore_ascii_case("zh-CN")
+        || locale.eq_ignore_ascii_case("zh_CN")
+        || locale.to_lowercase().starts_with("zh")
+    {
+        "zh-CN".to_string()
+    } else {
+        // Default to en-US for unknown values.
+        "en-US".to_string()
+    };
+
+    {
+        let mut guard = state
+            .ui_locale
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        *guard = normalized.clone();
+    }
+
+    serde_json::json!({"ok": true, "locale": normalized})
+}
+
 
 
 

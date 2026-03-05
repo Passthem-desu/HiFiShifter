@@ -1,11 +1,13 @@
 import {
     createContext,
     useContext,
+    useEffect,
     useMemo,
     useState,
     type PropsWithChildren,
 } from "react";
 import { messages, type Locale, type MessageKey } from "./messages";
+import { coreApi } from "../services/api/core";
 
 interface I18nContextValue {
     locale: Locale;
@@ -29,6 +31,18 @@ function getDefaultLocale(): Locale {
 
 export function I18nProvider({ children }: PropsWithChildren) {
     const [localeState, setLocaleState] = useState<Locale>(getDefaultLocale);
+
+    useEffect(() => {
+        // Native close-confirmation dialog lives in Rust (Tauri). Keep backend locale in sync
+        // so the dialog follows the user's in-app language.
+        const tauriInvoke =
+            window.__TAURI__?.core?.invoke ?? window.__TAURI__?.invoke;
+        if (typeof tauriInvoke !== "function") return;
+
+        void coreApi.setUiLocale(localeState).catch(() => {
+            // Best-effort: ignore failures (e.g. during early boot).
+        });
+    }, [localeState]);
 
     const value = useMemo<I18nContextValue>(() => {
         return {

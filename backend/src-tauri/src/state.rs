@@ -8,7 +8,7 @@ use crate::models::{
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use uuid::Uuid;
 
 fn default_frame_period_ms() -> f64 {
@@ -350,6 +350,11 @@ pub struct AppState {
     pub timeline_history: std::sync::Mutex<TimelineHistory>,
     pub project: std::sync::Mutex<ProjectState>,
     pub runtime: std::sync::Mutex<RuntimeState>,
+
+    /// Current UI locale reported by the frontend (e.g. "en-US", "zh-CN").
+    /// Used to localize native dialogs implemented in Rust.
+    pub ui_locale: RwLock<String>,
+
     pub waveform_cache_dir: std::sync::Mutex<PathBuf>,
     pub waveform_cache: std::sync::Mutex<
         std::collections::HashMap<String, std::sync::Arc<crate::waveform::CachedPeaks>>,
@@ -384,6 +389,9 @@ impl Default for AppState {
                 synthesized_wav_path: None,
                 ..RuntimeState::default()
             }),
+
+            ui_locale: RwLock::new("en-US".to_string()),
+
             waveform_cache_dir: std::sync::Mutex::new(
                 crate::waveform_disk_cache::default_cache_dir(),
             ),

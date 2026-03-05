@@ -17,6 +17,9 @@ export const coreApi = {
     getRuntimeInfo: () => invoke<RuntimeInfo>("get_runtime_info"),
     getPlaybackState: () => invoke<PlaybackStateResult>("get_playback_state"),
 
+    setUiLocale: (locale: string) =>
+        invoke<{ ok: boolean; locale?: string }>("set_ui_locale", locale),
+
     openAudioDialog: () =>
         invoke<{ ok: boolean; canceled?: boolean; path?: string }>(
             "open_audio_dialog",

@@ -56,6 +56,11 @@ pub fn get_runtime_info(state: State<'_, AppState>) -> crate::models::RuntimeInf
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn set_ui_locale(state: State<'_, AppState>, locale: String) -> serde_json::Value {
+    core::set_ui_locale(state, locale)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn get_timeline_state(state: State<'_, AppState>) -> crate::models::TimelineStatePayload {
     core::get_timeline_state(state)
 }
