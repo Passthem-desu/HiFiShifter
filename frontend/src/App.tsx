@@ -18,6 +18,8 @@ import {
     openProjectFromDialog,
     saveProjectRemote,
     saveProjectAsRemote,
+    exportAudio,
+    pickOutputPath,
 } from "./features/session/sessionSlice";
 import { useI18n } from "./i18n/I18nProvider";
 import { useClipPitchDataListener } from "./hooks/useClipPitchDataListener";
@@ -42,6 +44,8 @@ const statusKey: Record<string, string> = {
     "Output path selected": "status_output_path_selected",
     "New project": "status_new_project",
     "Open canceled": "status_open_canceled",
+    "Opening project...": "status_opening_project",
+    "Open failed": "status_open_failed",
     "Project opened": "status_project_opened",
     "Save canceled": "status_save_canceled",
     "Save failed": "status_save_failed",
@@ -50,6 +54,10 @@ const statusKey: Record<string, string> = {
     "Project saved": "status_project_saved",
     "Clips created": "status_clips_created",
     "Glue done": "status_glue_done",
+    "Export done": "status_export_done",
+    "Export failed": "status_export_failed",
+    "Export separated done": "status_export_separated_done",
+    "Export separated failed": "status_export_separated_failed",
 };
 
 function AppInner() {
@@ -77,6 +85,7 @@ function AppInner() {
     const fileBrowserVisible = useAppSelector(
         (state) => state.fileBrowser.visible,
     );
+    const outputPath = useAppSelector((state) => state.session.outputPath);
 
     const containerRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{ pointerId: number } | null>(null);
@@ -148,7 +157,18 @@ function AppInner() {
         return { startDrag };
     }, [splitRatio]);
 
-    const statusText = statusKey[status] ? t(statusKey[status] as any) : status;
+    const statusText = useMemo(() => {
+        // 精确匹配
+        if (statusKey[status]) return t(statusKey[status] as any);
+        // 前缀匹配：支持 "Export done — path" 等带后缀的状态
+        for (const key of Object.keys(statusKey)) {
+            if (status.startsWith(key) && status.length > key.length) {
+                const suffix = status.slice(key.length);
+                return t(statusKey[key] as any) + suffix;
+            }
+        }
+        return status;
+    }, [status, t]);
 
     // 监听后端 clip_pitch_data 事件，将 per-clip MIDI 曲线存入 store。
     useClipPitchDataListener();
@@ -285,6 +305,7 @@ function AppInner() {
         isPlaying: false,
         hasSynthesized: false,
     });
+    const outputPathRef = useRef(outputPath);
 
     const playbackSyncInFlightRef = useRef(false);
     const renderingWasActiveRef = useRef(false);
@@ -300,6 +321,10 @@ function AppInner() {
             hasSynthesized: Boolean(runtimeHasSynthesized),
         };
     }, [runtimeIsPlaying, runtimeHasSynthesized]);
+
+    useEffect(() => {
+        outputPathRef.current = outputPath;
+    }, [outputPath]);
 
     useEffect(() => {
         function isEditableTarget(target: EventTarget | null): boolean {
@@ -368,6 +393,24 @@ function AppInner() {
                 void dispatch(
                     shift ? saveProjectAsRemote() : saveProjectRemote(),
                 );
+                return;
+            }
+
+            // Ctrl+E — 导出音频
+            if (key === "e" && !shift) {
+                e.preventDefault();
+                e.stopPropagation();
+                void (async () => {
+                    const curPath = outputPathRef.current?.trim();
+                    if (!curPath) {
+                        const picked = await dispatch(pickOutputPath()).unwrap();
+                        if (picked.ok && !picked.canceled && picked.path) {
+                            await dispatch(exportAudio(picked.path));
+                        }
+                        return;
+                    }
+                    await dispatch(exportAudio(curPath));
+                })();
                 return;
             }
         }

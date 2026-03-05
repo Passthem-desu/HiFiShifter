@@ -39,6 +39,7 @@ export const webApi = {
     setPitchShift: coreApi.setPitchShift,
     synthesize: coreApi.synthesize,
     saveSynthesized: coreApi.saveSynthesized,
+    saveSeparated: coreApi.saveSeparated,
     playOriginal: coreApi.playOriginal,
     playSynthesized: coreApi.playSynthesized,
     stopAudio: coreApi.stopAudio,

@@ -6,6 +6,7 @@ import type { RootState } from "../../app/store";
 import {
     importAudioFromDialog,
     exportAudio,
+    exportSeparated,
     pickOutputPath,
     addTrackRemote,
     removeTrackRemote,
@@ -20,7 +21,9 @@ import {
     saveProjectAsRemote,
 } from "../../features/session/sessionSlice";
 import { coreApi } from "../../services/api";
+import { fileBrowserApi } from "../../services/api/fileBrowser";
 import { useAppTheme } from "../../theme/AppThemeProvider";
+import { GlobeIcon } from "@radix-ui/react-icons";
 
 export const MenuBar: React.FC = () => {
     const { t, setLocale } = useI18n();
@@ -38,6 +41,13 @@ export const MenuBar: React.FC = () => {
             return;
         }
         await dispatch(exportAudio(outputPath));
+    }
+
+    async function handleExportSeparated() {
+        // 弹出文件夹选择对话框
+        const result = await fileBrowserApi.pickDirectory();
+        if (!result.ok || result.canceled || !result.path) return;
+        await dispatch(exportSeparated(result.path));
     }
 
     return (
@@ -132,6 +142,9 @@ export const MenuBar: React.FC = () => {
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {t("shortcut_ctrl_e")}
                         </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={handleExportSeparated}>
+                        {t("menu_export_separated")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item
@@ -245,7 +258,10 @@ export const MenuBar: React.FC = () => {
             <Flex ml="auto" gap="2" align="center" className="shrink-0">
                 <DropdownMenu.Root>
                     <DropdownMenu.Trigger className="shrink-0 rounded px-2 py-1 text-xs text-qt-text hover:bg-qt-highlight hover:text-white">
-                        <span>{t("language")}</span>
+                        <Flex align="center" gap="1">
+                            <GlobeIcon width={14} height={14} />
+                            <span>{t("language")}</span>
+                        </Flex>
                     </DropdownMenu.Trigger>
                     <DropdownMenu.Content>
                         <DropdownMenu.Item onSelect={() => setLocale("en-US")}>

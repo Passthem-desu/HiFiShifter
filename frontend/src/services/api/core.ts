@@ -60,6 +60,20 @@ export const coreApi = {
             num_samples?: number;
         }>("save_synthesized", outputPath),
 
+    saveSeparated: (outputDir: string) =>
+        invoke<{
+            ok: boolean;
+            count?: number;
+            output_dir?: string;
+            tracks?: Array<{
+                track_id: string;
+                name: string;
+                path?: string;
+                ok: boolean;
+                error?: string;
+            }>;
+        }>("save_separated", outputDir),
+
     playOriginal: (startSec = 0) =>
         invoke<{ ok: boolean; playing?: string; start_sec?: number }>(
             "play_original",

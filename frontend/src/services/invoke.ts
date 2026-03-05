@@ -248,6 +248,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "save_synthesized":
             return { outputPath: args[0] };
 
+        case "save_separated":
+            return { outputDir: args[0] };
+
         case "play_original":
         case "play_synthesized":
             return { startSec: args[0] };

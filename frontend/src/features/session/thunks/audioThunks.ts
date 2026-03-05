@@ -39,3 +39,10 @@ export const exportAudio = createAsyncThunk(
         return webApi.saveSynthesized(outputPath);
     },
 );
+
+export const exportSeparated = createAsyncThunk(
+    "session/exportSeparated",
+    async (outputDir: string) => {
+        return webApi.saveSeparated(outputDir);
+    },
+);

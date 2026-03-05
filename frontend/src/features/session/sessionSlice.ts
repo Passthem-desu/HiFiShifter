@@ -62,6 +62,7 @@ import { loadDefaultModel, loadModel } from "./thunks/modelThunks";
 import {
     applyPitchShift,
     exportAudio,
+    exportSeparated,
     pickOutputPath,
     processAudio,
     synthesizeAudio,
@@ -602,6 +603,7 @@ export {
     applyPitchShift,
     synthesizeAudio,
     exportAudio,
+    exportSeparated,
 } from "./thunks/audioThunks";
 
 export {
@@ -1255,11 +1257,39 @@ const sessionSlice = createSlice({
             .addCase(exportAudio.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
-                state.status = (action.payload as { ok?: boolean }).ok
-                    ? "Export done"
-                    : "Export failed";
+                const payload = action.payload as { ok?: boolean; path?: string };
+                if (payload.ok) {
+                    // 状态栏文本会先匹配 statusKey 前缀 "Export done"，
+                    // 再把路径附加在后面，用户能看到 "导出完成 — D:\xxx.wav"。
+                    const suffix = payload.path ? ` — ${payload.path}` : "";
+                    state.status = `Export done${suffix}`;
+                } else {
+                    state.status = "Export failed";
+                }
             })
             .addCase(exportAudio.rejected, setRejected)
+
+            .addCase(exportSeparated.pending, (state) =>
+                setPending(state, "Exporting separated tracks..."),
+            )
+            .addCase(exportSeparated.fulfilled, (state, action) => {
+                state.busy = false;
+                state.lastResult = action.payload;
+                const payload = action.payload as {
+                    ok?: boolean;
+                    count?: number;
+                    output_dir?: string;
+                };
+                if (payload.ok) {
+                    const suffix = payload.output_dir
+                        ? ` — ${payload.output_dir} (${payload.count ?? 0} tracks)`
+                        : "";
+                    state.status = `Export separated done${suffix}`;
+                } else {
+                    state.status = "Export separated failed";
+                }
+            })
+            .addCase(exportSeparated.rejected, setRejected)
 
             .addCase(playOriginal.pending, (state) =>
                 setPending(state, "Playing original..."),
@@ -1422,7 +1452,11 @@ const sessionSlice = createSlice({
                 state.status = "New project";
             })
 
+            .addCase(openProjectFromDialog.pending, (state) =>
+                setPending(state, "Opening project..."),
+            )
             .addCase(openProjectFromDialog.fulfilled, (state, action) => {
+                state.busy = false;
                 const payload = action.payload as
                     | { ok: true; canceled: true }
                     | { ok: true; canceled: false; timeline: TimelineState };
@@ -1433,14 +1467,28 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, (payload as any).timeline);
                 state.status = "Project opened";
             })
+            .addCase(openProjectFromDialog.rejected, (state, action) => {
+                state.busy = false;
+                state.error = action.error?.message ?? "Open project failed";
+                state.status = "Open failed";
+            })
 
+            .addCase(openProjectFromPath.pending, (state) =>
+                setPending(state, "Opening project..."),
+            )
             .addCase(openProjectFromPath.fulfilled, (state, action) => {
+                state.busy = false;
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;
                 if (!payload.ok) return;
                 applyTimelineState(state, payload);
                 state.status = "Project opened";
+            })
+            .addCase(openProjectFromPath.rejected, (state, action) => {
+                state.busy = false;
+                state.error = action.error?.message ?? "Open project failed";
+                state.status = "Open failed";
             })
 
             .addCase(saveProjectRemote.fulfilled, (state, action) => {

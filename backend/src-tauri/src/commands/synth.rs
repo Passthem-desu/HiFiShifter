@@ -177,3 +177,134 @@ pub(super) fn save_synthesized(state: State<'_, AppState>, output_path: String) 
         }),
     }
 }
+
+
+
+
+/// 按 root track 分轨导出音频到指定目录。
+///
+/// 每个 root track（`parent_id == None` 的轨道）以及它的所有子轨道的音频
+/// 会被混缩成一个独立的 WAV 文件，文件名为 `{track_name}.wav`。
+pub(super) fn save_separated(state: State<'_, AppState>, output_dir: String) -> serde_json::Value {
+    let out_dir = Path::new(&output_dir);
+    if !out_dir.exists() {
+        if let Err(e) = fs::create_dir_all(out_dir) {
+            eprintln!("save_separated: create dir failed: {e}");
+            return serde_json::json!({"ok": false, "error": format!("Cannot create directory: {e}")});
+        }
+    }
+
+    let timeline = state
+        .timeline
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+
+    // 找到所有 root track（parent_id 为 None）
+    let root_tracks: Vec<&crate::state::Track> = timeline
+        .tracks
+        .iter()
+        .filter(|t| t.parent_id.is_none())
+        .collect();
+
+    if root_tracks.is_empty() {
+        return serde_json::json!({"ok": false, "error": "No root tracks found"});
+    }
+
+    // 收集某个 root 下所有后代 track id（包括自身）
+    fn collect_descendants(tracks: &[crate::state::Track], root_id: &str) -> std::collections::HashSet<String> {
+        let mut set = std::collections::HashSet::new();
+        set.insert(root_id.to_string());
+        let mut queue = vec![root_id.to_string()];
+        while let Some(cur) = queue.pop() {
+            for t in tracks {
+                if t.parent_id.as_deref() == Some(cur.as_str()) && !set.contains(&t.id) {
+                    set.insert(t.id.clone());
+                    queue.push(t.id.clone());
+                }
+            }
+        }
+        set
+    }
+
+    // 文件名安全化：去掉路径分隔符和不合法字符
+    fn sanitize_filename(name: &str) -> String {
+        name.chars()
+            .map(|c| match c {
+                '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+                _ => c,
+            })
+            .collect::<String>()
+            .trim()
+            .to_string()
+    }
+
+    let mut results = Vec::new();
+
+    for root in &root_tracks {
+        // muted 的根轨道不导出
+        if root.muted {
+            continue;
+        }
+
+        let included = collect_descendants(&timeline.tracks, &root.id);
+
+        // 构建子 timeline：仅保留该 root 分支下的、未 mute 的 tracks 和对应 clips
+        let mut sub_tl = timeline.clone();
+        sub_tl.tracks.retain(|t| included.contains(&t.id) && !t.muted);
+        let active_track_ids: std::collections::HashSet<&str> =
+            sub_tl.tracks.iter().map(|t| t.id.as_str()).collect();
+        sub_tl.clips.retain(|c| active_track_ids.contains(c.track_id.as_str()));
+
+        let safe_name = sanitize_filename(&root.name);
+        let file_name = if safe_name.is_empty() {
+            format!("track_{}.wav", root.id)
+        } else {
+            format!("{}.wav", safe_name)
+        };
+        let out_path = out_dir.join(&file_name);
+
+        let opts = crate::mixdown::MixdownOptions {
+            sample_rate: 44100,
+            start_sec: 0.0,
+            end_sec: None,
+            stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
+            apply_pitch_edit: true,
+            export_format: crate::mixdown::ExportFormat::Wav32f,
+            quality_preset: crate::mixdown::QualityPreset::Export,
+        };
+
+        match crate::mixdown::render_mixdown_wav(&sub_tl, &out_path, opts) {
+            Ok(result) => {
+                let num_samples = (result.duration_sec * result.sample_rate as f64)
+                    .round()
+                    .max(0.0) as u32;
+                results.push(serde_json::json!({
+                    "track_id": root.id,
+                    "name": root.name,
+                    "path": out_path.display().to_string(),
+                    "ok": true,
+                    "sample_rate": result.sample_rate,
+                    "num_samples": num_samples,
+                }));
+            }
+            Err(e) => {
+                eprintln!("save_separated: render failed for track '{}': {e}", root.name);
+                results.push(serde_json::json!({
+                    "track_id": root.id,
+                    "name": root.name,
+                    "ok": false,
+                    "error": e,
+                }));
+            }
+        }
+    }
+
+    let all_ok = results.iter().all(|r| r["ok"].as_bool().unwrap_or(false));
+    serde_json::json!({
+        "ok": all_ok,
+        "count": results.len(),
+        "tracks": results,
+        "output_dir": output_dir,
+    })
+}

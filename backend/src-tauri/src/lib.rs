@@ -260,6 +260,7 @@ pub fn run() {
             commands::process_audio,
             commands::synthesize,
             commands::save_synthesized,
+            commands::save_separated,
             commands::play_original,
             commands::play_synthesized,
             commands::stop_audio,

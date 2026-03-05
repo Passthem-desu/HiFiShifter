@@ -208,14 +208,14 @@ export function ActionBar() {
                 >
                     <StopIcon />
                 </Button>
-                <Button
+                <IconButton
                     variant="solid"
                     size="1"
                     onClick={() => dispatch(playSynthesized())}
                     title={t("action_play_out")}
                 >
-                    <PlayIcon /> {t("action_play_out")}
-                </Button>
+                    <PlayIcon />
+                </IconButton>
             </Flex>
 
             <Separator orientation="vertical" size="2" />

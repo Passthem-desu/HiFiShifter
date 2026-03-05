@@ -414,6 +414,11 @@ pub fn save_synthesized(state: State<'_, AppState>, output_path: String) -> serd
     synth::save_synthesized(state, output_path)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn save_separated(state: State<'_, AppState>, output_dir: String) -> serde_json::Value {
+    synth::save_separated(state, output_dir)
+}
+
 // ===================== playback =====================
 
 #[tauri::command(rename_all = "camelCase")]

@@ -905,6 +905,7 @@ impl TimelineState {
         self.patch_clip_state(
             clip_id,
             ClipStatePatch {
+                name: None,
                 start_sec: None,
                 length_sec,
                 gain,
