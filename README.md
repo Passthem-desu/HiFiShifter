@@ -61,7 +61,7 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
-**注意：** WORLD vocoder 现已通过 cc crate 静态编译集成，无需额外配置。首次构建时会自动编译 WORLD C++ 源码（约需 1-2 分钟）。
+**注意：** WORLD vocoder 和 Rubber band 现已通过 cc crate 静态编译集成，无需额外配置。首次构建时会自动编译C++ 源码（约需 1-2 分钟）。
 
 ### ONNX 推理（可选）
 
