@@ -10,4 +10,4 @@
 /third_party/world/build_world_dll/_build/
 /third_party/world/build_world_dll/_build_*/
 
-# Third-party source code (static linking - cloned from GitHub, not committed)
+# Third-party source code (static linking - embedded as source code in the repo)
