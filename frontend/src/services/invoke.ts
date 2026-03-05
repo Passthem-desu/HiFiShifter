@@ -322,7 +322,10 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
     }
 }
 
-export async function invoke<T>(method: string, ...args: unknown[]): Promise<T> {
+export async function invoke<T>(
+    method: string,
+    ...args: unknown[]
+): Promise<T> {
     const tauriInvoke = getTauriInvoke();
     if (tauriInvoke) {
         const invokeArgs = buildTauriArgs(method, args);
