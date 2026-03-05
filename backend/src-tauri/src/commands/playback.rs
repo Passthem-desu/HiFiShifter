@@ -68,6 +68,26 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 clips_to_render.sort_by(|a, b| {
                     a.clip.start_sec.total_cmp(&b.clip.start_sec)
                 });
+
+                // 防呆：当 pitch_edit_user_modified 为 true 但当前时间线中并没有任何 clip
+                // 在播放窗口内需要 pitch edit（例如用户把所有点都清空为 0），
+                // 则不应进入“等待预渲染”路径，否则会因 first_clip_rendered 永远为 false
+                // 而导致播放不启动、全程无声。
+                if clips_to_render.is_empty() {
+                    engine.seek_sec(render_start_sec);
+                    engine.update_timeline(tl_for_render.clone());
+                    engine.set_playing(true, Some("original"));
+
+                    let _ = app.emit(
+                        "playback_rendering_state",
+                        PlaybackRenderingStateEvent {
+                            active: false,
+                            progress: Some(1.0),
+                            target: Some("original".to_string()),
+                        },
+                    );
+                    return;
+                }
                 
                 let total = clips_to_render.len().max(1);
                 let mut rendered_count = 0u32;
@@ -241,6 +261,12 @@ fn collect_clips_needing_render(
             Some(e) => e,
             None => continue,
         };
+        let track = match timeline.tracks.iter().find(|t| t.id == clip_root) {
+            Some(t) => t,
+            None => continue,
+        };
+        let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+        let renderer_id = crate::renderer::get_renderer(kind).id();
         let pitch_edit = entry.pitch_edit.as_slice();
         let frame_period_ms = entry.frame_period_ms.max(0.1);
 
@@ -250,6 +276,7 @@ fn collect_clips_needing_render(
             start_frame,
             end_frame,
             sr,
+            renderer_id,
             pitch_edit,
             frame_period_ms,
             playback_rate,

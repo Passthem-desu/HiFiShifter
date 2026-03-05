@@ -21,11 +21,6 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
         return None;
     }
 
-    // 检查clip是否需要pitch edit
-    // 注意：这里需要timeline状态来检测pitch edit，但在audio callback中无法获取timeline
-    // 因此我们依赖clip.rendered_pcm的存在来判断是否需要pitch edit
-    // 如果clip需要pitch edit但没有rendered_pcm，说明尚未合成完成，返回静音
-    
     // 次高优先级：stretch_stream ring（实时拉伸缓存）
     if let Some(stream) = clip.stretch_stream.as_ref() {
         if let Some((sl, sr)) = stream.read_frame(local) {
@@ -33,12 +28,35 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
         }
     }
 
-    // 如果clip需要pitch edit但没有rendered_pcm，返回静音（而不是fallback到源PCM）
-    // 注意：在audio callback中无法检测pitch edit状态，我们依赖clip.rendered_pcm的存在
-    // 如果clip有pitch edit需求，rendered_pcm应该存在；如果不存在，说明尚未合成完成
-    
-    // 返回静音表示clip尚未就绪
-    None
+    // 若该 clip 需要合成（pitch edit）但尚未渲染完成，静音等待
+    if clip.needs_synthesis {
+        return None;
+    }
+
+    // 无需合成：直接回退到源 PCM（支持 playback_rate 采样）
+    let src_frame_f = local_adj * clip.playback_rate;
+    let src_frame = src_frame_f.round() as u64;
+    let src_abs = src_frame.saturating_add(clip.src_start_frame);
+    if src_abs >= clip.src_end_frame {
+        if clip.repeat {
+            let range = clip.src_end_frame.saturating_sub(clip.src_start_frame);
+            if range == 0 {
+                return None;
+            }
+            let looped = clip.src_start_frame + ((src_abs - clip.src_start_frame) % range);
+            let idx = (looped as usize) * 2;
+            if idx + 1 < clip.src.pcm.len() {
+                return Some((clip.src.pcm[idx], clip.src.pcm[idx + 1]));
+            }
+        }
+        return None;
+    }
+    let idx = (src_abs as usize) * 2;
+    if idx + 1 < clip.src.pcm.len() {
+        Some((clip.src.pcm[idx], clip.src.pcm[idx + 1]))
+    } else {
+        None
+    }
 }
 
 pub(crate) fn mix_snapshot_clips_into_scratch(

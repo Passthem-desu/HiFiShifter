@@ -391,6 +391,12 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         return Ok(false);
     };
 
+    // v2 semantics: do nothing until the user actually modified the edit curve.
+    // This avoids treating auto-synced `pitch_edit` (e.g. copied from pitch_orig) as an edit.
+    if !entry.pitch_edit_user_modified {
+        return Ok(false);
+    }
+
     let frame_period_ms = entry.frame_period_ms.max(0.1);
     let pitch_edit = entry.pitch_edit.as_slice();
 
@@ -574,6 +580,13 @@ pub fn does_clip_need_pitch_edit(
     let Some(entry) = entry else {
         return false;
     };
+
+    // v2 semantics: only treat pitch edit as active after the user modified the edit curve.
+    // Otherwise `pitch_edit` may be auto-synced to `pitch_orig` and contain non-zero MIDI values,
+    // which should NOT trigger synthesis / prerender.
+    if !entry.pitch_edit_user_modified {
+        return false;
+    }
 
     let frame_period_ms = entry.frame_period_ms.max(0.1);
     let pitch_edit = entry.pitch_edit.as_slice();

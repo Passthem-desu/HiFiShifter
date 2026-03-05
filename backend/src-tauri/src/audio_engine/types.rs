@@ -85,6 +85,11 @@ pub(crate) struct EngineClip {
     /// 当有 pitch edit 时，由后台线程预渲染并填充。
     /// 长度 = clip_length_frames * 2（stereo），采样从 local frame 0 开始。
     pub(crate) rendered_pcm: Option<Arc<Vec<f32>>>,
+
+    /// 该 clip 是否需要 pitch 合成。
+    /// - true：需要合成；若 rendered_pcm 为 None，则静音等待渲染完成。
+    /// - false：无需合成；直接回退到源 PCM 播放。
+    pub(crate) needs_synthesis: bool,
 }
 
 #[allow(dead_code)]

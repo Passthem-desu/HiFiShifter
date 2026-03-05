@@ -237,6 +237,7 @@ pub fn compute_param_hash(
     start_frame: u64,
     end_frame: u64,
     sr: u32,
+    renderer_id: &str,
     curves: &PitchCurvesSnapshot,
 ) -> u64 {
     // FNV-1a 64-bit 初始值
@@ -252,6 +253,7 @@ pub fn compute_param_hash(
     }
 
     mix_bytes!(clip_id.as_bytes());
+    mix_bytes!(renderer_id.as_bytes());
     mix_bytes!(&start_frame.to_le_bytes());
     mix_bytes!(&end_frame.to_le_bytes());
     mix_bytes!(&sr.to_le_bytes());
@@ -411,6 +413,7 @@ pub fn compute_rendered_clip_hash(
     start_frame: u64,
     end_frame: u64,
     sr: u32,
+    renderer_id: &str,
     pitch_edit: &[f32],
     frame_period_ms: f64,
     playback_rate: f64,
@@ -428,6 +431,7 @@ pub fn compute_rendered_clip_hash(
 
     mix_bytes!(clip_id.as_bytes());
     mix_bytes!(source_path.as_bytes());
+    mix_bytes!(renderer_id.as_bytes());
     mix_bytes!(&start_frame.to_le_bytes());
     mix_bytes!(&end_frame.to_le_bytes());
     mix_bytes!(&sr.to_le_bytes());

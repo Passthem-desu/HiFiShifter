@@ -67,6 +67,7 @@ impl Renderer for HiFiGanRenderer {
             seg_start_frame,
             seg_end_frame,
             sr,
+            self.id(),
             &curves_snapshot,
         );
         let cache_key = crate::synth_clip_cache::SynthClipCacheKey {

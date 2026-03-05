@@ -391,43 +391,61 @@ pub(crate) fn build_snapshot(
             .max(0.0) as u64;
 
         // ── 查询整 Clip 渲染缓存 ───────────────────────────────────────────
-        // 对有 pitch edit 的 clip，尝试从 RenderedClipCache 获取预渲染 PCM。
-        let rendered_pcm = {
-            let clip_root = timeline.resolve_root_track_id(&clip.track_id);
-            let has_pitch_edit = clip_root.as_ref().and_then(|root| {
-                let entry = timeline.params_by_root_track.get(root)?;
-                let track = timeline.tracks.iter().find(|t| &t.id == root)?;
-                if !track.compose_enabled {
-                    return None;
-                }
-                if entry.pitch_edit.iter().any(|&v| v.is_finite() && v > 0.0) {
-                    Some((entry.pitch_edit.as_slice(), entry.frame_period_ms))
+        // 使用与 collect_clips_needing_render 完全相同的逻辑判断是否需要合成：
+        //   1. 通过 does_clip_need_pitch_edit 做 per-clip 范围检查，避免将范围外clip
+        //      误判为需要合成（否则会因缓存缺失而产生静音）。
+        //   2. hash 使用原始 playback_rate 而非 playback_rate_render，确保与
+        //      render_single_clip 存入缓存时使用的 key 完全一致。
+        //      （stretch cache 命中后 playback_rate_render=1.0，若用 playback_rate_render
+        //       会导致 hash 不匹配 → rendered_pcm=None + needs_synthesis=true → 静音）
+        let (rendered_pcm, needs_synthesis) = {
+            let needs_pitch_edit = crate::pitch_editing::does_clip_need_pitch_edit(
+                timeline,
+                clip,
+                start_sec,
+            );
+            if needs_pitch_edit {
+                // 获取 pitch edit 参数 + renderer_id 用于 hash 计算
+                let params = timeline
+                    .resolve_root_track_id(&clip.track_id)
+                    .and_then(|root| {
+                        let entry = timeline.params_by_root_track.get(&root)?;
+                        let track = timeline.tracks.iter().find(|t| t.id == root)?;
+                        let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+                        let renderer_id = crate::renderer::get_renderer(kind).id();
+                        Some((entry.pitch_edit.as_slice(), entry.frame_period_ms, renderer_id))
+                    });
+                if let Some((pitch_edit, frame_period_ms, renderer_id)) = params {
+                    let end_frame = start_frame.saturating_add(length_frames);
+                    // 关键：使用原始 playback_rate，与 render_single_clip 存入时一致
+                    let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
+                        &clip.id,
+                        source_path,
+                        start_frame,
+                        end_frame,
+                        out_rate,
+                        renderer_id,
+                        pitch_edit,
+                        frame_period_ms,
+                        playback_rate,
+                    );
+                    let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
+                        clip_id: clip.id.clone(),
+                        param_hash,
+                    };
+                    let mut rendered_cache = crate::synth_clip_cache::global_rendered_clip_cache()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    let pcm = rendered_cache.get(&cache_key).map(|entry| entry.pcm_stereo.clone());
+                    // 该 clip 需要合成；若 pcm 为 None 则表示尚未完成，应静音等待
+                    (pcm, true)
                 } else {
-                    None
+                    // 无法找到 pitch edit 参数，降级为不合成
+                    (None, false)
                 }
-            });
-            if let Some((pitch_edit, frame_period_ms)) = has_pitch_edit {
-                let end_frame = start_frame.saturating_add(length_frames);
-                let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
-                    &clip.id,
-                    source_path,
-                    start_frame,
-                    end_frame,
-                    out_rate,
-                    pitch_edit,
-                    frame_period_ms,
-                    playback_rate_render,
-                );
-                let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
-                    clip_id: clip.id.clone(),
-                    param_hash,
-                };
-                let mut rendered_cache = crate::synth_clip_cache::global_rendered_clip_cache()
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner());
-                rendered_cache.get(&cache_key).map(|entry| entry.pcm_stereo.clone())
             } else {
-                None
+                // 无需合成，直接回退到源 PCM
+                (None, false)
             }
         };
 
@@ -447,6 +465,7 @@ pub(crate) fn build_snapshot(
             fade_out_frames,
             gain,
             rendered_pcm,
+            needs_synthesis,
         });    }
 
     clips_out.sort_by_key(|c| c.start_frame);
@@ -520,6 +539,7 @@ pub(crate) fn build_snapshot_for_file(
             fade_out_frames: 0,
             gain: 1.0,
             rendered_pcm: None,
+            needs_synthesis: false,
         }]),
     }
 }
