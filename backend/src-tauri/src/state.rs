@@ -114,6 +114,7 @@ pub struct Clip {
 
 #[derive(Debug, Clone, Default)]
 pub struct ClipStatePatch {
+    pub name: Option<String>,
     pub start_sec: Option<f64>,
     pub length_sec: Option<f64>,
     pub gain: Option<f32>,
@@ -921,6 +922,9 @@ impl TimelineState {
     pub fn patch_clip_state(&mut self, clip_id: &str, patch: ClipStatePatch) {
         let mut end_sec: Option<f64> = None;
         if let Some(c) = self.clips.iter_mut().find(|c| c.id == clip_id) {
+            if let Some(v) = patch.name {
+                c.name = v;
+            }
             if let Some(v) = patch.start_sec {
                 c.start_sec = v.max(0.0);
             }

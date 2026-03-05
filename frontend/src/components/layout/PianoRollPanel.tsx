@@ -593,6 +593,7 @@ export const PianoRollPanel: React.FC = () => {
         invalidate,
         yToViewportT,
         yToValue,
+        valueToY,
         clampViewport,
         ensureLiveEditBase,
         applyDenseToLiveEdit,
@@ -943,6 +944,7 @@ export const PianoRollPanel: React.FC = () => {
                     <div
                         ref={scrollerRef}
                         className="flex-1 bg-qt-graph-bg overflow-x-auto overflow-y-hidden relative custom-scrollbar"
+                        data-piano-roll-scroller
                         tabIndex={0}
                         onMouseDownCapture={
                             interactions.onScrollerMouseDownCapture

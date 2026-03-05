@@ -78,6 +78,7 @@ export function usePianoRollInteractions(args: {
 
     yToViewportT: (y: number, h: number) => number;
     yToValue: (param: ParamName, y: number, h: number) => number;
+    valueToY: (param: ParamName, v: number, h: number) => number;
     clampViewport: (param: ParamName, v: ValueViewport) => ValueViewport;
 
     ensureLiveEditBase: (pv: ParamViewSegment) => void;
@@ -126,6 +127,7 @@ export function usePianoRollInteractions(args: {
         invalidate,
         yToViewportT,
         yToValue,
+        valueToY,
         clampViewport,
         ensureLiveEditBase,
         applyDenseToLiveEdit,
@@ -455,7 +457,7 @@ export function usePianoRollInteractions(args: {
                     const aBeat = Math.min(sel.aBeat, sel.bBeat);
                     const bBeat = Math.max(sel.aBeat, sel.bBeat);
                     if (b >= aBeat && b <= bBeat) {
-                        // 判断鼠标是否在曲线附近（Y轴距离 < 0.5 半音）
+                        // 判断鼠标是否在曲线附近（像素距离 < 10px）
                         const pv = paramViewRef.current;
                         if (pv && pv.edit.length > 0) {
                             const fp = pv.framePeriodMs;
@@ -465,7 +467,18 @@ export function usePianoRollInteractions(args: {
                             const curveVal = (idx >= 0 && idx < pv.edit.length) ? pv.edit[idx] : null;
                             const mouseVal = pointerValue(e.clientY);
 
-                            if (curveVal !== null && Math.abs(mouseVal - curveVal) < 0.5) {
+                            // 使用像素距离判断是否靠近曲线，避免不同参数值域差异的影响
+                            const canvas = canvasRef.current;
+                            const rectH = canvas ? canvas.getBoundingClientRect().height : (viewSizeRef.current.h || 1);
+                            const mouseY = canvas ? (e.clientY - canvas.getBoundingClientRect().top) : 0;
+                            // pitch 绘制时有 +0.5 偏移（画在琴键中心），命中检测需保持一致
+                            const mappedCurveVal = curveVal !== null
+                                ? (editParam === "pitch" ? curveVal + 0.5 : curveVal)
+                                : null;
+                            const curveY = mappedCurveVal !== null ? valueToY(editParam, mappedCurveVal, rectH) : null;
+                            const HIT_THRESHOLD_PX = 10;
+
+                            if (curveY !== null && Math.abs(mouseY - curveY) < HIT_THRESHOLD_PX) {
                                 // 进入拖拽选中曲线模式
                                 const startMouseVal = mouseVal;
                                 const pid = e.pointerId;

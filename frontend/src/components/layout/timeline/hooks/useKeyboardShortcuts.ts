@@ -60,10 +60,18 @@ export function useKeyboardShortcuts(deps: {
                 }
             }
 
-            // Ctrl+C / Ctrl+V：复�?粘贴
+            // Ctrl+C / Ctrl+V：复制粘贴（PianoRoll 有自己的复制粘贴逻辑，焦点在其中时跳过）
             if ((e.ctrlKey || e.metaKey) && !e.altKey) {
-                if (key === "c") {
-                    if (selectedIds.length === 0) return;
+                const active = document.activeElement as HTMLElement | null;
+                if (
+                    active?.hasAttribute("data-piano-roll-scroller") ||
+                    active?.closest?.("[data-piano-roll-scroller]")
+                ) {
+                    // 焦点在 PianoRoll scroller 内，让事件继续传播给 PianoRoll 的 onKeyDown
+                    return;
+                }
+
+                if (key === "c") {                    if (selectedIds.length === 0) return;
                     e.preventDefault();
                     e.stopPropagation();
                     const clips = s.clips.filter((c) => selectedIds.includes(c.id));

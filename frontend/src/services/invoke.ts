@@ -214,16 +214,17 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "set_clip_state":
             return {
                 clipId: args[0],
-                startSec: args[1],
-                lengthSec: args[2],
-                gain: args[3],
-                muted: args[4],
-                trimStartSec: args[5],
-                trimEndSec: args[6],
-                playbackRate: args[7],
-                fadeInSec: args[8],
-                fadeOutSec: args[9],
-                color: args[10],
+                name: args[1],
+                startSec: args[2],
+                lengthSec: args[3],
+                gain: args[4],
+                muted: args[5],
+                trimStartSec: args[6],
+                trimEndSec: args[7],
+                playbackRate: args[8],
+                fadeInSec: args[9],
+                fadeOutSec: args[10],
+                color: args[11],
             };
 
         case "split_clip":

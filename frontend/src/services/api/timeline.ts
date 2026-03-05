@@ -132,6 +132,7 @@ export const timelineApi = {
 
     setClipState: (payload: {
         clipId: string;
+        name?: string;
         startSec?: number;
         lengthSec?: number;
         gain?: number;
@@ -146,6 +147,7 @@ export const timelineApi = {
         invoke<TimelineResult>(
             "set_clip_state",
             payload.clipId,
+            payload.name,
             payload.startSec,
             payload.lengthSec,
             payload.gain,

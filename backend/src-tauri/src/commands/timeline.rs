@@ -262,6 +262,7 @@ pub(super) fn move_clip(
 pub(super) fn set_clip_state(
     state: State<'_, AppState>,
     clip_id: String,
+    name: Option<String>,
     start_sec: Option<f64>,
     length_sec: Option<f64>,
     gain: Option<f32>,
@@ -278,6 +279,7 @@ pub(super) fn set_clip_state(
     tl.patch_clip_state(
         &clip_id,
         crate::state::ClipStatePatch {
+            name,
             start_sec,
             length_sec,
             gain,

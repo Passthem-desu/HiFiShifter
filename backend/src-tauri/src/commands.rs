@@ -292,6 +292,7 @@ pub fn move_clip(
 pub fn set_clip_state(
     state: State<'_, AppState>,
     clip_id: String,
+    name: Option<String>,
     start_sec: Option<f64>,
     length_sec: Option<f64>,
     gain: Option<f32>,
@@ -306,6 +307,7 @@ pub fn set_clip_state(
     timeline::set_clip_state(
         state,
         clip_id,
+        name,
         start_sec,
         length_sec,
         gain,
