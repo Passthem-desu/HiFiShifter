@@ -123,26 +123,11 @@ fn env_path(name: &str) -> Option<PathBuf> {
 }
 
 fn default_model_dir_guess() -> Option<PathBuf> {
-    // Prefer repo-relative default used in this workspace.
-    // 1) Current working directory
-    if let Ok(cd) = std::env::current_dir() {
-        let p = cd.join("pc_nsf_hifigan_44.1k_hop512_128bin_2025.02");
-        if p.is_dir() {
-            return Some(p);
-        }
-    }
-
-    // 2) Dev runs: backend/src-tauri -> repo root
+    // 开发环境：模型位于 CARGO_MANIFEST_DIR/resources/models/nsf_hifigan/
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let root = manifest
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.to_path_buf());
-    if let Some(root) = root {
-        let p = root.join("pc_nsf_hifigan_44.1k_hop512_128bin_2025.02");
-        if p.is_dir() {
-            return Some(p);
-        }
+    let p = manifest.join("resources").join("models").join("nsf_hifigan");
+    if p.join("pc_nsf_hifigan.onnx").is_file() && p.join("config.json").is_file() {
+        return Some(p);
     }
 
     None

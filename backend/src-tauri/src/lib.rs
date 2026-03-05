@@ -29,7 +29,6 @@ mod world;
 mod streaming_world;
 mod world_vocoder;
 
-use std::path::PathBuf;
 use tauri::Manager;
 
 pub fn nsf_hifigan_onnx_probe() -> Result<String, String> {
@@ -51,60 +50,14 @@ pub fn run() {
         .manage(state::AppState::default())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // Prefer pre-bundled Rubber Band DLL if present.
-            // We expose it to the runtime loader via env var so `rubberband.rs`
-            // can stay independent of Tauri handles.
-            if std::env::var_os("HIFISHIFTER_RUBBERBAND_DLL").is_none() {
-                // 1) Bundled resource dir (packaged apps)
+            // 打包后的应用：从 resource_dir 查找内嵌的 ONNX 模型
+            if std::env::var_os("HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR").is_none() {
                 if let Ok(res_dir) = app.path().resource_dir() {
-                    let p = res_dir
-                        .join("rubberband")
-                        .join("windows")
-                        .join("x64")
-                        .join("rubberband.dll");
-                    if p.exists() {
-                        std::env::set_var("HIFISHIFTER_RUBBERBAND_DLL", p);
-                    }
-                }
-
-                // 2) Workspace path (dev runs)
-                if std::env::var_os("HIFISHIFTER_RUBBERBAND_DLL").is_none() {
-                    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("resources")
-                        .join("rubberband")
-                        .join("windows")
-                        .join("x64")
-                        .join("rubberband.dll");
-                    if p.exists() {
-                        std::env::set_var("HIFISHIFTER_RUBBERBAND_DLL", p);
-                    }
-                }
-            }
-
-            // Prefer pre-bundled WORLD DLL if present.
-            if std::env::var_os("HIFISHIFTER_WORLD_DLL").is_none() {
-                // 1) Bundled resource dir (packaged apps)
-                if let Ok(res_dir) = app.path().resource_dir() {
-                    let p = res_dir
-                        .join("world")
-                        .join("windows")
-                        .join("x64")
-                        .join("world.dll");
-                    if p.exists() {
-                        std::env::set_var("HIFISHIFTER_WORLD_DLL", p);
-                    }
-                }
-
-                // 2) Workspace path (dev runs)
-                if std::env::var_os("HIFISHIFTER_WORLD_DLL").is_none() {
-                    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("resources")
-                        .join("world")
-                        .join("windows")
-                        .join("x64")
-                        .join("world.dll");
-                    if p.exists() {
-                        std::env::set_var("HIFISHIFTER_WORLD_DLL", p);
+                    let p = res_dir.join("models").join("nsf_hifigan");
+                    if p.join("pc_nsf_hifigan.onnx").exists()
+                        && p.join("config.json").exists()
+                    {
+                        std::env::set_var("HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR", &p);
                     }
                 }
             }
