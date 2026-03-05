@@ -619,8 +619,6 @@ export interface DetectedPitchCurve {
         if (selection) {
             const selMinBeat = Math.min(selection.aBeat, selection.bBeat);
             const selMaxBeat = Math.max(selection.aBeat, selection.bBeat);
-            const selMinSec = selMinBeat * secPerBeat;
-            const selMaxSec = selMaxBeat * secPerBeat;
             const selX0 = selMinBeat * pxPerBeat - scrollLeft;
             const selX1 = selMaxBeat * pxPerBeat - scrollLeft;
 
