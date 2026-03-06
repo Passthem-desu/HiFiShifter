@@ -477,6 +477,7 @@ pub fn schedule_clip_pitch_jobs(
                 .cloned();
             if cached.is_none() {
                 // 拉伸尚未完成，跳过；等待 handle_stretch_ready 触发重新调度
+                eprintln!("[pitch_clip] clip '{}' ({}) stretch PCM not ready, deferring pitch analysis", clip.name, clip.id);
                 let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
                 set.remove(&inflight_key);
                 continue;
@@ -809,6 +810,16 @@ pub fn compute_clip_pitch_midi(
 pub fn invalidate_clip_pitch_cache(clip_id: &str) {
     let mut cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
     cache.remove(clip_id);
+}
+
+/// 清除指定 clip 的所有 inflight 标记。
+/// 当拉伸完成（handle_stretch_ready）后调用，确保后续的
+/// schedule_clip_pitch_jobs 不会因为残留的 inflight 标记而跳过该 clip。
+pub fn clear_clip_inflight(clip_id: &str) {
+    let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
+    // inflight key 格式为 "{clip_id}|{hash_key}"，按 clip_id 前缀清除
+    let prefix = format!("{}|", clip_id);
+    set.retain(|k| !k.starts_with(&prefix));
 }
 
 #[allow(dead_code)]

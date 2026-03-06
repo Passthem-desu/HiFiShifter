@@ -20,7 +20,7 @@ import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
 import { PitchStatusBadge } from "./PitchStatusBadge";
 import {
-    playSynthesized,
+    playOriginal,
     stopAudioPlayback,
     setBpm,
     updateTransportBpm,
@@ -211,7 +211,7 @@ export function ActionBar() {
                 <IconButton
                     variant="solid"
                     size="1"
-                    onClick={() => dispatch(playSynthesized())}
+onClick={() => dispatch(playOriginal())}
                     title={t("action_play_out")}
                 >
                     <PlayIcon />

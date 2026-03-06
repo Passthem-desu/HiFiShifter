@@ -38,11 +38,6 @@ export const ClipEdgeHandles: React.FC<{
                 onPointerDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    const alt = Boolean(
-                        altPressed ||
-                        e.altKey ||
-                        e.nativeEvent.getModifierState?.("Alt"),
-                    );
                     if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
                         ensureSelected(clipId);
                     }
@@ -50,7 +45,7 @@ export const ClipEdgeHandles: React.FC<{
                     startEditDrag(
                         e,
                         clipId,
-                        alt ? "stretch_left" : "trim_left",
+                        altPressed ? "stretch_left" : "trim_left",
                     );
                 }}
             />
@@ -63,11 +58,6 @@ export const ClipEdgeHandles: React.FC<{
                 onPointerDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    const alt = Boolean(
-                        altPressed ||
-                        e.altKey ||
-                        e.nativeEvent.getModifierState?.("Alt"),
-                    );
                     if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
                         ensureSelected(clipId);
                     }
@@ -75,7 +65,7 @@ export const ClipEdgeHandles: React.FC<{
                     startEditDrag(
                         e,
                         clipId,
-                        alt ? "stretch_right" : "trim_right",
+                        altPressed ? "stretch_right" : "trim_right",
                     );
                 }}
             />

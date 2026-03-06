@@ -141,6 +141,22 @@ fn mix_into_scratch_stereo(
     let pos0 = position_frames.load(Ordering::Relaxed);
     let pos1 = pos0.saturating_add(frames as u64);
 
+    // 检查当前播放窗口内是否有需要合成但尚未渲染完成的 clip，
+    // 如果有则 cursor 暂停（不推进 position），输出静音等待渲染完成。
+    let has_pending_clip = snap.clips.iter().any(|clip| {
+        if !clip.needs_synthesis || clip.rendered_pcm.is_some() {
+            return false; // 不需要合成 或 已经渲染好
+        }
+        // 该 clip 需要合成但还没好，检查是否与当前播放窗口重叠
+        let clip_end = clip.start_frame.saturating_add(clip.length_frames);
+        clip.start_frame < pos1 && clip_end > pos0
+    });
+
+    if has_pending_clip {
+        // cursor 暂停，不推进 position，输出静音等待
+        return;
+    }
+
     // Legacy mixing: 直接在 audio callback 中混合所有 clip
     mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch.as_mut_slice());
 

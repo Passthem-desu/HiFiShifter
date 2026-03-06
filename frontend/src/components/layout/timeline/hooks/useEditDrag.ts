@@ -12,6 +12,8 @@ import {
     setClipTrim,
 } from "../../../../features/session/sessionSlice";
 import { clamp, gainToDb, dbToGain } from "../math";
+import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
+import type { Keybinding } from "../../../../features/keybindings/types";
 
 export type EditDragType =
     | "trim_left"
@@ -44,8 +46,10 @@ export function useEditDrag(deps: {
     dispatch: AppDispatch;
     snapBeat: (beat: number) => number;
     beatFromClientX: (clientX: number, bounds: DOMRect, xScroll: number) => number;
+    /** modifier.clipNoSnap 绑定 */
+    noSnapKb: Keybinding;
 }) {
-    const { scrollRef, sessionRef, dispatch, snapBeat, beatFromClientX } = deps;
+    const { scrollRef, sessionRef, dispatch, snapBeat, beatFromClientX, noSnapKb } = deps;
 
     const editDragRef = useRef<EditDragState | null>(null);
 
@@ -92,7 +96,7 @@ export function useEditDrag(deps: {
                 drag.type === "trim_right" ||
                 drag.type === "stretch_left" ||
                 drag.type === "stretch_right";
-            if (shouldSnap && !ev.shiftKey) beat = snapBeat(beat);
+            if (shouldSnap && !isModifierActive(noSnapKb, ev)) beat = snapBeat(beat);
 
             const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
             if (!clipNow) return;

@@ -43,6 +43,7 @@ import type {
     StrokePoint,
     ValueViewport,
 } from "./pianoRoll/types";
+import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 
 import { PitchStatusBadge } from "./PitchStatusBadge";
 import { useAsyncPitchRefresh } from "../../hooks/useAsyncPitchRefresh";
@@ -56,6 +57,9 @@ export const PianoRollPanel: React.FC = () => {
     const { t } = useI18n();
     const s = useAppSelector((state: RootState) => state.session);
     const editParam = s.editParam as ParamName;
+    const pianoRollCopyKb = useAppSelector((state) => selectKeybinding(state, "pianoRoll.copy"));
+    const pianoRollPasteKb = useAppSelector((state) => selectKeybinding(state, "pianoRoll.paste"));
+    const prVerticalZoomKb = useAppSelector((state) => selectKeybinding(state, "modifier.pianoRollVerticalZoom"));
     const { mode: themeMode } = useAppTheme();
     const waveformColors = useMemo(
         () => getWaveformColors(themeMode),
@@ -560,6 +564,7 @@ export const PianoRollPanel: React.FC = () => {
             playheadSec: s.playheadSec,
             waveformColors,
             detectedPitchCurves,
+            isDark: themeMode === "dark",
         });
     };
 
@@ -599,6 +604,9 @@ export const PianoRollPanel: React.FC = () => {
         applyDenseToLiveEdit,
         commitStroke,
         liveEditActiveRef,
+        pianoRollCopyKb,
+        pianoRollPasteKb,
+        prVerticalZoomKb,
     });
 
     const onScrollerWheelNative = interactions.onScrollerWheelNative;

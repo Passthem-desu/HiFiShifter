@@ -305,7 +305,7 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
             durationSec: Number(clip.duration_sec ?? 0) || undefined,
             durationFrames: clip.duration_frames,
             sourceSampleRate: clip.source_sample_rate,
-            gain: clamp(Number(clip.gain ?? 1), 0, 2),
+            gain: clamp(Number(clip.gain ?? 1), 0, 4),
             muted: Boolean(clip.muted),
             // Allow negative trimStartSec to represent leading silence (slip-edit past source start).
             trimStartSec: Number(clip.trim_start_sec ?? 0) || 0,
@@ -773,7 +773,7 @@ const sessionSlice = createSlice({
                 (entry) => entry.id === action.payload.clipId,
             );
             if (!clip) return;
-            clip.gain = clamp(Number(action.payload.gain), 0, 2);
+            clip.gain = clamp(Number(action.payload.gain), 0, 4);
         },
         setClipMuted(
             state,

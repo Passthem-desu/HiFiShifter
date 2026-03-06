@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { AppDispatch } from "../../../../app/store";
+import { useAppSelector } from "../../../../app/hooks";
 import type { SessionState } from "../../../../features/session/sessionSlice";
 import {
     checkpointHistory,
@@ -9,6 +10,58 @@ import {
     splitClipRemote,
 } from "../../../../features/session/sessionSlice";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
+import { selectMergedKeybindings } from "../../../../features/keybindings/keybindingsSlice";
+import type { ActionId, Keybinding, KeybindingMap } from "../../../../features/keybindings/types";
+
+/**
+ * 判断 KeyboardEvent 是否匹配某个 Keybinding
+ */
+function matchesKeybinding(e: KeyboardEvent, kb: Keybinding): boolean {
+    let key = e.key.toLowerCase();
+    if (key === " " || e.code === "Space") key = "space";
+
+    if (key !== kb.key) return false;
+
+    const isMac =
+        typeof navigator !== "undefined" &&
+        navigator.platform?.toLowerCase().includes("mac");
+
+    const modKey = isMac ? e.metaKey : e.ctrlKey;
+    if (modKey !== Boolean(kb.ctrl)) return false;
+    if (e.shiftKey !== Boolean(kb.shift)) return false;
+    if (e.altKey !== Boolean(kb.alt)) return false;
+    return true;
+}
+
+/**
+ * 在 keybinding map 中查找匹配的 actionId
+ * 只检查 clip.* 操作
+ */
+function matchClipAction(
+    e: KeyboardEvent,
+    keybindings: KeybindingMap,
+): ActionId | null {
+    const clipActions: ActionId[] = [
+        "clip.delete",
+        "clip.copy",
+        "clip.paste",
+        "clip.split",
+    ];
+    // 优先匹配含修饰键的
+    for (const actionId of clipActions) {
+        const kb = keybindings[actionId];
+        if ((kb.ctrl || kb.shift || kb.alt) && matchesKeybinding(e, kb)) {
+            return actionId;
+        }
+    }
+    for (const actionId of clipActions) {
+        const kb = keybindings[actionId];
+        if (!kb.ctrl && !kb.shift && !kb.alt && matchesKeybinding(e, kb)) {
+            return actionId;
+        }
+    }
+    return null;
+}
 
 export function useKeyboardShortcuts(deps: {
     sessionRef: React.RefObject<SessionState>;
@@ -27,6 +80,8 @@ export function useKeyboardShortcuts(deps: {
         isEditableTarget,
     } = deps;
 
+    const keybindings = useAppSelector(selectMergedKeybindings);
+
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
             if (e.repeat) return;
@@ -36,9 +91,7 @@ export function useKeyboardShortcuts(deps: {
             )
                 return;
 
-            const key = e.key.toLowerCase();
             const s = sessionRef.current;
-
             const selectedIds =
                 multiSelectedClipIds.length > 0
                     ? [...multiSelectedClipIds]
@@ -46,9 +99,22 @@ export function useKeyboardShortcuts(deps: {
                       ? [s.selectedClipId]
                       : [];
 
-            // Delete / Backspace：删除选中�?clip
-            if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-                if (key === "delete" || key === "backspace") {
+            const actionId = matchClipAction(e, keybindings);
+            if (!actionId) return;
+
+            // clip.copy / clip.paste: PianoRoll 有自己的复制粘贴逻辑，焦点在其中时跳过
+            if (actionId === "clip.copy" || actionId === "clip.paste") {
+                const active = document.activeElement as HTMLElement | null;
+                if (
+                    active?.hasAttribute("data-piano-roll-scroller") ||
+                    active?.closest?.("[data-piano-roll-scroller]")
+                ) {
+                    return;
+                }
+            }
+
+            switch (actionId) {
+                case "clip.delete": {
                     if (selectedIds.length === 0) return;
                     e.preventDefault();
                     e.stopPropagation();
@@ -58,20 +124,9 @@ export function useKeyboardShortcuts(deps: {
                     }
                     return;
                 }
-            }
 
-            // Ctrl+C / Ctrl+V：复制粘贴（PianoRoll 有自己的复制粘贴逻辑，焦点在其中时跳过）
-            if ((e.ctrlKey || e.metaKey) && !e.altKey) {
-                const active = document.activeElement as HTMLElement | null;
-                if (
-                    active?.hasAttribute("data-piano-roll-scroller") ||
-                    active?.closest?.("[data-piano-roll-scroller]")
-                ) {
-                    // 焦点在 PianoRoll scroller 内，让事件继续传播给 PianoRoll 的 onKeyDown
-                    return;
-                }
-
-                if (key === "c") {                    if (selectedIds.length === 0) return;
+                case "clip.copy": {
+                    if (selectedIds.length === 0) return;
                     e.preventDefault();
                     e.stopPropagation();
                     const clips = s.clips.filter((c) => selectedIds.includes(c.id));
@@ -105,7 +160,7 @@ export function useKeyboardShortcuts(deps: {
                     return;
                 }
 
-                if (key === "v") {
+                case "clip.paste": {
                     const tpl = clipClipboardRef.current;
                     if (!tpl || tpl.length === 0) return;
                     e.preventDefault();
@@ -134,16 +189,16 @@ export function useKeyboardShortcuts(deps: {
                         .catch(() => undefined);
                     return;
                 }
-            }
 
-            // S：在播放头处分割选中 clip
-            if (!e.ctrlKey && !e.metaKey && !e.altKey && key === "s") {
-                const clipId = s.selectedClipId;
-                if (!clipId) return;
-                e.preventDefault();
-                e.stopPropagation();
-                const splitSec = Math.max(0, Number(s.playheadSec ?? 0) || 0);
-                void dispatch(splitClipRemote({ clipId, splitSec }));
+                case "clip.split": {
+                    const clipId = s.selectedClipId;
+                    if (!clipId) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const splitSec = Math.max(0, Number(s.playheadSec ?? 0) || 0);
+                    void dispatch(splitClipRemote({ clipId, splitSec }));
+                    return;
+                }
             }
         }
         window.addEventListener("keydown", onKeyDown, true);
@@ -155,5 +210,6 @@ export function useKeyboardShortcuts(deps: {
         setMultiSelectedClipIds,
         clipClipboardRef,
         isEditableTarget,
+        keybindings,
     ]);
 }
