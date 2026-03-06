@@ -50,9 +50,8 @@ function applyFadeGainToPeaks(
     const safeFadeIn = Math.max(0, Number(fadeInSec) || 0);
     const safeFadeOut = Math.max(0, Number(fadeOutSec) || 0);
     const safeWinStart = Math.max(0, windowStartSec);
-    const safeWinEnd = windowEndSec >= 0
-        ? Math.min(safeLenBeats, windowEndSec)
-        : safeLenBeats;
+    const safeWinEnd =
+        windowEndSec >= 0 ? Math.min(safeLenBeats, windowEndSec) : safeLenBeats;
 
     const resultMin = new Array<number>(srcN);
     const resultMax = new Array<number>(srcN);
@@ -63,7 +62,10 @@ function applyFadeGainToPeaks(
 
         let mul = ampScale;
         if (safeFadeIn > 1e-9) {
-            mul *= fadeCurveGain(clamp((beatAt - safeWinStart) / safeFadeIn, 0, 1), fadeInCurve);
+            mul *= fadeCurveGain(
+                clamp((beatAt - safeWinStart) / safeFadeIn, 0, 1),
+                fadeInCurve,
+            );
         }
         if (safeFadeOut > 1e-9) {
             mul *= fadeCurveGain(
@@ -278,8 +280,8 @@ export const ClipItem: React.FC<{
         // 而非 clip.lengthSec（trim 拖动时持续变化导致波形拉伸）。
         // 对于 fallback 的 waveform preview 路径，仍使用 sourceAvailSec。
         const lenBeats = peaks?.ok
-            ? (peaks.cycleLenSecTimeline || Number(clip.lengthSec ?? 0) || 0)
-            : (Number(clip.lengthSec ?? 0) || 0);
+            ? peaks.cycleLenSecTimeline || Number(clip.lengthSec ?? 0) || 0
+            : Number(clip.lengthSec ?? 0) || 0;
         const fadeIn = Number(clip.fadeInSec ?? 0) || 0;
         const fadeOut = Number(clip.fadeOutSec ?? 0) || 0;
         const fadeInCurve: FadeCurveType = clip.fadeInCurve ?? "sine";
@@ -330,7 +332,7 @@ export const ClipItem: React.FC<{
             const env = minMaxEnvelopeFromSamples(mono, w);
             // waveform_preview 是绝对值数据（0~1），需要镜像为对称的 min/max
             wMax = env.max;
-            wMin = env.max.map(v => -v);
+            wMin = env.max.map((v) => -v);
         } else {
             return null;
         }
@@ -344,9 +346,8 @@ export const ClipItem: React.FC<{
             ? Math.max(0, Number(clip.sourceStartSec ?? 0) || 0) / pr
             : 0;
         const rawSourceEnd = Number(clip.sourceEndSec ?? 0) || 0;
-        const fadeWindowEndSec = peaks?.ok && rawSourceEnd > 0
-            ? rawSourceEnd / pr
-            : -1;
+        const fadeWindowEndSec =
+            peaks?.ok && rawSourceEnd > 0 ? rawSourceEnd / pr : -1;
         const faded = applyFadeGainToPeaks(
             wMin,
             wMax,
@@ -539,7 +540,10 @@ export const ClipItem: React.FC<{
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                            if (
+                                multiSelectedCount === 0 ||
+                                !isInMultiSelectedSet
+                            ) {
                                 ensureSelected(clip.id);
                             }
                             selectClipRemote(clip.id);
@@ -554,7 +558,10 @@ export const ClipItem: React.FC<{
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                            if (
+                                multiSelectedCount === 0 ||
+                                !isInMultiSelectedSet
+                            ) {
                                 ensureSelected(clip.id);
                             }
                             selectClipRemote(clip.id);
@@ -566,7 +573,7 @@ export const ClipItem: React.FC<{
                     {/* Fade handles: 操作区覆盖整�?fade 区域（fadeBeats > 0 时显示） */}
                     {(clip.fadeInSec ?? 0) > 0 && (
                         <div
-className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
+                            className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
                             style={{
                                 width: Math.min(
                                     width,
@@ -600,7 +607,7 @@ className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
                     )}
                     {(clip.fadeOutSec ?? 0) > 0 && (
                         <div
-className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
+                            className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                             style={{
                                 width: Math.min(
                                     width,
@@ -712,17 +719,27 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                         ) : null}
                     </div>
 
-                    <div
-                        className="absolute inset-0 opacity-80 overflow-hidden"
-                    >
+                    <div className="absolute inset-0 opacity-80 overflow-hidden">
                         {/* 内层容器：通过负 marginLeft 将 trimStart 对应位置的波形对齐到容器左边缘。
                             peaks 数据覆盖整个 source 文件（0 → durationSec），SVG 固定宽度 = durationSec/pr*pxPerSec，
                             外层 overflow-hidden 裁掉左侧 trim 和右侧超出部分。 */}
                         <div
                             style={{
                                 height: "100%",
-                            marginLeft: peaks?.ok
-                                    ? -(Math.max(0, Number(clip.sourceStartSec ?? 0) || 0) / Math.max(1e-6, Number(clip.playbackRate ?? 1) || 1)) * pxPerSec
+                                marginLeft: peaks?.ok
+                                    ? -(
+                                          Math.max(
+                                              0,
+                                              Number(
+                                                  clip.sourceStartSec ?? 0,
+                                              ) || 0,
+                                          ) /
+                                          Math.max(
+                                              1e-6,
+                                              Number(clip.playbackRate ?? 1) ||
+                                                  1,
+                                          )
+                                      ) * pxPerSec
                                     : 0,
                             }}
                         >
