@@ -624,6 +624,13 @@ export const PianoRollPanel: React.FC = () => {
     // Silence unused state warnings; selectionUi is future UI.
     void selectionUi;
 
+    // 切换工具时清除选区
+    useEffect(() => {
+        selectionRef.current = null;
+        setSelectionUi(null);
+        invalidate();
+    }, [s.toolMode]);
+
     // 同步 isLoading 和 asyncRefresh 状态到全局 Context
     useEffect(() => {
         updatePianoRollStatus({

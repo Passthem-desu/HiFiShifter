@@ -436,6 +436,10 @@ export const TimelinePanel: React.FC = () => {
     const [multiSelectedClipIds, setMultiSelectedClipIds] = useState<string[]>(
         [],
     );
+    // 切换工具时清除多选
+    useEffect(() => {
+        setMultiSelectedClipIds([]);
+    }, [s.toolMode]);
     const multiSelectedSet = useMemo(
         () => new Set(multiSelectedClipIds),
         [multiSelectedClipIds],
