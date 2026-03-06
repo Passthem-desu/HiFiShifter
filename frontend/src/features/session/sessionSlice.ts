@@ -1304,7 +1304,11 @@ const sessionSlice = createSlice({
                 state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
                 state.status = "Pasted VocalShifter clipboard data";
             })
-            .addCase(pasteVocalShifterClipboard.rejected, setRejected)
+            .addCase(pasteVocalShifterClipboard.rejected, (state, action) => {
+                state.busy = false;
+                state.error = (action.payload as string) ?? action.error?.message ?? "Request failed";
+                state.status = "Failed";
+            })
 
             .addCase(playOriginal.pending, (state) =>
                 setPending(state, "Playing original..."),
@@ -1513,17 +1517,23 @@ const sessionSlice = createSlice({
                 state.busy = false;
                 const payload = action.payload as
                     | { ok: true; canceled: true }
-                    | { ok: true; canceled: false; timeline: TimelineState };
+                    | { ok: true; canceled: false; timeline: TimelineState; skippedFiles?: string[] };
                 if (!payload || (payload as any).canceled) {
                     state.status = "Import canceled";
                     return;
                 }
                 applyTimelineState(state, (payload as any).timeline);
-                state.status = "VocalShifter project imported";
+                const skipped = (payload as any).skippedFiles as string[] | undefined;
+                if (skipped && skipped.length > 0) {
+                    state.status = "VocalShifter imported with skipped files";
+                    state.error = skipped.join(", ");
+                } else {
+                    state.status = "VocalShifter project imported";
+                }
             })
             .addCase(openVocalShifterFromDialog.rejected, (state, action) => {
                 state.busy = false;
-                state.error = action.error?.message ?? "Import VocalShifter failed";
+                state.error = (action.payload as string) ?? action.error?.message ?? "Import VocalShifter failed";
                 state.status = "Import failed";
             })
 

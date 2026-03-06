@@ -38,7 +38,7 @@ const CTRP_FRAME_PERIOD: f64 = 0.005;
 const SEGMENT_OVERLAP_SEC: f64 = 0.005;
 
 /// HiFiShifter 支持的音频格式扩展名
-const SUPPORTED_AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3"];
+const SUPPORTED_AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3", "ogg", "m4a"];
 
 const FILE_HEADER_SIZE: usize = 16;
 const MAGIC: [u8; 4] = [0x56, 0x53, 0x50, 0x44]; // "VSPD"

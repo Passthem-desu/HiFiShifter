@@ -7,9 +7,8 @@
 use crate::state::AppState;
 use crate::vocalshifter_import;
 use std::path::Path;
-use tauri::{State, Window};
+use tauri::Window;
 
-use super::common::ok_bool;
 use super::core::get_timeline_state_from_ref;
 
 fn update_window_title(window: &Window, name: &str, dirty: bool) {
@@ -19,23 +18,9 @@ fn update_window_title(window: &Window, name: &str, dirty: bool) {
 }
 
 /// 弹出文件选择对话框，选择 .vshp / .vsp 文件。
-pub(super) fn open_vocalshifter_dialog(state: &AppState) -> serde_json::Value {
-    let is_zh = {
-        let locale = state
-            .ui_locale
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        locale.to_lowercase().starts_with("zh")
-    };
-    let filter_name = if is_zh {
-        "VocalShifter 工程"
-    } else {
-        "VocalShifter Project"
-    };
-
+pub(super) fn open_vocalshifter_dialog() -> serde_json::Value {
     let picked = rfd::FileDialog::new()
-        .add_filter(filter_name, &["vshp", "vsp"])
+        .add_filter("VocalShifter Project", &["vshp", "vsp"])
         .pick_file();
 
     match picked {
@@ -47,21 +32,26 @@ pub(super) fn open_vocalshifter_dialog(state: &AppState) -> serde_json::Value {
 }
 
 /// 解析 VocalShifter 工程并导入到 HiFiShifter。
+///
+/// 返回 JSON 对象，包含 timeline 数据。失败时 `ok=false` 并附带 `error` 字段。
+/// 若有跳过的文件，附带 `skipped_files` 数组。
 pub(super) fn import_vocalshifter_project(
     state: &AppState,
     window: &Window,
     vsp_path: String,
-) -> crate::models::TimelineStatePayload {
+) -> serde_json::Value {
     let path = Path::new(&vsp_path);
 
     // 读取文件
     let data = match std::fs::read(path) {
         Ok(d) => d,
-        Err(e) => {
-            show_error_dialog(state, &format!("Failed to read file: {}", e));
+        Err(_e) => {
             let mut payload = get_timeline_state_from_ref(state);
             payload.ok = false;
-            return payload;
+            let mut json = serde_json::to_value(&payload).unwrap_or_default();
+            json["ok"] = serde_json::json!(false);
+            json["error"] = serde_json::json!("import_read_failed");
+            return json;
         }
     };
 
@@ -71,11 +61,13 @@ pub(super) fn import_vocalshifter_project(
     // 解析并转换
     let result = match vocalshifter_import::import_vsp(&data, vsp_dir) {
         Ok(r) => r,
-        Err(e) => {
-            show_error_dialog(state, &e);
+        Err(_e) => {
             let mut payload = get_timeline_state_from_ref(state);
             payload.ok = false;
-            return payload;
+            let mut json = serde_json::to_value(&payload).unwrap_or_default();
+            json["ok"] = serde_json::json!(false);
+            json["error"] = serde_json::json!("import_parse_failed");
+            return json;
         }
     };
 
@@ -101,62 +93,12 @@ pub(super) fn import_vocalshifter_project(
         update_window_title(window, &p.name, p.dirty);
     }
 
-    // 如果有跳过的文件，弹出警告
+    let payload = get_timeline_state_from_ref(state);
+    let mut json = serde_json::to_value(&payload).unwrap_or_default();
+
     if !result.skipped_files.is_empty() {
-        show_skipped_warning(state, &result.skipped_files);
+        json["skipped_files"] = serde_json::json!(result.skipped_files);
     }
 
-    get_timeline_state_from_ref(state)
-}
-
-fn show_error_dialog(state: &AppState, message: &str) {
-    let is_zh = {
-        let locale = state
-            .ui_locale
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        locale.to_lowercase().starts_with("zh")
-    };
-    let title = if is_zh { "导入错误" } else { "Import Error" };
-    rfd::MessageDialog::new()
-        .set_title(title)
-        .set_description(message)
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
-}
-
-fn show_skipped_warning(state: &AppState, skipped: &[String]) {
-    let is_zh = {
-        let locale = state
-            .ui_locale
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        locale.to_lowercase().starts_with("zh")
-    };
-
-    let title = if is_zh {
-        "导入警告"
-    } else {
-        "Import Warning"
-    };
-
-    let header = if is_zh {
-        "以下音频文件因格式不支持或文件不存在而被跳过：\n"
-    } else {
-        "The following audio files were skipped (unsupported format or not found):\n"
-    };
-
-    let file_list: String = skipped
-        .iter()
-        .map(|f| format!("  • {}", f))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    rfd::MessageDialog::new()
-        .set_title(title)
-        .set_description(&format!("{}{}", header, file_list))
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
+    json
 }

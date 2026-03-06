@@ -1,35 +1,7 @@
 use crate::state::AppState;
 
-fn show_error_dialog(state: &AppState, message_zh: &str, message_en: &str) {
-    let is_zh = {
-        let locale = state
-            .ui_locale
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        locale.to_lowercase().starts_with("zh")
-    };
-    let title = if is_zh {
-        "粘贴错误"
-    } else {
-        "Paste Error"
-    };
-    let desc = if is_zh { message_zh } else { message_en };
-
-    let _ = rfd::MessageDialog::new()
-        .set_title(title)
-        .set_description(desc)
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
-}
-
 pub(super) fn paste_vocalshifter_clipboard(state: &AppState) -> serde_json::Value {
     let Some(path) = crate::vocalshifter_clipboard::find_latest_clipboard_file() else {
-        show_error_dialog(
-            state,
-            "未找到 VocalShifter 剪贴板数据。",
-            "VocalShifter clipboard data was not found.",
-        );
         return serde_json::json!({"ok": false, "error": "clipboard_not_found"});
     };
 
@@ -37,18 +9,8 @@ pub(super) fn paste_vocalshifter_clipboard(state: &AppState) -> serde_json::Valu
         Ok(v) => v,
         Err(e) => {
             if e.starts_with("invalid_format:") {
-                show_error_dialog(
-                    state,
-                    "剪贴板文件格式不正确（文件大小不是 0x80 的整数倍，或记录损坏）。",
-                    "Clipboard file format is invalid (size is not a multiple of 0x80, or record is corrupted).",
-                );
                 return serde_json::json!({"ok": false, "error": "clipboard_invalid_format"});
             }
-            show_error_dialog(
-                state,
-                "读取 VocalShifter 剪贴板文件时发生 IO 错误。",
-                "An I/O error occurred while reading VocalShifter clipboard file.",
-            );
             return serde_json::json!({"ok": false, "error": "clipboard_io_error"});
         }
     };
@@ -56,20 +18,10 @@ pub(super) fn paste_vocalshifter_clipboard(state: &AppState) -> serde_json::Valu
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
 
     let Some(selected_track_id) = tl.selected_track_id.clone() else {
-        show_error_dialog(
-            state,
-            "当前没有选中的音高线，请先选择一条音高线。",
-            "No pitch line is selected. Please select one first.",
-        );
         return serde_json::json!({"ok": false, "error": "no_pitch_line_selected"});
     };
 
     let Some(root_track_id) = tl.resolve_root_track_id(&selected_track_id) else {
-        show_error_dialog(
-            state,
-            "当前没有选中的音高线，请先选择一条音高线。",
-            "No pitch line is selected. Please select one first.",
-        );
         return serde_json::json!({"ok": false, "error": "no_pitch_line_selected"});
     };
 

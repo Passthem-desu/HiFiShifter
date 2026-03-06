@@ -59,6 +59,17 @@ const statusKey: Record<string, string> = {
     "Export failed": "status_export_failed",
     "Export separated done": "status_export_separated_done",
     "Export separated failed": "status_export_separated_failed",
+    "VocalShifter imported with skipped files": "vs_import_skipped_header",
+};
+
+// 后端返回的错误码 → i18n key 映射
+const errorCodeKey: Record<string, string> = {
+    clipboard_not_found: "vs_paste_clipboard_not_found",
+    clipboard_invalid_format: "vs_paste_clipboard_invalid_format",
+    clipboard_io_error: "vs_paste_clipboard_io_error",
+    no_pitch_line_selected: "vs_paste_no_pitch_line",
+    import_read_failed: "vs_import_read_failed",
+    import_parse_failed: "vs_import_parse_failed",
 };
 
 function AppInner() {
@@ -174,7 +185,9 @@ function AppInner() {
     // 监听后端 clip_pitch_data 事件，将 per-clip MIDI 曲线存入 store。
     useClipPitchDataListener();
 
-    const errorText = error ? `${t("status_error_prefix")}：${error}` : statusText;
+    const errorText = error
+        ? `${t("status_error_prefix")}：${errorCodeKey[error] ? t(errorCodeKey[error] as any) : error}`
+        : statusText;
 
     // 构建 pitch 分析进度文本（分析中时显示在状态栏左侧）
     const pitchAnalysisText = pitchAnalysis.pending

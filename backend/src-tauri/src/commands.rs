@@ -515,8 +515,8 @@ pub fn read_audio_preview(
 // ===================== vocalshifter =====================
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn open_vocalshifter_dialog(state: State<'_, AppState>) -> serde_json::Value {
-    vocalshifter::open_vocalshifter_dialog(state.inner())
+pub fn open_vocalshifter_dialog() -> serde_json::Value {
+    vocalshifter::open_vocalshifter_dialog()
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -524,7 +524,7 @@ pub fn import_vocalshifter_project(
     state: State<'_, AppState>,
     window: Window,
     vsp_path: String,
-) -> crate::models::TimelineStatePayload {
+) -> serde_json::Value {
     vocalshifter::import_vocalshifter_project(state.inner(), &window, vsp_path)
 }
 

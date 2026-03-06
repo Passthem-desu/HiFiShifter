@@ -32,5 +32,5 @@ export const projectApi = {
         ),
 
     importVocalShifterProject: (vspPath: string) =>
-        invoke<TimelineResult>("import_vocalshifter_project", vspPath),
+        invoke<TimelineResult & { error?: string; skipped_files?: string[] }>("import_vocalshifter_project", vspPath),
 };

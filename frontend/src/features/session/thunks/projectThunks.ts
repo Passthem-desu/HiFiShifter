@@ -72,7 +72,15 @@ export const openVocalShifterFromDialog = createAsyncThunk(
         if (picked.canceled || !picked.path) {
             return { ok: true, canceled: true } as const;
         }
-        const timeline = await webApi.importVocalShifterProject(picked.path);
-        return { ok: true, canceled: false, timeline } as const;
+        const result = await webApi.importVocalShifterProject(picked.path);
+        if (!result?.ok) {
+            return rejectWithValue(result?.error ?? "import_vocalshifter_failed");
+        }
+        return {
+            ok: true,
+            canceled: false,
+            timeline: result,
+            skippedFiles: result.skipped_files as string[] | undefined,
+        } as const;
     },
 );
