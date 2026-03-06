@@ -22,14 +22,7 @@ pub(crate) fn save_project_to_path_inner(
     project_path: String,
 ) -> Result<crate::models::TimelineStatePayload, String> {
     let path = PathBuf::from(&project_path);
-    let name = {
-        let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-        if p.name.trim().is_empty() {
-            project_name_from_path(&path)
-        } else {
-            p.name.clone()
-        }
-    };
+    let name = project_name_from_path(&path);
 
     let tl = state
         .timeline
@@ -142,11 +135,7 @@ pub(super) fn open_project(
     state.clear_history();
     {
         let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-        p.name = if pf.name.trim().is_empty() {
-            project_name_from_path(&path)
-        } else {
-            pf.name.clone()
-        };
+        p.name = project_name_from_path(&path);
         p.path = Some(project_path.clone());
         p.dirty = false;
         // recent list (in-memory)

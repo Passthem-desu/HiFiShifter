@@ -403,6 +403,21 @@ pub fn schedule_clip_pitch_jobs(
             continue;
         }
 
+        // 仅对 compose_enabled 的根轨道进行音高分析
+        {
+            let root_id = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+            let compose_enabled = tl
+                .tracks
+                .iter()
+                .find(|t| t.id == root_id)
+                .map(|t| t.compose_enabled)
+                .unwrap_or(false);
+            if !compose_enabled {
+                eprintln!("[pitch_clip] clip '{}' skipped: compose_enabled=false for root '{}'", clip.id, root_id);
+                continue;
+            }
+        }
+
         // 尝试构建 key
         let ck = match build_clip_pitch_key(tl, clip, &tl.resolve_root_track_id(&clip.track_id).unwrap_or_default(), frame_period_ms) {
             Some(k) => k,
