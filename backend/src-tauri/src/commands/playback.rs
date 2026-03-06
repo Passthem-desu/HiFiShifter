@@ -92,11 +92,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 let mut rendered_count = 0u32;
                 let mut any_error = false;
 
-                // 立即开始播放：cursor 会在遇到未合成 clip 时自动暂停等待
-                engine.seek_sec(render_start_sec);
-                engine.update_timeline(tl_for_render.clone());
-                engine.set_playing(true, Some("original"));
-
+                // 逐 clip 预渲染，全部完成后再开始播放
                 for clip_render_info in &clips_to_render {
                     // 检查缓存是否已命中
                     {
@@ -176,11 +172,12 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                             target: Some("original".to_string()),
                         },
                     );
-
-                    // 每个 clip 渲染完成后更新 timeline snapshot，
-                    // 使 mix.rs 中的 cursor 能感知到新渲染好的 clip 并恢复推进
-                    engine.update_timeline(tl_for_render.clone());
                 }
+
+                // 所有 clip 渲染完成，开始播放
+                engine.seek_sec(render_start_sec);
+                engine.update_timeline(tl_for_render.clone());
+                engine.set_playing(true, Some("original"));
 
                 // 推送渲染完成
                 let _ = app.emit(
