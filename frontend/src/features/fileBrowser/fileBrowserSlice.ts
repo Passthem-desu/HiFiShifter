@@ -17,6 +17,8 @@ interface FileBrowserState {
     previewVolume: number; // 0~1
     previewingFile: string | null;
     searchQuery: string; // 搜索过滤关键词
+    searchResults: FileEntry[] | null; // null = 非搜索模式
+    searchLoading: boolean;
 }
 
 const STORAGE_KEY = "hifishifter.fileBrowser.lastPath";
@@ -34,6 +36,8 @@ const initialState: FileBrowserState = {
     previewVolume: 0.8,
     previewingFile: null,
     searchQuery: "",
+    searchResults: null,
+    searchLoading: false,
 };
 
 export const loadDirectory = createAsyncThunk(
@@ -45,6 +49,23 @@ export const loadDirectory = createAsyncThunk(
         } catch (err) {
             return rejectWithValue(
                 err instanceof Error ? err.message : "Failed to load directory",
+            );
+        }
+    },
+);
+
+export const searchFilesRecursive = createAsyncThunk(
+    "fileBrowser/searchFilesRecursive",
+    async (
+        { dirPath, query }: { dirPath: string; query: string },
+        { rejectWithValue },
+    ) => {
+        try {
+            const entries = await fileBrowserApi.searchFilesRecursive(dirPath, query);
+            return entries;
+        } catch (err) {
+            return rejectWithValue(
+                err instanceof Error ? err.message : "Search failed",
             );
         }
     },
@@ -68,6 +89,10 @@ const fileBrowserSlice = createSlice({
         },
         setSearchQuery(state, action: PayloadAction<string>) {
             state.searchQuery = action.payload;
+            if (!action.payload.trim()) {
+                state.searchResults = null;
+                state.searchLoading = false;
+            }
         },
     },
     extraReducers: (builder) => {
@@ -85,6 +110,17 @@ const fileBrowserSlice = createSlice({
             .addCase(loadDirectory.rejected, (state, action) => {
                 state.loading = false;
                 state.error = String(action.payload ?? "Unknown error");
+            })
+            .addCase(searchFilesRecursive.pending, (state) => {
+                state.searchLoading = true;
+            })
+            .addCase(searchFilesRecursive.fulfilled, (state, action) => {
+                state.searchLoading = false;
+                state.searchResults = action.payload;
+            })
+            .addCase(searchFilesRecursive.rejected, (state) => {
+                state.searchLoading = false;
+                state.searchResults = [];
             });
     },
 });

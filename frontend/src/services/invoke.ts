@@ -325,6 +325,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 ...(args[1] !== undefined ? { maxFrames: args[1] } : {}),
             };
 
+        case "search_files_recursive":
+            return { dirPath: args[0], query: args[1] };
+
         default:
             return { __unwired: true };
     }

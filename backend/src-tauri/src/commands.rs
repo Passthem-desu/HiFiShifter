@@ -516,6 +516,14 @@ pub fn read_audio_preview(
     file_browser::read_audio_preview(file_path, max_frames)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn search_files_recursive(
+    dir_path: String,
+    query: String,
+) -> Result<Vec<file_browser::FileEntry>, String> {
+    file_browser::search_files_recursive(dir_path, query)
+}
+
 // ===================== vocalshifter =====================
 
 #[tauri::command(rename_all = "camelCase")]

@@ -250,6 +250,7 @@ pub fn run() {
             commands::list_directory,
             commands::get_audio_file_info,
             commands::read_audio_preview,
+            commands::search_files_recursive,
             commands::open_vocalshifter_dialog,
             commands::import_vocalshifter_project,
             commands::paste_vocalshifter_clipboard
