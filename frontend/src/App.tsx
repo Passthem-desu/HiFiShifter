@@ -10,7 +10,6 @@ import {
     refreshRuntime,
     syncPlaybackState,
     stopAudioPlayback,
-    playSynthesized,
     playOriginal,
     undoRemote,
     redoRemote,
@@ -335,11 +334,7 @@ function AppInner() {
                 if (runtimeRef.current.isPlaying) {
                     void dispatch(stopAudioPlayback());
                 } else {
-                    void dispatch(
-                        runtimeRef.current.hasSynthesized
-                            ? playSynthesized()
-                            : playOriginal(),
-                    );
+                    void dispatch(playOriginal());
                 }
                 break;
             case "edit.undo":

@@ -17,7 +17,7 @@ use super::resource_manager::ResourceManager;
 use super::snapshot::{
     build_snapshot, build_snapshot_for_file, schedule_stretch_jobs, source_bounds_frames,
 };
-use crate::pitch_clip::{invalidate_clip_pitch_cache, schedule_clip_pitch_jobs};
+use crate::pitch_clip::{clear_clip_inflight, invalidate_clip_pitch_cache, schedule_clip_pitch_jobs};
 use super::types::{
     AudioEngineStateSnapshot, EngineCommand, EngineSnapshot, ResampledStereo, StretchJob,
     StretchKey,
@@ -792,11 +792,36 @@ fn handle_stretch_ready(s: &mut EngineWorkerState, key: StretchKey) {
             if let Some(src) = clip.source_path.as_deref() {
                 if std::path::Path::new(src) == key.path.as_path() {
                     invalidate_clip_pitch_cache(&clip.id);
+                    // 清除该 clip 残留的 inflight 标记，确保重新调度不会因为
+                    // 旧的 inflight 而跳过（修复拉伸后 pitch 曲线不更新的问题）
+                    clear_clip_inflight(&clip.id);
                 }
             }
         }
         // 重新调度音高检测（使用新的拉伸后 PCM）
         schedule_clip_pitch_jobs(tl, s.tx, s.stretch_cache, s.app_handle.as_ref(), s.sr);
+
+        // 冗余保障：拉伸完成后主动触发一次 pitch_orig 组装推送，
+        // 即使 schedule_clip_pitch_jobs 中因为某些原因未能触发完整链路
+        // （handle_clip_pitch_ready → maybe_schedule_pitch_orig），
+        // 也能保证前端收到最新的整体音高线。
+        if let Some(app) = s.app_handle.as_ref() {
+            let state = app.state::<crate::state::AppState>();
+            // 收集涉及该 StretchKey 路径的所有 root track
+            let mut root_track_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for clip in &tl.clips {
+                if let Some(src) = clip.source_path.as_deref() {
+                    if std::path::Path::new(src) == key.path.as_path() {
+                        if let Some(rt) = tl.resolve_root_track_id(&clip.track_id) {
+                            root_track_ids.insert(rt);
+                        }
+                    }
+                }
+            }
+            for rt in &root_track_ids {
+                crate::pitch_analysis::maybe_schedule_pitch_orig(&state, rt);
+            }
+        }
     }
 
     if let Some(tl) = s.last_timeline.as_ref() {
