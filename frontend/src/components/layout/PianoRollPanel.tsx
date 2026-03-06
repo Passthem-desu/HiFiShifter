@@ -564,6 +564,7 @@ export const PianoRollPanel: React.FC = () => {
             playheadSec: s.playheadSec,
             waveformColors,
             detectedPitchCurves,
+            isDark: themeMode === "dark",
         });
     };
 

@@ -169,7 +169,9 @@ export interface DetectedPitchCurve {
     clipStartSec: number;
     /** clip 在 timeline 上的长度（秒），用于裁剪渲染区域 */
     clipLengthSec: number;
-}export function drawPianoRoll(args: {
+}
+
+export function drawPianoRoll(args: {
     axisCanvas: HTMLCanvasElement | null;
     canvas: HTMLCanvasElement | null;
     viewSize: { w: number; h: number };
@@ -190,8 +192,10 @@ export interface DetectedPitchCurve {
     playheadSec: number; // 播放头位置（秒）
     pitchAnalysisPending?: boolean;
     waveformColors?: { fill: string; stroke: string };
-    /** 检测音高曲线列表，�?pitch 模式下渲染为参考线 */
+    /** 检测音高曲线列表，在 pitch 模式下渲染为参考线 */
     detectedPitchCurves?: DetectedPitchCurve[];
+    /** 是否为深色主题（默认 true） */
+    isDark?: boolean;
 }) {
     const {
         axisCanvas,
@@ -218,7 +222,57 @@ export interface DetectedPitchCurve {
             stroke: "rgba(255,255,255,0.7)",
         },
         detectedPitchCurves,
-    } = args; // Draw axis (left labels)
+        isDark = true,
+    } = args;
+
+    // 主题颜色查找表
+    const colors = isDark
+        ? {
+              // 琴键区
+              axisBorder: "rgba(255,255,255,0.08)",
+              whiteKey: "#e8e8e8",
+              blackKey: "#1a1a1a",
+              blackKeyGradient: "rgba(0,0,0,0.35)",
+              cLabel: "#3b82f6",
+              cSeparator: "rgba(100,100,100,0.45)",
+              keySeparator: "rgba(160,160,160,0.20)",
+              tensionLabel: "rgba(255,255,255,0.55)",
+              tensionLine: "rgba(255,255,255,0.10)",
+              // 网格线
+              pitchGridC: "rgba(255,255,255,0.10)",
+              pitchGridOther: "rgba(255,255,255,0.05)",
+              // 曲线
+              origCurve: "rgba(200,200,200,0.55)",
+              editCurve: "rgba(255,255,255,0.90)",
+              selectionCurve: "rgba(100,200,255,0.95)",
+              // 叠加文字 & 播放头
+              overlayTextColor: "rgba(255,255,255,0.35)",
+              playheadLine: "rgba(255,255,255,0.25)",
+          }
+        : {
+              // 浅色主题
+              axisBorder: "rgba(0,0,0,0.10)",
+              whiteKey: "#ffffff",
+              blackKey: "#3a3a3a",
+              blackKeyGradient: "rgba(0,0,0,0.25)",
+              cLabel: "#2563eb",
+              cSeparator: "rgba(0,0,0,0.25)",
+              keySeparator: "rgba(0,0,0,0.12)",
+              tensionLabel: "rgba(0,0,0,0.55)",
+              tensionLine: "rgba(0,0,0,0.10)",
+              // 网格线
+              pitchGridC: "rgba(0,0,0,0.12)",
+              pitchGridOther: "rgba(0,0,0,0.06)",
+              // 曲线
+              origCurve: "rgba(80,80,80,0.55)",
+              editCurve: "rgba(0,0,0,0.85)",
+              selectionCurve: "rgba(30,120,200,0.95)",
+              // 叠加文字 & 播放头
+              overlayTextColor: "rgba(0,0,0,0.35)",
+              playheadLine: "rgba(0,0,0,0.20)",
+          };
+
+    // Draw axis (left labels)
     if (axisCanvas) {
         const ctx = axisCanvas.getContext("2d");
         if (ctx) {
@@ -236,7 +290,7 @@ export interface DetectedPitchCurve {
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, w, h);
 
-            ctx.strokeStyle = "rgba(255,255,255,0.08)";
+            ctx.strokeStyle = colors.axisBorder;
             ctx.beginPath();
             ctx.moveTo(w - 0.5, 0);
             ctx.lineTo(w - 0.5, h);
@@ -265,15 +319,15 @@ export interface DetectedPitchCurve {
                     const black = isBlackKey(midi);
                     const pc = ((midi % 12) + 12) % 12;
 
-                    // 白键：中性浅灰色
+                    // 白键
                     if (!black) {
-                        ctx.fillStyle = "#e8e8e8";
+                        ctx.fillStyle = colors.whiteKey;
                         ctx.fillRect(0, top, w, keyH);
                     }
 
                     // 黑键：深色覆盖，宽度 72%
                     if (black) {
-                        ctx.fillStyle = "#1a1a1a";
+                        ctx.fillStyle = colors.blackKey;
                         ctx.fillRect(0, top, w * 0.72, keyH);
                         // 黑键右侧渐变边缘
                         const grad = ctx.createLinearGradient(
@@ -283,15 +337,14 @@ export interface DetectedPitchCurve {
                             0,
                         );
                         grad.addColorStop(0, "rgba(0,0,0,0)");
-                        grad.addColorStop(1, "rgba(0,0,0,0.35)");
+                        grad.addColorStop(1, colors.blackKeyGradient);
                         ctx.fillStyle = grad;
                         ctx.fillRect(w * 0.62, top, w * 0.1, keyH);
                     }
 
-                    // C 音名标注：使用高亮蓝�?
+                    // C 音名标注
                     if (pc === 0) {
-                        ctx.fillStyle = "#3b82f6";
-                        ctx.font = "bold 9px sans-serif";
+                        ctx.fillStyle = colors.cLabel;                        ctx.font = "bold 9px sans-serif";
                         ctx.textBaseline = "middle";
                         ctx.fillText(midiToLabel(midi), 5, top + keyH / 2);
                     }
@@ -299,8 +352,8 @@ export interface DetectedPitchCurve {
                     // 分隔线：C 音用较深的线，其他用浅线
                     ctx.strokeStyle =
                         pc === 0
-                            ? "rgba(100,100,100,0.45)"
-                            : "rgba(160,160,160,0.20)";
+                            ? colors.cSeparator
+                            : colors.keySeparator;
                     ctx.lineWidth = pc === 0 ? 1 : 0.5;
                     ctx.beginPath();
                     ctx.moveTo(0, top + 0.5);
@@ -310,14 +363,14 @@ export interface DetectedPitchCurve {
                 }
             } else {
                 // tension axis labels
-                ctx.fillStyle = "rgba(255,255,255,0.55)";
+                ctx.fillStyle = colors.tensionLabel;
                 ctx.font = "10px sans-serif";
                 ctx.textBaseline = "middle";
                 const marks = [1, 0.5, 0];
                 for (const m of marks) {
                     const y = valueToY("tension", m, h);
                     ctx.fillText(String(m), 6, y);
-                    ctx.strokeStyle = "rgba(255,255,255,0.10)";
+                    ctx.strokeStyle = colors.tensionLine;
                     ctx.beginPath();
                     ctx.moveTo(0, y + 0.5);
                     ctx.lineTo(w, y + 0.5);
@@ -365,7 +418,7 @@ export interface DetectedPitchCurve {
             const y = valueToY("pitch", midi + 0.5, h);
             const pc = ((midi % 12) + 12) % 12;
             ctx.strokeStyle =
-                pc === 0 ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.05)";
+                pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(0, y + 0.5);
@@ -577,7 +630,7 @@ export interface DetectedPitchCurve {
 
         // original (dashed)
         ctx.save();
-        ctx.strokeStyle = "rgba(200,200,200,0.55)";
+        ctx.strokeStyle = colors.origCurve;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([6, 6]);
         drawCurveTimed({
@@ -597,7 +650,7 @@ export interface DetectedPitchCurve {
 
         // edited (solid)
         ctx.save();
-        ctx.strokeStyle = "rgba(255,255,255,0.90)";
+        ctx.strokeStyle = colors.editCurve;
         ctx.lineWidth = 2;
         ctx.setLineDash([]);
         drawCurveTimed({
@@ -628,7 +681,7 @@ export interface DetectedPitchCurve {
             ctx.rect(selX0, 0, selX1 - selX0, h);
             ctx.clip();
 
-            ctx.strokeStyle = "rgba(100, 200, 255, 0.95)";
+            ctx.strokeStyle = colors.selectionCurve;
             ctx.lineWidth = 3;
             ctx.setLineDash([]);
             drawCurveTimed({
@@ -650,7 +703,7 @@ export interface DetectedPitchCurve {
 
     if (overlayText) {
         ctx.save();
-        ctx.fillStyle = "rgba(255,255,255,0.35)";
+        ctx.fillStyle = colors.overlayTextColor;
         ctx.font = "12px sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -660,7 +713,7 @@ export interface DetectedPitchCurve {
 
     // Playhead（统一用 sec 坐标系）
     const phx = playheadSec * pxPerSec - scrollLeft;
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    ctx.strokeStyle = colors.playheadLine;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(phx + 0.5, 0);
