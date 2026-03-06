@@ -60,6 +60,7 @@ export const TimelinePanel: React.FC = () => {
         sessionRef.current = s;
     }, [s]);
     const scrollRef = useRef<HTMLDivElement | null>(null);
+    const trackListScrollRef = useRef<HTMLDivElement | null>(null);
     const rulerContentRef = useRef<HTMLDivElement | null>(null);
     const scrollLeftRef = useRef(0);
     const scrollStateRafRef = useRef<number | null>(null);
@@ -694,6 +695,7 @@ export const TimelinePanel: React.FC = () => {
                 selectedTrackId={s.selectedTrackId}
                 rowHeight={rowHeight}
                 trackVolumeUi={trackVolumeUi}
+                listScrollRef={trackListScrollRef}
                 onSelectTrack={(trackId) => {
                     dispatch(selectTrackRemote(trackId));
                 }}
@@ -806,6 +808,12 @@ export const TimelinePanel: React.FC = () => {
                     setRowHeight={setRowHeight}
                     setScrollLeft={setScrollLeftAction}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"
+                    onScroll={(e) => {
+                        const el = e.currentTarget as HTMLDivElement;
+                        if (trackListScrollRef.current) {
+                            trackListScrollRef.current.scrollTop = el.scrollTop;
+                        }
+                    }}
                     onMouseDownCapture={(e) => {
                         if (e.button === 1) {
                             e.preventDefault();

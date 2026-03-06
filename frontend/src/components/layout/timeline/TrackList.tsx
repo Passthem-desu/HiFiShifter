@@ -36,6 +36,8 @@ export const TrackList: React.FC<{
     onVolumeCommit: (trackId: string, nextVolume: number) => void;
     onAddTrack: () => void;
     onTrackColorChange?: (trackId: string, color: string) => void;
+    /** 外部持有该滚动容器的 ref，用于同步右侧轨道区的竖向滚动 */
+    listScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
 }> = ({
     t,
     tracks,
@@ -52,6 +54,7 @@ export const TrackList: React.FC<{
     onVolumeCommit,
     onAddTrack,
     onTrackColorChange,
+    listScrollRef,
 }) => {
     const listRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{
@@ -229,8 +232,12 @@ export const TrackList: React.FC<{
                 </Text>
             </Box>
             <div
-                ref={listRef}
-                className="flex-1 overflow-y-auto custom-scrollbar relative"
+                ref={(el) => {
+                    (listRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+                    if (listScrollRef) listScrollRef.current = el;
+                }}
+                className="flex-1 relative"
+                style={{ overflowY: "hidden" }}
             >
                 {dragUi?.mode === "reorder" &&
                 typeof dragUi.indicatorY === "number" ? (
