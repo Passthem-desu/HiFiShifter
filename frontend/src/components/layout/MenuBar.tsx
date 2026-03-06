@@ -17,6 +17,8 @@ import {
     newProjectRemote,
     openProjectFromDialog,
     openProjectFromPath,
+    openVocalShifterFromDialog,
+    pasteVocalShifterClipboard,
     saveProjectRemote,
     saveProjectAsRemote,
 } from "../../features/session/sessionSlice";
@@ -137,6 +139,11 @@ export const MenuBar: React.FC = () => {
                             {t("shortcut_ctrl_o")}
                         </div>
                     </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                        onSelect={() => void dispatch(openVocalShifterFromDialog())}
+                    >
+                        {t("menu_open_vocalshifter")}
+                    </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={handleExport}>
                         {t("menu_export_audio")}{" "}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
@@ -190,6 +197,12 @@ export const MenuBar: React.FC = () => {
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             Ctrl+A
                         </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item
+                        onSelect={() => void dispatch(pasteVocalShifterClipboard())}
+                    >
+                        {t("menu_paste_vocalshifter_clipboard")}
                     </DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Root>

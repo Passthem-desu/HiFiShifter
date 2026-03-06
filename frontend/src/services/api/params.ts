@@ -50,4 +50,9 @@ export const paramsApi = {
             frameCount,
             checkpoint,
         ),
+
+    pasteVocalShifterClipboard: () =>
+        invoke<{ ok: boolean; error?: string; updated?: number }>(
+            "paste_vocalshifter_clipboard",
+        ),
 };

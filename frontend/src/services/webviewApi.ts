@@ -56,6 +56,9 @@ export const webApi = {
     saveProject: projectApi.saveProject,
     saveProjectAs: projectApi.saveProjectAs,
 
+    openVocalShifterDialog: projectApi.openVocalShifterDialog,
+    importVocalShifterProject: projectApi.importVocalShifterProject,
+
     // Waveform peaks
     getWaveformPeaksSegment: waveformApi.getWaveformPeaksSegment,
     getRootMixWaveformPeaksSegment: waveformApi.getRootMixWaveformPeaksSegment,
@@ -65,6 +68,7 @@ export const webApi = {
     getParamFrames: paramsApi.getParamFrames,
     setParamFrames: paramsApi.setParamFrames,
     restoreParamFrames: paramsApi.restoreParamFrames,
+    pasteVocalShifterClipboard: paramsApi.pasteVocalShifterClipboard,
 
     // Timeline
     getTimelineState: timelineApi.getTimelineState,

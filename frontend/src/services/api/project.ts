@@ -25,4 +25,12 @@ export const projectApi = {
     saveProject: () => invoke<any>("save_project"),
 
     saveProjectAs: () => invoke<any>("save_project_as"),
+
+    openVocalShifterDialog: () =>
+        invoke<{ ok: boolean; canceled?: boolean; path?: string }>(
+            "open_vocalshifter_dialog",
+        ),
+
+    importVocalShifterProject: (vspPath: string) =>
+        invoke<TimelineResult>("import_vocalshifter_project", vspPath),
 };

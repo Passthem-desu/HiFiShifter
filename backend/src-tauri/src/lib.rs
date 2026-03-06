@@ -21,6 +21,8 @@ use nsf_hifigan_onnx_stub as nsf_hifigan_onnx;
 
 mod project;
 mod rubberband;
+mod vocalshifter_clipboard;
+mod vocalshifter_import;
 mod state;
 mod time_stretch;
 mod waveform;
@@ -247,7 +249,10 @@ pub fn run() {
             commands::get_pitch_cache_stats,
             commands::list_directory,
             commands::get_audio_file_info,
-            commands::read_audio_preview
+            commands::read_audio_preview,
+            commands::open_vocalshifter_dialog,
+            commands::import_vocalshifter_project,
+            commands::paste_vocalshifter_clipboard
             // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
             // commands::start_pitch_refresh_task,
             // commands::get_pitch_refresh_status,

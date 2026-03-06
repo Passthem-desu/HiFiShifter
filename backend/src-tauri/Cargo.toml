@@ -41,6 +41,7 @@ symphonia = { version = "0.5", features = ["aac", "flac", "isomp4", "mp3", "ogg"
 blake3 = "1"
 rayon = "1.7"
 lru = "0.12"
+encoding_rs = "0.8"
 
 # ONNX inference + feature extraction helpers
 # Use prebuilt ONNX Runtime binaries (downloaded at build time) to avoid relying on a system-installed onnxruntime.dll.
