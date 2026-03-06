@@ -247,6 +247,8 @@ export const messages = {
         kb_modifier_no_snap: "Disable Snap (hold while dragging)",
         kb_modifier_copy_drag: "Copy Drag (hold while dragging clip)",
         kb_modifier_pr_vzoom: "Vertical Zoom (hold + scroll in Piano Roll)",
+        kb_group_mode: "Mode",
+        kb_mode_toggle: "Toggle Select / Draw Mode",
         kb_press_modifier: "Press modifier…",
         menu_keybindings: "Keyboard Shortcuts...",
 
@@ -497,6 +499,8 @@ export const messages = {
         kb_group_modifier: "修饰键",
         kb_pianoroll_copy: "复制参数帧",
         kb_pianoroll_paste: "粘贴参数帧",
+        kb_group_mode: "模式",
+        kb_mode_toggle: "切换选择 / 绘制模式",
         kb_modifier_slip_edit: "Slip 编辑（拖动音频块时按住）",
         kb_modifier_stretch: "拉伸（拖动边缘时按住）",
         kb_modifier_no_snap: "禁用吸附（拖动时按住）",
