@@ -55,6 +55,14 @@ pub(crate) fn save_project_to_path_inner(
         update_window_title(window, &p.name, p.dirty);
     }
 
+    // 持久化最近工程列表
+    {
+        let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(dir) = state.config_dir.get() {
+            crate::config::save_recent(dir, &p.recent);
+        }
+    }
+
     Ok(get_timeline_state_from_ref(state))
 }
 
@@ -148,6 +156,14 @@ pub(super) fn open_project(
             p.recent.truncate(10);
         }
         update_window_title(&window, &p.name, p.dirty);
+    }
+
+    // 持久化最近工程列表
+    {
+        let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(dir) = state.config_dir.get() {
+            crate::config::save_recent(dir, &p.recent);
+        }
     }
 
     get_timeline_state(state)

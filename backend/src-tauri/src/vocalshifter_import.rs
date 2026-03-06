@@ -470,7 +470,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                         muted: vsp_track.muted,
                         solo: vsp_track.solo,
                         volume: convert_volume(vsp_track.volume),
-                        compose_enabled: true,
+                        compose_enabled: false,
                         pitch_analysis_algo: algo,
                         color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
                     });
@@ -498,7 +498,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 muted: vsp_track.muted,
                 solo: vsp_track.solo,
                 volume: convert_volume(vsp_track.volume),
-                compose_enabled: has_items,
+                compose_enabled: false,
                 pitch_analysis_algo: algo,
                 color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
             });
@@ -525,7 +525,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     muted: false,
                     solo: false,
                     volume: 0.9,
-                    compose_enabled: true,
+                    compose_enabled: false,
                     pitch_analysis_algo: PitchAnalysisAlgo::default(),
                     color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
                 });

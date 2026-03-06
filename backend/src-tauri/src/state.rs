@@ -386,6 +386,9 @@ pub struct AppState {
     pub pitch_timeline_snapshot: Mutex<HashMap<String, TimelineSnapshot>>,
 
     pub audio_engine: AudioEngine,
+
+    /// App config directory for persisting recent projects etc.
+    pub config_dir: OnceLock<std::path::PathBuf>,
 }
 
 impl Default for AppState {
@@ -414,6 +417,7 @@ impl Default for AppState {
             pitch_timeline_snapshot: Mutex::new(HashMap::new()),
 
             audio_engine: AudioEngine::new(),
+            config_dir: OnceLock::new(),
         }
     }
 }

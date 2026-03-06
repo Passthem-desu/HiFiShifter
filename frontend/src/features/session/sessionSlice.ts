@@ -101,7 +101,8 @@ export interface SessionState {
     editParam: EditParam;
     bpm: number;
     beats: number;
-    projectSec: number;    grid: GridSize;
+    projectSec: number;
+    grid: GridSize;
 
     // Monotonic bump token for invalidating parameter curve caches.
     // - Not included in undo/redo snapshots.
@@ -288,9 +289,7 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         volume: clamp(Number(track.volume ?? 0.9), 0, 1),
 
         composeEnabled: Boolean(track.compose_enabled),
-        pitchAnalysisAlgo: String(
-            track.pitch_analysis_algo ?? "world_dll",
-        ),
+        pitchAnalysisAlgo: String(track.pitch_analysis_algo ?? "world_dll"),
         color: track.color || undefined,
     }));
 
@@ -314,7 +313,10 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
                 const raw = Math.max(0, Number(clip.source_end_sec ?? 0));
                 // 旧项目兼容：source_end_sec == 0 曾表示"到源文件末尾"，修正为实际时长
                 if (raw === 0) {
-                    return Number(clip.duration_sec ?? 0) || Math.max(0, Number(clip.length_sec ?? 1));
+                    return (
+                        Number(clip.duration_sec ?? 0) ||
+                        Math.max(0, Number(clip.length_sec ?? 1))
+                    );
                 }
                 return raw;
             })(),
@@ -438,7 +440,7 @@ function upsertImportedClip(
             solo: false,
             volume: 0.9,
 
-            composeEnabled: true,
+            composeEnabled: false,
             pitchAnalysisAlgo: "world_dll",
         });
     }
@@ -449,10 +451,7 @@ function upsertImportedClip(
     );
     const startSec = Math.max(0, Math.ceil(maxEndSec));
     const newClipId = createId("clip");
-    const lengthSec = Math.max(
-        1,
-        meta?.durationSec ?? 4,
-    );
+    const lengthSec = Math.max(1, meta?.durationSec ?? 4);
     state.clips.push({
         id: newClipId,
         trackId: targetTrackId,
@@ -507,7 +506,7 @@ const initialState: SessionState = {
             solo: false,
             volume: 0.9,
 
-            composeEnabled: true,
+            composeEnabled: false,
             pitchAnalysisAlgo: "world_dll",
         },
     ],
@@ -744,7 +743,8 @@ const sessionSlice = createSlice({
             );
             if (!clip) return;
             if (action.payload.sourceStartSec !== undefined) {
-                clip.sourceStartSec = Number(action.payload.sourceStartSec) || 0;
+                clip.sourceStartSec =
+                    Number(action.payload.sourceStartSec) || 0;
             }
             if (action.payload.sourceEndSec !== undefined) {
                 clip.sourceEndSec = Math.max(0, action.payload.sourceEndSec);
@@ -1273,7 +1273,10 @@ const sessionSlice = createSlice({
             .addCase(exportAudio.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
-                const payload = action.payload as { ok?: boolean; path?: string };
+                const payload = action.payload as {
+                    ok?: boolean;
+                    path?: string;
+                };
                 if (payload.ok) {
                     // 状态栏文本会先匹配 statusKey 前缀 "Export done"，
                     // 再把路径附加在后面，用户能看到 "导出完成 — D:\xxx.wav"。
@@ -1318,7 +1321,10 @@ const sessionSlice = createSlice({
             })
             .addCase(pasteVocalShifterClipboard.rejected, (state, action) => {
                 state.busy = false;
-                state.error = (action.payload as string) ?? action.error?.message ?? "Request failed";
+                state.error =
+                    (action.payload as string) ??
+                    action.error?.message ??
+                    "Request failed";
                 state.status = "Failed";
             })
 
@@ -1549,7 +1555,10 @@ const sessionSlice = createSlice({
             })
             .addCase(openVocalShifterFromDialog.rejected, (state, action) => {
                 state.busy = false;
-                state.error = (action.payload as string) ?? action.error?.message ?? "Import VocalShifter failed";
+                state.error =
+                    (action.payload as string) ??
+                    action.error?.message ??
+                    "Import VocalShifter failed";
                 state.status = "Import failed";
             })
 

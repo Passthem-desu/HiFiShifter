@@ -14,8 +14,23 @@ function isBlackKey(midi: number): boolean {
 }
 
 function midiToLabel(midi: number): string {
+    const NOTE_NAMES = [
+        "C",
+        "C#",
+        "D",
+        "D#",
+        "E",
+        "F",
+        "F#",
+        "G",
+        "G#",
+        "A",
+        "A#",
+        "B",
+    ];
     const octave = Math.floor(midi / 12) - 1;
-    return `C${octave}`;
+    const name = NOTE_NAMES[((midi % 12) + 12) % 12];
+    return `${name}${octave}`;
 }
 
 function drawCurveTimed(args: {
@@ -230,6 +245,8 @@ export function drawPianoRoll(args: {
               blackKey: "#1a1a1a",
               blackKeyGradient: "rgba(0,0,0,0.35)",
               cLabel: "#3b82f6",
+              whiteKeyLabel: "rgba(80,80,80,0.70)",
+              blackKeyLabel: "rgba(220,220,220,0.80)",
               cSeparator: "rgba(100,100,100,0.45)",
               keySeparator: "rgba(160,160,160,0.20)",
               tensionLabel: "rgba(255,255,255,0.55)",
@@ -252,6 +269,8 @@ export function drawPianoRoll(args: {
               blackKey: "#3a3a3a",
               blackKeyGradient: "rgba(0,0,0,0.25)",
               cLabel: "#2563eb",
+              whiteKeyLabel: "rgba(80,80,80,0.65)",
+              blackKeyLabel: "rgba(255,255,255,0.85)",
               cSeparator: "rgba(0,0,0,0.25)",
               keySeparator: "rgba(0,0,0,0.12)",
               tensionLabel: "rgba(0,0,0,0.55)",
@@ -338,18 +357,35 @@ export function drawPianoRoll(args: {
                         ctx.fillRect(w * 0.62, top, w * 0.1, keyH);
                     }
 
-                    // C 音名标注
-                    if (pc === 0) {
-                        ctx.fillStyle = colors.cLabel;                        ctx.font = "bold 9px sans-serif";
+                    // 所有琴键音名标注（高度足够时）
+                    if (keyH >= 6) {
                         ctx.textBaseline = "middle";
-                        ctx.fillText(midiToLabel(midi), 5, top + keyH / 2);
+                        const midY = top + keyH / 2;
+                        if (!black) {
+                            // 白键：C 音用蓝色加粗，其他用灰色
+                            ctx.fillStyle =
+                                pc === 0 ? colors.cLabel : colors.whiteKeyLabel;
+                            ctx.font =
+                                pc === 0
+                                    ? "bold 9px sans-serif"
+                                    : "9px sans-serif";
+                            ctx.fillText(midiToLabel(midi), 4, midY);
+                        } else {
+                            // 黑键：在黑键宽度内裁剪绘制
+                            ctx.save();
+                            ctx.beginPath();
+                            ctx.rect(0, top, w * 0.7, keyH);
+                            ctx.clip();
+                            ctx.fillStyle = colors.blackKeyLabel;
+                            ctx.font = "8px sans-serif";
+                            ctx.fillText(midiToLabel(midi), 3, midY);
+                            ctx.restore();
+                        }
                     }
 
                     // 分隔线：C 音用较深的线，其他用浅线
                     ctx.strokeStyle =
-                        pc === 0
-                            ? colors.cSeparator
-                            : colors.keySeparator;
+                        pc === 0 ? colors.cSeparator : colors.keySeparator;
                     ctx.lineWidth = pc === 0 ? 1 : 0.5;
                     ctx.beginPath();
                     ctx.moveTo(0, top + 0.5);
@@ -428,16 +464,13 @@ export function drawPianoRoll(args: {
     // 裁剪到 clip 可视区域，trim 拖动不影响 peaks 数据本身。
     for (const entry of clipPeaks) {
         if (!entry.peaks) continue;
-        const {
-            min: pMin,
-            max: pMax,
-            durSec: pDurSec,
-        } = entry.peaks;
+        const { min: pMin, max: pMax, durSec: pDurSec } = entry.peaks;
         if (pMin.length < 2 || pMax.length < 2) continue;
 
         const pr = entry.playbackRate > 0 ? entry.playbackRate : 1;
         const sourceStartSec = entry.sourceStartSec ?? 0;
-        const sourceDurSec = entry.sourceDurationSec > 0 ? entry.sourceDurationSec : pDurSec;
+        const sourceDurSec =
+            entry.sourceDurationSec > 0 ? entry.sourceDurationSec : pDurSec;
 
         // clip 在 canvas 上的可视 x 范围
         const clipStartX = entry.startSec * pxPerSec - scrollLeft;
@@ -532,7 +565,7 @@ export function drawPianoRoll(args: {
 
             ctx.save();
 
-            ctx.strokeStyle
+            ctx.strokeStyle;
             ctx.strokeStyle = DETECTED_COLORS[ci % DETECTED_COLORS.length];
             ctx.lineWidth = 1.5;
             ctx.setLineDash([]);
@@ -568,7 +601,8 @@ export function drawPianoRoll(args: {
             }
             ctx.stroke();
             ctx.restore();
-        }    }
+        }
+    }
 
     // Curves
     // 副参数曲线（半透明、细线，绘制在主参数曲线下方�?
