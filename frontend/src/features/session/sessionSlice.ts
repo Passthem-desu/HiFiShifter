@@ -305,14 +305,21 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
             sourceSampleRate: clip.source_sample_rate,
             gain: clamp(Number(clip.gain ?? 1), 0, 4),
             muted: Boolean(clip.muted),
-            // Allow negative trimStartSec to represent leading silence (slip-edit past source start).
-            trimStartSec: Number(clip.trim_start_sec ?? 0) || 0,
-            trimEndSec: Math.max(0, Number(clip.trim_end_sec ?? 0)),
+            // Allow negative sourceStartSec to represent leading silence (slip-edit past source start).
+            sourceStartSec: Number(clip.source_start_sec ?? 0) || 0,
+            sourceEndSec: (() => {
+                const raw = Math.max(0, Number(clip.source_end_sec ?? 0));
+                // 旧项目兼容：source_end_sec == 0 曾表示"到源文件末尾"，修正为实际时长
+                if (raw === 0) {
+                    return Number(clip.duration_sec ?? 0) || Math.max(0, Number(clip.length_sec ?? 1));
+                }
+                return raw;
+            })(),
             playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
             fadeInSec: Math.max(0, Number(clip.fade_in_sec ?? 0)),
             fadeOutSec: Math.max(0, Number(clip.fade_out_sec ?? 0)),
-            fadeInCurve: "sine" as FadeCurveType,
-            fadeOutCurve: "sine" as FadeCurveType,
+            fadeInCurve: (clip.fade_in_curve ?? "sine") as FadeCurveType,
+            fadeOutCurve: (clip.fade_out_curve ?? "sine") as FadeCurveType,
         };
 
         // DEBUG: 打印每个clip的关键参�?
@@ -329,8 +336,8 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
                     : "N/A",
             sourcePath: parsed.sourcePath?.split(/[/\\]/).pop(),
             startSec: parsed.startSec,
-            trimStartSec: parsed.trimStartSec,
-            trimEndSec: parsed.trimEndSec,
+            sourceStartSec: parsed.sourceStartSec,
+            sourceEndSec: parsed.sourceEndSec,
             playbackRate: parsed.playbackRate,
         });
 
@@ -454,8 +461,8 @@ function upsertImportedClip(
         durationSec: meta?.durationSec,
         gain: 1,
         muted: false,
-        trimStartSec: 0,
-        trimEndSec: 0,
+        sourceStartSec: 0,
+        sourceEndSec: meta?.durationSec ?? lengthSec,
         playbackRate: 1,
         fadeInSec: 0,
         fadeOutSec: 0,
@@ -715,23 +722,23 @@ const sessionSlice = createSlice({
             if (!clip) return;
             clip.playbackRate = clamp(action.payload.playbackRate, 0.1, 10);
         },
-        setClipTrim(
+        setClipSourceRange(
             state,
             action: PayloadAction<{
                 clipId: string;
-                trimStartSec?: number;
-                trimEndSec?: number;
+                sourceStartSec?: number;
+                sourceEndSec?: number;
             }>,
         ) {
             const clip = state.clips.find(
                 (entry) => entry.id === action.payload.clipId,
             );
             if (!clip) return;
-            if (action.payload.trimStartSec !== undefined) {
-                clip.trimStartSec = Number(action.payload.trimStartSec) || 0;
+            if (action.payload.sourceStartSec !== undefined) {
+                clip.sourceStartSec = Number(action.payload.sourceStartSec) || 0;
             }
-            if (action.payload.trimEndSec !== undefined) {
-                clip.trimEndSec = Math.max(0, action.payload.trimEndSec);
+            if (action.payload.sourceEndSec !== undefined) {
+                clip.sourceEndSec = Math.max(0, action.payload.sourceEndSec);
             }
         },
         setClipFades(
@@ -815,8 +822,8 @@ const sessionSlice = createSlice({
                 color: "emerald",
                 gain: 1,
                 muted: false,
-                trimStartSec: 0,
-                trimEndSec: 0,
+                sourceStartSec: 0,
+                sourceEndSec: 2,
                 playbackRate: 1,
                 fadeInSec: 0,
                 fadeOutSec: 0,
@@ -1773,7 +1780,7 @@ export const {
     moveClipTrack,
     setClipLength,
     setClipPlaybackRate,
-    setClipTrim,
+    setClipSourceRange,
     setClipFades,
     setClipGain,
     setClipMuted,

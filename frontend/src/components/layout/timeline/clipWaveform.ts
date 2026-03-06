@@ -5,31 +5,32 @@ import { clamp } from "./math";
  * 从 waveform 预览采样数组中切出 clip 可见窗口对应的采样段。
  *
  * 所有参数均在**秒域**计算，不依赖 BPM。
- * - trimStartSec / trimEndSec：相对于 source 起点的裁剪量（秒）
+ * - sourceStartSec / sourceEndSec：源文件有效区间的绝对起止时间（秒）
  * - durationSec：source 文件总时长（秒）
  * - lengthSec：source 可用窗口长度（秒），用于控制输出采样密度
- *   应传入 (durationSec - trimStart - trimEnd)，与 clip.lengthSec 无关，
+ *   应传入 (sourceEnd - max(0, sourceStart))，与 clip.lengthSec 无关，
  *   这样 trim 拖动时只改变 i0/i1 切片范围，不改变输出密度，波形不缩放。
  */
 export function sliceWaveformSamples(
     samples: number[],
     clip: Pick<
         ClipInfo,
-        "trimStartSec" | "trimEndSec" | "lengthSec" | "durationSec"
+        "sourceStartSec" | "sourceEndSec" | "lengthSec" | "durationSec"
     >,
 ): number[] {
     if (!Array.isArray(samples) || samples.length < 2) return samples;
     const durationSec = Number(clip.durationSec ?? 0);
     if (!Number.isFinite(durationSec) || durationSec <= 0) return samples;
 
-    const trimStartRaw = Number(clip.trimStartSec ?? 0) || 0;
-    const preSilenceSec = Math.max(0, -trimStartRaw);
-    const trimStart = Math.max(0, trimStartRaw);
-    const trimEnd = Math.max(0, Number(clip.trimEndSec ?? 0) || 0);
+    const sourceStartRaw = Number(clip.sourceStartSec ?? 0) || 0;
+    const preSilenceSec = Math.max(0, -sourceStartRaw);
+    const sourceStart = Math.max(0, sourceStartRaw);
+    const sourceEnd = Number(clip.sourceEndSec ?? 0) || 0;
+    const effectiveEnd = sourceEnd;
 
     // 切片起止点（秒域）
-    const startSec = clamp(trimStart, 0, durationSec);
-    const maxEndSec = Math.max(startSec, durationSec - trimEnd);
+    const startSec = clamp(sourceStart, 0, durationSec);
+    const maxEndSec = Math.max(startSec, clamp(effectiveEnd, 0, durationSec));
 
     // desiredLen：source 可用窗口长度（秒），控制输出采样密度
     // 由调用方传入，应为固定值（不随 trim/BPM 变化）

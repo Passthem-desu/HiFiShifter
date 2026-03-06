@@ -55,11 +55,13 @@ pub struct TimelineClip {
 
     pub gain: Option<f32>,
     pub muted: Option<bool>,
-    pub trim_start_sec: Option<f64>,
-    pub trim_end_sec: Option<f64>,
+    pub source_start_sec: Option<f64>,
+    pub source_end_sec: Option<f64>,
     pub playback_rate: Option<f32>,
     pub fade_in_sec: Option<f64>,
     pub fade_out_sec: Option<f64>,
+    pub fade_in_curve: Option<String>,
+    pub fade_out_curve: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -195,14 +195,14 @@ export const ClipItem: React.FC<{
         rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT,
     );
 
-    // source 可用窗口长度（秒）：durationSec 减去两端裁剪量。
+    // source 可用窗口长度（秒）：sourceEnd 减去两端裁剪量。
     // 此值不随 trim/stretch/BPM 变化，用于固定 sliceWaveformSamples 的输出密度，
     // 确保 trim 拖动时波形不缩放（只改变切片起止点），stretch 时由 SVG 自动拉伸。
-    const durationSec = Math.max(0, Number(clip.durationSec ?? 0) || 0);
-    const trimStartRaw = Number(clip.trimStartSec ?? 0) || 0;
-    const trimStart = Math.max(0, trimStartRaw);
-    const trimEnd = Math.max(0, Number(clip.trimEndSec ?? 0) || 0);
-    const sourceAvailSec = Math.max(0, durationSec - trimStart - trimEnd);
+    const sourceStartRaw = Number(clip.sourceStartSec ?? 0) || 0;
+    const sourceStart = Math.max(0, sourceStartRaw);
+    const sourceEnd = Number(clip.sourceEndSec ?? 0) || 0;
+    const effectiveEnd = sourceEnd;
+    const sourceAvailSec = Math.max(0, effectiveEnd - sourceStart);
 
     const showRepeatMarker = false;
     const repeatMarkerX = 0;
@@ -232,16 +232,16 @@ export const ClipItem: React.FC<{
 
     const clipForWaveform = React.useMemo(
         () => ({
-            trimStartSec: clip.trimStartSec,
-            trimEndSec: clip.trimEndSec,
+            sourceStartSec: clip.sourceStartSec,
+            sourceEndSec: clip.sourceEndSec,
             // 传入 source 可用窗口长度（秒）作为 desiredLen，
             // 使输出采样密度固定，trim 时不缩放波形，stretch 时由 SVG 自动拉伸。
             lengthSec: sourceAvailSec,
             durationSec: clip.durationSec,
         }),
         [
-            clip.trimStartSec,
-            clip.trimEndSec,
+            clip.sourceStartSec,
+            clip.sourceEndSec,
             sourceAvailSec,
             clip.durationSec,
         ],
@@ -696,8 +696,8 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                         <div
                             style={{
                                 height: "100%",
-                                marginLeft: peaks?.ok
-                                    ? -(Math.max(0, Number(clip.trimStartSec ?? 0) || 0) / Math.max(1e-6, Number(clip.playbackRate ?? 1) || 1)) * pxPerSec
+                            marginLeft: peaks?.ok
+                                    ? -(Math.max(0, Number(clip.sourceStartSec ?? 0) || 0) / Math.max(1e-6, Number(clip.playbackRate ?? 1) || 1)) * pxPerSec
                                     : 0,
                             }}
                         >

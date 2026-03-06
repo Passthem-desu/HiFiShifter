@@ -165,10 +165,6 @@ export interface DetectedPitchCurve {
     midiCurve: number[];
     /** WORLD 帧周期（毫秒） */
     framePeriodMs: number;
-    /** clip 在 timeline 上的起始时间（秒），用于裁剪渲染区域 */
-    clipStartSec: number;
-    /** clip 在 timeline 上的长度（秒），用于裁剪渲染区域 */
-    clipLengthSec: number;
 }
 
 export function drawPianoRoll(args: {
@@ -428,7 +424,7 @@ export function drawPianoRoll(args: {
     }
 
     // Background waveform: per-clip 叠加绘制
-    // peaks 数据覆盖整个 source 文件，渲染时根据 trimStart/playbackRate 计算偏移，
+    // peaks 数据覆盖整个 source 文件，渲染时根据 sourceStartSec/playbackRate 计算偏移，
     // 裁剪到 clip 可视区域，trim 拖动不影响 peaks 数据本身。
     for (const entry of clipPeaks) {
         if (!entry.peaks) continue;
@@ -440,7 +436,7 @@ export function drawPianoRoll(args: {
         if (pMin.length < 2 || pMax.length < 2) continue;
 
         const pr = entry.playbackRate > 0 ? entry.playbackRate : 1;
-        const trimStartSec = entry.trimStartSec ?? 0;
+        const sourceStartSec = entry.sourceStartSec ?? 0;
         const sourceDurSec = entry.sourceDurationSec > 0 ? entry.sourceDurationSec : pDurSec;
 
         // clip 在 canvas 上的可视 x 范围
@@ -453,8 +449,8 @@ export function drawPianoRoll(args: {
 
         // 整个 source 文件在 timeline 域的像素宽度 = (sourceDurSec / pr) * pxPerSec
         const sourceWidthPx = (sourceDurSec / pr) * pxPerSec;
-        // trimStart 对应的 timeline 域偏移量（像素）= (trimStartSec / pr) * pxPerSec
-        const trimOffsetPx = (trimStartSec / pr) * pxPerSec;
+        // sourceStart 对应的 timeline 域偏移量（像素）= (sourceStartSec / pr) * pxPerSec
+        const trimOffsetPx = (sourceStartSec / pr) * pxPerSec;
 
         // 处理波形：1:1 映射 peaks 列
         const processed = processWaveformPeaks({
@@ -473,8 +469,8 @@ export function drawPianoRoll(args: {
         ctx.rect(clipStartX, 0, clipWidthPx, h);
         ctx.clip();
 
-        // 平移：先到 clip 起始位置，再向左偏移 trimStart 部分
-        // 这样 peaks 的 trimStart 位置对齐到 clipStartX
+        // 平移：先到 clip 起始位置，再向左偏移 sourceStart 部分
+        // 这样 peaks 的 sourceStart 位置对齐到 clipStartX
         ctx.translate(clipStartX - trimOffsetPx, 0);
 
         // 缩放：将 peaksCols 列映射到整个 source 在 timeline 上的宽度
@@ -536,18 +532,7 @@ export function drawPianoRoll(args: {
 
             ctx.save();
 
-            // 裁剪到 clip 可见区域：只渲染 [clipStartSec, clipStartSec + clipLengthSec] 内的曲线
-            const cStartSec = curve.clipStartSec;
-            const cLenSec = curve.clipLengthSec;
-            const clipLeftX = cStartSec * pxPerSec - scrollLeft;
-            const clipRightX = (cStartSec + cLenSec) * pxPerSec - scrollLeft;
-            const clipWidthPx = clipRightX - clipLeftX;
-            if (clipWidthPx > 0 && isFinite(clipWidthPx)) {
-                ctx.beginPath();
-                ctx.rect(clipLeftX, 0, clipWidthPx, h);
-                ctx.clip();
-            }
-
+            ctx.strokeStyle
             ctx.strokeStyle = DETECTED_COLORS[ci % DETECTED_COLORS.length];
             ctx.lineWidth = 1.5;
             ctx.setLineDash([]);

@@ -313,9 +313,9 @@ fn render_single_clip(
         let r = clip.playback_rate as f64;
         if r.is_finite() && r > 0.0 { r } else { 1.0 }
     };
-    let trim_start_sec = clip.trim_start_sec.max(0.0);
-    let trim_end_sec = clip.trim_end_sec.max(0.0);
-    let pre_silence_sec = (-clip.trim_start_sec).max(0.0) / playback_rate.max(1e-6);
+    let source_start_sec = clip.source_start_sec.max(0.0);
+    let source_end_sec = clip.source_end_sec;
+    let pre_silence_sec = (-clip.source_start_sec).max(0.0) / playback_rate.max(1e-6);
 
     let total_sec = crate::mixdown::clip_duration_sec_from_wav(in_rate, in_channels, &pcm)
         .ok_or_else(|| "cannot determine clip duration".to_string())?;
@@ -323,13 +323,13 @@ fn render_single_clip(
         return Err("invalid clip duration".to_string());
     }
 
-    let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
-    if src_end_limit_sec - trim_start_sec <= 1e-9 {
+    let src_end_limit_sec = source_end_sec.min(total_sec).max(source_start_sec);
+    if src_end_limit_sec - source_start_sec <= 1e-9 {
         return Err("trimmed clip too short".to_string());
     }
 
     // 3. 切片 + resample
-    let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
+    let src_i0 = (source_start_sec * in_rate as f64).floor().max(0.0) as usize;
     let src_i1 = ((src_end_limit_sec * in_rate as f64).ceil().max(src_i0 as f64) as usize)
         .min(in_frames);
     if src_i1 <= src_i0 + 1 {
@@ -408,7 +408,7 @@ fn render_single_clip(
         }
     }
 
-    // 7. 前置静音（负 trim_start 导致的 pre-silence）
+    // 7. 前置静音（负 source_start 导致的 pre-silence）
     if pre_silence_sec > 1e-6 {
         let pre_frames = (pre_silence_sec * out_rate as f64).round().max(0.0) as usize;
         let mut with_silence = vec![0.0f32; pre_frames * 2];

@@ -67,17 +67,16 @@ pub(crate) fn compute_track_gains(tracks: &[Track]) -> HashMap<String, (f32, boo
 }
 
 pub(crate) fn source_bounds_frames(
-    trim_start_sec: f64,
-    trim_end_sec: f64,
+    source_start_sec: f64,
+    source_end_sec: f64,
     src_total_frames: usize,
     sr: u32,
 ) -> (u64, u64) {
-    let trim_start_sec = trim_start_sec.max(0.0);
-    let trim_end_sec = trim_end_sec.max(0.0);
+    let source_start_sec = source_start_sec.max(0.0);
 
     let total_sec = (src_total_frames as f64) / sr.max(1) as f64;
-    let start = (trim_start_sec * sr as f64).round().max(0.0);
-    let end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
+    let start = (source_start_sec * sr as f64).round().max(0.0);
+    let end_limit_sec = source_end_sec.min(total_sec).max(source_start_sec);
     let end = (end_limit_sec * sr as f64).round().max(start);
 
     // Keep within source length.
@@ -103,8 +102,8 @@ fn clip_source_bounds_frames(
     sr: u32,
 ) -> (u64, u64) {
     source_bounds_frames(
-        clip.trim_start_sec.max(0.0),
-        clip.trim_end_sec,
+        clip.source_start_sec.max(0.0),
+        clip.source_end_sec,
         src_total_frames,
         sr,
     )
@@ -113,16 +112,16 @@ fn clip_source_bounds_frames(
 pub(crate) fn make_stretch_key(
     path: &Path,
     out_rate: u32,
-    trim_start: f64,
-    trim_end: f64,
+    source_start: f64,
+    source_end: f64,
     playback_rate: f64,
 ) -> StretchKey {
     StretchKey {
         path: path.to_path_buf(),
         out_rate,
         bpm_q: 0, // 不再依赖 BPM
-        trim_start_q: quantize_i64(trim_start, 1000.0),
-        trim_end_q: quantize_i64(trim_end, 1000.0),
+        trim_start_q: quantize_i64(source_start, 1000.0),
+        trim_end_q: quantize_i64(source_end, 1000.0),
         playback_rate_q: quantize_u32(playback_rate, 10000.0),
     }
 }
@@ -176,8 +175,8 @@ pub(crate) fn schedule_stretch_jobs(
         let key = make_stretch_key(
             path,
             out_rate,
-            clip.trim_start_sec.max(0.0),
-            clip.trim_end_sec,
+            clip.source_start_sec.max(0.0),
+            clip.source_end_sec,
             playback_rate,
         );
         if let Ok(m) = stretch_cache.lock() {
@@ -207,8 +206,8 @@ pub(crate) fn schedule_stretch_jobs(
 
         let _ = stretch_tx.send(StretchJob {
             key,
-            trim_start_sec: clip.trim_start_sec.max(0.0),
-            trim_end_sec: clip.trim_end_sec,
+            source_start_sec: clip.source_start_sec.max(0.0),
+            source_end_sec: clip.source_end_sec,
             playback_rate,
             clip_name,
             app_handle: app_handle.map(|h| std::sync::Arc::new(h.clone())),
@@ -307,9 +306,9 @@ pub(crate) fn build_snapshot(
         // trim_* are expressed in SOURCE seconds (i.e. they already incorporate playbackRate in UI).
         // Therefore leading silence in timeline time scales by 1 / playback_rate.
         let local_src_offset_frames: i64 =
-            if clip.trim_start_sec.is_finite() && clip.trim_start_sec < 0.0 {
+            if clip.source_start_sec.is_finite() && clip.source_start_sec < 0.0 {
                 let pr = playback_rate.max(1e-6);
-                let pre_silence_sec = (-clip.trim_start_sec) / pr;
+                let pre_silence_sec = (-clip.source_start_sec) / pr;
                 let frames = (pre_silence_sec * out_rate as f64).round().max(0.0) as i64;
                 -frames
             } else {
@@ -324,10 +323,11 @@ pub(crate) fn build_snapshot(
             let key = make_stretch_key(
                 path,
                 out_rate,
-                clip.trim_start_sec.max(0.0),
-                clip.trim_end_sec,
+                clip.source_start_sec.max(0.0),
+                clip.source_end_sec,
                 playback_rate,
-            );            if let Ok(m) = stretch_cache.lock() {
+            );
+            if let Ok(m) = stretch_cache.lock() {
                 if let Some(stretched) = m.get(&key) {
                     src_render = stretched.clone();
                     src_start = 0;

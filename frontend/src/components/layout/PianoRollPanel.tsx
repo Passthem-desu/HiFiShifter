@@ -517,17 +517,11 @@ export const PianoRollPanel: React.FC = () => {
                 const clip = s.clips.find((cl) => cl.id === clipId);
                 return clip && groupTrackIds.has(clip.trackId);
             })
-            .map(([clipId, c]) => {
-                // 通过 clipId 查找对应 clip 的当前 startSec 和 lengthSec，用于裁剪渲染区域
-                const clip = s.clips.find((cl) => cl.id === clipId);
-                return {
+            .map(([, c]) => ({
                     curveStartSec: c.curveStartSec,
                     midiCurve: c.midiCurve,
                     framePeriodMs: c.framePeriodMs,
-                    clipStartSec: clip ? Number(clip.startSec ?? 0) : c.curveStartSec,
-                    clipLengthSec: clip ? Number(clip.lengthSec ?? 0) : Infinity,
-                };
-            });
+            }));
     }, [editParam, rootTrack, s.clipPitchCurves, s.clips, groupTrackIds]);
 
     // 检测音高曲线更新时触发重绘

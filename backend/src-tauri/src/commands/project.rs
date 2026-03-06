@@ -119,6 +119,13 @@ pub(super) fn open_project(
     };
 
     pf.timeline = resolve_paths_relative(pf.timeline, &path);
+    // 旧项目兼容迁移：source_end_sec == 0.0 曾表示"到源文件末尾"，
+    // 新语义要求它是真实的结束时间，此处自动修正为 duration_sec 或 length_sec。
+    for clip in &mut pf.timeline.clips {
+        if clip.source_end_sec == 0.0 {
+            clip.source_end_sec = clip.duration_sec.unwrap_or(clip.length_sec);
+        }
+    }
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         *tl = pf.timeline.clone();

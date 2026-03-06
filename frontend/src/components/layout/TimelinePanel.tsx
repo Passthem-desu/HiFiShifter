@@ -1307,6 +1307,12 @@ export const TimelinePanel: React.FC = () => {
                                         ? { fadeInCurve: curve }
                                         : { fadeOutCurve: curve }),
                                 }));
+                                void dispatch(setClipStateRemote({
+                                    clipId,
+                                    ...(target === "in"
+                                        ? { fadeInCurve: curve }
+                                        : { fadeOutCurve: curve }),
+                                }));
                             }}
                             onNormalize={(ids) => {
                                 for (const id of ids) {

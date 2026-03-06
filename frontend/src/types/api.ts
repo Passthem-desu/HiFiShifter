@@ -52,11 +52,13 @@ export interface TimelineClip {
     };
     gain?: number;
     muted?: boolean;
-    trim_start_sec?: number;
-    trim_end_sec?: number;
+    source_start_sec?: number;
+    source_end_sec?: number;
     playback_rate?: number;
     fade_in_sec?: number;
     fade_out_sec?: number;
+    fade_in_curve?: string;
+    fade_out_curve?: string;
 }
 
 export interface ProjectMeta {

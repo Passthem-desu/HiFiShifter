@@ -38,8 +38,8 @@ export interface ClipInfo {
     sourceSampleRate?: number; // 源文件采样率
     gain: number;
     muted: boolean;
-    trimStartSec: number;
-    trimEndSec: number;
+    sourceStartSec: number;
+    sourceEndSec: number;
     playbackRate: number;
     fadeInSec: number;
     fadeOutSec: number;

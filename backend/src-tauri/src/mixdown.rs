@@ -327,14 +327,13 @@ pub fn render_mixdown_interleaved(
             continue;
         }
 
-        // Source trimming is expressed in seconds.
-        // Negative trim_start_sec means leading silence in the clip (slip-edit past source start).
-        let trim_start_sec_src = clip.trim_start_sec.max(0.0);
-        let trim_end_sec_src = clip.trim_end_sec.max(0.0);
-        let pre_silence_sec_src = (-clip.trim_start_sec).max(0.0);
+        // Source trimming is expressed in source-domain absolute seconds.
+        // Negative source_start_sec means leading silence in the clip (slip-edit past source start).
+        let source_start_sec_src = clip.source_start_sec.max(0.0);
+        let source_end_sec_src = clip.source_end_sec;
+        let pre_silence_sec_src = (-clip.source_start_sec).max(0.0);
 
-        let trim_start_sec = trim_start_sec_src;
-        let trim_end_sec = trim_end_sec_src;
+        let source_start_sec = source_start_sec_src;
         // pre-silence is in source seconds, so convert to timeline time by dividing by playback_rate.
         let pre_silence_sec = pre_silence_sec_src / playback_rate.max(1e-6);
 
@@ -346,13 +345,13 @@ pub fn render_mixdown_interleaved(
             continue;
         }
 
-        let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
-        if src_end_limit_sec - trim_start_sec <= 1e-9 {
+        let src_end_limit_sec = source_end_sec_src.min(total_sec).max(source_start_sec);
+        if src_end_limit_sec - source_start_sec <= 1e-9 {
             continue;
         }
 
         // Slice source by time in its own rate.
-        let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
+        let src_i0 = (source_start_sec * in_rate as f64).floor().max(0.0) as usize;
         let src_i1 = (src_end_limit_sec * in_rate as f64)
             .ceil()
             .max(src_i0 as f64) as usize;
