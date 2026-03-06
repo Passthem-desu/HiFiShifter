@@ -112,11 +112,6 @@ fn decode_local_string(bytes: &[u8]) -> String {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
     let raw = &bytes[..end];
 
-    // 尝试 UTF-8
-    if let Ok(s) = std::str::from_utf8(raw) {
-        return s.to_string();
-    }
-
     // 使用系统编码
     let encoding = get_system_encoding();
     let (result, _, _) = encoding.decode(raw);

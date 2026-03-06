@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Flex, Box, Text } from "@radix-ui/themes";
+import { Flex, Box, Text, Dialog, Button } from "@radix-ui/themes";
 import { MenuBar } from "./components/layout/MenuBar";
 import { ActionBar } from "./components/layout/ActionBar";
 import { TimelinePanel } from "./components/layout/TimelinePanel";
 import { PianoRollPanel } from "./components/layout/PianoRollPanel";
 import { useAppDispatch, useAppSelector } from "./app/hooks";
 import {
+    closeVocalShifterSkippedFilesDialog,
     fetchTimeline,
     refreshRuntime,
     syncPlaybackState,
@@ -98,6 +99,9 @@ function AppInner() {
         (state) => state.fileBrowser.visible,
     );
     const outputPath = useAppSelector((state) => state.session.outputPath);
+    const vocalShifterSkippedFilesDialog = useAppSelector(
+        (state) => state.session.vocalShifterSkippedFilesDialog,
+    );
 
     const containerRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{ pointerId: number } | null>(null);
@@ -426,6 +430,38 @@ function AppInner() {
             direction="column"
             className="h-screen w-screen bg-qt-window text-qt-text overflow-hidden font-sans text-sm selection:bg-qt-highlight selection:text-white"
         >
+            <Dialog.Root
+                open={Boolean(vocalShifterSkippedFilesDialog?.length)}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        dispatch(closeVocalShifterSkippedFilesDialog());
+                    }
+                }}
+            >
+                <Dialog.Content maxWidth="620px">
+                    <Dialog.Title>{t("status_error_prefix")}</Dialog.Title>
+                    <Dialog.Description>
+                        {t("vs_import_skipped_header")}
+                    </Dialog.Description>
+                    <div className="mt-2 max-h-[240px] overflow-auto rounded border border-qt-border bg-qt-base p-2 text-xs">
+                        {(vocalShifterSkippedFilesDialog ?? []).map((file) => (
+                            <div key={file} className="truncate" title={file}>
+                                • {file}
+                            </div>
+                        ))}
+                    </div>
+                    <Flex justify="end" mt="3">
+                        <Button
+                            onClick={() =>
+                                dispatch(closeVocalShifterSkippedFilesDialog())
+                            }
+                        >
+                            {"OK"}
+                        </Button>
+                    </Flex>
+                </Dialog.Content>
+            </Dialog.Root>
+
             <MenuBar />
             <ActionBar />
 

@@ -176,6 +176,7 @@ export interface SessionState {
     status: string;
     error?: string;
     lastResult?: unknown;
+    vocalShifterSkippedFilesDialog: string[] | null;
 }
 
 interface StateSnapshot {
@@ -548,6 +549,7 @@ const initialState: SessionState = {
 
     busy: false,
     status: "Ready",
+    vocalShifterSkippedFilesDialog: null,
 };
 
 export {
@@ -658,6 +660,9 @@ const sessionSlice = createSlice({
         },
         setPitchShift(state, action: PayloadAction<number>) {
             state.pitchShift = action.payload;
+        },
+        closeVocalShifterSkippedFilesDialog(state) {
+            state.vocalShifterSkippedFilesDialog = null;
         },
         setSelectedClip(state, action: PayloadAction<string | null>) {
             state.selectedClipId = action.payload;
@@ -1517,19 +1522,23 @@ const sessionSlice = createSlice({
                 state.busy = false;
                 const payload = action.payload as
                     | { ok: true; canceled: true }
-                    | { ok: true; canceled: false; timeline: TimelineState; skippedFiles?: string[] };
+                    | {
+                          ok: true;
+                          canceled: false;
+                          timeline: TimelineState;
+                          skippedFiles?: string[];
+                      };
                 if (!payload || (payload as any).canceled) {
                     state.status = "Import canceled";
                     return;
                 }
                 applyTimelineState(state, (payload as any).timeline);
-                const skipped = (payload as any).skippedFiles as string[] | undefined;
-                if (skipped && skipped.length > 0) {
-                    state.status = "VocalShifter imported with skipped files";
-                    state.error = skipped.join(", ");
-                } else {
-                    state.status = "VocalShifter project imported";
-                }
+                const skippedFiles = (payload as any).skippedFiles;
+                state.vocalShifterSkippedFilesDialog =
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0
+                        ? skippedFiles
+                        : null;
+                state.status = "VocalShifter project imported";
             })
             .addCase(openVocalShifterFromDialog.rejected, (state, action) => {
                 state.busy = false;
@@ -1814,6 +1823,7 @@ export const {
     setAudioPath,
     setOutputPath,
     setPitchShift,
+    closeVocalShifterSkippedFilesDialog,
     setSelectedClip,
     moveClipStart,
     moveClipTrack,
