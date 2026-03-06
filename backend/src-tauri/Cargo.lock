@@ -11,6 +11,7 @@ dependencies = [
  "blake3",
  "cc",
  "cpal",
+ "encoding_rs",
  "hound",
  "lru",
  "ndarray 0.16.1",

@@ -33,6 +33,10 @@ mod onnx_status;
 mod pitch_cache;
 #[path = "commands/file_browser.rs"]
 mod file_browser;
+#[path = "commands/vocalshifter.rs"]
+mod vocalshifter;
+#[path = "commands/vocalshifter_clipboard.rs"]
+mod vocalshifter_clipboard;
 // TODO: 异步音高刷新功能未完成，缺少必要的状态管理和依赖
 // #[path = "commands/pitch_refresh_async.rs"]
 // mod pitch_refresh_async;
@@ -510,6 +514,27 @@ pub fn read_audio_preview(
     max_frames: Option<u32>,
 ) -> Result<file_browser::AudioPreviewData, String> {
     file_browser::read_audio_preview(file_path, max_frames)
+}
+
+// ===================== vocalshifter =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn open_vocalshifter_dialog() -> serde_json::Value {
+    vocalshifter::open_vocalshifter_dialog()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn import_vocalshifter_project(
+    state: State<'_, AppState>,
+    window: Window,
+    vsp_path: String,
+) -> serde_json::Value {
+    vocalshifter::import_vocalshifter_project(state.inner(), &window, vsp_path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn paste_vocalshifter_clipboard(state: State<'_, AppState>) -> serde_json::Value {
+    vocalshifter_clipboard::paste_vocalshifter_clipboard(state.inner())
 }
 
 // ===================== pitch_refresh_async (暂时禁用) =====================

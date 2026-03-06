@@ -20,6 +20,8 @@ export const messages = {
         shortcut_ctrl_o: "Ctrl+O",
         shortcut_ctrl_e: "Ctrl+E",
         menu_import_audio: "Import Audio",
+        menu_open_vocalshifter: "Open VocalShifter Project...",
+        menu_paste_vocalshifter_clipboard: "Paste VocalShifter Clipboard Data",
         menu_pick_output: "Pick Output",
         language: "Language",
         lang_en: "English",
@@ -247,6 +249,14 @@ export const messages = {
         kb_modifier_pr_vzoom: "Vertical Zoom (hold + scroll in Piano Roll)",
         kb_press_modifier: "Press modifier…",
         menu_keybindings: "Keyboard Shortcuts...",
+
+        vs_paste_clipboard_not_found: "VocalShifter clipboard data was not found.",
+        vs_paste_clipboard_invalid_format: "Clipboard file format is invalid (size is not a multiple of 0x80, or record is corrupted).",
+        vs_paste_clipboard_io_error: "An I/O error occurred while reading VocalShifter clipboard file.",
+        vs_paste_no_pitch_line: "No pitch line is selected. Please select one first.",
+        vs_import_read_failed: "Failed to read VocalShifter project file.",
+        vs_import_parse_failed: "Failed to parse VocalShifter project.",
+        vs_import_skipped_header: "The following audio files were skipped (unsupported format or not found):",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -269,6 +279,8 @@ export const messages = {
         shortcut_ctrl_o: "Ctrl+O",
         shortcut_ctrl_e: "Ctrl+E",
         menu_import_audio: "导入音频",
+        menu_open_vocalshifter: "打开 VocalShifter 工程...",
+        menu_paste_vocalshifter_clipboard: "粘贴 VocalShifter 剪贴板数据",
         menu_pick_output: "选择导出路径",
         language: "语言",
         lang_en: "English",
@@ -492,6 +504,14 @@ export const messages = {
         kb_modifier_pr_vzoom: "垂直缩放（在钢琴卷帘中按住+滚轮）",
         kb_press_modifier: "请按修饰键…",
         menu_keybindings: "快捷键设置...",
+
+        vs_paste_clipboard_not_found: "未找到 VocalShifter 剪贴板数据。",
+        vs_paste_clipboard_invalid_format: "剪贴板文件格式不正确（文件大小不是 0x80 的整数倍，或记录损坏）。",
+        vs_paste_clipboard_io_error: "读取 VocalShifter 剪贴板文件时发生 IO 错误。",
+        vs_paste_no_pitch_line: "当前没有选中的音高线，请先选择一条音高线。",
+        vs_import_read_failed: "读取 VocalShifter 工程文件失败。",
+        vs_import_parse_failed: "解析 VocalShifter 工程失败。",
+        vs_import_skipped_header: "以下音频文件因格式不支持或文件不存在而被跳过：",
     },
 } as const;
 

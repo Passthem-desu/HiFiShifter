@@ -63,3 +63,24 @@ export const saveProjectAsRemote = createAsyncThunk(
         return res as any;
     },
 );
+
+export const openVocalShifterFromDialog = createAsyncThunk(
+    "session/openVocalShifterFromDialog",
+    async (_, { rejectWithValue }) => {
+        const picked = await webApi.openVocalShifterDialog();
+        if (!picked.ok) return rejectWithValue("open_vocalshifter_dialog_failed");
+        if (picked.canceled || !picked.path) {
+            return { ok: true, canceled: true } as const;
+        }
+        const result = await webApi.importVocalShifterProject(picked.path);
+        if (!result?.ok) {
+            return rejectWithValue(result?.error ?? "import_vocalshifter_failed");
+        }
+        return {
+            ok: true,
+            canceled: false,
+            timeline: result,
+            skippedFiles: result.skipped_files as string[] | undefined,
+        } as const;
+    },
+);

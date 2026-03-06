@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Flex, Box, Text } from "@radix-ui/themes";
+import { Flex, Box, Text, Dialog, Button } from "@radix-ui/themes";
 import { MenuBar } from "./components/layout/MenuBar";
 import { ActionBar } from "./components/layout/ActionBar";
 import { TimelinePanel } from "./components/layout/TimelinePanel";
 import { PianoRollPanel } from "./components/layout/PianoRollPanel";
 import { useAppDispatch, useAppSelector } from "./app/hooks";
 import {
+    closeVocalShifterSkippedFilesDialog,
     fetchTimeline,
     refreshRuntime,
     syncPlaybackState,
@@ -59,6 +60,17 @@ const statusKey: Record<string, string> = {
     "Export failed": "status_export_failed",
     "Export separated done": "status_export_separated_done",
     "Export separated failed": "status_export_separated_failed",
+    "VocalShifter imported with skipped files": "vs_import_skipped_header",
+};
+
+// 后端返回的错误码 → i18n key 映射
+const errorCodeKey: Record<string, string> = {
+    clipboard_not_found: "vs_paste_clipboard_not_found",
+    clipboard_invalid_format: "vs_paste_clipboard_invalid_format",
+    clipboard_io_error: "vs_paste_clipboard_io_error",
+    no_pitch_line_selected: "vs_paste_no_pitch_line",
+    import_read_failed: "vs_import_read_failed",
+    import_parse_failed: "vs_import_parse_failed",
 };
 
 function AppInner() {
@@ -87,6 +99,9 @@ function AppInner() {
         (state) => state.fileBrowser.visible,
     );
     const outputPath = useAppSelector((state) => state.session.outputPath);
+    const vocalShifterSkippedFilesDialog = useAppSelector(
+        (state) => state.session.vocalShifterSkippedFilesDialog,
+    );
 
     const containerRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{ pointerId: number } | null>(null);
@@ -174,7 +189,9 @@ function AppInner() {
     // 监听后端 clip_pitch_data 事件，将 per-clip MIDI 曲线存入 store。
     useClipPitchDataListener();
 
-    const errorText = error ? `${t("status_error_prefix")}：${error}` : statusText;
+    const errorText = error
+        ? `${t("status_error_prefix")}：${errorCodeKey[error] ? t(errorCodeKey[error] as any) : error}`
+        : statusText;
 
     // 构建 pitch 分析进度文本（分析中时显示在状态栏左侧）
     const pitchAnalysisText = pitchAnalysis.pending
@@ -413,6 +430,38 @@ function AppInner() {
             direction="column"
             className="h-screen w-screen bg-qt-window text-qt-text overflow-hidden font-sans text-sm selection:bg-qt-highlight selection:text-white"
         >
+            <Dialog.Root
+                open={Boolean(vocalShifterSkippedFilesDialog?.length)}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        dispatch(closeVocalShifterSkippedFilesDialog());
+                    }
+                }}
+            >
+                <Dialog.Content maxWidth="620px">
+                    <Dialog.Title>{t("status_error_prefix")}</Dialog.Title>
+                    <Dialog.Description>
+                        {t("vs_import_skipped_header")}
+                    </Dialog.Description>
+                    <div className="mt-2 max-h-[240px] overflow-auto rounded border border-qt-border bg-qt-base p-2 text-xs">
+                        {(vocalShifterSkippedFilesDialog ?? []).map((file) => (
+                            <div key={file} className="truncate" title={file}>
+                                • {file}
+                            </div>
+                        ))}
+                    </div>
+                    <Flex justify="end" mt="3">
+                        <Button
+                            onClick={() =>
+                                dispatch(closeVocalShifterSkippedFilesDialog())
+                            }
+                        >
+                            {"OK"}
+                        </Button>
+                    </Flex>
+                </Dialog.Content>
+            </Dialog.Root>
+
             <MenuBar />
             <ActionBar />
 

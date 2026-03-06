@@ -36,6 +36,7 @@ import {
     newProjectRemote,
     openProjectFromDialog,
     openProjectFromPath,
+    openVocalShifterFromDialog,
     redoRemote,
     saveProjectAsRemote,
     saveProjectRemote,
@@ -63,6 +64,7 @@ import {
     applyPitchShift,
     exportAudio,
     exportSeparated,
+    pasteVocalShifterClipboard,
     pickOutputPath,
     processAudio,
     synthesizeAudio,
@@ -174,6 +176,7 @@ export interface SessionState {
     status: string;
     error?: string;
     lastResult?: unknown;
+    vocalShifterSkippedFilesDialog: string[] | null;
 }
 
 interface StateSnapshot {
@@ -553,6 +556,7 @@ const initialState: SessionState = {
 
     busy: false,
     status: "Ready",
+    vocalShifterSkippedFilesDialog: null,
 };
 
 export {
@@ -561,6 +565,7 @@ export {
     newProjectRemote,
     openProjectFromDialog,
     openProjectFromPath,
+    openVocalShifterFromDialog,
     saveProjectRemote,
     saveProjectAsRemote,
 } from "./thunks/projectThunks";
@@ -611,6 +616,7 @@ export {
     synthesizeAudio,
     exportAudio,
     exportSeparated,
+    pasteVocalShifterClipboard,
 } from "./thunks/audioThunks";
 
 export {
@@ -661,6 +667,9 @@ const sessionSlice = createSlice({
         },
         setPitchShift(state, action: PayloadAction<number>) {
             state.pitchShift = action.payload;
+        },
+        closeVocalShifterSkippedFilesDialog(state) {
+            state.vocalShifterSkippedFilesDialog = null;
         },
         setSelectedClip(state, action: PayloadAction<string | null>) {
             state.selectedClipId = action.payload;
@@ -1298,6 +1307,21 @@ const sessionSlice = createSlice({
             })
             .addCase(exportSeparated.rejected, setRejected)
 
+            .addCase(pasteVocalShifterClipboard.pending, (state) =>
+                setPending(state, "Pasting VocalShifter clipboard data..."),
+            )
+            .addCase(pasteVocalShifterClipboard.fulfilled, (state, action) => {
+                state.busy = false;
+                state.lastResult = action.payload;
+                state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
+                state.status = "Pasted VocalShifter clipboard data";
+            })
+            .addCase(pasteVocalShifterClipboard.rejected, (state, action) => {
+                state.busy = false;
+                state.error = (action.payload as string) ?? action.error?.message ?? "Request failed";
+                state.status = "Failed";
+            })
+
             .addCase(playOriginal.pending, (state) =>
                 setPending(state, "Playing original..."),
             )
@@ -1496,6 +1520,37 @@ const sessionSlice = createSlice({
                 state.busy = false;
                 state.error = action.error?.message ?? "Open project failed";
                 state.status = "Open failed";
+            })
+
+            .addCase(openVocalShifterFromDialog.pending, (state) =>
+                setPending(state, "Importing VocalShifter project..."),
+            )
+            .addCase(openVocalShifterFromDialog.fulfilled, (state, action) => {
+                state.busy = false;
+                const payload = action.payload as
+                    | { ok: true; canceled: true }
+                    | {
+                          ok: true;
+                          canceled: false;
+                          timeline: TimelineState;
+                          skippedFiles?: string[];
+                      };
+                if (!payload || (payload as any).canceled) {
+                    state.status = "Import canceled";
+                    return;
+                }
+                applyTimelineState(state, (payload as any).timeline);
+                const skippedFiles = (payload as any).skippedFiles;
+                state.vocalShifterSkippedFilesDialog =
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0
+                        ? skippedFiles
+                        : null;
+                state.status = "VocalShifter project imported";
+            })
+            .addCase(openVocalShifterFromDialog.rejected, (state, action) => {
+                state.busy = false;
+                state.error = (action.payload as string) ?? action.error?.message ?? "Import VocalShifter failed";
+                state.status = "Import failed";
             })
 
             .addCase(saveProjectRemote.fulfilled, (state, action) => {
@@ -1775,6 +1830,7 @@ export const {
     setAudioPath,
     setOutputPath,
     setPitchShift,
+    closeVocalShifterSkippedFilesDialog,
     setSelectedClip,
     moveClipStart,
     moveClipTrack,

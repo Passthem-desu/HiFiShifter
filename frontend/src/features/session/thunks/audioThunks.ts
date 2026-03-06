@@ -46,3 +46,14 @@ export const exportSeparated = createAsyncThunk(
         return webApi.saveSeparated(outputDir);
     },
 );
+
+export const pasteVocalShifterClipboard = createAsyncThunk(
+    "session/pasteVocalShifterClipboard",
+    async (_, { rejectWithValue }) => {
+        const result = await webApi.pasteVocalShifterClipboard();
+        if (!result?.ok) {
+            return rejectWithValue(result?.error ?? "paste_vocalshifter_clipboard_failed");
+        }
+        return result;
+    },
+);

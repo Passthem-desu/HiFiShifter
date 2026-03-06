@@ -263,6 +263,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "open_project":
             return { projectPath: args[0] };
 
+        case "import_vocalshifter_project":
+            return { vspPath: args[0] };
+
+        case "paste_vocalshifter_clipboard":
+            return {};
+
         case "get_waveform_peaks_segment":
             return {
                 sourcePath: args[0],
