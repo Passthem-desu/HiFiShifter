@@ -35,5 +35,7 @@ export const fileBrowserApi = {
         invoke<AudioPreviewData>("read_audio_preview", filePath, maxFrames),
 
     pickDirectory: () =>
-        invoke<{ ok: boolean; canceled?: boolean; path?: string }>("pick_directory"),
+        invoke<{ ok: boolean; canceled?: boolean; path?: string }>(
+            "pick_directory",
+        ),
 };

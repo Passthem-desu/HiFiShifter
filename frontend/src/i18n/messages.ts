@@ -157,7 +157,8 @@ export const messages = {
         fade_out: "Fade Out",
         show_secondary_param: "Show secondary parameter overlay",
         hide_secondary_param: "Hide secondary parameter overlay",
-        onnx_compile_required: "ONNX model not compiled. Run: cargo tauri dev --features onnx",
+        onnx_compile_required:
+            "ONNX model not compiled. Run: cargo tauri dev --features onnx",
         onnx_unavailable_label: " (unavailable)",
         solo: "Solo",
         status_analyzing_pitch: "Analyzing pitch",
@@ -196,7 +197,8 @@ export const messages = {
         fade_curve_logarithmic: "Logarithmic",
         fade_curve_scurve: "S-Curve",
 
-        clip_gain_drag_hint: "Drag up/down to adjust gain / Double-click to enter precise value",
+        clip_gain_drag_hint:
+            "Drag up/down to adjust gain / Double-click to enter precise value",
         track_change_color: "Change track color",
         color_blue: "Blue",
         color_purple: "Purple",
@@ -253,13 +255,18 @@ export const messages = {
         kb_press_modifier: "Press modifier…",
         menu_keybindings: "Keyboard Shortcuts...",
 
-        vs_paste_clipboard_not_found: "VocalShifter clipboard data was not found.",
-        vs_paste_clipboard_invalid_format: "Clipboard file format is invalid (size is not a multiple of 0x80, or record is corrupted).",
-        vs_paste_clipboard_io_error: "An I/O error occurred while reading VocalShifter clipboard file.",
-        vs_paste_no_pitch_line: "No pitch line is selected. Please select one first.",
+        vs_paste_clipboard_not_found:
+            "VocalShifter clipboard data was not found.",
+        vs_paste_clipboard_invalid_format:
+            "Clipboard file format is invalid (size is not a multiple of 0x80, or record is corrupted).",
+        vs_paste_clipboard_io_error:
+            "An I/O error occurred while reading VocalShifter clipboard file.",
+        vs_paste_no_pitch_line:
+            "No pitch line is selected. Please select one first.",
         vs_import_read_failed: "Failed to read VocalShifter project file.",
         vs_import_parse_failed: "Failed to parse VocalShifter project.",
-        vs_import_skipped_header: "The following audio files were skipped (unsupported format or not found):",
+        vs_import_skipped_header:
+            "The following audio files were skipped (unsupported format or not found):",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -345,7 +352,8 @@ export const messages = {
         param_editor: "参数编辑器",
         pitch_requires_compose: "请在根轨开启 Compose（C）以生成音高曲线",
         pitch_requires_algo: "请选择非“无”的音高算法以启用音高编辑",
-        pitch_backend_unavailable: "音高后端不可用（请检查 WORLD DLL / ONNX 模型）",
+        pitch_backend_unavailable:
+            "音高后端不可用（请检查 WORLD DLL / ONNX 模型）",
         pitch_edit_not_modified_hint: "尚未修改曲线：当前等同原始音高",
         pitch_status_label: "音高",
         pitch_status_off: "关闭",
@@ -415,7 +423,8 @@ export const messages = {
         fade_out: "淡出",
         show_secondary_param: "显示副参数叠加曲线",
         hide_secondary_param: "隐藏副参数叠加曲线",
-        onnx_compile_required: "ONNX 模型未编译，请运行：cargo tauri dev --features onnx",
+        onnx_compile_required:
+            "ONNX 模型未编译，请运行：cargo tauri dev --features onnx",
         onnx_unavailable_label: "（不可用）",
         solo: "独奏",
         status_analyzing_pitch: "正在分析音高",
@@ -512,12 +521,15 @@ export const messages = {
         menu_keybindings: "快捷键设置...",
 
         vs_paste_clipboard_not_found: "未找到 VocalShifter 剪贴板数据。",
-        vs_paste_clipboard_invalid_format: "剪贴板文件格式不正确（文件大小不是 0x80 的整数倍，或记录损坏）。",
-        vs_paste_clipboard_io_error: "读取 VocalShifter 剪贴板文件时发生 IO 错误。",
+        vs_paste_clipboard_invalid_format:
+            "剪贴板文件格式不正确（文件大小不是 0x80 的整数倍，或记录损坏）。",
+        vs_paste_clipboard_io_error:
+            "读取 VocalShifter 剪贴板文件时发生 IO 错误。",
         vs_paste_no_pitch_line: "当前没有选中的音高线，请先选择一条音高线。",
         vs_import_read_failed: "读取 VocalShifter 工程文件失败。",
         vs_import_parse_failed: "解析 VocalShifter 工程失败。",
-        vs_import_skipped_header: "以下音频文件因格式不支持或文件不存在而被跳过：",
+        vs_import_skipped_header:
+            "以下音频文件因格式不支持或文件不存在而被跳过：",
     },
 } as const;
 

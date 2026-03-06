@@ -3,10 +3,7 @@ import {
     createAsyncThunk,
     type PayloadAction,
 } from "@reduxjs/toolkit";
-import {
-    fileBrowserApi,
-    type FileEntry,
-} from "../../services/api/fileBrowser";
+import { fileBrowserApi, type FileEntry } from "../../services/api/fileBrowser";
 
 interface FileBrowserState {
     visible: boolean;
@@ -61,7 +58,10 @@ export const searchFilesRecursive = createAsyncThunk(
         { rejectWithValue },
     ) => {
         try {
-            const entries = await fileBrowserApi.searchFilesRecursive(dirPath, query);
+            const entries = await fileBrowserApi.searchFilesRecursive(
+                dirPath,
+                query,
+            );
             return entries;
         } catch (err) {
             return rejectWithValue(
