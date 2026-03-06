@@ -32,6 +32,8 @@ import {
     usePianoRollStatus,
 } from "./contexts/PianoRollStatusContext";
 import { FileBrowserPanel } from "./components/layout/FileBrowserPanel";
+import { useKeybindings } from "./features/keybindings/useKeybindings";
+import type { ActionId } from "./features/keybindings/types";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -326,80 +328,39 @@ function AppInner() {
         outputPathRef.current = outputPath;
     }, [outputPath]);
 
-    useEffect(() => {
-        function isEditableTarget(target: EventTarget | null): boolean {
-            const el = target as HTMLElement | null;
-            if (!el) return false;
-            const tag = (el.tagName ?? "").toLowerCase();
-            if (tag === "input" || tag === "textarea" || tag === "select") {
-                return true;
-            }
-            if (el.isContentEditable) return true;
-            // Radix/other components may put focus on nested elements.
-            if (el.closest?.('input,textarea,select,[contenteditable="true"]'))
-                return true;
-            return false;
-        }
-
-        function onUndoRedo(e: KeyboardEvent) {
-            if (e.repeat) return;
-            if (!(e.ctrlKey || e.metaKey)) return;
-            if (e.altKey) return;
-
-            const active = document.activeElement as HTMLElement | null;
-            if (isEditableTarget(active) || isEditableTarget(e.target)) return;
-
-            const key = e.key.toLowerCase();
-            const isUndo = key === "z" && !e.shiftKey;
-            const isRedo = key === "y" || (key === "z" && e.shiftKey);
-            if (!isUndo && !isRedo) return;
-
-            e.preventDefault();
-            e.stopPropagation();
-            void dispatch(isUndo ? undoRemote() : redoRemote());
-        }
-
-        function onProjectShortcuts(e: KeyboardEvent) {
-            if (e.repeat) return;
-            if (!(e.ctrlKey || e.metaKey)) return;
-            if (e.altKey) return;
-
-            const active = document.activeElement as HTMLElement | null;
-            if (isEditableTarget(active) || isEditableTarget(e.target)) return;
-
-            const key = e.key.toLowerCase();
-            const shift = Boolean(e.shiftKey);
-
-            // Ctrl+N
-            if (key === "n" && !shift) {
-                e.preventDefault();
-                e.stopPropagation();
+    // 统一快捷键处理（通过 keybindings 模块管理，用户可自定义）
+    const handleKeybindingAction = useRef((actionId: ActionId) => {
+        switch (actionId) {
+            case "playback.toggle":
+                if (runtimeRef.current.isPlaying) {
+                    void dispatch(stopAudioPlayback());
+                } else {
+                    void dispatch(
+                        runtimeRef.current.hasSynthesized
+                            ? playSynthesized()
+                            : playOriginal(),
+                    );
+                }
+                break;
+            case "edit.undo":
+                void dispatch(undoRemote());
+                break;
+            case "edit.redo":
+                void dispatch(redoRemote());
+                break;
+            case "project.new":
                 void dispatch(newProjectRemote());
-                return;
-            }
-
-            // Ctrl+Shift+O
-            if (key === "o" && shift) {
-                e.preventDefault();
-                e.stopPropagation();
+                break;
+            case "project.open":
                 void dispatch(openProjectFromDialog());
-                return;
-            }
-
-            // Ctrl+S / Ctrl+Shift+S
-            if (key === "s") {
-                e.preventDefault();
-                e.stopPropagation();
-                void dispatch(
-                    shift ? saveProjectAsRemote() : saveProjectRemote(),
-                );
-                return;
-            }
-
-            // Ctrl+E — 导出音频
-            if (key === "e" && !shift) {
-                e.preventDefault();
-                e.stopPropagation();
+                break;
+            case "project.save":
+                void dispatch(saveProjectRemote());
+                break;
+            case "project.saveAs":
+                void dispatch(saveProjectAsRemote());
+                break;
+            case "project.export":
                 void (async () => {
                     const curPath = outputPathRef.current?.trim();
                     if (!curPath) {
@@ -411,40 +372,14 @@ function AppInner() {
                     }
                     await dispatch(exportAudio(curPath));
                 })();
-                return;
-            }
+                break;
+            // clip.* 操作由 TimelinePanel 的 useKeyboardShortcuts 处理
+            default:
+                break;
         }
+    });
 
-        function onKeyDown(e: KeyboardEvent) {
-            if (e.key !== " " && e.code !== "Space") return;
-            if (e.repeat) return;
-            if (e.ctrlKey || e.metaKey || e.altKey) return;
-
-            const active = document.activeElement as HTMLElement | null;
-            if (isEditableTarget(active) || isEditableTarget(e.target)) return;
-            e.preventDefault();
-            e.stopPropagation();
-
-            if (runtimeRef.current.isPlaying) {
-                void dispatch(stopAudioPlayback());
-            } else {
-                void dispatch(
-                    runtimeRef.current.hasSynthesized
-                        ? playSynthesized()
-                        : playOriginal(),
-                );
-            }
-        }
-
-        window.addEventListener("keydown", onKeyDown, true);
-        window.addEventListener("keydown", onUndoRedo, true);
-        window.addEventListener("keydown", onProjectShortcuts, true);
-        return () => {
-            window.removeEventListener("keydown", onKeyDown, true);
-            window.removeEventListener("keydown", onUndoRedo, true);
-            window.removeEventListener("keydown", onProjectShortcuts, true);
-        };
-    }, [dispatch]);
+    useKeybindings(handleKeybindingAction.current);
 
     useEffect(() => {
         if (!runtimeIsPlaying) return;

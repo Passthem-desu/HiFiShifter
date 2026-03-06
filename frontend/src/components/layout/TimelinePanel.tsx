@@ -29,6 +29,8 @@ import { useClipDrag } from "./timeline/hooks/useClipDrag";
 import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
 import { useKeyboardShortcuts } from "./timeline/hooks/useKeyboardShortcuts";
+import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
+import type { Keybinding } from "../../features/keybindings/types";
 
 import {
     BackgroundGrid,
@@ -137,6 +139,16 @@ export const TimelinePanel: React.FC = () => {
 
     const [altPressed, setAltPressed] = useState(false);
 
+    // 从 store 读取 modifier.clipStretch 绑定，动态检测对应修饰键
+    const stretchKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipStretch"));
+    const slipEditKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipSlipEdit"));
+    const noSnapKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipNoSnap"));
+    const copyDragKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipCopyDrag"));
+    const stretchKbRef = useRef<Keybinding>(stretchKb);
+    useEffect(() => {
+        stretchKbRef.current = stretchKb;
+    }, [stretchKb]);
+
     const clipClipboardRef = useRef<ClipTemplate[] | null>(null);
 
     const tauriDraggedPathRef = useRef<string | null>(null);
@@ -144,11 +156,26 @@ export const TimelinePanel: React.FC = () => {
     const tauriDropHandledAtRef = useRef<number>(0);
 
     useEffect(() => {
+        /** 检测当前按下的键是否匹配 modifier.clipStretch 绑定 */
+        function isStretchModifier(e: KeyboardEvent): boolean {
+            const kb = stretchKbRef.current;
+            if (kb.ctrl && (e.key === "Control" || e.ctrlKey || e.metaKey)) return true;
+            if (kb.alt && (e.key === "Alt" || e.altKey)) return true;
+            if (kb.shift && (e.key === "Shift" || e.shiftKey)) return true;
+            return false;
+        }
+        function checkStretchState(e: KeyboardEvent): boolean {
+            const kb = stretchKbRef.current;
+            if (kb.ctrl) return e.ctrlKey || e.metaKey;
+            if (kb.alt) return e.altKey;
+            if (kb.shift) return e.shiftKey;
+            return false;
+        }
         function onKeyDown(e: KeyboardEvent) {
-            if (e.key === "Alt") setAltPressed(true);
+            if (isStretchModifier(e)) setAltPressed(true);
         }
         function onKeyUp(e: KeyboardEvent) {
-            if (e.key === "Alt") setAltPressed(false);
+            if (!checkStretchState(e)) setAltPressed(false);
         }
         function onBlur() {
             setAltPressed(false);
@@ -600,6 +627,7 @@ export const TimelinePanel: React.FC = () => {
         dispatch,
         snapBeat,
         beatFromClientX,
+        noSnapKb,
     });
 
     const { slipDragRef: _slipDragRef, startSlipDrag } = useSlipDrag({
@@ -623,6 +651,9 @@ export const TimelinePanel: React.FC = () => {
         trackIdFromClientY,
         setClipDropNewTrack,
         setMultiSelectedClipIds,
+        slipEditKb,
+        noSnapKb,
+        copyDragKb,
     });
 
     function startClipDrag(

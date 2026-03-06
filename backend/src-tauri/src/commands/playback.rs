@@ -71,8 +71,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
 
                 // 防呆：当 pitch_edit_user_modified 为 true 但当前时间线中并没有任何 clip
                 // 在播放窗口内需要 pitch edit（例如用户把所有点都清空为 0），
-                // 则不应进入“等待预渲染”路径，否则会因 first_clip_rendered 永远为 false
-                // 而导致播放不启动、全程无声。
+                // 则无需进入预渲染路径，直接播放即可。
                 if clips_to_render.is_empty() {
                     engine.seek_sec(render_start_sec);
                     engine.update_timeline(tl_for_render.clone());
@@ -92,7 +91,11 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 let total = clips_to_render.len().max(1);
                 let mut rendered_count = 0u32;
                 let mut any_error = false;
-                let mut first_clip_rendered = false;
+
+                // 立即开始播放：cursor 会在遇到未合成 clip 时自动暂停等待
+                engine.seek_sec(render_start_sec);
+                engine.update_timeline(tl_for_render.clone());
+                engine.set_playing(true, Some("original"));
 
                 for clip_render_info in &clips_to_render {
                     // 检查缓存是否已命中
@@ -112,13 +115,6 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                 },
                             );
                             
-                            // 如果这是第一个clip且缓存命中，立即开始播放
-                            if !first_clip_rendered {
-                                first_clip_rendered = true;
-                                engine.seek_sec(render_start_sec);
-                                engine.update_timeline(tl_for_render.clone());
-                                engine.set_playing(true, Some("original"));
-                            }
                             continue;
                         }
                     }
@@ -181,13 +177,9 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                         },
                     );
 
-                    // 第一个clip渲染完成后立即开始播放
-                    if !first_clip_rendered {
-                        first_clip_rendered = true;
-                        engine.seek_sec(render_start_sec);
-                        engine.update_timeline(tl_for_render.clone());
-                        engine.set_playing(true, Some("original"));
-                    }
+                    // 每个 clip 渲染完成后更新 timeline snapshot，
+                    // 使 mix.rs 中的 cursor 能感知到新渲染好的 clip 并恢复推进
+                    engine.update_timeline(tl_for_render.clone());
                 }
 
                 // 推送渲染完成

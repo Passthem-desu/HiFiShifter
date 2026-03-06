@@ -23,6 +23,8 @@ import type {
     StrokePoint,
     ValueViewport,
 } from "./types";
+import { isModifierActive } from "../../../features/keybindings/keybindingsSlice";
+import type { Keybinding } from "../../../features/keybindings/types";
 
 export function usePianoRollInteractions(args: {
     dispatch: AppDispatch;
@@ -96,6 +98,12 @@ export function usePianoRollInteractions(args: {
     /** pointer down 期间设为 true，pointer up 后由 commitStroke 包装层重置为 false�?
      *  用于保护 pitch_orig_updated 事件触发的曲线刷新不覆盖正在绘制的内容�?*/
     liveEditActiveRef?: MutableRefObject<boolean>;
+    /** pianoRoll.copy 绑定 */
+    pianoRollCopyKb: Keybinding;
+    /** pianoRoll.paste 绑定 */
+    pianoRollPasteKb: Keybinding;
+    /** modifier.pianoRollVerticalZoom 绑定 */
+    prVerticalZoomKb: Keybinding;
 }) {
     const {
         dispatch,
@@ -133,6 +141,9 @@ export function usePianoRollInteractions(args: {
         applyDenseToLiveEdit,
         commitStroke,
         liveEditActiveRef,
+        pianoRollCopyKb,
+        pianoRollPasteKb,
+        prVerticalZoomKb,
     } = args;
 
     const pointerBeat = useCallback(
@@ -204,9 +215,6 @@ export function usePianoRollInteractions(args: {
             if (!rootTrackId) return;
             if (!selectionRef.current) return;
             if (editParam === "pitch" && !pitchEnabled) return;
-            const isMac = navigator.platform.toLowerCase().includes("mac");
-            const mod = isMac ? e.metaKey : e.ctrlKey;
-            if (!mod) return;
 
             const sel = selectionRef.current;
             const aBeat = Math.min(sel.aBeat, sel.bBeat);
@@ -221,42 +229,80 @@ export function usePianoRollInteractions(args: {
                 200_000,
             );
 
-            if (e.key.toLowerCase() === "c") {
-                e.preventDefault();
-                void (async () => {
-                    const res = await paramsApi.getParamFrames(
-                        rootTrackId,
-                        editParam,
-                        startFrame,
-                        frameCount,
-                        1,
-                    );
-                    if (!res?.ok) return;
-                    const payload = res as ParamFramesPayload;
-                    clipboardRef.current = {
-                        param: editParam,
-                        framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
-                        values: (payload.edit ?? []).map((v) => Number(v) || 0),
-                    };
-                })();
-                return;
+            // 检测 pianoRoll.copy 绑定
+            {
+                const kb = pianoRollCopyKb;
+                let keyMatch = false;
+                if (kb.modifierOnly) {
+                    keyMatch = isModifierActive(kb, e.nativeEvent);
+                } else {
+                    let pressedKey = e.key === " " ? "space" : e.key.toLowerCase();
+                    if (pressedKey !== kb.key) keyMatch = false;
+                    else {
+                        const isMac = navigator.platform.toLowerCase().includes("mac");
+                        const modKey = isMac ? e.metaKey : e.ctrlKey;
+                        keyMatch =
+                            modKey === Boolean(kb.ctrl) &&
+                            e.shiftKey === Boolean(kb.shift) &&
+                            e.altKey === Boolean(kb.alt);
+                    }
+                }
+                if (keyMatch) {
+                    e.preventDefault();
+                    void (async () => {
+                        const res = await paramsApi.getParamFrames(
+                            rootTrackId,
+                            editParam,
+                            startFrame,
+                            frameCount,
+                            1,
+                        );
+                        if (!res?.ok) return;
+                        const payload = res as ParamFramesPayload;
+                        clipboardRef.current = {
+                            param: editParam,
+                            framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
+                            values: (payload.edit ?? []).map((v) => Number(v) || 0),
+                        };
+                    })();
+                    return;
+                }
             }
 
-            if (e.key.toLowerCase() === "v") {
-                e.preventDefault();
-                const clip = clipboardRef.current;
-                if (!clip) return;
-                if (clip.param !== editParam) return;
-                void (async () => {
-                    await paramsApi.setParamFrames(
-                        rootTrackId,
-                        editParam,
-                        startFrame,
-                        clip.values,
-                        true,
-                    );
-                    bumpRefreshToken();
-                })();
+            // 检测 pianoRoll.paste 绑定
+            {
+                const kb = pianoRollPasteKb;
+                let keyMatch = false;
+                if (kb.modifierOnly) {
+                    keyMatch = isModifierActive(kb, e.nativeEvent);
+                } else {
+                    let pressedKey = e.key === " " ? "space" : e.key.toLowerCase();
+                    if (pressedKey !== kb.key) keyMatch = false;
+                    else {
+                        const isMac = navigator.platform.toLowerCase().includes("mac");
+                        const modKey = isMac ? e.metaKey : e.ctrlKey;
+                        keyMatch =
+                            modKey === Boolean(kb.ctrl) &&
+                            e.shiftKey === Boolean(kb.shift) &&
+                            e.altKey === Boolean(kb.alt);
+                    }
+                }
+                if (keyMatch) {
+                    e.preventDefault();
+                    const clip = clipboardRef.current;
+                    if (!clip) return;
+                    if (clip.param !== editParam) return;
+                    void (async () => {
+                        await paramsApi.setParamFrames(
+                            rootTrackId,
+                            editParam,
+                            startFrame,
+                            clip.values,
+                            true,
+                        );
+                        bumpRefreshToken();
+                    })();
+                }
             }
         },
         [
@@ -268,6 +314,8 @@ export function usePianoRollInteractions(args: {
             pitchEnabled,
             clipboardRef,
             bumpRefreshToken,
+            pianoRollCopyKb,
+            pianoRollPasteKb,
         ],
     );
 
@@ -296,7 +344,7 @@ export function usePianoRollInteractions(args: {
             e.preventDefault();
 
             // Ctrl + wheel: vertical zoom (value axis)
-            if (e.ctrlKey) {
+            if (isModifierActive(prVerticalZoomKb, e)) {
                 const h = Math.max(1, bounds.height);
                 const y = clamp(pointerYRaw, 0, h);
                 const t = yToViewportT(y, h);

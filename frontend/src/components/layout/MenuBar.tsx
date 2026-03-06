@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Flex, DropdownMenu } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
@@ -24,12 +24,22 @@ import { coreApi } from "../../services/api";
 import { fileBrowserApi } from "../../services/api/fileBrowser";
 import { useAppTheme } from "../../theme/AppThemeProvider";
 import { GlobeIcon } from "@radix-ui/react-icons";
+import { selectMergedKeybindings, formatKeybinding } from "../../features/keybindings/keybindingsSlice";
+import type { ActionId } from "../../features/keybindings/types";
+import { KeybindingsDialog } from "./KeybindingsDialog";
 
 export const MenuBar: React.FC = () => {
     const { t, setLocale } = useI18n();
     const dispatch = useAppDispatch();
     const s = useAppSelector((state: RootState) => state.session);
     const theme = useAppTheme();
+    const keybindings = useAppSelector(selectMergedKeybindings);
+    const [kbDialogOpen, setKbDialogOpen] = useState(false);
+
+    /** 获取某个操作的快捷键显示文本 */
+    function shortcutLabel(actionId: ActionId): string {
+        return formatKeybinding(keybindings[actionId]);
+    }
 
     async function handleExport() {
         const outputPath = s.outputPath?.trim();
@@ -70,7 +80,7 @@ export const MenuBar: React.FC = () => {
                     >
                         {t("menu_new_project")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                            Ctrl+N
+                            {shortcutLabel("project.new")}
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
@@ -78,7 +88,7 @@ export const MenuBar: React.FC = () => {
                     >
                         {t("menu_open_project")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                            Ctrl+Shift+O
+                            {shortcutLabel("project.open")}
                         </div>
                     </DropdownMenu.Item>
 
@@ -115,7 +125,7 @@ export const MenuBar: React.FC = () => {
                     >
                         {t("menu_save_project")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                            Ctrl+S
+                            {shortcutLabel("project.save")}
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
@@ -123,7 +133,7 @@ export const MenuBar: React.FC = () => {
                     >
                         {t("menu_save_project_as")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                            Ctrl+Shift+S
+                            {shortcutLabel("project.saveAs")}
                         </div>
                     </DropdownMenu.Item>
 
@@ -133,14 +143,11 @@ export const MenuBar: React.FC = () => {
                         onSelect={() => dispatch(importAudioFromDialog())}
                     >
                         {t("menu_import_audio")}{" "}
-                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                            {t("shortcut_ctrl_o")}
-                        </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={handleExport}>
                         {t("menu_export_audio")}{" "}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                            {t("shortcut_ctrl_e")}
+                            {shortcutLabel("project.export")}
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={handleExportSeparated}>
@@ -173,7 +180,7 @@ export const MenuBar: React.FC = () => {
                     >
                         {t("menu_undo")}{" "}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                            Ctrl+Z
+                            {shortcutLabel("edit.undo")}
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
@@ -181,7 +188,7 @@ export const MenuBar: React.FC = () => {
                     >
                         {t("menu_redo")}{" "}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                            Ctrl+Y
+                            {shortcutLabel("edit.redo")}
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
@@ -242,6 +249,10 @@ export const MenuBar: React.FC = () => {
                             ? t("theme_dark")
                             : t("theme_light")}
                     </DropdownMenu.Item>
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item onSelect={() => setKbDialogOpen(true)}>
+                        {(t as (key: string) => string)("menu_keybindings")}
+                    </DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Root>
 
@@ -273,6 +284,9 @@ export const MenuBar: React.FC = () => {
                     </DropdownMenu.Content>
                 </DropdownMenu.Root>
             </Flex>
+
+            {/* 快捷键设置对话框 */}
+            <KeybindingsDialog open={kbDialogOpen} onOpenChange={setKbDialogOpen} />
         </Flex>
     );
 };

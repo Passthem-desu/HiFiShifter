@@ -12,6 +12,8 @@ import {
     selectClipRemote,
 } from "../../../../features/session/sessionSlice";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
+import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
+import type { Keybinding } from "../../../../features/keybindings/types";
 
 const NEW_TRACK_SENTINEL = "__hs_new_track__";
 
@@ -59,6 +61,12 @@ export function useClipDrag(deps: {
     trackIdFromClientY: (clientY: number) => string | null;
     setClipDropNewTrack: (v: boolean) => void;
     setMultiSelectedClipIds: (ids: string[]) => void;
+    /** modifier.clipSlipEdit 绑定 */
+    slipEditKb: Keybinding;
+    /** modifier.clipNoSnap 绑定 */
+    noSnapKb: Keybinding;
+    /** modifier.clipCopyDrag 绑定 */
+    copyDragKb: Keybinding;
 }) {
     const {
         scrollRef,
@@ -71,6 +79,9 @@ export function useClipDrag(deps: {
         trackIdFromClientY,
         setClipDropNewTrack,
         setMultiSelectedClipIds,
+        slipEditKb,
+        noSnapKb,
+        copyDragKb,
     } = deps;
 
     const clipDragRef = useRef<ClipDragState | null>(null);
@@ -98,8 +109,7 @@ export function useClipDrag(deps: {
 
         const alt = Boolean(
             altPressedHint ||
-            e.altKey ||
-            e.nativeEvent.getModifierState?.("Alt"),
+            isModifierActive(slipEditKb, e.nativeEvent),
         );
         if (alt) {
             startSlipDrag(e, clipId, startSlipDragFn);
@@ -145,7 +155,7 @@ export function useClipDrag(deps: {
             initialAnchorTrackId: initialTrackId,
             lastTrackId: targetTrackId,
             lastDeltaBeat: 0,
-            copyMode: Boolean(e.ctrlKey || e.metaKey),
+            copyMode: isModifierActive(copyDragKb, e.nativeEvent),
             startClientX: e.clientX,
             startClientY: e.clientY,
             hasMoved: false,
@@ -169,7 +179,7 @@ export function useClipDrag(deps: {
             const b = el.getBoundingClientRect();
             const beatNow = beatFromClientX(ev.clientX, b, el.scrollLeft);
             let nextStart = Math.max(0, beatNow - drag.offsetBeat);
-            if (!ev.shiftKey) nextStart = snapBeat(nextStart);
+            if (!isModifierActive(noSnapKb, ev)) nextStart = snapBeat(nextStart);
 
             let deltaBeat = nextStart - drag.initialAnchorstartSec;
             deltaBeat = Math.max(deltaBeat, -drag.minstartSec);
