@@ -1,7 +1,6 @@
 // Reaper 工程 / 剪贴板数据转换为 HiFiShifter 工程
 //
 // 将 reaper_parser 解析出的 ReaperData 转换为 HiFiShifter 的 TimelineState。
-// 参考 vocalshifter_import.rs 的转换逻辑和 UltraPaste/ReaperDataHelper.cs。
 
 use crate::audio_utils::try_read_wav_info;
 use crate::models::PitchRange;
@@ -65,85 +64,156 @@ pub fn import_rpp(path: &Path) -> Result<ReaperImportResult, String> {
 }
 
 /// 导入 Reaper 剪贴板数据。
-/// `existing_track_id` 是 HiFiShifter 中当前选中的轨道 ID（用于无 Track 时粘贴到该轨道）。
+///
+/// - `playhead_sec`: 当前光标位置
+/// - `selected_track_idx`: 用户选中的轨道在 `ordered_track_ids` 中的下标
+/// - `ordered_track_ids`: 按 order 排序的现有轨道 ID 列表
 pub fn import_reaper_clipboard(
     data: &[u8],
-    existing_track_id: Option<&str>,
+    playhead_sec: f64,
+    selected_track_idx: usize,
+    ordered_track_ids: &[String],
 ) -> Result<ReaperImportResult, String> {
     let reaper_data = reaper_parser::parse_clipboard_bytes(data)?;
-    convert_reaper_data_clipboard(reaper_data, existing_track_id)
+    convert_reaper_data_clipboard(reaper_data, playhead_sec, selected_track_idx, ordered_track_ids)
 }
 
-/// 剪贴板导入：如果数据有 Track 信息则新建轨道，否则放到 existing_track_id。
+/// 剪贴板导入逻辑：
+/// - 有 Track 块：创建新轨道（.rpp 完整工程方式）
+/// - 纯 Item 数据（含 TRACKSKIP）：粘贴到选中轨道及其下方现有轨道，偏移到光标位置
 fn convert_reaper_data_clipboard(
     data: ReaperData,
-    existing_track_id: Option<&str>,
+    playhead_sec: f64,
+    selected_track_idx: usize,
+    ordered_track_ids: &[String],
 ) -> Result<ReaperImportResult, String> {
     if data.is_track_data {
         // 有 Track 信息，创建新轨道
         convert_reaper_data(data, None)
     } else {
-        // 没有 Track 信息，导入到指定轨道
-        convert_reaper_data_to_track(data, existing_track_id)
+        // 纯 Item（可能含 TRACKSKIP）：粘贴到现有轨道，偏移到光标
+        convert_reaper_items_to_existing_tracks(
+            data, playhead_sec, selected_track_idx, ordered_track_ids,
+        )
     }
 }
 
-/// 将没有 Track 的 Reaper 数据的 items 导入到指定轨道。
-/// 返回的 timeline 中只包含新建的 clips（由调用者合并到现有 timeline）。
-fn convert_reaper_data_to_track(
+/// 将纯 Item 剪贴板数据粘贴到现有轨道。
+///
+/// - 首个音频块的开始位置对齐到光标
+/// - TRACKSKIP 的 offset 用于映射到 selected_track 下方的现有轨道
+fn convert_reaper_items_to_existing_tracks(
     data: ReaperData,
-    existing_track_id: Option<&str>,
+    playhead_sec: f64,
+    selected_track_idx: usize,
+    ordered_track_ids: &[String],
 ) -> Result<ReaperImportResult, String> {
-    let track_id = existing_track_id.unwrap_or("").to_string();
     let mut skipped_files: Vec<String> = Vec::new();
     let mut clips: Vec<Clip> = Vec::new();
-    let mut pitch_accum: std::collections::HashMap<usize, PitchFrameAccumulator> =
+    let mut new_tracks: Vec<Track> = Vec::new();
+    // 新建轨道映射：target_track_idx → track_id
+    let mut created_track_ids: std::collections::HashMap<usize, String> =
         std::collections::HashMap::new();
+    // track_id → pitch offset accumulator
+    let mut pitch_offset_by_track: std::collections::HashMap<
+        String,
+        std::collections::HashMap<usize, PitchFrameAccumulator>,
+    > = std::collections::HashMap::new();
 
-    for track in &data.tracks {
-        for item in &track.items {
+    // 当前已有轨道的最大 order，用于分配新轨道 order
+    let mut next_order = ordered_track_ids.len() as i32;
+
+    // 计算所有 item 中最小的 position，用于 offset 到 playhead
+    let min_position = data.tracks.iter()
+        .flat_map(|t| t.items.iter())
+        .map(|item| item.position)
+        .fold(f64::MAX, f64::min);
+    let time_offset = if min_position.is_finite() {
+        playhead_sec - min_position
+    } else {
+        0.0
+    };
+
+    for (track_idx, reaper_track) in data.tracks.iter().enumerate() {
+        // 查找此 Reaper track 对应的 HiFiShifter 轨道
+        let track_offset = data.track_offsets.get(track_idx).copied().unwrap_or(track_idx);
+        let target_track_idx = selected_track_idx + track_offset;
+        let target_track_id = if target_track_idx < ordered_track_ids.len() {
+            ordered_track_ids[target_track_idx].clone()
+        } else if let Some(id) = created_track_ids.get(&target_track_idx) {
+            // 已经为此下标创建过轨道
+            id.clone()
+        } else {
+            // 超出现有轨道范围，创建新轨道
+            let tid = new_track_id();
+            let color_idx = (ordered_track_ids.len() + new_tracks.len()) % TRACK_COLORS.len();
+            new_tracks.push(Track {
+                id: tid.clone(),
+                name: format!("Track {}", next_order + 1),
+                parent_id: None,
+                order: next_order,
+                muted: false,
+                solo: false,
+                volume: 0.9,
+                compose_enabled: true,
+                pitch_analysis_algo: PitchAnalysisAlgo::default(),
+                color: TRACK_COLORS[color_idx].to_string(),
+            });
+            created_track_ids.insert(target_track_idx, tid.clone());
+            next_order += 1;
+            tid
+        };
+
+        let track_pitch_accum = pitch_offset_by_track
+            .entry(target_track_id.clone())
+            .or_default();
+
+        for item in &reaper_track.items {
             process_item(
                 item,
-                &track_id,
+                &target_track_id,
                 None, // no base dir for clipboard
+                time_offset,
                 &mut clips,
                 &mut skipped_files,
-                &mut pitch_accum,
+                track_pitch_accum,
             );
         }
     }
 
-    // Build pitch params if any data was accumulated
-    let mut params_by_root_track: BTreeMap<String, TrackParamsState> = BTreeMap::new();
-    if !pitch_accum.is_empty() && !track_id.is_empty() {
-        let project_end = clips
-            .iter()
-            .map(|c| c.start_sec + c.length_sec)
-            .fold(0.0_f64, f64::max);
-        let frame_period_ms = FRAME_PERIOD * 1000.0;
-        let total_frames = ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
-        let pitch_edit = build_pitch_frames(&pitch_accum, total_frames);
-        params_by_root_track.insert(
-            track_id.clone(),
-            TrackParamsState {
-                frame_period_ms,
-                pitch_orig: pitch_edit.clone(),
-                pitch_edit,
-                pitch_edit_user_modified: true,
-                tension_orig: Vec::new(),
-                tension_edit: Vec::new(),
-                pitch_orig_key: None,
-            },
-        );
-    }
-
-    let project_end = clips
-        .iter()
+    // 构建待应用的 pitch 偏移数据
+    let project_end = clips.iter()
         .map(|c| c.start_sec + c.length_sec)
         .fold(32.0_f64, f64::max);
+    let frame_period_ms = FRAME_PERIOD * 1000.0;
+    let total_frames = ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
+
+    let mut params_by_root_track: BTreeMap<String, TrackParamsState> = BTreeMap::new();
+    for (track_id, accum) in &pitch_offset_by_track {
+        if accum.is_empty() || track_id.is_empty() {
+            continue;
+        }
+        let offset_frames = build_pitch_frames(accum, total_frames);
+        // 只在有非零偏移时才记录
+        if offset_frames.iter().any(|&v| v.abs() > 1e-6) {
+            params_by_root_track.insert(
+                track_id.clone(),
+                TrackParamsState {
+                    frame_period_ms,
+                    pitch_orig: Vec::new(),
+                    pitch_edit: Vec::new(),
+                    pitch_edit_user_modified: false,
+                    tension_orig: Vec::new(),
+                    tension_edit: Vec::new(),
+                    pitch_orig_key: None,
+                    pending_pitch_offset: Some(offset_frames),
+                },
+            );
+        }
+    }
 
     let timeline = TimelineState {
-        tracks: Vec::new(), // 不创建新轨道
+        tracks: new_tracks,
         clips,
         selected_track_id: None,
         selected_clip_id: None,
@@ -151,7 +221,7 @@ fn convert_reaper_data_to_track(
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
-        next_track_order: 0,
+        next_track_order: next_order,
     };
 
     Ok(ReaperImportResult {
@@ -216,6 +286,7 @@ fn convert_reaper_data(
                 item,
                 &track_id,
                 base_dir,
+                0.0, // .rpp 导入不做时间偏移
                 &mut hs_clips,
                 &mut skipped_files,
                 &mut track_pitch_accum,
@@ -246,20 +317,24 @@ fn convert_reaper_data(
             }
             let total_frames =
                 ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
-            let pitch_edit = build_pitch_frames(points, total_frames);
+            let offset_frames = build_pitch_frames(points, total_frames);
 
-            params_by_root_track.insert(
-                track.id.clone(),
-                TrackParamsState {
-                    frame_period_ms,
-                    pitch_orig: pitch_edit.clone(),
-                    pitch_edit,
-                    pitch_edit_user_modified: true,
-                    tension_orig: Vec::new(),
-                    tension_edit: Vec::new(),
-                    pitch_orig_key: None,
-                },
-            );
+            // 只在有非零偏移时才记录
+            if offset_frames.iter().any(|&v| v.abs() > 1e-6) {
+                params_by_root_track.insert(
+                    track.id.clone(),
+                    TrackParamsState {
+                        frame_period_ms,
+                        pitch_orig: Vec::new(),
+                        pitch_edit: Vec::new(),
+                        pitch_edit_user_modified: false,
+                        tension_orig: Vec::new(),
+                        tension_edit: Vec::new(),
+                        pitch_orig_key: None,
+                        pending_pitch_offset: Some(offset_frames),
+                    },
+                );
+            }
         }
     }
 
@@ -290,10 +365,13 @@ struct PitchFrameAccumulator {
 }
 
 /// 处理一个 Reaper Item，生成一个或多个 HiFiShifter Clip。
+///
+/// `time_offset`: 时间偏移量（用于将剪贴板数据对齐到光标位置），.rpp 导入时为 0。
 fn process_item(
     item: &ReaperItem,
     track_id: &str,
     base_dir: Option<&Path>,
+    time_offset: f64,
     clips: &mut Vec<Clip>,
     skipped_files: &mut Vec<String>,
     pitch_accum: &mut std::collections::HashMap<usize, PitchFrameAccumulator>,
@@ -356,27 +434,31 @@ fn process_item(
     // ─── 处理 Stretch Markers ───
     let segments = stretch_segments_from_markers(&item.stretch_markers);
 
-    if segments.len() >= 2 {
+    if !segments.is_empty() {
         // 有 stretch markers：拆分为多段
+        // effective rate = segment_avg_rate * item_play_rate（源消耗速率）
         let seg_count = segments.len();
-        let mut current_timeline_pos = item_pos;
+        let mut current_timeline_pos = item_pos + time_offset;
+        let mut cumulative_source_pos: f64 = 0.0;
 
         for (seg_idx, seg) in segments.iter().enumerate() {
-            let avg_rate = seg.velocity_average().max(0.01);
-            let seg_src_duration = seg.offset_length();
-            let seg_timeline_duration = seg_src_duration / avg_rate;
+            let seg_avg_rate = seg.velocity_average().max(0.01);
+            let effective_rate = seg_avg_rate * play_rate;
+            let seg_timeline_duration = seg.offset_length() / play_rate;
+            // 源消耗量 = 时间线时长 × 播放速率
+            let seg_source_duration = seg_timeline_duration * effective_rate;
 
             // 分段重叠与淡入淡出
             let want_pre = if seg_idx > 0 { SEGMENT_OVERLAP_SEC } else { 0.0 };
             let want_post = if seg_idx + 1 < seg_count { SEGMENT_OVERLAP_SEC } else { 0.0 };
-            let actual_pre_src = (want_pre * avg_rate).min(seg.offset_start);
-            let actual_post_src = want_post * avg_rate;
-            let actual_pre_tl = actual_pre_src / avg_rate;
-            let actual_post_tl = actual_post_src / avg_rate;
+            let actual_pre_src = (want_pre * effective_rate).min(cumulative_source_pos);
+            let actual_post_src = want_post * effective_rate;
+            let actual_pre_tl = actual_pre_src / effective_rate;
+            let actual_post_tl = actual_post_src / effective_rate;
 
-            let clip_src_start = s_offs + seg.offset_start - actual_pre_src;
-            let clip_src_end = (s_offs + seg.offset_end + actual_post_src)
-                .min(source_duration_sec.max(s_offs + seg.offset_end));
+            let clip_src_start = s_offs + cumulative_source_pos - actual_pre_src;
+            let clip_src_end = (s_offs + cumulative_source_pos + seg_source_duration + actual_post_src)
+                .min(source_duration_sec.max(s_offs + cumulative_source_pos + seg_source_duration));
             let clip_start = current_timeline_pos - actual_pre_tl;
             let clip_length = (seg_timeline_duration + actual_pre_tl + actual_post_tl).max(0.001);
 
@@ -397,7 +479,7 @@ fn process_item(
             clips.push(Clip {
                 id: clip_id.clone(),
                 track_id: track_id.to_string(),
-                name: format!("{} ({})", clip_name, seg_idx + 1),
+                name: if seg_count > 1 { format!("{} ({})", clip_name, seg_idx + 1) } else { clip_name },
                 start_sec: clip_start,
                 length_sec: clip_length,
                 color: clip_color(),
@@ -409,41 +491,45 @@ fn process_item(
                 pitch_range: Some(PitchRange { min: -24.0, max: 24.0 }),
                 gain: convert_volume(take_volume * gain_trim),
                 muted: item_muted,
-                trim_start_sec: clip_src_start.max(0.0),
-                trim_end_sec: clip_src_end,
-                playback_rate: (avg_rate as f32).clamp(0.1, 10.0),
+                source_start_sec: clip_src_start.max(0.0),
+                source_end_sec: clip_src_end,
+                playback_rate: (effective_rate as f32).clamp(0.1, 10.0),
                 fade_in_sec: fi,
                 fade_out_sec: fo,
+                fade_in_curve: "sine".to_string(),
+                fade_out_curve: "sine".to_string(),
             });
 
-            // 写入 pitch 数据
+            // 写入 pitch 偏移数据
             write_pitch_for_clip(
                 pitch_accum,
                 clip_start,
                 clip_length,
                 clip_src_start,
-                avg_rate,
+                effective_rate,
                 item_pitch_semitones,
                 pitch_envelope.as_ref(),
-                item_pos,
+                item_pos + time_offset,
                 item_length,
             );
 
             current_timeline_pos += seg_timeline_duration;
+            cumulative_source_pos += seg_source_duration;
         }
     } else {
-        // 无 stretch markers 或只有一两个点：使用 take 的 play_rate
+        // 无 stretch markers：使用 take 的 play_rate
         let effective_rate = play_rate;
         let source_start = s_offs;
         let source_end = s_offs + item_length * effective_rate;
         let clip_name = clip_name_from_path(&audio_path);
         let clip_id = new_clip_id();
+        let clip_start = item_pos + time_offset;
 
         clips.push(Clip {
             id: clip_id.clone(),
             track_id: track_id.to_string(),
             name: clip_name,
-            start_sec: item_pos,
+            start_sec: clip_start,
             length_sec: item_length,
             color: clip_color(),
             source_path: Some(audio_path.clone()),
@@ -454,23 +540,25 @@ fn process_item(
             pitch_range: Some(PitchRange { min: -24.0, max: 24.0 }),
             gain: convert_volume(take_volume * gain_trim),
             muted: item_muted,
-            trim_start_sec: source_start.max(0.0),
-            trim_end_sec: source_end.min(source_duration_sec.max(source_end)),
+            source_start_sec: source_start.max(0.0),
+            source_end_sec: source_end.min(source_duration_sec.max(source_end)),
             playback_rate: (effective_rate as f32).clamp(0.1, 10.0),
             fade_in_sec,
             fade_out_sec,
+            fade_in_curve: "sine".to_string(),
+            fade_out_curve: "sine".to_string(),
         });
 
-        // 写入 pitch 数据
+        // 写入 pitch 偏移数据
         write_pitch_for_clip(
             pitch_accum,
-            item_pos,
+            clip_start,
             item_length,
             source_start,
             effective_rate,
             item_pitch_semitones,
             pitch_envelope.as_ref(),
-            item_pos,
+            clip_start,
             item_length,
         );
     }

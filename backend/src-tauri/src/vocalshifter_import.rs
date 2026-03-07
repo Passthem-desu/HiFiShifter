@@ -789,8 +789,16 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     tension_orig: Vec::new(),
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
+                    pending_pitch_offset: None,
                 },
             );
+        }
+    }
+
+    // ─── 第四步(b)：为有 pitch 数据的轨道开启合成 ───
+    for track in &mut hs_tracks {
+        if params_by_root_track.contains_key(&track.id) {
+            track.compose_enabled = true;
         }
     }
 

@@ -266,6 +266,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "import_vocalshifter_project":
             return { vspPath: args[0] };
 
+        case "import_reaper_project":
+            return { rppPath: args[0] };
+
         case "paste_vocalshifter_clipboard":
             return {};
 

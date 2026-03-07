@@ -12,6 +12,9 @@ pub struct ReaperData {
     pub tracks: Vec<ReaperTrack>,
     pub is_track_data: bool,
     pub tempo_envelope: Option<ReaperTempoEnvelope>,
+    /// 每个 track 相对于首个 track 的轨道偏移量（由 TRACKSKIP 累计得出）。
+    /// 与 tracks 等长，tracks[0] 的 offset 始终为 0。
+    pub track_offsets: Vec<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -499,17 +502,22 @@ fn update_source_paths(data: &mut ReaperData, folder: &Path) {
 fn parse_data_block(block: &Block) -> ReaperData {
     let mut data = ReaperData::default();
     let mut current_track: Option<ReaperTrack> = None;
+    let mut cumulative_track_offset: usize = 0;
+    let mut pending_offset: usize = 0;
 
     for child in &block.children {
         let block_type = child.block_type();
 
         if block_type.as_deref() == Some("TRACK") {
             if let Some(t) = current_track.take() {
+                data.track_offsets.push(pending_offset);
                 data.tracks.push(t);
             }
             let track = parse_track_block(child);
             data.is_track_data = true;
+            data.track_offsets.push(cumulative_track_offset);
             data.tracks.push(track);
+            cumulative_track_offset += 1;
             current_track = None;
             continue;
         }
@@ -517,6 +525,7 @@ fn parse_data_block(block: &Block) -> ReaperData {
         if block_type.as_deref() == Some("ITEM") {
             let item = parse_item_block(child);
             if current_track.is_none() {
+                pending_offset = cumulative_track_offset;
                 current_track = Some(ReaperTrack::default());
             }
             current_track.as_mut().unwrap().items.push(item);
@@ -532,6 +541,7 @@ fn parse_data_block(block: &Block) -> ReaperData {
             if is_envelope_type(bt) {
                 let env = parse_envelope_block(child);
                 if current_track.is_none() {
+                    pending_offset = cumulative_track_offset;
                     current_track = Some(ReaperTrack::default());
                 }
                 current_track.as_mut().unwrap().envelopes.push(env);
@@ -542,13 +552,22 @@ fn parse_data_block(block: &Block) -> ReaperData {
         // TRACKSKIP
         if child.lines.first().map(|l| l.starts_with("TRACKSKIP")).unwrap_or(false) {
             if let Some(t) = current_track.take() {
+                data.track_offsets.push(pending_offset);
                 data.tracks.push(t);
             }
+            // 解析跳过的轨道数（TRACKSKIP N ...）
+            let skip_n = child.lines.first()
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(1);
+            cumulative_track_offset += skip_n;
+            pending_offset = cumulative_track_offset;
             current_track = Some(ReaperTrack::default());
         }
     }
 
     if let Some(t) = current_track {
+        data.track_offsets.push(pending_offset);
         data.tracks.push(t);
     }
 
