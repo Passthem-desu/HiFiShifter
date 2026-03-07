@@ -21,6 +21,7 @@ import {
     saveProjectAsRemote,
     exportAudio,
     pickOutputPath,
+    setToolMode,
 } from "./features/session/sessionSlice";
 import { useI18n } from "./i18n/I18nProvider";
 import { useClipPitchDataListener } from "./hooks/useClipPitchDataListener";
@@ -99,6 +100,7 @@ function AppInner() {
     const fileBrowserVisible = useAppSelector(
         (state) => state.fileBrowser.visible,
     );
+    const toolMode = useAppSelector((state) => state.session.toolMode);
     const outputPath = useAppSelector((state) => state.session.outputPath);
     const vocalShifterSkippedFilesDialog = useAppSelector(
         (state) => state.session.vocalShifterSkippedFilesDialog,
@@ -326,6 +328,7 @@ function AppInner() {
     const runtimeRef = useRef({
         isPlaying: false,
         hasSynthesized: false,
+        toolMode: "draw" as "draw" | "select",
     });
     const outputPathRef = useRef(outputPath);
 
@@ -341,8 +344,9 @@ function AppInner() {
         runtimeRef.current = {
             isPlaying: Boolean(runtimeIsPlaying),
             hasSynthesized: Boolean(runtimeHasSynthesized),
+            toolMode,
         };
-    }, [runtimeIsPlaying, runtimeHasSynthesized]);
+    }, [runtimeIsPlaying, runtimeHasSynthesized, toolMode]);
 
     useEffect(() => {
         outputPathRef.current = outputPath;
@@ -388,6 +392,13 @@ function AppInner() {
                     }
                     await dispatch(exportAudio(curPath));
                 })();
+                break;
+            case "mode.toggle":
+                dispatch(
+                    setToolMode(
+                        runtimeRef.current.toolMode === "draw" ? "select" : "draw",
+                    ),
+                );
                 break;
             // clip.* 操作由 TimelinePanel 的 useKeyboardShortcuts 处理
             default:

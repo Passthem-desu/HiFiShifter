@@ -1,5 +1,3 @@
-use crate::audio_engine::make_stretch_key;
-use crate::audio_engine::types::ResampledStereo;
 use crate::state::{Clip, TimelineState};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -274,13 +272,12 @@ fn build_clip_pitch_key(
         1.0
     };
 
-    // Source trimming in sec.
-    let trim_start_sec_src = clip.trim_start_sec.max(0.0);
-    let trim_end_sec_src = clip.trim_end_sec.max(0.0);
-    let pre_silence_sec_src = (-clip.trim_start_sec).max(0.0);
+    // Source range in sec.
+    let source_start_sec_src = clip.source_start_sec.max(0.0);
+    let source_end_sec_src = clip.source_end_sec;
+    let pre_silence_sec_src = (-clip.source_start_sec).max(0.0);
 
-    let trim_start_sec = trim_start_sec_src;
-    let trim_end_sec = trim_end_sec_src;
+    let source_start_sec = source_start_sec_src;
     let pre_silence_sec = pre_silence_sec_src / playback_rate.max(1e-6);
 
     let fp = frame_period_ms.max(0.1);
@@ -297,24 +294,12 @@ fn build_clip_pitch_key(
     hasher.update(&quantize_u32(bpm, 1000.0).to_le_bytes());
     hasher.update(&quantize_u32(fp, 1000.0).to_le_bytes());
 
-    // 只有影响音频内容的字段才参与 hash：
-    //   source_path、playback_rate（以及 playback_rate!=1 时的 trim 参数）
-    // 注意：start_sec（clip 位置）和 length_sec 不参与 hash，
-    //       clip 移动不会触发重新检测。
-    hasher.update(&quantize_u32(playback_rate, 10000.0).to_le_bytes());
+    // 缓存 key 只包含影响原始音频内容的字段：source_path、bpm、frame_period。
+    // playback_rate 和 trim 不参与 hash——缓存中始终存全量源音频的 MIDI 曲线，
+    // trim/rate 变化时在推送/组装阶段按需截取+resample，无需重新分析。
+    // 注意：start_sec（clip 位置）和 length_sec 也不参与 hash。
 
     let is_full_source = (playback_rate - 1.0).abs() <= 1e-6;
-
-    if !is_full_source {
-        // playback_rate != 1：拉伸后 PCM 依赖 trim，trim 参与 hash
-        hasher.update(&quantize_i64(clip.trim_start_sec, 1000.0).to_le_bytes());
-        hasher.update(&quantize_u32(clip.trim_end_sec, 1000.0).to_le_bytes());
-        hasher.update(&quantize_u32(pre_silence_sec, 1000.0).to_le_bytes());
-        hasher.update(&quantize_u32(trim_start_sec, 1000.0).to_le_bytes());
-        hasher.update(&quantize_u32(trim_end_sec, 1000.0).to_le_bytes());
-    }
-    // playback_rate == 1：全量分析源音频，cache key 不含 trim，
-    // trim 变化不触发重新分析。
 
     let key = hasher.finalize().to_hex().to_string();
 
@@ -377,7 +362,6 @@ fn store_clip_pitch_cache(clip_id: &str, cached: CachedClipPitch) {
 pub fn schedule_clip_pitch_jobs(
     tl: &TimelineState,
     engine_tx: &mpsc::Sender<crate::audio_engine::types::EngineCommand>,
-    stretch_cache: &Arc<Mutex<HashMap<crate::audio_engine::types::StretchKey, ResampledStereo>>>,
     app_handle: Option<&tauri::AppHandle>,
     out_rate: u32,
 ) {
@@ -401,7 +385,6 @@ pub fn schedule_clip_pitch_jobs(
         ck: ClipPitchKey,
         root_track_id: String,
         inflight_key: String,
-        stretched_pcm: Option<ResampledStereo>,
     }
 
     let mut pending_jobs: Vec<PendingJob> = Vec::new();
@@ -418,6 +401,21 @@ pub fn schedule_clip_pitch_jobs(
         if !file_exists_cached(Path::new(source_path)) {
             eprintln!("[pitch_clip] clip '{}' skipped: file not found: {}", clip.id, source_path);
             continue;
+        }
+
+        // 仅对 compose_enabled 的根轨道进行音高分析
+        {
+            let root_id = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+            let compose_enabled = tl
+                .tracks
+                .iter()
+                .find(|t| t.id == root_id)
+                .map(|t| t.compose_enabled)
+                .unwrap_or(false);
+            if !compose_enabled {
+                eprintln!("[pitch_clip] clip '{}' skipped: compose_enabled=false for root '{}'", clip.id, root_id);
+                continue;
+            }
         }
 
         // 尝试构建 key
@@ -457,35 +455,8 @@ pub fn schedule_clip_pitch_jobs(
             continue;
         }
 
-        // 尝试从 stretch_cache 中获取拉伸后 PCM。
-        let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 { tl.bpm } else { 120.0 };
-        let playback_rate = clip.playback_rate as f64;
-        let playback_rate = if playback_rate.is_finite() && playback_rate > 0.0 { playback_rate } else { 1.0 };
-
-        let stretched_pcm: Option<ResampledStereo> = if (playback_rate - 1.0).abs() > 1e-6 {
-            let sk = make_stretch_key(
-                Path::new(source_path),
-                out_rate,
-                clip.trim_start_sec,
-                clip.trim_end_sec,
-                playback_rate,
-            );
-            let cached = stretch_cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(&sk)
-                .cloned();
-            if cached.is_none() {
-                // 拉伸尚未完成，跳过；等待 handle_stretch_ready 触发重新调度
-                eprintln!("[pitch_clip] clip '{}' ({}) stretch PCM not ready, deferring pitch analysis", clip.name, clip.id);
-                let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
-                set.remove(&inflight_key);
-                continue;
-            }
-            cached
-        } else {
-            None
-        };
+        // 改动后：始终分析原始源 PCM，不再需要 stretch_cache。
+        // trim/rate 变化时在推送/组装阶段按需截取+resample。
 
         let root_track_id = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
         pending_jobs.push(PendingJob {
@@ -493,7 +464,6 @@ pub fn schedule_clip_pitch_jobs(
             ck,
             root_track_id,
             inflight_key,
-            stretched_pcm,
         });
     }
 
@@ -554,7 +524,6 @@ pub fn schedule_clip_pitch_jobs(
                 &job.clip,
                 &job.root_track_id,
                 frame_period_ms,
-                job.stretched_pcm.as_ref(),
             );
 
             // 完成一个 clip，更新进度
@@ -613,7 +582,6 @@ pub fn compute_clip_pitch_midi(
     clip: &Clip,
     root_track_id: &str,
     frame_period_ms: f64,
-    stretched_pcm: Option<&ResampledStereo>,
 ) -> Option<Vec<f32>> {
     if !crate::world::is_available() {
         return None;
@@ -621,41 +589,25 @@ pub fn compute_clip_pitch_midi(
 
     let ck = build_clip_pitch_key(tl, clip, root_track_id, frame_period_ms)?;
 
-    let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 {
-        tl.bpm
-    } else {
-        120.0
-    };
-    let bs = beat_sec(bpm);
-
-    // ── 选择分析用 PCM ────────────────────────────────────────────────────
-    // playback_rate == 1（is_full_source）：解码源音频全部，不做 trim 截取，
-    //   缓存覆盖整个源文件，trim 变化只需重新推送而无需重新分析。
-    // playback_rate != 1：使用拉伸后 PCM（已包含 trim + 时间拉伸），直接分析。
-    let (analysis_pcm, analysis_rate, analysis_channels): (Vec<f32>, u32, usize) =
-        if let Some(stretched) = stretched_pcm {
-            // 拉伸后 PCM 已经是 interleaved stereo，直接使用
-            ((*stretched.pcm).clone(), stretched.sample_rate, 2)
-        } else {
-            // playback_rate == 1：解码源音频全部（不做 trim 截取）
-            let source_path = clip.source_path.as_deref()?;
-
-            let (in_rate, in_channels, pcm) =
-                crate::audio_utils::decode_audio_f32_interleaved(Path::new(source_path)).ok()?;
-            let in_channels_usize = (in_channels as usize).max(1);
-            let in_frames = pcm.len() / in_channels_usize;
-            if in_frames < 2 {
-                return None;
-            }
-
-            let segment = crate::mixdown::linear_resample_interleaved(
-                &pcm,
-                in_channels_usize,
-                in_rate,
-                ck.sample_rate,
-            );
-            (segment, ck.sample_rate, in_channels_usize)
-        };
+    // ── 始终解码源音频全量 PCM 进行分析 ─────────────────────────────────────
+    // 缓存中存的是全量源音频的 MIDI 曲线，不含 trim/rate 处理。
+    // trim 截取 + rate 拉伸在推送/组装阶段按需执行。
+    let source_path = clip.source_path.as_deref()?;
+    let (in_rate, in_channels, pcm) =
+        crate::audio_utils::decode_audio_f32_interleaved(Path::new(source_path)).ok()?;
+    let in_channels_usize = (in_channels as usize).max(1);
+    let in_frames = pcm.len() / in_channels_usize;
+    if in_frames < 2 {
+        return None;
+    }
+    let analysis_pcm = crate::mixdown::linear_resample_interleaved(
+        &pcm,
+        in_channels_usize,
+        in_rate,
+        ck.sample_rate,
+    );
+    let analysis_rate = ck.sample_rate;
+    let analysis_channels = in_channels_usize;
 
     let analysis_frames = analysis_pcm.len() / analysis_channels;
     if analysis_frames < 2 {
@@ -750,34 +702,10 @@ pub fn compute_clip_pitch_midi(
         midi.push(hz_to_midi(hz));
     }
 
-    // ── timeline alignment ──────────────────────────────────────────────
-    // is_full_source (playback_rate==1)：全量曲线直接返回，前端负责裁剪。
-    // stretched (playback_rate!=1)：resample 到 clip timeline 长度。
-    if !ck.is_full_source {
-        let clip_timeline_len_sec = clip.length_sec.max(0.0);
-        let clip_frames = ((clip_timeline_len_sec * 1000.0) / frame_period_tl_ms)
-            .round()
-            .max(1.0) as usize;
-        midi = resample_curve_linear(&midi, clip_frames);
-
-        // Apply pre-silence shift (仅 stretched 分支需要).
-        let pre_frames = ((ck.pre_silence_sec * 1000.0) / frame_period_tl_ms)
-            .round()
-            .max(0.0) as usize;
-        if pre_frames > 0 {
-            let mut shifted = vec![0.0f32; clip_frames];
-            for (i, v) in shifted.iter_mut().enumerate() {
-                if let Some(src) = i.checked_sub(pre_frames) {
-                    if let Some(&m) = midi.get(src) {
-                        *v = m;
-                    }
-                }
-            }
-            midi = shifted;
-        }
-    }
-    // is_full_source 时 midi 长度直接对应源音频帧数（WORLD 输出），
-    // 前端通过 ctx.clip() + clipStartSec/clipLengthSec 裁剪显示。
+    // ── 全量曲线直接返回 ──────────────────────────────────────────────
+    // 缓存中始终存全量源音频的 MIDI 曲线。
+    // trim 截取 + rate resample 在推送（handle_clip_pitch_ready）
+    // 和组装（assemble_pitch_orig_from_cache）阶段按需执行。
 
     // Small gap fill.
     let gap_ms = std::env::var("HIFISHIFTER_WORLD_F0_GAP_MS")
@@ -803,6 +731,73 @@ pub fn compute_clip_pitch_midi(
     }
 
     Some(midi)
+}
+
+/// 从全量 MIDI 曲线中截取 source range 区间并按 playback_rate 重采样。
+/// 返回对应 clip 在时间线上可见区间的 MIDI 曲线。
+///
+/// - `full_midi`：全量源音频的 MIDI 曲线（WORLD 输出，每帧间隔 `frame_period_ms`）
+/// - `source_start_sec`：clip 的 source_start_sec（源音频有效区间起点）
+/// - `source_end_sec`：clip 的 source_end_sec（源音频有效区间终点）
+/// - `playback_rate`：clip 的 playback_rate（>1 加速，<1 减速）
+/// - `clip_timeline_len_sec`：clip 在时间线上的可见长度（秒）
+pub fn trim_and_resample_midi(
+    full_midi: &[f32],
+    frame_period_ms: f64,
+    source_start_sec: f64,
+    source_end_sec: f64,
+    playback_rate: f64,
+    clip_timeline_len_sec: f64,
+) -> Vec<f32> {
+    let fp = frame_period_ms.max(0.1);
+    let src_start = source_start_sec.max(0.0);
+
+    // 从全量曲线中截取 source range 区间
+    let src_start_frame = ((src_start * 1000.0) / fp).round().max(0.0) as usize;
+
+    // 根据 source_end_sec 计算结束帧
+    let src_end_frame = ((source_end_sec * 1000.0) / fp).round().max(0.0) as usize;
+    let src_end_frame = src_end_frame.min(full_midi.len());
+    if src_start_frame >= src_end_frame {
+        eprintln!(
+            "[pitch:trim] EMPTY: src_start={:.3}s src_end={:.3}s full_midi_len={} \
+             start_frame={} end_frame={} → empty",
+            source_start_sec, source_end_sec, full_midi.len(),
+            src_start_frame, src_end_frame,
+        );
+        return Vec::new();
+    }
+
+    let trimmed = &full_midi[src_start_frame..src_end_frame];
+
+    // 按 1/playback_rate 重采样到 clip timeline 长度
+    let target_frames = ((clip_timeline_len_sec * 1000.0) / fp)
+        .round()
+        .max(1.0) as usize;
+
+    // 防御性 clamp：当 playback_rate ≈ 1.0 时，target_frames 不应超过 trimmed 长度，
+    // 避免前端 sourceEndSec 超出源文件实际时长导致曲线被不合理拉伸。
+    let rate_near_one = (playback_rate - 1.0).abs() <= 0.01;
+    let target_frames = if rate_near_one && target_frames > trimmed.len() && !trimmed.is_empty() {
+        eprintln!(
+            "[pitch:trim] CLAMP: target_frames {} > trimmed {} (rate≈1), clamping to trimmed.len()",
+            target_frames, trimmed.len(),
+        );
+        trimmed.len()
+    } else {
+        target_frames
+    };
+
+    eprintln!(
+        "[pitch:trim] src_start={:.3}s src_end={:.3}s rate={:.2} tl_len={:.3}s \
+         full_midi_len={} trimmed=[{}..{}]={} → target_frames={}",
+        source_start_sec, source_end_sec, playback_rate,
+        clip_timeline_len_sec, full_midi.len(),
+        src_start_frame, src_end_frame, trimmed.len(),
+        target_frames,
+    );
+
+    resample_curve_linear(trimmed, target_frames)
 }
 
 /// 使指定 clip 的 pitch MIDI 缓存失效（例如拉伸参数变化后调用）。

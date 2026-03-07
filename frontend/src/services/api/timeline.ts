@@ -137,11 +137,13 @@ export const timelineApi = {
         lengthSec?: number;
         gain?: number;
         muted?: boolean;
-        trimStartSec?: number;
-        trimEndSec?: number;
+        sourceStartSec?: number;
+        sourceEndSec?: number;
         playbackRate?: number;
         fadeInSec?: number;
         fadeOutSec?: number;
+        fadeInCurve?: string;
+        fadeOutCurve?: string;
         color?: string;
     }) =>
         invoke<TimelineResult>(
@@ -152,11 +154,13 @@ export const timelineApi = {
             payload.lengthSec,
             payload.gain,
             payload.muted,
-            payload.trimStartSec,
-            payload.trimEndSec,
+            payload.sourceStartSec,
+            payload.sourceEndSec,
             payload.playbackRate,
             payload.fadeInSec,
             payload.fadeOutSec,
+            payload.fadeInCurve,
+            payload.fadeOutCurve,
             payload.color,
         ),
 

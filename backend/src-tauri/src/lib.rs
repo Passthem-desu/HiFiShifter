@@ -29,6 +29,7 @@ mod state;
 mod time_stretch;
 mod waveform;
 mod waveform_disk_cache;
+mod config;
 mod world;
 mod streaming_world;
 mod world_vocoder;
@@ -88,6 +89,19 @@ pub fn run() {
                 *d = dir.clone();
             }
             let _ = waveform_disk_cache::ensure_dir(&dir);
+
+            // 加载持久化的最近工程列表
+            if let Ok(cfg_base) = app.path().app_config_dir() {
+                let cfg_dir = cfg_base.join("HiFiShifter");
+                let _ = std::fs::create_dir_all(&cfg_dir);
+                let recent = crate::config::load_recent(&cfg_dir);
+                {
+                    let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+                    p.recent = recent;
+                }
+                let _ = state.config_dir.set(cfg_dir);
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -252,6 +266,7 @@ pub fn run() {
             commands::list_directory,
             commands::get_audio_file_info,
             commands::read_audio_preview,
+            commands::search_files_recursive,
             commands::open_vocalshifter_dialog,
             commands::import_vocalshifter_project,
             commands::paste_vocalshifter_clipboard,

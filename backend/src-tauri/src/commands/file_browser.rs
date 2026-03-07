@@ -90,6 +90,62 @@ pub(crate) fn list_directory(dir_path: String) -> Result<Vec<FileEntry>, String>
     Ok(entries)
 }
 
+/// 在指定目录下递归搜索文件（中间匹配，不区分大小写，忽略隐藏文件和目录）。
+/// 最多返回 500 条结果，按文件名排序。
+pub(crate) fn search_files_recursive(
+    dir_path: String,
+    query: String,
+) -> Result<Vec<FileEntry>, String> {
+    let path = Path::new(&dir_path);
+    if !path.is_dir() {
+        return Err(format!("Not a directory: {}", dir_path));
+    }
+
+    let query_lower = query.to_lowercase();
+    let mut results = Vec::new();
+    collect_matching_files(path, &query_lower, &mut results, 500);
+
+    results.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(results)
+}
+
+fn collect_matching_files(dir: &Path, query: &str, results: &mut Vec<FileEntry>, max: usize) {
+    if results.len() >= max {
+        return;
+    }
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        if results.len() >= max {
+            break;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        if metadata.is_dir() {
+            collect_matching_files(&entry.path(), query, results, max);
+        } else if name.to_lowercase().contains(query) {
+            let extension = entry
+                .path()
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_lowercase());
+            results.push(FileEntry {
+                name,
+                path: entry.path().to_string_lossy().into_owned(),
+                is_dir: false,
+                size: Some(metadata.len()),
+                extension,
+            });
+        }
+    }
+}
+
 /// 获取音频文件元信息（时长、采样率、声道数、总帧数）
 pub(crate) fn get_audio_file_info(file_path: String) -> Result<AudioFileInfo, String> {
     let path = Path::new(&file_path);

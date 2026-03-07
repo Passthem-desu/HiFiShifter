@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
     Flex,
     Text,
@@ -26,17 +26,29 @@ import {
     setPreviewingFile,
     setSearchQuery,
     setVisible,
+    searchFilesRecursive,
 } from "../../features/fileBrowser/fileBrowserSlice";
 import { audioPreview } from "../../features/fileBrowser/audioPreview";
 import type { FileEntry } from "../../services/api/fileBrowser";
 
 /** 支持的音频扩展名 */
 const AUDIO_EXTENSIONS = new Set([
-    "wav", "mp3", "flac", "ogg", "aac", "aif", "aiff", "m4a",
+    "wav",
+    "mp3",
+    "flac",
+    "ogg",
+    "aac",
+    "aif",
+    "aiff",
+    "m4a",
 ]);
 
 function isAudioFile(entry: FileEntry): boolean {
-    return !entry.isDir && !!entry.extension && AUDIO_EXTENSIONS.has(entry.extension);
+    return (
+        !entry.isDir &&
+        !!entry.extension &&
+        AUDIO_EXTENSIONS.has(entry.extension)
+    );
 }
 
 /** 格式化文件大小 */
@@ -90,6 +102,15 @@ export const FileBrowserPanel: React.FC = () => {
     const { t } = useI18n();
     const fb = useAppSelector((state: RootState) => state.fileBrowser);
     const searchInputRef = useRef<HTMLInputElement>(null);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // 清除 debounce
+    useEffect(
+        () => () => {
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+        },
+        [],
+    );
 
     // 预览音量同步
     useEffect(() => {
@@ -103,21 +124,31 @@ export const FileBrowserPanel: React.FC = () => {
         }
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // 根据搜索过滤文件列表
-    const filteredEntries = useMemo(() => {
-        const q = fb.searchQuery.trim().toLowerCase();
-        if (!q) return fb.entries;
-        return fb.entries.filter((entry) =>
-            entry.name.toLowerCase().includes(q),
-        );
-    }, [fb.entries, fb.searchQuery]);
+    // 根据搜索模式决定展示配表
+    const isSearchMode = fb.searchQuery.trim().length > 0;
+    const displayEntries = isSearchMode ? (fb.searchResults ?? []) : fb.entries;
+
+    // 计算展示相对路径（搜索模式下显示文件所在目录）
+    function getRelativeDirHint(fullPath: string): string {
+        const normalFull = fullPath.replace(/\\/g, "/");
+        const normalBase = fb.currentPath
+            .replace(/\\/g, "/")
+            .replace(/\/$/, "");
+        if (
+            normalFull.toLowerCase().startsWith(normalBase.toLowerCase() + "/")
+        ) {
+            const rel = normalFull.slice(normalBase.length + 1);
+            const lastSlash = rel.lastIndexOf("/");
+            return lastSlash >= 0 ? rel.slice(0, lastSlash) : "";
+        }
+        return "";
+    }
 
     // 选择文件夹（通过后端 rfd dialog）
     const handleOpenFolder = useCallback(async () => {
         try {
-            const { fileBrowserApi } = await import(
-                "../../services/api/fileBrowser"
-            );
+            const { fileBrowserApi } =
+                await import("../../services/api/fileBrowser");
             const result = await fileBrowserApi.pickDirectory();
             if (result.ok && !result.canceled && result.path) {
                 void dispatch(loadDirectory(result.path));
@@ -156,7 +187,8 @@ export const FileBrowserPanel: React.FC = () => {
     // 进入子目录
     const handleEnterDir = useCallback(
         (dirPath: string) => {
-            dispatch(setSearchQuery("")); // 进入子目录时清空搜索
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+            dispatch(setSearchQuery(""));
             void dispatch(loadDirectory(dirPath));
         },
         [dispatch],
@@ -338,10 +370,25 @@ export const FileBrowserPanel: React.FC = () => {
                 <TextField.Root
                     ref={searchInputRef}
                     size="1"
-                    placeholder={(t as (key: string) => string)("fb_search_placeholder")}
+                    placeholder={(t as (key: string) => string)(
+                        "fb_search_placeholder",
+                    )}
                     value={fb.searchQuery}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                        dispatch(setSearchQuery(e.target.value));
+                        const q = e.target.value;
+                        dispatch(setSearchQuery(q));
+                        if (debounceRef.current)
+                            clearTimeout(debounceRef.current);
+                        if (q.trim() && fb.currentPath) {
+                            debounceRef.current = setTimeout(() => {
+                                void dispatch(
+                                    searchFilesRecursive({
+                                        dirPath: fb.currentPath,
+                                        query: q.trim(),
+                                    }),
+                                );
+                            }, 300);
+                        }
                     }}
                     style={{ backgroundColor: "var(--qt-base)" }}
                 >
@@ -392,31 +439,57 @@ export const FileBrowserPanel: React.FC = () => {
             )}
 
             {/* 文件列表 */}
-            <ScrollArea
-                className="flex-1 min-h-0"
-                scrollbars="vertical"
-            >
+            <ScrollArea className="flex-1 min-h-0" scrollbars="vertical">
                 <div className="py-1">
                     {fb.loading ? (
-                        <Text size="1" color="gray" className="px-3 py-4 block text-center">
+                        <Text
+                            size="1"
+                            color="gray"
+                            className="px-3 py-4 block text-center"
+                        >
                             {(t as (key: string) => string)("fb_loading")}
                         </Text>
                     ) : fb.error ? (
-                        <Text size="1" color="red" className="px-3 py-4 block text-center">
-                            {(t as (key: string) => string)("fb_error")}: {fb.error}
+                        <Text
+                            size="1"
+                            color="red"
+                            className="px-3 py-4 block text-center"
+                        >
+                            {(t as (key: string) => string)("fb_error")}:{" "}
+                            {fb.error}
                         </Text>
                     ) : !fb.currentPath ? (
-                        <Text size="1" color="gray" className="px-3 py-4 block text-center">
+                        <Text
+                            size="1"
+                            color="gray"
+                            className="px-3 py-4 block text-center"
+                        >
                             {(t as (key: string) => string)("fb_no_folder")}
                         </Text>
-                    ) : filteredEntries.length === 0 ? (
-                        <Text size="1" color="gray" className="px-3 py-4 block text-center">
-                            {fb.searchQuery
-                                ? (t as (key: string) => string)("fb_no_results")
-                                : (t as (key: string) => string)("fb_empty_folder")}
+                    ) : isSearchMode && fb.searchLoading ? (
+                        <Text
+                            size="1"
+                            color="gray"
+                            className="px-3 py-4 block text-center"
+                        >
+                            {(t as (key: string) => string)("fb_searching")}
+                        </Text>
+                    ) : displayEntries.length === 0 ? (
+                        <Text
+                            size="1"
+                            color="gray"
+                            className="px-3 py-4 block text-center"
+                        >
+                            {isSearchMode
+                                ? (t as (key: string) => string)(
+                                      "fb_no_results",
+                                  )
+                                : (t as (key: string) => string)(
+                                      "fb_empty_folder",
+                                  )}
                         </Text>
                     ) : (
-                        filteredEntries.map((entry) => (
+                        displayEntries.map((entry) => (
                             <FileEntryRow
                                 key={entry.path}
                                 entry={entry}
@@ -424,7 +497,15 @@ export const FileBrowserPanel: React.FC = () => {
                                 onDoubleClickDir={handleEnterDir}
                                 onClickAudio={handleClickAudio}
                                 onPointerDownForDrag={handlePointerDownForDrag}
-                                isDragging={dragState?.active === true && dragState.filePath === entry.path}
+                                isDragging={
+                                    dragState?.active === true &&
+                                    dragState.filePath === entry.path
+                                }
+                                pathHint={
+                                    isSearchMode
+                                        ? getRelativeDirHint(entry.path)
+                                        : undefined
+                                }
                             />
                         ))
                     )}
@@ -498,12 +579,24 @@ interface FileEntryRowProps {
     isPlaying: boolean;
     onDoubleClickDir: (dirPath: string) => void;
     onClickAudio: (entry: FileEntry) => void;
-    onPointerDownForDrag: (e: React.PointerEvent<HTMLDivElement>, entry: FileEntry) => void;
+    onPointerDownForDrag: (
+        e: React.PointerEvent<HTMLDivElement>,
+        entry: FileEntry,
+    ) => void;
     isDragging: boolean;
+    pathHint?: string;
 }
 
 const FileEntryRow: React.FC<FileEntryRowProps> = React.memo(
-    ({ entry, isPlaying, onDoubleClickDir, onClickAudio, onPointerDownForDrag, isDragging }) => {
+    ({
+        entry,
+        isPlaying,
+        onDoubleClickDir,
+        onClickAudio,
+        onPointerDownForDrag,
+        isDragging,
+        pathHint,
+    }) => {
         const isAudio = isAudioFile(entry);
 
         return (
@@ -514,12 +607,8 @@ const FileEntryRow: React.FC<FileEntryRowProps> = React.memo(
                     isPlaying
                         ? "bg-[color-mix(in_oklab,var(--qt-highlight)_20%,transparent)]"
                         : "",
-                    isDragging
-                        ? "opacity-50"
-                        : "",
-                    !entry.isDir && !isAudio
-                        ? "opacity-50"
-                        : "",
+                    isDragging ? "opacity-50" : "",
+                    !entry.isDir && !isAudio ? "opacity-50" : "",
                 ]
                     .filter(Boolean)
                     .join(" ")}
@@ -527,9 +616,7 @@ const FileEntryRow: React.FC<FileEntryRowProps> = React.memo(
                     isAudio ? (e) => onPointerDownForDrag(e, entry) : undefined
                 }
                 onDoubleClick={
-                    entry.isDir
-                        ? () => onDoubleClickDir(entry.path)
-                        : undefined
+                    entry.isDir ? () => onDoubleClickDir(entry.path) : undefined
                 }
                 onClick={isAudio ? () => onClickAudio(entry) : undefined}
             >
@@ -556,19 +643,31 @@ const FileEntryRow: React.FC<FileEntryRowProps> = React.memo(
                     )}
                 </span>
 
-                {/* 文件名 */}
-                <Text
-                    size="1"
-                    className="truncate flex-1"
-                    title={entry.name}
-                >
-                    {entry.name}
-                    {entry.isDir ? "/" : ""}
-                </Text>
+                {/* 文件名 + 路径提示 */}
+                <div className="flex flex-col min-w-0 flex-1">
+                    <Text size="1" className="truncate" title={entry.name}>
+                        {entry.name}
+                        {entry.isDir ? "/" : ""}
+                    </Text>
+                    {pathHint && (
+                        <Text
+                            size="1"
+                            color="gray"
+                            className="truncate leading-none"
+                            style={{ fontSize: 10 }}
+                        >
+                            {pathHint}
+                        </Text>
+                    )}
+                </div>
 
                 {/* 右侧信息 */}
                 {!entry.isDir && entry.size != null && (
-                    <Text size="1" color="gray" className="shrink-0 text-[10px]">
+                    <Text
+                        size="1"
+                        color="gray"
+                        className="shrink-0 text-[10px]"
+                    >
                         {formatSize(entry.size)}
                     </Text>
                 )}

@@ -14,8 +14,23 @@ function isBlackKey(midi: number): boolean {
 }
 
 function midiToLabel(midi: number): string {
+    const NOTE_NAMES = [
+        "C",
+        "C#",
+        "D",
+        "D#",
+        "E",
+        "F",
+        "F#",
+        "G",
+        "G#",
+        "A",
+        "A#",
+        "B",
+    ];
     const octave = Math.floor(midi / 12) - 1;
-    return `C${octave}`;
+    const name = NOTE_NAMES[((midi % 12) + 12) % 12];
+    return `${name}${octave}`;
 }
 
 function drawCurveTimed(args: {
@@ -165,10 +180,6 @@ export interface DetectedPitchCurve {
     midiCurve: number[];
     /** WORLD 帧周期（毫秒） */
     framePeriodMs: number;
-    /** clip 在 timeline 上的起始时间（秒），用于裁剪渲染区域 */
-    clipStartSec: number;
-    /** clip 在 timeline 上的长度（秒），用于裁剪渲染区域 */
-    clipLengthSec: number;
 }
 
 export function drawPianoRoll(args: {
@@ -234,6 +245,8 @@ export function drawPianoRoll(args: {
               blackKey: "#1a1a1a",
               blackKeyGradient: "rgba(0,0,0,0.35)",
               cLabel: "#3b82f6",
+              whiteKeyLabel: "rgba(80,80,80,0.70)",
+              blackKeyLabel: "rgba(220,220,220,0.80)",
               cSeparator: "rgba(100,100,100,0.45)",
               keySeparator: "rgba(160,160,160,0.20)",
               tensionLabel: "rgba(255,255,255,0.55)",
@@ -256,6 +269,8 @@ export function drawPianoRoll(args: {
               blackKey: "#3a3a3a",
               blackKeyGradient: "rgba(0,0,0,0.25)",
               cLabel: "#2563eb",
+              whiteKeyLabel: "rgba(80,80,80,0.65)",
+              blackKeyLabel: "rgba(255,255,255,0.85)",
               cSeparator: "rgba(0,0,0,0.25)",
               keySeparator: "rgba(0,0,0,0.12)",
               tensionLabel: "rgba(0,0,0,0.55)",
@@ -342,18 +357,35 @@ export function drawPianoRoll(args: {
                         ctx.fillRect(w * 0.62, top, w * 0.1, keyH);
                     }
 
-                    // C 音名标注
-                    if (pc === 0) {
-                        ctx.fillStyle = colors.cLabel;                        ctx.font = "bold 9px sans-serif";
+                    // 所有琴键音名标注（高度足够时）
+                    if (keyH >= 6) {
                         ctx.textBaseline = "middle";
-                        ctx.fillText(midiToLabel(midi), 5, top + keyH / 2);
+                        const midY = top + keyH / 2;
+                        if (!black) {
+                            // 白键：C 音用蓝色加粗，其他用灰色
+                            ctx.fillStyle =
+                                pc === 0 ? colors.cLabel : colors.whiteKeyLabel;
+                            ctx.font =
+                                pc === 0
+                                    ? "bold 9px sans-serif"
+                                    : "9px sans-serif";
+                            ctx.fillText(midiToLabel(midi), 4, midY);
+                        } else {
+                            // 黑键：在黑键宽度内裁剪绘制
+                            ctx.save();
+                            ctx.beginPath();
+                            ctx.rect(0, top, w * 0.7, keyH);
+                            ctx.clip();
+                            ctx.fillStyle = colors.blackKeyLabel;
+                            ctx.font = "8px sans-serif";
+                            ctx.fillText(midiToLabel(midi), 3, midY);
+                            ctx.restore();
+                        }
                     }
 
                     // 分隔线：C 音用较深的线，其他用浅线
                     ctx.strokeStyle =
-                        pc === 0
-                            ? colors.cSeparator
-                            : colors.keySeparator;
+                        pc === 0 ? colors.cSeparator : colors.keySeparator;
                     ctx.lineWidth = pc === 0 ? 1 : 0.5;
                     ctx.beginPath();
                     ctx.moveTo(0, top + 0.5);
@@ -428,20 +460,17 @@ export function drawPianoRoll(args: {
     }
 
     // Background waveform: per-clip 叠加绘制
-    // peaks 数据覆盖整个 source 文件，渲染时根据 trimStart/playbackRate 计算偏移，
+    // peaks 数据覆盖整个 source 文件，渲染时根据 sourceStartSec/playbackRate 计算偏移，
     // 裁剪到 clip 可视区域，trim 拖动不影响 peaks 数据本身。
     for (const entry of clipPeaks) {
         if (!entry.peaks) continue;
-        const {
-            min: pMin,
-            max: pMax,
-            durSec: pDurSec,
-        } = entry.peaks;
+        const { min: pMin, max: pMax, durSec: pDurSec } = entry.peaks;
         if (pMin.length < 2 || pMax.length < 2) continue;
 
         const pr = entry.playbackRate > 0 ? entry.playbackRate : 1;
-        const trimStartSec = entry.trimStartSec ?? 0;
-        const sourceDurSec = entry.sourceDurationSec > 0 ? entry.sourceDurationSec : pDurSec;
+        const sourceStartSec = entry.sourceStartSec ?? 0;
+        const sourceDurSec =
+            entry.sourceDurationSec > 0 ? entry.sourceDurationSec : pDurSec;
 
         // clip 在 canvas 上的可视 x 范围
         const clipStartX = entry.startSec * pxPerSec - scrollLeft;
@@ -453,8 +482,8 @@ export function drawPianoRoll(args: {
 
         // 整个 source 文件在 timeline 域的像素宽度 = (sourceDurSec / pr) * pxPerSec
         const sourceWidthPx = (sourceDurSec / pr) * pxPerSec;
-        // trimStart 对应的 timeline 域偏移量（像素）= (trimStartSec / pr) * pxPerSec
-        const trimOffsetPx = (trimStartSec / pr) * pxPerSec;
+        // sourceStart 对应的 timeline 域偏移量（像素）= (sourceStartSec / pr) * pxPerSec
+        const trimOffsetPx = (sourceStartSec / pr) * pxPerSec;
 
         // 处理波形：1:1 映射 peaks 列
         const processed = processWaveformPeaks({
@@ -473,8 +502,8 @@ export function drawPianoRoll(args: {
         ctx.rect(clipStartX, 0, clipWidthPx, h);
         ctx.clip();
 
-        // 平移：先到 clip 起始位置，再向左偏移 trimStart 部分
-        // 这样 peaks 的 trimStart 位置对齐到 clipStartX
+        // 平移：先到 clip 起始位置，再向左偏移 sourceStart 部分
+        // 这样 peaks 的 sourceStart 位置对齐到 clipStartX
         ctx.translate(clipStartX - trimOffsetPx, 0);
 
         // 缩放：将 peaksCols 列映射到整个 source 在 timeline 上的宽度
@@ -536,18 +565,7 @@ export function drawPianoRoll(args: {
 
             ctx.save();
 
-            // 裁剪到 clip 可见区域：只渲染 [clipStartSec, clipStartSec + clipLengthSec] 内的曲线
-            const cStartSec = curve.clipStartSec;
-            const cLenSec = curve.clipLengthSec;
-            const clipLeftX = cStartSec * pxPerSec - scrollLeft;
-            const clipRightX = (cStartSec + cLenSec) * pxPerSec - scrollLeft;
-            const clipWidthPx = clipRightX - clipLeftX;
-            if (clipWidthPx > 0 && isFinite(clipWidthPx)) {
-                ctx.beginPath();
-                ctx.rect(clipLeftX, 0, clipWidthPx, h);
-                ctx.clip();
-            }
-
+            ctx.strokeStyle;
             ctx.strokeStyle = DETECTED_COLORS[ci % DETECTED_COLORS.length];
             ctx.lineWidth = 1.5;
             ctx.setLineDash([]);
@@ -583,7 +601,8 @@ export function drawPianoRoll(args: {
             }
             ctx.stroke();
             ctx.restore();
-        }    }
+        }
+    }
 
     // Curves
     // 副参数曲线（半透明、细线，绘制在主参数曲线下方�?

@@ -105,11 +105,19 @@ pub struct Clip {
 
     pub gain: f32,
     pub muted: bool,
-    pub trim_start_sec: f64,
-    pub trim_end_sec: f64,
+    #[serde(alias = "trim_start_sec")]
+    pub source_start_sec: f64,
+    #[serde(alias = "trim_end_sec")]
+    pub source_end_sec: f64,
     pub playback_rate: f32,
     pub fade_in_sec: f64,
     pub fade_out_sec: f64,
+    /// 淡入曲线类型（linear/sine/exponential/logarithmic/scurve），默认 sine
+    #[serde(default = "default_fade_curve")]
+    pub fade_in_curve: String,
+    /// 淡出曲线类型（linear/sine/exponential/logarithmic/scurve），默认 sine
+    #[serde(default = "default_fade_curve")]
+    pub fade_out_curve: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -119,11 +127,13 @@ pub struct ClipStatePatch {
     pub length_sec: Option<f64>,
     pub gain: Option<f32>,
     pub muted: Option<bool>,
-    pub trim_start_sec: Option<f64>,
-    pub trim_end_sec: Option<f64>,
+    pub source_start_sec: Option<f64>,
+    pub source_end_sec: Option<f64>,
     pub playback_rate: Option<f32>,
     pub fade_in_sec: Option<f64>,
     pub fade_out_sec: Option<f64>,
+    pub fade_in_curve: Option<String>,
+    pub fade_out_curve: Option<String>,
     pub color: Option<String>,
 }
 
@@ -376,6 +386,9 @@ pub struct AppState {
     pub pitch_timeline_snapshot: Mutex<HashMap<String, TimelineSnapshot>>,
 
     pub audio_engine: AudioEngine,
+
+    /// App config directory for persisting recent projects etc.
+    pub config_dir: OnceLock<std::path::PathBuf>,
 }
 
 impl Default for AppState {
@@ -404,6 +417,7 @@ impl Default for AppState {
             pitch_timeline_snapshot: Mutex::new(HashMap::new()),
 
             audio_engine: AudioEngine::new(),
+            config_dir: OnceLock::new(),
         }
     }
 }
@@ -585,6 +599,10 @@ fn default_clip_color() -> String {
     "emerald".to_string()
 }
 
+fn default_fade_curve() -> String {
+    "sine".to_string()
+}
+
 impl TimelineState {
     fn ensure_project_end_sec(&mut self, end_sec: f64) {
         if !(end_sec.is_finite()) {
@@ -618,11 +636,13 @@ impl TimelineState {
                 pitch_range: c.pitch_range.clone(),
                 gain: Some(c.gain),
                 muted: Some(c.muted),
-                trim_start_sec: Some(c.trim_start_sec),
-                trim_end_sec: Some(c.trim_end_sec),
+                source_start_sec: Some(c.source_start_sec),
+                source_end_sec: Some(c.source_end_sec),
                 playback_rate: Some(c.playback_rate),
                 fade_in_sec: Some(c.fade_in_sec),
                 fade_out_sec: Some(c.fade_out_sec),
+                fade_in_curve: Some(c.fade_in_curve.clone()),
+                fade_out_curve: Some(c.fade_out_curve.clone()),
             })
             .collect::<Vec<_>>();
 
@@ -877,11 +897,13 @@ impl TimelineState {
                 })),
             gain: 1.0,
             muted: false,
-            trim_start_sec: 0.0,
-            trim_end_sec: 0.0,
+            source_start_sec: 0.0,
+            source_end_sec: inherited.as_ref().and_then(|v| v.0).unwrap_or(ls),
             playback_rate: 1.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
+            fade_in_curve: default_fade_curve(),
+            fade_out_curve: default_fade_curve(),
         };
         self.clips.push(clip);
         self.selected_clip_id = Some(id.clone());
@@ -919,8 +941,8 @@ impl TimelineState {
         length_sec: Option<f64>,
         gain: Option<f32>,
         muted: Option<bool>,
-        trim_start_sec: Option<f64>,
-        trim_end_sec: Option<f64>,
+        source_start_sec: Option<f64>,
+        source_end_sec: Option<f64>,
         playback_rate: Option<f32>,
         fade_in_sec: Option<f64>,
         fade_out_sec: Option<f64>,
@@ -933,11 +955,13 @@ impl TimelineState {
                 length_sec,
                 gain,
                 muted,
-                trim_start_sec,
-                trim_end_sec,
+                source_start_sec,
+                source_end_sec,
                 playback_rate,
                 fade_in_sec,
                 fade_out_sec,
+                fade_in_curve: None,
+                fade_out_curve: None,
                 color: None,
             },
         );
@@ -961,15 +985,15 @@ impl TimelineState {
             if let Some(v) = patch.muted {
                 c.muted = v;
             }
-            if let Some(v) = patch.trim_start_sec {
+            if let Some(v) = patch.source_start_sec {
                 if v.is_finite() {
                     // Negative values are allowed (slip-edit past the source start -> leading silence).
                     // Keep a reasonable bound to avoid accidental extreme values.
-                    c.trim_start_sec = v.clamp(-1_000_000.0, 1_000_000.0);
+                    c.source_start_sec = v.clamp(-1_000_000.0, 1_000_000.0);
                 }
             }
-            if let Some(v) = patch.trim_end_sec {
-                c.trim_end_sec = v.max(0.0);
+            if let Some(v) = patch.source_end_sec {
+                c.source_end_sec = v.max(0.0);
             }
             if let Some(v) = patch.playback_rate {
                 c.playback_rate = v.clamp(0.1, 10.0);
@@ -979,6 +1003,12 @@ impl TimelineState {
             }
             if let Some(v) = patch.fade_out_sec {
                 c.fade_out_sec = v.max(0.0);
+            }
+            if let Some(v) = patch.fade_in_curve {
+                c.fade_in_curve = v;
+            }
+            if let Some(v) = patch.fade_out_curve {
+                c.fade_out_curve = v;
             }
             if let Some(v) = patch.color {
                 c.color = v;
@@ -1009,7 +1039,20 @@ impl TimelineState {
         let left_len = split - start;
         let right_len = end - split;
 
+        // 计算左 clip 的 playback_rate，用于更新 source_end_sec
+        let left_rate = {
+            let r = self.clips[idx].playback_rate as f64;
+            if r.is_finite() && r > 0.0 { r } else { 1.0 }
+        };
+
         self.clips[idx].length_sec = left_len;
+        // 更新左 clip 的 source_end_sec: 切分点对应的源时间
+        {
+            let orig_src_end = self.clips[idx].source_end_sec;
+            let new_src_end = self.clips[idx].source_start_sec + left_len * left_rate;
+            self.clips[idx].source_end_sec =
+                new_src_end.clamp(self.clips[idx].source_start_sec, orig_src_end);
+        }
         // Fade semantics on split:
         // - fade-in is anchored to the original start, so only the left clip should keep it.
         // - fade-out is anchored to the original end, so only the right clip should keep it.
@@ -1032,9 +1075,9 @@ impl TimelineState {
         } else {
             1.0
         };
-        if right.trim_start_sec.is_finite() {
-            right.trim_start_sec =
-                (right.trim_start_sec + left_len * rate).clamp(-1_000_000.0, 1_000_000.0);
+        if right.source_start_sec.is_finite() {
+            right.source_start_sec =
+                (right.source_start_sec + left_len * rate).clamp(-1_000_000.0, 1_000_000.0);
         }
         self.clips.push(right);
     }

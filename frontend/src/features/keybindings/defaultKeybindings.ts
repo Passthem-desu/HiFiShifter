@@ -5,6 +5,9 @@ import type { ActionId, ActionMeta, KeybindingMap } from "./types";
  * 收录了项目中所有硬编码快捷键的默认值
  */
 export const DEFAULT_KEYBINDINGS: KeybindingMap = {
+    // 模式切换
+    "mode.toggle": { key: "tab" },
+
     // 播放控制
     "playback.toggle": { key: "space" },
 
@@ -41,6 +44,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
  * 操作元信息（用于 UI 分组 & 显示）
  */
 export const ACTION_META: Record<ActionId, ActionMeta> = {
+    "mode.toggle": { labelKey: "kb_mode_toggle", group: "mode" },
+
     "playback.toggle": { labelKey: "kb_playback_toggle", group: "playback" },
 
     "edit.undo": { labelKey: "kb_edit_undo", group: "edit" },
@@ -78,6 +83,7 @@ export const ALL_ACTION_IDS: ActionId[] = Object.keys(
  * 分组标题 i18n key
  */
 export const GROUP_LABEL_KEYS: Record<ActionMeta["group"], string> = {
+    mode: "kb_group_mode",
     playback: "kb_group_playback",
     edit: "kb_group_edit",
     project: "kb_group_project",

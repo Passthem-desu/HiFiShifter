@@ -310,11 +310,13 @@ pub fn set_clip_state(
     length_sec: Option<f64>,
     gain: Option<f32>,
     muted: Option<bool>,
-    trim_start_sec: Option<f64>,
-    trim_end_sec: Option<f64>,
+    source_start_sec: Option<f64>,
+    source_end_sec: Option<f64>,
     playback_rate: Option<f32>,
     fade_in_sec: Option<f64>,
     fade_out_sec: Option<f64>,
+    fade_in_curve: Option<String>,
+    fade_out_curve: Option<String>,
     color: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     timeline::set_clip_state(
@@ -325,11 +327,13 @@ pub fn set_clip_state(
         length_sec,
         gain,
         muted,
-        trim_start_sec,
-        trim_end_sec,
+        source_start_sec,
+        source_end_sec,
         playback_rate,
         fade_in_sec,
         fade_out_sec,
+        fade_in_curve,
+        fade_out_curve,
         color,
     )
 }
@@ -514,6 +518,14 @@ pub fn read_audio_preview(
     max_frames: Option<u32>,
 ) -> Result<file_browser::AudioPreviewData, String> {
     file_browser::read_audio_preview(file_path, max_frames)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn search_files_recursive(
+    dir_path: String,
+    query: String,
+) -> Result<Vec<file_browser::FileEntry>, String> {
+    file_browser::search_files_recursive(dir_path, query)
 }
 
 // ===================== vocalshifter =====================

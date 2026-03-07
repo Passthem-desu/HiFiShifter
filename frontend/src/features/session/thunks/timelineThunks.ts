@@ -101,8 +101,8 @@ export const createClipsRemote = createAsyncThunk(
                     lengthSec: tpl.lengthSec,
                     gain: tpl.gain,
                     muted: tpl.muted,
-                    trimStartSec: tpl.trimStartSec,
-                    trimEndSec: tpl.trimEndSec,
+                    sourceStartSec: tpl.sourceStartSec,
+                    sourceEndSec: tpl.sourceEndSec,
                     playbackRate: tpl.playbackRate,
                     fadeInSec: tpl.fadeInSec,
                     fadeOutSec: tpl.fadeOutSec,
@@ -163,11 +163,13 @@ export const setClipStateRemote = createAsyncThunk(
         lengthSec?: number;
         gain?: number;
         muted?: boolean;
-        trimStartSec?: number;
-        trimEndSec?: number;
+        sourceStartSec?: number;
+        sourceEndSec?: number;
         playbackRate?: number;
         fadeInSec?: number;
         fadeOutSec?: number;
+        fadeInCurve?: string;
+        fadeOutCurve?: string;
     }) => {
         return webApi.setClipState(payload);
     },

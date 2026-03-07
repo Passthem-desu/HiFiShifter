@@ -37,6 +37,11 @@ function applyFadeGainToPeaks(
     fadeOutSec: number,
     fadeInCurve: FadeCurveType,
     fadeOutCurve: FadeCurveType,
+    // 可见窗口在 lengthSec 坐标系中的起止位置（秒）。
+    // peaks.ok 路径：= sourceStartSec/pr 与 sourceEndSec/pr（覆盖完整文件时用于偏移 fade）。
+    // fallback 路径：均为默认值 0 / -1（-1 表示使用 lengthSec），无需偏移。
+    windowStartSec = 0,
+    windowEndSec = -1,
 ): { min: number[]; max: number[] } {
     const srcN = Math.min(min.length, max.length);
     if (srcN === 0) return { min: [], max: [] };
@@ -44,6 +49,9 @@ function applyFadeGainToPeaks(
     const safeLenBeats = Math.max(1e-9, Number(lengthSec) || 0);
     const safeFadeIn = Math.max(0, Number(fadeInSec) || 0);
     const safeFadeOut = Math.max(0, Number(fadeOutSec) || 0);
+    const safeWinStart = Math.max(0, windowStartSec);
+    const safeWinEnd =
+        windowEndSec >= 0 ? Math.min(safeLenBeats, windowEndSec) : safeLenBeats;
 
     const resultMin = new Array<number>(srcN);
     const resultMax = new Array<number>(srcN);
@@ -54,11 +62,14 @@ function applyFadeGainToPeaks(
 
         let mul = ampScale;
         if (safeFadeIn > 1e-9) {
-            mul *= fadeCurveGain(clamp(beatAt / safeFadeIn, 0, 1), fadeInCurve);
+            mul *= fadeCurveGain(
+                clamp((beatAt - safeWinStart) / safeFadeIn, 0, 1),
+                fadeInCurve,
+            );
         }
         if (safeFadeOut > 1e-9) {
             mul *= fadeCurveGain(
-                clamp((safeLenBeats - beatAt) / safeFadeOut, 0, 1),
+                clamp((safeWinEnd - beatAt) / safeFadeOut, 0, 1),
                 fadeOutCurve,
             );
         }
@@ -195,14 +206,14 @@ export const ClipItem: React.FC<{
         rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT,
     );
 
-    // source 可用窗口长度（秒）：durationSec 减去两端裁剪量。
+    // source 可用窗口长度（秒）：sourceEnd 减去两端裁剪量。
     // 此值不随 trim/stretch/BPM 变化，用于固定 sliceWaveformSamples 的输出密度，
     // 确保 trim 拖动时波形不缩放（只改变切片起止点），stretch 时由 SVG 自动拉伸。
-    const durationSec = Math.max(0, Number(clip.durationSec ?? 0) || 0);
-    const trimStartRaw = Number(clip.trimStartSec ?? 0) || 0;
-    const trimStart = Math.max(0, trimStartRaw);
-    const trimEnd = Math.max(0, Number(clip.trimEndSec ?? 0) || 0);
-    const sourceAvailSec = Math.max(0, durationSec - trimStart - trimEnd);
+    const sourceStartRaw = Number(clip.sourceStartSec ?? 0) || 0;
+    const sourceStart = Math.max(0, sourceStartRaw);
+    const sourceEnd = Number(clip.sourceEndSec ?? 0) || 0;
+    const effectiveEnd = sourceEnd;
+    const sourceAvailSec = Math.max(0, effectiveEnd - sourceStart);
 
     const showRepeatMarker = false;
     const repeatMarkerX = 0;
@@ -232,16 +243,16 @@ export const ClipItem: React.FC<{
 
     const clipForWaveform = React.useMemo(
         () => ({
-            trimStartSec: clip.trimStartSec,
-            trimEndSec: clip.trimEndSec,
+            sourceStartSec: clip.sourceStartSec,
+            sourceEndSec: clip.sourceEndSec,
             // 传入 source 可用窗口长度（秒）作为 desiredLen，
             // 使输出采样密度固定，trim 时不缩放波形，stretch 时由 SVG 自动拉伸。
             lengthSec: sourceAvailSec,
             durationSec: clip.durationSec,
         }),
         [
-            clip.trimStartSec,
-            clip.trimEndSec,
+            clip.sourceStartSec,
+            clip.sourceEndSec,
             sourceAvailSec,
             clip.durationSec,
         ],
@@ -269,8 +280,8 @@ export const ClipItem: React.FC<{
         // 而非 clip.lengthSec（trim 拖动时持续变化导致波形拉伸）。
         // 对于 fallback 的 waveform preview 路径，仍使用 sourceAvailSec。
         const lenBeats = peaks?.ok
-            ? (peaks.cycleLenSecTimeline || Number(clip.lengthSec ?? 0) || 0)
-            : (Number(clip.lengthSec ?? 0) || 0);
+            ? peaks.cycleLenSecTimeline || Number(clip.lengthSec ?? 0) || 0
+            : Number(clip.lengthSec ?? 0) || 0;
         const fadeIn = Number(clip.fadeInSec ?? 0) || 0;
         const fadeOut = Number(clip.fadeOutSec ?? 0) || 0;
         const fadeInCurve: FadeCurveType = clip.fadeInCurve ?? "sine";
@@ -321,12 +332,22 @@ export const ClipItem: React.FC<{
             const env = minMaxEnvelopeFromSamples(mono, w);
             // waveform_preview 是绝对值数据（0~1），需要镜像为对称的 min/max
             wMax = env.max;
-            wMin = env.max.map(v => -v);
+            wMin = env.max.map((v) => -v);
         } else {
             return null;
         }
 
-        // 应用淡入淡出效果到波形数据
+        // 应用淡入淡出效果到波形数据。
+        // peaks.ok 路径：peaks 覆盖完整 source 文件（0 → durationSec），
+        // fade 需相对于 clip 可见窗口（sourceStartSec/pr → sourceEndSec/pr）定位，
+        // 否则 trim 后 fade 渐变会落在被 overflow-hidden 裁掉的不可见区域。
+        const pr = Math.max(1e-6, Number(clip.playbackRate ?? 1) || 1);
+        const fadeWindowStartSec = peaks?.ok
+            ? Math.max(0, Number(clip.sourceStartSec ?? 0) || 0) / pr
+            : 0;
+        const rawSourceEnd = Number(clip.sourceEndSec ?? 0) || 0;
+        const fadeWindowEndSec =
+            peaks?.ok && rawSourceEnd > 0 ? rawSourceEnd / pr : -1;
         const faded = applyFadeGainToPeaks(
             wMin,
             wMax,
@@ -336,6 +357,8 @@ export const ClipItem: React.FC<{
             fadeOut,
             fadeInCurve,
             fadeOutCurve,
+            fadeWindowStartSec,
+            fadeWindowEndSec,
         );
 
         // 使用共享渲染函数生成 SVG 路径（单 band 全高）
@@ -390,6 +413,9 @@ export const ClipItem: React.FC<{
         clip.fadeInCurve,
         clip.fadeOutCurve,
         clip.lengthSec,
+        clip.playbackRate,
+        clip.sourceStartSec,
+        clip.sourceEndSec,
         peaks,
         pxPerSec,
         width,
@@ -514,7 +540,10 @@ export const ClipItem: React.FC<{
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                            if (
+                                multiSelectedCount === 0 ||
+                                !isInMultiSelectedSet
+                            ) {
                                 ensureSelected(clip.id);
                             }
                             selectClipRemote(clip.id);
@@ -529,7 +558,10 @@ export const ClipItem: React.FC<{
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                            if (
+                                multiSelectedCount === 0 ||
+                                !isInMultiSelectedSet
+                            ) {
                                 ensureSelected(clip.id);
                             }
                             selectClipRemote(clip.id);
@@ -541,7 +573,7 @@ export const ClipItem: React.FC<{
                     {/* Fade handles: 操作区覆盖整�?fade 区域（fadeBeats > 0 时显示） */}
                     {(clip.fadeInSec ?? 0) > 0 && (
                         <div
-className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
+                            className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
                             style={{
                                 width: Math.min(
                                     width,
@@ -575,7 +607,7 @@ className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
                     )}
                     {(clip.fadeOutSec ?? 0) > 0 && (
                         <div
-className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
+                            className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                             style={{
                                 width: Math.min(
                                     width,
@@ -687,9 +719,7 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                         ) : null}
                     </div>
 
-                    <div
-                        className="absolute inset-0 opacity-80 overflow-hidden"
-                    >
+                    <div className="absolute inset-0 opacity-80 overflow-hidden">
                         {/* 内层容器：通过负 marginLeft 将 trimStart 对应位置的波形对齐到容器左边缘。
                             peaks 数据覆盖整个 source 文件（0 → durationSec），SVG 固定宽度 = durationSec/pr*pxPerSec，
                             外层 overflow-hidden 裁掉左侧 trim 和右侧超出部分。 */}
@@ -697,7 +727,19 @@ className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                             style={{
                                 height: "100%",
                                 marginLeft: peaks?.ok
-                                    ? -(Math.max(0, Number(clip.trimStartSec ?? 0) || 0) / Math.max(1e-6, Number(clip.playbackRate ?? 1) || 1)) * pxPerSec
+                                    ? -(
+                                          Math.max(
+                                              0,
+                                              Number(
+                                                  clip.sourceStartSec ?? 0,
+                                              ) || 0,
+                                          ) /
+                                          Math.max(
+                                              1e-6,
+                                              Number(clip.playbackRate ?? 1) ||
+                                                  1,
+                                          )
+                                      ) * pxPerSec
                                     : 0,
                             }}
                         >

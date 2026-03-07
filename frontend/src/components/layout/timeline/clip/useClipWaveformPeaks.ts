@@ -193,8 +193,8 @@ export function useClipWaveformPeaks(args: {
         const desiredLenSrc = timelineLenSec * pr;
         if (desiredLenSrc <= 1e-9) return null;
 
-        const trimStartRaw = Number(clip.trimStartSec ?? 0) || 0;
-        const preSilenceSecSrc = Math.max(0, -trimStartRaw);
+        const sourceStartRaw = Number(clip.sourceStartSec ?? 0) || 0;
+        const preSilenceSecSrc = Math.max(0, -sourceStartRaw);
         // peaks 覆盖整个 source 文件（startSec=0, segmentLenSec=durationSec），
         // 这样无论 trim_left 还是 trim_right 拖动，peaks 请求参数都完全稳定。
         const startSec = 0;

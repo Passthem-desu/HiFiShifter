@@ -407,7 +407,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         return Ok(false);
     }
 
-    // Get per-clip original MIDI curve (timeline-aligned, includes pre-silence shift).
+    // Get per-clip original MIDI curve (full source, source-time indexed).
     let clip_pitch = crate::pitch_clip::get_or_compute_clip_pitch_midi_global(
         timeline,
         clip,
@@ -418,12 +418,28 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         return Ok(false);
     };
 
+    // 将源时间索引的 MIDI 曲线 trim+resample 为时间轴对齐的曲线：
+    // timeline_midi[0] 对应 clip_start_sec，每帧 frame_period_ms，按 playback_rate 拉伸后的时间轴坐标。
+    // 这与前端显示所用的曲线变换完全一致（见 emit_clip_pitch_data_for_clip）。
+    let playback_rate = (clip.playback_rate as f64).max(1e-6);
+    let timeline_midi = crate::pitch_clip::trim_and_resample_midi(
+        &clip_pitch.midi,
+        frame_period_ms,
+        clip.source_start_sec,
+        clip.source_end_sec,
+        playback_rate,
+        clip.length_sec.max(0.0),
+    );
+    if timeline_midi.is_empty() {
+        return Ok(false);
+    }
+
     // Skip expensive processing if the edit curve does not actually change pitch vs clip's original MIDI.
     if !any_effective_pitch_change_in_range(
         frame_period_ms,
         pitch_edit,
         clip_start_sec,
-        &clip_pitch.midi,
+        &timeline_midi,
         seg_start_sec,
         seg_end_sec,
     ) {
@@ -455,7 +471,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             clip_start_sec,
             frame_period_ms,
             pitch_edit,
-            clip_midi: &clip_pitch.midi,
+            clip_midi: &timeline_midi,
             clip_id: &clip.id,
         };
         let out = renderer.render(&ctx)?;
@@ -592,6 +608,104 @@ pub fn does_clip_need_pitch_edit(
     let pitch_edit = entry.pitch_edit.as_slice();
 
     // 检查clip时间范围内是否有用户设置的pitch edit
-    let clip_end_sec = clip_start_sec + clip.duration_sec.unwrap_or(0.0);
+    // 注意：这里必须使用 clip 在时间线上的可见长度（length_sec），而不是源文件时长（duration_sec）。
+    // 否则当 playback_rate < 1（减速拉伸）时，clip 时间线长度会变长，后半段的编辑将不会触发合成。
+    let clip_end_sec = clip_start_sec + clip.length_sec.max(0.0);
     any_user_edit_in_range(frame_period_ms, pitch_edit, clip_start_sec, clip_end_sec)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
+
+    fn make_timeline_with_pitch_edit(
+        frame_period_ms: f64,
+        pitch_edit_user_modified: bool,
+        pitch_edit_len: usize,
+        edited_times_sec: &[f64],
+    ) -> TimelineState {
+        let mut pitch_edit = vec![0.0f32; pitch_edit_len];
+        for &t in edited_times_sec {
+            let i = ((t.max(0.0) * 1000.0) / frame_period_ms.max(0.1)).round().max(0.0) as usize;
+            if i < pitch_edit.len() {
+                // any positive value counts as a user-set target
+                pitch_edit[i] = 60.0;
+            }
+        }
+
+        let root_id = "track_root".to_string();
+        let track = Track {
+            id: root_id.clone(),
+            name: "Root".to_string(),
+            parent_id: None,
+            order: 0,
+            muted: false,
+            solo: false,
+            volume: 1.0,
+            compose_enabled: true,
+            pitch_analysis_algo: PitchAnalysisAlgo::World,
+            color: String::new(),
+        };
+
+        let mut tl = TimelineState {
+            tracks: vec![track],
+            clips: vec![],
+            selected_track_id: Some(root_id.clone()),
+            selected_clip_id: None,
+            bpm: 120.0,
+            playhead_sec: 0.0,
+            project_sec: 60.0,
+            params_by_root_track: Default::default(),
+            next_track_order: 1,
+        };
+
+        tl.params_by_root_track.insert(
+            root_id,
+            TrackParamsState {
+                pitch_edit,
+                pitch_edit_user_modified,
+                frame_period_ms,
+                ..Default::default()
+            },
+        );
+        tl
+    }
+
+    #[test]
+    fn does_clip_need_pitch_edit_uses_timeline_length_not_source_duration() {
+        let frame_period_ms = 5.0;
+
+        // Create an edit at t=6s (in the stretched tail).
+        let mut tl = make_timeline_with_pitch_edit(frame_period_ms, true, 20_000, &[6.0]);
+
+        let clip = crate::state::Clip {
+            id: "clip1".to_string(),
+            track_id: "track_root".to_string(),
+            name: "c".to_string(),
+            start_sec: 0.0,
+            length_sec: 8.0, // stretched on timeline
+            color: String::new(),
+            source_path: None,
+            duration_sec: Some(4.0), // original source duration (compat)
+            duration_frames: None,
+            source_sample_rate: None,
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            source_start_sec: 0.0,
+            source_end_sec: 4.0,
+            playback_rate: 0.5,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            fade_in_curve: "sine".to_string(),
+            fade_out_curve: "sine".to_string(),
+        };
+
+        // Place clip into timeline so root resolution works.
+        tl.clips.push(clip.clone());
+
+        assert!(does_clip_need_pitch_edit(&tl, &clip, 0.0));
+    }
 }

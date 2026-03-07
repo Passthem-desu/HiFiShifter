@@ -20,8 +20,8 @@ pub(crate) struct StretchKey {
 #[derive(Debug, Clone)]
 pub(crate) struct StretchJob {
     pub(crate) key: StretchKey,
-    pub(crate) trim_start_sec: f64,
-    pub(crate) trim_end_sec: f64,
+    pub(crate) source_start_sec: f64,
+    pub(crate) source_end_sec: f64,
     pub(crate) playback_rate: f64,
     /// clip 名称，用于向前端推送拉伸进度信息
     pub(crate) clip_name: String,

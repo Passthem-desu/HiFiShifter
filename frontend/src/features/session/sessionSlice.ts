@@ -103,7 +103,8 @@ export interface SessionState {
     editParam: EditParam;
     bpm: number;
     beats: number;
-    projectSec: number;    grid: GridSize;
+    projectSec: number;
+    grid: GridSize;
 
     // Monotonic bump token for invalidating parameter curve caches.
     // - Not included in undo/redo snapshots.
@@ -291,9 +292,7 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         volume: clamp(Number(track.volume ?? 0.9), 0, 1),
 
         composeEnabled: Boolean(track.compose_enabled),
-        pitchAnalysisAlgo: String(
-            track.pitch_analysis_algo ?? "world_dll",
-        ),
+        pitchAnalysisAlgo: String(track.pitch_analysis_algo ?? "world_dll"),
         color: track.color || undefined,
     }));
 
@@ -311,14 +310,24 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
             sourceSampleRate: clip.source_sample_rate,
             gain: clamp(Number(clip.gain ?? 1), 0, 4),
             muted: Boolean(clip.muted),
-            // Allow negative trimStartSec to represent leading silence (slip-edit past source start).
-            trimStartSec: Number(clip.trim_start_sec ?? 0) || 0,
-            trimEndSec: Math.max(0, Number(clip.trim_end_sec ?? 0)),
+            // Allow negative sourceStartSec to represent leading silence (slip-edit past source start).
+            sourceStartSec: Number(clip.source_start_sec ?? 0) || 0,
+            sourceEndSec: (() => {
+                const raw = Math.max(0, Number(clip.source_end_sec ?? 0));
+                // 旧项目兼容：source_end_sec == 0 曾表示"到源文件末尾"，修正为实际时长
+                if (raw === 0) {
+                    return (
+                        Number(clip.duration_sec ?? 0) ||
+                        Math.max(0, Number(clip.length_sec ?? 1))
+                    );
+                }
+                return raw;
+            })(),
             playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
             fadeInSec: Math.max(0, Number(clip.fade_in_sec ?? 0)),
             fadeOutSec: Math.max(0, Number(clip.fade_out_sec ?? 0)),
-            fadeInCurve: "sine" as FadeCurveType,
-            fadeOutCurve: "sine" as FadeCurveType,
+            fadeInCurve: (clip.fade_in_curve ?? "sine") as FadeCurveType,
+            fadeOutCurve: (clip.fade_out_curve ?? "sine") as FadeCurveType,
         };
 
         // DEBUG: 打印每个clip的关键参�?
@@ -335,8 +344,8 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
                     : "N/A",
             sourcePath: parsed.sourcePath?.split(/[/\\]/).pop(),
             startSec: parsed.startSec,
-            trimStartSec: parsed.trimStartSec,
-            trimEndSec: parsed.trimEndSec,
+            sourceStartSec: parsed.sourceStartSec,
+            sourceEndSec: parsed.sourceEndSec,
             playbackRate: parsed.playbackRate,
         });
 
@@ -434,7 +443,7 @@ function upsertImportedClip(
             solo: false,
             volume: 0.9,
 
-            composeEnabled: true,
+            composeEnabled: false,
             pitchAnalysisAlgo: "world_dll",
         });
     }
@@ -445,10 +454,7 @@ function upsertImportedClip(
     );
     const startSec = Math.max(0, Math.ceil(maxEndSec));
     const newClipId = createId("clip");
-    const lengthSec = Math.max(
-        1,
-        meta?.durationSec ?? 4,
-    );
+    const lengthSec = Math.max(1, meta?.durationSec ?? 4);
     state.clips.push({
         id: newClipId,
         trackId: targetTrackId,
@@ -460,8 +466,8 @@ function upsertImportedClip(
         durationSec: meta?.durationSec,
         gain: 1,
         muted: false,
-        trimStartSec: 0,
-        trimEndSec: 0,
+        sourceStartSec: 0,
+        sourceEndSec: meta?.durationSec ?? lengthSec,
         playbackRate: 1,
         fadeInSec: 0,
         fadeOutSec: 0,
@@ -503,7 +509,7 @@ const initialState: SessionState = {
             solo: false,
             volume: 0.9,
 
-            composeEnabled: true,
+            composeEnabled: false,
             pitchAnalysisAlgo: "world_dll",
         },
     ],
@@ -733,23 +739,24 @@ const sessionSlice = createSlice({
             if (!clip) return;
             clip.playbackRate = clamp(action.payload.playbackRate, 0.1, 10);
         },
-        setClipTrim(
+        setClipSourceRange(
             state,
             action: PayloadAction<{
                 clipId: string;
-                trimStartSec?: number;
-                trimEndSec?: number;
+                sourceStartSec?: number;
+                sourceEndSec?: number;
             }>,
         ) {
             const clip = state.clips.find(
                 (entry) => entry.id === action.payload.clipId,
             );
             if (!clip) return;
-            if (action.payload.trimStartSec !== undefined) {
-                clip.trimStartSec = Number(action.payload.trimStartSec) || 0;
+            if (action.payload.sourceStartSec !== undefined) {
+                clip.sourceStartSec =
+                    Number(action.payload.sourceStartSec) || 0;
             }
-            if (action.payload.trimEndSec !== undefined) {
-                clip.trimEndSec = Math.max(0, action.payload.trimEndSec);
+            if (action.payload.sourceEndSec !== undefined) {
+                clip.sourceEndSec = Math.max(0, action.payload.sourceEndSec);
             }
         },
         setClipFades(
@@ -833,8 +840,8 @@ const sessionSlice = createSlice({
                 color: "emerald",
                 gain: 1,
                 muted: false,
-                trimStartSec: 0,
-                trimEndSec: 0,
+                sourceStartSec: 0,
+                sourceEndSec: 2,
                 playbackRate: 1,
                 fadeInSec: 0,
                 fadeOutSec: 0,
@@ -1275,7 +1282,10 @@ const sessionSlice = createSlice({
             .addCase(exportAudio.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
-                const payload = action.payload as { ok?: boolean; path?: string };
+                const payload = action.payload as {
+                    ok?: boolean;
+                    path?: string;
+                };
                 if (payload.ok) {
                     // 状态栏文本会先匹配 statusKey 前缀 "Export done"，
                     // 再把路径附加在后面，用户能看到 "导出完成 — D:\xxx.wav"。
@@ -1320,7 +1330,10 @@ const sessionSlice = createSlice({
             })
             .addCase(pasteVocalShifterClipboard.rejected, (state, action) => {
                 state.busy = false;
-                state.error = (action.payload as string) ?? action.error?.message ?? "Request failed";
+                state.error =
+                    (action.payload as string) ??
+                    action.error?.message ??
+                    "Request failed";
                 state.status = "Failed";
             })
 
@@ -1573,7 +1586,10 @@ const sessionSlice = createSlice({
             })
             .addCase(openVocalShifterFromDialog.rejected, (state, action) => {
                 state.busy = false;
-                state.error = (action.payload as string) ?? action.error?.message ?? "Import VocalShifter failed";
+                state.error =
+                    (action.payload as string) ??
+                    action.error?.message ??
+                    "Import VocalShifter failed";
                 state.status = "Import failed";
             })
 
@@ -1892,7 +1908,7 @@ export const {
     moveClipTrack,
     setClipLength,
     setClipPlaybackRate,
-    setClipTrim,
+    setClipSourceRange,
     setClipFades,
     setClipGain,
     setClipMuted,

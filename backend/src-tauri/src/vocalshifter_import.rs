@@ -470,7 +470,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                         muted: vsp_track.muted,
                         solo: vsp_track.solo,
                         volume: convert_volume(vsp_track.volume),
-                        compose_enabled: true,
+                        compose_enabled: false,
                         pitch_analysis_algo: algo,
                         color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
                     });
@@ -498,7 +498,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 muted: vsp_track.muted,
                 solo: vsp_track.solo,
                 volume: convert_volume(vsp_track.volume),
-                compose_enabled: has_items,
+                compose_enabled: false,
                 pitch_analysis_algo: algo,
                 color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
             });
@@ -525,7 +525,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     muted: false,
                     solo: false,
                     volume: 0.9,
-                    compose_enabled: true,
+                    compose_enabled: false,
                     pitch_analysis_algo: PitchAnalysisAlgo::default(),
                     color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
                 });
@@ -629,8 +629,6 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
 
                 let clip_start = item_start_sec + new_start - actual_pre_tl;
                 let clip_length = (new_dur + actual_pre_tl + actual_post_tl).max(0.001);
-                let trim_start = seg_src_start;
-                let trim_end = (source_duration_sec - seg_src_end).max(0.0);
                 let fade_in = if seg_idx > 0 {
                     actual_pre_tl.min(SEGMENT_OVERLAP_SEC)
                 } else {
@@ -667,11 +665,13 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     }),
                     gain: 1.0,
                     muted: false,
-                    trim_start_sec: trim_start,
-                    trim_end_sec: trim_end,
+                    source_start_sec: seg_src_start,
+                    source_end_sec: seg_src_end,
                     playback_rate: rate.clamp(0.1, 10.0),
                     fade_in_sec: fade_in,
                     fade_out_sec: fade_out,
+                    fade_in_curve: String::new(),
+                    fade_out_curve: String::new(),
                 });
 
                 // 写入 pitch 数据（源时间范围内的 Ctrp 点）
@@ -726,12 +726,14 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 }),
                 gain: 1.0,
                 muted: false,
-                trim_start_sec: 0.0,
-                trim_end_sec: 0.0,
+                    source_start_sec: 0.0,
+                    source_end_sec: source_duration_sec,
                 playback_rate: rate.clamp(0.1, 10.0),
-                fade_in_sec: 0.0,
-                fade_out_sec: 0.0,
-            });
+                    fade_in_sec: 0.0,
+                    fade_out_sec: 0.0,
+                    fade_in_curve: String::new(),
+                    fade_out_curve: String::new(),
+                });
 
             // 写入 pitch 数据
             write_pitch_data_for_segment(

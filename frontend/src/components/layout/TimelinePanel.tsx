@@ -60,6 +60,7 @@ export const TimelinePanel: React.FC = () => {
         sessionRef.current = s;
     }, [s]);
     const scrollRef = useRef<HTMLDivElement | null>(null);
+    const trackListScrollRef = useRef<HTMLDivElement | null>(null);
     const rulerContentRef = useRef<HTMLDivElement | null>(null);
     const scrollLeftRef = useRef(0);
     const scrollStateRafRef = useRef<number | null>(null);
@@ -140,10 +141,18 @@ export const TimelinePanel: React.FC = () => {
     const [altPressed, setAltPressed] = useState(false);
 
     // 从 store 读取 modifier.clipStretch 绑定，动态检测对应修饰键
-    const stretchKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipStretch"));
-    const slipEditKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipSlipEdit"));
-    const noSnapKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipNoSnap"));
-    const copyDragKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipCopyDrag"));
+    const stretchKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.clipStretch"),
+    );
+    const slipEditKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.clipSlipEdit"),
+    );
+    const noSnapKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.clipNoSnap"),
+    );
+    const copyDragKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.clipCopyDrag"),
+    );
     const stretchKbRef = useRef<Keybinding>(stretchKb);
     useEffect(() => {
         stretchKbRef.current = stretchKb;
@@ -159,7 +168,8 @@ export const TimelinePanel: React.FC = () => {
         /** 检测当前按下的键是否匹配 modifier.clipStretch 绑定 */
         function isStretchModifier(e: KeyboardEvent): boolean {
             const kb = stretchKbRef.current;
-            if (kb.ctrl && (e.key === "Control" || e.ctrlKey || e.metaKey)) return true;
+            if (kb.ctrl && (e.key === "Control" || e.ctrlKey || e.metaKey))
+                return true;
             if (kb.alt && (e.key === "Alt" || e.altKey)) return true;
             if (kb.shift && (e.key === "Shift" || e.shiftKey)) return true;
             return false;
@@ -231,106 +241,109 @@ export const TimelinePanel: React.FC = () => {
                             ? payload.paths
                             : [];
 
-                    if (debugDnd) {
-                        console.log("[dnd] tauri event", {
-                            type,
-                            pathsCount: paths.length,
-                            hasPosition: Boolean(
-                                payload?.position ??
-                                payload?.pos ??
-                                payload?.cursorPosition,
-                            ),
-                        });
-                    }
-
-                    // Some platforms don't dispatch DOM dragover/drop for external file drags.
-                    // Use Tauri's drag-drop event as the source of truth, including ghost + import.
-                    const scroller = scrollRef.current;
-                    const bounds = scroller?.getBoundingClientRect() ?? null;
-                    const pos = (payload?.position ??
-                        payload?.pos ??
-                        payload?.cursorPosition) as
-                        | { x?: number; y?: number }
-                        | undefined;
-                    // Tauri's position is in window/client coordinates.
-                    const clientX =
-                        typeof pos?.x === "number" ? pos.x : undefined;
-                    const clientY =
-                        typeof pos?.y === "number" ? pos.y : undefined;
-                    const fallbackBeat = sessionRef.current.playheadSec ?? 0;
-                    const beat =
-                        clientX !== undefined && bounds && scroller
-                            ? beatFromClientX(
-                                  clientX,
-                                  bounds,
-                                  scroller.scrollLeft,
-                              )
-                            : fallbackBeat;
-                    const trackId =
-                        clientY !== undefined
-                            ? trackIdFromClientY(clientY)
-                            : null;
-
-                    const primaryPath = paths.length > 0 ? paths[0] : null;
-                    function fileNameFromPath(p: string) {
-                        return String(p.split(/[\\/]/).pop() ?? p);
-                    }
-
-                    if (type === "enter" || type === "over") {
-                        if (primaryPath) {
-                            tauriDraggedPathRef.current = primaryPath;
+                        if (debugDnd) {
+                            console.log("[dnd] tauri event", {
+                                type,
+                                pathsCount: paths.length,
+                                hasPosition: Boolean(
+                                    payload?.position ??
+                                    payload?.pos ??
+                                    payload?.cursorPosition,
+                                ),
+                            });
                         }
-                        // On some platforms, `paths` may only be populated on `drop`.
-                        // Still update the ghost position on every `over`.
-                        setDropPreview((prev) => {
-                            const path =
-                                primaryPath ??
-                                tauriDraggedPathRef.current ??
-                                prev?.path ??
-                                null;
-                            if (!path) return prev;
-                            const nextFileName = fileNameFromPath(path);
-                            return {
-                                path,
-                                fileName: prev?.fileName ?? nextFileName,
-                                trackId,
-                                startSec: beat,
-                            };
-                        });
-                        return;
-                    }
 
-                    if (type === "leave") {
-                        tauriDraggedPathRef.current = null;
-                        setDropPreview(null);
-                        return;
-                    }
+                        // Some platforms don't dispatch DOM dragover/drop for external file drags.
+                        // Use Tauri's drag-drop event as the source of truth, including ghost + import.
+                        const scroller = scrollRef.current;
+                        const bounds =
+                            scroller?.getBoundingClientRect() ?? null;
+                        const pos = (payload?.position ??
+                            payload?.pos ??
+                            payload?.cursorPosition) as
+                            | { x?: number; y?: number }
+                            | undefined;
+                        // Tauri's position is in window/client coordinates.
+                        const clientX =
+                            typeof pos?.x === "number" ? pos.x : undefined;
+                        const clientY =
+                            typeof pos?.y === "number" ? pos.y : undefined;
+                        const fallbackBeat =
+                            sessionRef.current.playheadSec ?? 0;
+                        const beat =
+                            clientX !== undefined && bounds && scroller
+                                ? beatFromClientX(
+                                      clientX,
+                                      bounds,
+                                      scroller.scrollLeft,
+                                  )
+                                : fallbackBeat;
+                        const trackId =
+                            clientY !== undefined
+                                ? trackIdFromClientY(clientY)
+                                : null;
 
-                    if (type === "drop") {
-                        if (primaryPath) {
-                            tauriDraggedPathRef.current = primaryPath;
-                            tauriLastDropPathRef.current = primaryPath;
+                        const primaryPath = paths.length > 0 ? paths[0] : null;
+                        function fileNameFromPath(p: string) {
+                            return String(p.split(/[\\/]/).pop() ?? p);
                         }
-                        setDropPreview(null);
 
-                        const resolvedPath =
-                            primaryPath ||
-                            tauriDraggedPathRef.current ||
-                            tauriLastDropPathRef.current;
-                        if (resolvedPath) {
-                            tauriDropHandledAtRef.current = Date.now();
-                            tauriDraggedPathRef.current = null;
-                            tauriLastDropPathRef.current = null;
-                            void dispatch(
-                                importAudioAtPosition({
-                                    audioPath: resolvedPath,
+                        if (type === "enter" || type === "over") {
+                            if (primaryPath) {
+                                tauriDraggedPathRef.current = primaryPath;
+                            }
+                            // On some platforms, `paths` may only be populated on `drop`.
+                            // Still update the ghost position on every `over`.
+                            setDropPreview((prev) => {
+                                const path =
+                                    primaryPath ??
+                                    tauriDraggedPathRef.current ??
+                                    prev?.path ??
+                                    null;
+                                if (!path) return prev;
+                                const nextFileName = fileNameFromPath(path);
+                                return {
+                                    path,
+                                    fileName: prev?.fileName ?? nextFileName,
                                     trackId,
                                     startSec: beat,
-                                }),
-                            );
+                                };
+                            });
+                            return;
                         }
-                    }
-                });
+
+                        if (type === "leave") {
+                            tauriDraggedPathRef.current = null;
+                            setDropPreview(null);
+                            return;
+                        }
+
+                        if (type === "drop") {
+                            if (primaryPath) {
+                                tauriDraggedPathRef.current = primaryPath;
+                                tauriLastDropPathRef.current = primaryPath;
+                            }
+                            setDropPreview(null);
+
+                            const resolvedPath =
+                                primaryPath ||
+                                tauriDraggedPathRef.current ||
+                                tauriLastDropPathRef.current;
+                            if (resolvedPath) {
+                                tauriDropHandledAtRef.current = Date.now();
+                                tauriDraggedPathRef.current = null;
+                                tauriLastDropPathRef.current = null;
+                                void dispatch(
+                                    importAudioAtPosition({
+                                        audioPath: resolvedPath,
+                                        trackId,
+                                        startSec: beat,
+                                    }),
+                                );
+                            }
+                        }
+                    },
+                );
             } catch (err) {
                 // Safe no-op: browser/pywebview builds won't have the Tauri API.
                 if (debugDnd) {
@@ -423,6 +436,10 @@ export const TimelinePanel: React.FC = () => {
     const [multiSelectedClipIds, setMultiSelectedClipIds] = useState<string[]>(
         [],
     );
+    // 切换工具时清除多选
+    useEffect(() => {
+        setMultiSelectedClipIds([]);
+    }, [s.toolMode]);
     const multiSelectedSet = useMemo(
         () => new Set(multiSelectedClipIds),
         [multiSelectedClipIds],
@@ -498,11 +515,7 @@ export const TimelinePanel: React.FC = () => {
     }, [s.clips]);
 
     /** 将客户端 X 坐标转换为秒（seconds-based，不受 BPM 影响） */
-    function secFromClientX(
-        clientX: number,
-        bounds: DOMRect,
-        xScroll: number,
-    ) {
+    function secFromClientX(clientX: number, bounds: DOMRect, xScroll: number) {
         const x = clientX - bounds.left + xScroll;
         return Math.max(0, x / pxPerSec);
     }
@@ -639,7 +652,11 @@ export const TimelinePanel: React.FC = () => {
         beatFromClientX,
     });
 
-    const { clipDragRef: _clipDragRef, startClipDrag: _startClipDragInner, ghostDrag } = useClipDrag({
+    const {
+        clipDragRef: _clipDragRef,
+        startClipDrag: _startClipDragInner,
+        ghostDrag,
+    } = useClipDrag({
         scrollRef,
         sessionRef,
         rowHeight,
@@ -662,7 +679,13 @@ export const TimelinePanel: React.FC = () => {
         clipstartSec: number,
         altPressedHint?: boolean,
     ) {
-        _startClipDragInner(e, clipId, clipstartSec, altPressedHint, startSlipDrag);
+        _startClipDragInner(
+            e,
+            clipId,
+            clipstartSec,
+            altPressedHint,
+            startSlipDrag,
+        );
     }
 
     // ���� ���̿�ݼ� hook ������������������������������������������������������������������������������������������������������������
@@ -694,6 +717,7 @@ export const TimelinePanel: React.FC = () => {
                 selectedTrackId={s.selectedTrackId}
                 rowHeight={rowHeight}
                 trackVolumeUi={trackVolumeUi}
+                listScrollRef={trackListScrollRef}
                 onSelectTrack={(trackId) => {
                     dispatch(selectTrackRemote(trackId));
                 }}
@@ -806,6 +830,12 @@ export const TimelinePanel: React.FC = () => {
                     setRowHeight={setRowHeight}
                     setScrollLeft={setScrollLeftAction}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"
+                    onScroll={(e) => {
+                        const el = e.currentTarget as HTMLDivElement;
+                        if (trackListScrollRef.current) {
+                            trackListScrollRef.current.scrollTop = el.scrollTop;
+                        }
+                    }}
                     onMouseDownCapture={(e) => {
                         if (e.button === 1) {
                             e.preventDefault();
@@ -1039,7 +1069,7 @@ export const TimelinePanel: React.FC = () => {
                                 ([] as typeof s.clips);
 
                             return (
-                        <TrackLane
+                                <TrackLane
                                     key={track.id}
                                     track={track}
                                     trackClips={trackClips}
@@ -1063,7 +1093,11 @@ export const TimelinePanel: React.FC = () => {
                                     selectClipRemote={(clipId) => {
                                         void dispatch(selectClipRemote(clipId));
                                     }}
-                                    openContextMenu={(clipId, clientX, clientY) => {
+                                    openContextMenu={(
+                                        clipId,
+                                        clientX,
+                                        clientY,
+                                    ) => {
                                         setContextMenu({
                                             x: clientX,
                                             y: clientY,
@@ -1230,106 +1264,153 @@ export const TimelinePanel: React.FC = () => {
                     </div>
                 </TimelineScrollArea>
 
-                {contextMenu ? (() => {
-                    const ctxClip = sessionRef.current.clips.find(
-                        (c) => c.id === contextMenu.clipId,
-                    );
-                    if (!ctxClip) return null;
+                {contextMenu
+                    ? (() => {
+                          const ctxClip = sessionRef.current.clips.find(
+                              (c) => c.id === contextMenu.clipId,
+                          );
+                          if (!ctxClip) return null;
 
-                    const selectedIds =
-                        multiSelectedClipIds.length >= 2
-                            ? multiSelectedClipIds
-                            : [contextMenu.clipId];
-                    const selectedClips = sessionRef.current.clips.filter((c) =>
-                        selectedIds.includes(c.id),
-                    );
+                          const selectedIds =
+                              multiSelectedClipIds.length >= 2
+                                  ? multiSelectedClipIds
+                                  : [contextMenu.clipId];
+                          const selectedClips = sessionRef.current.clips.filter(
+                              (c) => selectedIds.includes(c.id),
+                          );
 
-                    const playheadSec = sessionRef.current.playheadSec;
-                    const playheadInClip =
-                        playheadSec >= ctxClip.startSec &&
-                        playheadSec <= ctxClip.startSec + ctxClip.lengthSec;
+                          const playheadSec = sessionRef.current.playheadSec;
+                          const playheadInClip =
+                              playheadSec >= ctxClip.startSec &&
+                              playheadSec <=
+                                  ctxClip.startSec + ctxClip.lengthSec;
 
-                    return (
-                        <ClipContextMenu
-                            x={contextMenu.x}
-                            y={contextMenu.y}
-                            clip={ctxClip}
-                            selectedClips={selectedClips}
-                            playheadInClip={playheadInClip}
-                            onClose={() => setContextMenu(null)}
-                            onDelete={(ids) => {
-                                setContextMenu(null);
-                                setMultiSelectedClipIds([]);
-                                for (const id of ids) {
-                                    void dispatch(removeClipRemote(id));
-                                }
-                            }}
-                            onMute={(ids, muted) => {
-                                for (const id of ids) {
-                                    dispatch(setClipMuted({ clipId: id, muted }));
-                                    void dispatch(
-                                        setClipStateRemote({ clipId: id, muted }),
-                                    );
-                                }
-                            }}
-                            onRename={(clipId) => {
-                                setContextMenu(null);
-                                setRenamingClipId(clipId);
-                            }}
-                            onCopy={(ids) => {
-                                const templates = sessionRef.current.clips
-                                    .filter((c) => ids.includes(c.id))
-                                    .map((c) => ({ ...c }));
-                                if (templates.length > 0) {
-                                    clipClipboardRef.current = templates;
-                                }
-                            }}
-                            onSplit={(clipId) => {
-                                setContextMenu(null);
-                                void dispatch(
-                                    splitClipRemote({
-                                        clipId,
-                                        splitSec: sessionRef.current.playheadSec,
-                                    }),
-                                );
-                            }}
-                            onGlue={(ids) => {
-                                setContextMenu(null);
-                                if (ids.length >= 2) {
-                                    void dispatch(glueClipsRemote(ids));
-                                    setMultiSelectedClipIds([]);
-                                }
-                            }}
-                            onFadeCurveChange={(clipId, target, curve) => {
-                                dispatch(setClipFades({
-                                    clipId,
-                                    ...(target === "in"
-                                        ? { fadeInCurve: curve }
-                                        : { fadeOutCurve: curve }),
-                                }));
-                            }}
-                            onNormalize={(ids) => {
-                                for (const id of ids) {
-                                    const waveform = sessionRef.current.clipWaveforms[id];
-                                    if (!waveform) continue;
-                                    const samples = Array.isArray(waveform)
-                                        ? waveform
-                                        : [...waveform.l, ...waveform.r];
-                                    if (samples.length === 0) continue;
-                                    const peak = Math.max(...samples.map(Math.abs));
-                                    if (peak <= 0) continue;
-                                    const newGain = Math.min(
-                                        Math.max(1.0 / peak, dbToGain(-12)),
-                                        dbToGain(12),
-                                    );
-                                    dispatch(setClipGain({ clipId: id, gain: newGain }));
-                                    void dispatch(setClipStateRemote({ clipId: id, gain: newGain }));
-                                }
-                            }}                        />
-                    );
-                })() : null}
+                          return (
+                              <ClipContextMenu
+                                  x={contextMenu.x}
+                                  y={contextMenu.y}
+                                  clip={ctxClip}
+                                  selectedClips={selectedClips}
+                                  playheadInClip={playheadInClip}
+                                  onClose={() => setContextMenu(null)}
+                                  onDelete={(ids) => {
+                                      setContextMenu(null);
+                                      setMultiSelectedClipIds([]);
+                                      for (const id of ids) {
+                                          void dispatch(removeClipRemote(id));
+                                      }
+                                  }}
+                                  onMute={(ids, muted) => {
+                                      for (const id of ids) {
+                                          dispatch(
+                                              setClipMuted({
+                                                  clipId: id,
+                                                  muted,
+                                              }),
+                                          );
+                                          void dispatch(
+                                              setClipStateRemote({
+                                                  clipId: id,
+                                                  muted,
+                                              }),
+                                          );
+                                      }
+                                  }}
+                                  onRename={(clipId) => {
+                                      setContextMenu(null);
+                                      setRenamingClipId(clipId);
+                                  }}
+                                  onCopy={(ids) => {
+                                      const templates = sessionRef.current.clips
+                                          .filter((c) => ids.includes(c.id))
+                                          .map((c) => ({ ...c }));
+                                      if (templates.length > 0) {
+                                          clipClipboardRef.current = templates;
+                                      }
+                                  }}
+                                  onSplit={(clipId) => {
+                                      setContextMenu(null);
+                                      void dispatch(
+                                          splitClipRemote({
+                                              clipId,
+                                              splitSec:
+                                                  sessionRef.current
+                                                      .playheadSec,
+                                          }),
+                                      );
+                                  }}
+                                  onGlue={(ids) => {
+                                      setContextMenu(null);
+                                      if (ids.length >= 2) {
+                                          void dispatch(glueClipsRemote(ids));
+                                          setMultiSelectedClipIds([]);
+                                      }
+                                  }}
+                                  onFadeCurveChange={(
+                                      clipId,
+                                      target,
+                                      curve,
+                                  ) => {
+                                      dispatch(
+                                          setClipFades({
+                                              clipId,
+                                              ...(target === "in"
+                                                  ? { fadeInCurve: curve }
+                                                  : { fadeOutCurve: curve }),
+                                          }),
+                                      );
+                                      void dispatch(
+                                          setClipStateRemote({
+                                              clipId,
+                                              ...(target === "in"
+                                                  ? { fadeInCurve: curve }
+                                                  : { fadeOutCurve: curve }),
+                                          }),
+                                      );
+                                  }}
+                                  onNormalize={(ids) => {
+                                      for (const id of ids) {
+                                          const waveform =
+                                              sessionRef.current.clipWaveforms[
+                                                  id
+                                              ];
+                                          if (!waveform) continue;
+                                          const samples = Array.isArray(
+                                              waveform,
+                                          )
+                                              ? waveform
+                                              : [...waveform.l, ...waveform.r];
+                                          if (samples.length === 0) continue;
+                                          const peak = Math.max(
+                                              ...samples.map(Math.abs),
+                                          );
+                                          if (peak <= 0) continue;
+                                          const newGain = Math.min(
+                                              Math.max(
+                                                  1.0 / peak,
+                                                  dbToGain(-12),
+                                              ),
+                                              dbToGain(12),
+                                          );
+                                          dispatch(
+                                              setClipGain({
+                                                  clipId: id,
+                                                  gain: newGain,
+                                              }),
+                                          );
+                                          void dispatch(
+                                              setClipStateRemote({
+                                                  clipId: id,
+                                                  gain: newGain,
+                                              }),
+                                          );
+                                      }
+                                  }}
+                              />
+                          );
+                      })()
+                    : null}
             </Flex>
         </Flex>
     );
 };
-

@@ -165,7 +165,10 @@ export function usePianoRollInteractions(args: {
             if (!canvas) return 0;
             const rect = canvas.getBoundingClientRect();
             const y = clientY - rect.top;
-            return yToValue(editParam, y, rect.height);
+            const raw = yToValue(editParam, y, rect.height);
+            // render.ts 绘制 pitch 曲线时对值加了 +0.5（使曲线居于琴键中心），
+            // 此处减去相同偏移，确保编辑点与显示位置对齐。
+            return editParam === "pitch" ? raw - 0.5 : raw;
         },
         [canvasRef, editParam, yToValue],
     );
@@ -236,10 +239,13 @@ export function usePianoRollInteractions(args: {
                 if (kb.modifierOnly) {
                     keyMatch = isModifierActive(kb, e.nativeEvent);
                 } else {
-                    let pressedKey = e.key === " " ? "space" : e.key.toLowerCase();
+                    let pressedKey =
+                        e.key === " " ? "space" : e.key.toLowerCase();
                     if (pressedKey !== kb.key) keyMatch = false;
                     else {
-                        const isMac = navigator.platform.toLowerCase().includes("mac");
+                        const isMac = navigator.platform
+                            .toLowerCase()
+                            .includes("mac");
                         const modKey = isMac ? e.metaKey : e.ctrlKey;
                         keyMatch =
                             modKey === Boolean(kb.ctrl) &&
@@ -261,8 +267,11 @@ export function usePianoRollInteractions(args: {
                         const payload = res as ParamFramesPayload;
                         clipboardRef.current = {
                             param: editParam,
-                            framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
-                            values: (payload.edit ?? []).map((v) => Number(v) || 0),
+                            framePeriodMs:
+                                Number(payload.frame_period_ms ?? fp) || fp,
+                            values: (payload.edit ?? []).map(
+                                (v) => Number(v) || 0,
+                            ),
                         };
                     })();
                     return;
@@ -276,10 +285,13 @@ export function usePianoRollInteractions(args: {
                 if (kb.modifierOnly) {
                     keyMatch = isModifierActive(kb, e.nativeEvent);
                 } else {
-                    let pressedKey = e.key === " " ? "space" : e.key.toLowerCase();
+                    let pressedKey =
+                        e.key === " " ? "space" : e.key.toLowerCase();
                     if (pressedKey !== kb.key) keyMatch = false;
                     else {
-                        const isMac = navigator.platform.toLowerCase().includes("mac");
+                        const isMac = navigator.platform
+                            .toLowerCase()
+                            .includes("mac");
                         const modKey = isMac ? e.metaKey : e.ctrlKey;
                         keyMatch =
                             modKey === Boolean(kb.ctrl) &&
@@ -510,44 +522,92 @@ export function usePianoRollInteractions(args: {
                         if (pv && pv.edit.length > 0) {
                             const fp = pv.framePeriodMs;
                             const sec = b * secPerBeat;
-                            const frame = Math.max(0, Math.floor((sec * 1000) / fp));
-                            const idx = Math.round((frame - pv.startFrame) / Math.max(1, pv.stride));
-                            const curveVal = (idx >= 0 && idx < pv.edit.length) ? pv.edit[idx] : null;
+                            const frame = Math.max(
+                                0,
+                                Math.floor((sec * 1000) / fp),
+                            );
+                            const idx = Math.round(
+                                (frame - pv.startFrame) /
+                                    Math.max(1, pv.stride),
+                            );
+                            const curveVal =
+                                idx >= 0 && idx < pv.edit.length
+                                    ? pv.edit[idx]
+                                    : null;
                             const mouseVal = pointerValue(e.clientY);
 
                             // 使用像素距离判断是否靠近曲线，避免不同参数值域差异的影响
                             const canvas = canvasRef.current;
-                            const rectH = canvas ? canvas.getBoundingClientRect().height : (viewSizeRef.current.h || 1);
-                            const mouseY = canvas ? (e.clientY - canvas.getBoundingClientRect().top) : 0;
+                            const rectH = canvas
+                                ? canvas.getBoundingClientRect().height
+                                : viewSizeRef.current.h || 1;
+                            const mouseY = canvas
+                                ? e.clientY - canvas.getBoundingClientRect().top
+                                : 0;
                             // pitch 绘制时有 +0.5 偏移（画在琴键中心），命中检测需保持一致
-                            const mappedCurveVal = curveVal !== null
-                                ? (editParam === "pitch" ? curveVal + 0.5 : curveVal)
-                                : null;
-                            const curveY = mappedCurveVal !== null ? valueToY(editParam, mappedCurveVal, rectH) : null;
+                            const mappedCurveVal =
+                                curveVal !== null
+                                    ? editParam === "pitch"
+                                        ? curveVal + 0.5
+                                        : curveVal
+                                    : null;
+                            const curveY =
+                                mappedCurveVal !== null
+                                    ? valueToY(editParam, mappedCurveVal, rectH)
+                                    : null;
                             const HIT_THRESHOLD_PX = 10;
 
-                            if (curveY !== null && Math.abs(mouseY - curveY) < HIT_THRESHOLD_PX) {
+                            if (
+                                curveY !== null &&
+                                Math.abs(mouseY - curveY) < HIT_THRESHOLD_PX
+                            ) {
                                 // 进入拖拽选中曲线模式
                                 const startMouseVal = mouseVal;
                                 const pid = e.pointerId;
-                                (e.currentTarget as HTMLCanvasElement).setPointerCapture(pid);
+                                (
+                                    e.currentTarget as HTMLCanvasElement
+                                ).setPointerCapture(pid);
 
                                 // 保存选区内曲线原始值
                                 const selStartSec = aBeat * secPerBeat;
                                 const selEndSec = bBeat * secPerBeat;
-                                const selStartFrame = Math.max(0, Math.floor((selStartSec * 1000) / fp));
-                                const selEndFrame = Math.max(0, Math.ceil((selEndSec * 1000) / fp));
-                                const selStartIdx = Math.max(0, Math.round((selStartFrame - pv.startFrame) / Math.max(1, pv.stride)));
-                                const selEndIdx = Math.min(pv.edit.length - 1, Math.round((selEndFrame - pv.startFrame) / Math.max(1, pv.stride)));
-                                const origValues = pv.edit.slice(selStartIdx, selEndIdx + 1);
+                                const selStartFrame = Math.max(
+                                    0,
+                                    Math.floor((selStartSec * 1000) / fp),
+                                );
+                                const selEndFrame = Math.max(
+                                    0,
+                                    Math.ceil((selEndSec * 1000) / fp),
+                                );
+                                const selStartIdx = Math.max(
+                                    0,
+                                    Math.round(
+                                        (selStartFrame - pv.startFrame) /
+                                            Math.max(1, pv.stride),
+                                    ),
+                                );
+                                const selEndIdx = Math.min(
+                                    pv.edit.length - 1,
+                                    Math.round(
+                                        (selEndFrame - pv.startFrame) /
+                                            Math.max(1, pv.stride),
+                                    ),
+                                );
+                                const origValues = pv.edit.slice(
+                                    selStartIdx,
+                                    selEndIdx + 1,
+                                );
 
                                 ensureLiveEditBase(pv);
-                                if (liveEditActiveRef) liveEditActiveRef.current = true;
+                                if (liveEditActiveRef)
+                                    liveEditActiveRef.current = true;
 
                                 // 用闭包变量记录最新偏移量，避免全局污染
                                 let lastDelta = 0;
 
-                                const onMove = (ev: globalThis.PointerEvent) => {
+                                const onMove = (
+                                    ev: globalThis.PointerEvent,
+                                ) => {
                                     const currentVal = pointerValue(ev.clientY);
                                     lastDelta = currentVal - startMouseVal;
                                     const pvNow = paramViewRef.current;
@@ -558,24 +618,37 @@ export function usePianoRollInteractions(args: {
                                     const len = selEndIdx - selStartIdx + 1;
                                     const dense = new Array<number>(len);
                                     for (let i = 0; i < len; i++) {
-                                        dense[i] = (origValues[i] ?? 0) + lastDelta;
+                                        dense[i] =
+                                            (origValues[i] ?? 0) + lastDelta;
                                     }
-                                    const denseStartFrame = pv.startFrame + selStartIdx * Math.max(1, pv.stride);
+                                    const denseStartFrame =
+                                        pv.startFrame +
+                                        selStartIdx * Math.max(1, pv.stride);
                                     applyDenseToLiveEdit(
                                         pvNow,
                                         denseStartFrame,
                                         dense,
                                         denseStartFrame,
-                                        denseStartFrame + (len - 1) * Math.max(1, pv.stride),
+                                        denseStartFrame +
+                                            (len - 1) * Math.max(1, pv.stride),
                                         "draw",
                                     );
                                     invalidate();
                                 };
 
                                 const onUp = () => {
-                                    window.removeEventListener("pointermove", onMove);
-                                    window.removeEventListener("pointerup", onUp);
-                                    window.removeEventListener("pointercancel", onUp);
+                                    window.removeEventListener(
+                                        "pointermove",
+                                        onMove,
+                                    );
+                                    window.removeEventListener(
+                                        "pointerup",
+                                        onUp,
+                                    );
+                                    window.removeEventListener(
+                                        "pointercancel",
+                                        onUp,
+                                    );
 
                                     // 提交拖拽结果到后端
                                     const pvNow = paramViewRef.current;
@@ -583,9 +656,14 @@ export function usePianoRollInteractions(args: {
                                         const len = selEndIdx - selStartIdx + 1;
                                         const values = new Array<number>(len);
                                         for (let i = 0; i < len; i++) {
-                                            values[i] = (origValues[i] ?? 0) + lastDelta;
+                                            values[i] =
+                                                (origValues[i] ?? 0) +
+                                                lastDelta;
                                         }
-                                        const commitStartFrame = pv.startFrame + selStartIdx * Math.max(1, pv.stride);
+                                        const commitStartFrame =
+                                            pv.startFrame +
+                                            selStartIdx *
+                                                Math.max(1, pv.stride);
                                         void (async () => {
                                             await paramsApi.setParamFrames(
                                                 rootTrackId,
@@ -594,11 +672,13 @@ export function usePianoRollInteractions(args: {
                                                 values,
                                                 true,
                                             );
-                                            if (liveEditActiveRef) liveEditActiveRef.current = false;
+                                            if (liveEditActiveRef)
+                                                liveEditActiveRef.current = false;
                                             bumpRefreshToken();
                                         })();
                                     } else {
-                                        if (liveEditActiveRef) liveEditActiveRef.current = false;
+                                        if (liveEditActiveRef)
+                                            liveEditActiveRef.current = false;
                                     }
                                     invalidate();
                                 };

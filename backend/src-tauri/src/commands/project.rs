@@ -22,14 +22,7 @@ pub(crate) fn save_project_to_path_inner(
     project_path: String,
 ) -> Result<crate::models::TimelineStatePayload, String> {
     let path = PathBuf::from(&project_path);
-    let name = {
-        let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-        if p.name.trim().is_empty() {
-            project_name_from_path(&path)
-        } else {
-            p.name.clone()
-        }
-    };
+    let name = project_name_from_path(&path);
 
     let tl = state
         .timeline
@@ -53,6 +46,14 @@ pub(crate) fn save_project_to_path_inner(
             p.recent.truncate(10);
         }
         update_window_title(window, &p.name, p.dirty);
+    }
+
+    // 持久化最近工程列表
+    {
+        let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(dir) = state.config_dir.get() {
+            crate::config::save_recent(dir, &p.recent);
+        }
     }
 
     Ok(get_timeline_state_from_ref(state))
@@ -119,6 +120,13 @@ pub(super) fn open_project(
     };
 
     pf.timeline = resolve_paths_relative(pf.timeline, &path);
+    // 旧项目兼容迁移：source_end_sec == 0.0 曾表示"到源文件末尾"，
+    // 新语义要求它是真实的结束时间，此处自动修正为 duration_sec 或 length_sec。
+    for clip in &mut pf.timeline.clips {
+        if clip.source_end_sec == 0.0 {
+            clip.source_end_sec = clip.duration_sec.unwrap_or(clip.length_sec);
+        }
+    }
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         *tl = pf.timeline.clone();
@@ -127,11 +135,7 @@ pub(super) fn open_project(
     state.clear_history();
     {
         let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-        p.name = if pf.name.trim().is_empty() {
-            project_name_from_path(&path)
-        } else {
-            pf.name.clone()
-        };
+        p.name = project_name_from_path(&path);
         p.path = Some(project_path.clone());
         p.dirty = false;
         // recent list (in-memory)
@@ -141,6 +145,14 @@ pub(super) fn open_project(
             p.recent.truncate(10);
         }
         update_window_title(&window, &p.name, p.dirty);
+    }
+
+    // 持久化最近工程列表
+    {
+        let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(dir) = state.config_dir.get() {
+            crate::config::save_recent(dir, &p.recent);
+        }
     }
 
     get_timeline_state(state)

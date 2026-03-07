@@ -57,9 +57,15 @@ export const PianoRollPanel: React.FC = () => {
     const { t } = useI18n();
     const s = useAppSelector((state: RootState) => state.session);
     const editParam = s.editParam as ParamName;
-    const pianoRollCopyKb = useAppSelector((state) => selectKeybinding(state, "pianoRoll.copy"));
-    const pianoRollPasteKb = useAppSelector((state) => selectKeybinding(state, "pianoRoll.paste"));
-    const prVerticalZoomKb = useAppSelector((state) => selectKeybinding(state, "modifier.pianoRollVerticalZoom"));
+    const pianoRollCopyKb = useAppSelector((state) =>
+        selectKeybinding(state, "pianoRoll.copy"),
+    );
+    const pianoRollPasteKb = useAppSelector((state) =>
+        selectKeybinding(state, "pianoRoll.paste"),
+    );
+    const prVerticalZoomKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.pianoRollVerticalZoom"),
+    );
     const { mode: themeMode } = useAppTheme();
     const waveformColors = useMemo(
         () => getWaveformColors(themeMode),
@@ -69,8 +75,6 @@ export const PianoRollPanel: React.FC = () => {
     // Task 6.3: 集成 useAsyncPitchRefresh Hook
     const asyncRefresh = useAsyncPitchRefresh();
     const [showSuccessMessage, setShowSuccessMessage] = useState(false);
-
-
 
     const effectiveSelectedTrackId = useMemo(() => {
         if (s.selectedTrackId) return s.selectedTrackId;
@@ -198,8 +202,6 @@ export const PianoRollPanel: React.FC = () => {
 
     const pitchEnabled =
         editParam !== "pitch" || pitchHardDisableReason == null;
-
-
 
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
     const contentWidth = Math.max(8, Math.ceil(s.projectSec * pxPerSec));
@@ -450,7 +452,8 @@ export const PianoRollPanel: React.FC = () => {
 
     // 可见区域的 sec 范围（统一用 sec 坐标系）
     const visibleStartSec = scrollLeft / Math.max(1e-9, pxPerSec);
-    const visibleEndSec = visibleStartSec + viewSize.w / Math.max(1e-9, pxPerSec);
+    const visibleEndSec =
+        visibleStartSec + viewSize.w / Math.max(1e-9, pxPerSec);
 
     // Per-clip 波形 peaks（替代原来的 mix 波形）
     const clipPeaks = useClipsPeaksForPianoRoll({
@@ -517,17 +520,11 @@ export const PianoRollPanel: React.FC = () => {
                 const clip = s.clips.find((cl) => cl.id === clipId);
                 return clip && groupTrackIds.has(clip.trackId);
             })
-            .map(([clipId, c]) => {
-                // 通过 clipId 查找对应 clip 的当前 startSec 和 lengthSec，用于裁剪渲染区域
-                const clip = s.clips.find((cl) => cl.id === clipId);
-                return {
-                    curveStartSec: c.curveStartSec,
-                    midiCurve: c.midiCurve,
-                    framePeriodMs: c.framePeriodMs,
-                    clipStartSec: clip ? Number(clip.startSec ?? 0) : c.curveStartSec,
-                    clipLengthSec: clip ? Number(clip.lengthSec ?? 0) : Infinity,
-                };
-            });
+            .map(([, c]) => ({
+                curveStartSec: c.curveStartSec,
+                midiCurve: c.midiCurve,
+                framePeriodMs: c.framePeriodMs,
+            }));
     }, [editParam, rootTrack, s.clipPitchCurves, s.clips, groupTrackIds]);
 
     // 检测音高曲线更新时触发重绘
@@ -629,6 +626,13 @@ export const PianoRollPanel: React.FC = () => {
 
     // Silence unused state warnings; selectionUi is future UI.
     void selectionUi;
+
+    // 切换工具时清除选区
+    useEffect(() => {
+        selectionRef.current = null;
+        setSelectionUi(null);
+        invalidate();
+    }, [s.toolMode]);
 
     // 同步 isLoading 和 asyncRefresh 状态到全局 Context
     useEffect(() => {
@@ -920,12 +924,15 @@ export const PianoRollPanel: React.FC = () => {
                     <TimeRuler
                         contentWidth={contentWidth}
                         scrollLeft={scrollLeft}
-                    bars={(() => {
+                        bars={(() => {
                             const beatsPerBar = Math.max(
                                 1,
                                 Math.round(s.beats || 4),
                             );
-                            const totalBeats = Math.max(1, Math.ceil(s.projectSec / secPerBeat));
+                            const totalBeats = Math.max(
+                                1,
+                                Math.ceil(s.projectSec / secPerBeat),
+                            );
                             const result: Array<{
                                 beat: number;
                                 label: string;
@@ -1004,7 +1011,6 @@ export const PianoRollPanel: React.FC = () => {
                         </div>
                     </div>
                 </Flex>
-
             </Flex>
         </Flex>
     );

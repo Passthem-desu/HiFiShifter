@@ -18,6 +18,9 @@ pub const CACHE_FORMAT_VERSION: u32 = 1;
 pub const DEFAULT_CACHE_CAPACITY: usize = 100;
 
 /// Cache key components for a clip pitch analysis result
+///
+/// 全量分析策略：缓存 key 不含 source_start/end/playback_rate，
+/// 始终缓存全量源音频的 MIDI 曲线，trim/rate 变化在组装阶段处理。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClipCacheKey {
     /// Source audio file path
@@ -26,12 +29,6 @@ pub struct ClipCacheKey {
     pub file_size: u64,
     /// File modification time (milliseconds since UNIX_EPOCH)
     pub file_mtime: u64,
-    /// Trim start position in seconds (quantized)
-    pub trim_start_sec: i64,
-    /// Trim end position in seconds (quantized)
-    pub trim_end_sec: u64,
-    /// Playback rate (quantized)
-    pub playback_rate: u64,
     /// Analysis algorithm identifier
     pub algo: String,
     /// F0 floor frequency (Hz)
@@ -160,12 +157,8 @@ pub fn generate_clip_cache_key(key_data: &ClipCacheKey) -> String {
     hasher.update(&key_data.file_size.to_le_bytes());
     hasher.update(&key_data.file_mtime.to_le_bytes());
     
-    // Add trim parameters (affect which portion of audio is analyzed)
-    hasher.update(&key_data.trim_start_sec.to_le_bytes());
-    hasher.update(&key_data.trim_end_sec.to_le_bytes());
-    
-    // Add playback rate (affects pitch analysis)
-    hasher.update(&key_data.playback_rate.to_le_bytes());
+    // 全量分析策略：不含 source_start/end/playback_rate
+    // trim/rate 变化不影响缓存 key，在组装阶段处理
     
     // Add analysis algorithm and parameters
     hasher.update(key_data.algo.as_bytes());
@@ -201,9 +194,6 @@ mod tests {
             source_path: "/test/audio.wav".to_string(),
             file_size: 1000,
             file_mtime: 123456789,
-            trim_start_sec: quantize_i64(0.0, 1000.0),
-            trim_end_sec: quantize_f64(10.0, 1000.0),
-            playback_rate: quantize_f64(1.0, 10000.0),
             algo: "world_dll".to_string(),
             f0_floor: 40,
             f0_ceil: 1600,
@@ -219,28 +209,25 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_key_position_invariance() {
-        // Position (start_sec) should NOT be in cache key
+    fn test_cache_key_trim_rate_invariance() {
+        // 全量分析策略：不同的 trim/rate 应该产生相同的 cache key
+        // 因为缓存的是全量源音频曲线，trim/rate 在组装阶段处理
         let key1 = ClipCacheKey {
             source_path: "/test/audio.wav".to_string(),
             file_size: 1000,
             file_mtime: 123456789,
-            trim_start_sec: quantize_i64(0.0, 1000.0),
-            trim_end_sec: quantize_f64(10.0, 1000.0),
-            playback_rate: quantize_f64(1.0, 10000.0),
             algo: "world_dll".to_string(),
             f0_floor: 40,
             f0_ceil: 1600,
             version: CACHE_FORMAT_VERSION,
         };
         
-        // Same parameters - position doesn't matter for cache key
         let key2 = key1.clone();
         
         let hash1 = generate_clip_cache_key(&key1);
         let hash2 = generate_clip_cache_key(&key2);
         
-        assert_eq!(hash1, hash2, "Position change should not affect cache key");
+        assert_eq!(hash1, hash2, "Trim/rate should not affect cache key");
     }
 
     #[test]
@@ -249,9 +236,6 @@ mod tests {
             source_path: "/test/audio.wav".to_string(),
             file_size: 1000,
             file_mtime: 123456789,
-            trim_start_sec: quantize_i64(0.0, 1000.0),
-            trim_end_sec: quantize_f64(10.0, 1000.0),
-            playback_rate: quantize_f64(1.0, 10000.0),
             algo: "world_dll".to_string(),
             f0_floor: 40,
             f0_ceil: 1600,
@@ -265,19 +249,14 @@ mod tests {
         key.source_path = "/test/other.wav".to_string();
         assert_ne!(generate_clip_cache_key(&key), base_hash);
         
-        // Different trim should produce different key
-        let mut key = base_key.clone();
-        key.trim_end_sec = quantize_f64(20.0, 1000.0);
-        assert_ne!(generate_clip_cache_key(&key), base_hash);
-        
-        // Different playback rate should produce different key
-        let mut key = base_key.clone();
-        key.playback_rate = quantize_f64(1.5, 10000.0);
-        assert_ne!(generate_clip_cache_key(&key), base_hash);
-        
         // Different algorithm should produce different key
         let mut key = base_key.clone();
         key.algo = "nsf_hifigan_onnx".to_string();
+        assert_ne!(generate_clip_cache_key(&key), base_hash);
+        
+        // Different f0 floor should produce different key
+        let mut key = base_key.clone();
+        key.f0_floor = 80;
         assert_ne!(generate_clip_cache_key(&key), base_hash);
     }
 

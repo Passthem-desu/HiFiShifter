@@ -80,6 +80,7 @@ export function ActionBar() {
                     variant={s.toolMode === "select" ? "solid" : "ghost"}
                     color="gray"
                     title={t("select")}
+                    tabIndex={-1}
                     onClick={() => dispatch(setToolMode("select"))}
                 >
                     <CursorArrowIcon />
@@ -89,6 +90,7 @@ export function ActionBar() {
                     variant={s.toolMode === "draw" ? "solid" : "ghost"}
                     color="gray"
                     title={t("draw")}
+                    tabIndex={-1}
                     onClick={() => dispatch(setToolMode("draw"))}
                 >
                     <Pencil1Icon />

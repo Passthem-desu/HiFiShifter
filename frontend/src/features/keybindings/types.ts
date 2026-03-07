@@ -23,6 +23,8 @@ export type ActionId =
     // PianoRoll 操作
     | "pianoRoll.copy" // PianoRoll 内复制参数帧
     | "pianoRoll.paste" // PianoRoll 内粘贴参数帧
+    // 模式切换
+    | "mode.toggle" // 切换选区/编辑模式
     // 修饰键行为
     | "modifier.clipSlipEdit" // 拖动 clip 时进入 slip edit
     | "modifier.clipStretch" // clip 边缘拖动时从 trim 变为 stretch
@@ -49,7 +51,7 @@ export interface ActionMeta {
     /** 国际化文本的 key（用于操作名称显示） */
     labelKey: string;
     /** 分组（用于设置面板分组展示） */
-    group: "playback" | "edit" | "project" | "clip" | "pianoRoll" | "modifier";
+    group: "playback" | "edit" | "project" | "clip" | "pianoRoll" | "mode" | "modifier";
 }
 
 /** 完整的快捷键映射：actionId → Keybinding */

@@ -106,8 +106,8 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
         hasher.update(&quantize_u32(c.start_sec, 1000.0).to_le_bytes());
         hasher.update(&quantize_u32(c.length_sec, 1000.0).to_le_bytes());
         hasher.update(&quantize_u32(c.playback_rate as f64, 10000.0).to_le_bytes());
-        hasher.update(&quantize_i64(c.trim_start_sec, 1000.0).to_le_bytes());
-        hasher.update(&quantize_u32(c.trim_end_sec, 1000.0).to_le_bytes());
+        hasher.update(&quantize_i64(c.source_start_sec, 1000.0).to_le_bytes());
+        hasher.update(&quantize_u32(c.source_end_sec, 1000.0).to_le_bytes());
         if let Some(sp) = c.source_path.as_deref() {
             hasher.update(sp.as_bytes());
             let p = Path::new(sp);
@@ -153,7 +153,7 @@ pub struct PitchOrigAnalysisStartedEvent {
 pub struct PitchOrigAnalysisProgressEvent {
     pub root_track_id: String,
     pub progress: f32,
-    /// 当前正在分析的 clip 名称（None 表示未知或已完成）
+    /// 当前正在分析�?clip 名称（None 表示未知或已完成�?
     pub current_clip_name: Option<String>,
     /// 已完成的 clip 数量
     pub completed_clips: u32,
@@ -266,8 +266,6 @@ fn build_timeline_snapshot(
                 source_path: source_path.clone(),
                 file_size,
                 file_mtime,
-            trim_start_sec: crate::clip_pitch_cache::quantize_i64(clip.trim_start_sec, 1000.0),
-            trim_end_sec: crate::clip_pitch_cache::quantize_f64(clip.trim_end_sec, 1000.0),                playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
                 algo: match algo {
                     PitchAnalysisAlgo::WorldDll => "world_dll",
                     PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx",
@@ -482,6 +480,15 @@ fn analyze_clip_with_cache(
         return Err("No source path".to_string());
     };
 
+    eprintln!(
+        "[pitch:analyze] clip_id={} source={} duration_sec={:?} fp={:.1}ms algo={:?}",
+        clip.id,
+        source_path,
+        clip.duration_sec,
+        frame_period_ms,
+        algo,
+    );
+
     // Generate cache key
     let (file_size, file_mtime) = crate::clip_pitch_cache::get_file_signature(Path::new(source_path));
     
@@ -496,9 +503,6 @@ fn analyze_clip_with_cache(
         source_path: source_path.clone(),
         file_size,
         file_mtime,
-        trim_start_sec: crate::clip_pitch_cache::quantize_i64(clip.trim_start_sec, 1000.0),
-        trim_end_sec: crate::clip_pitch_cache::quantize_f64(clip.trim_end_sec, 1000.0),
-        playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
         algo: algo_str.to_string(),
         f0_floor: crate::clip_pitch_cache::quantize_f64(f0_floor, 10.0),
         f0_ceil: crate::clip_pitch_cache::quantize_f64(f0_ceil, 10.0),
@@ -535,39 +539,9 @@ fn analyze_clip_with_cache(
         return Err("Audio too short".to_string());
     }
     
-    let playback_rate = if clip.playback_rate.is_finite() && clip.playback_rate > 0.0 {
-        clip.playback_rate
-    } else {
-        1.0
-    };
-    
-    // Source trimming (already in sec)
-    let trim_start_sec = clip.trim_start_sec.max(0.0);
-    let trim_end_sec = clip.trim_end_sec.max(0.0);
-    
-    let total_sec = (in_frames as f64) / (in_rate.max(1) as f64);
-    if !(total_sec.is_finite() && total_sec > 0.0) {
-        return Err("Invalid audio duration".to_string());
-    }
-    
-    let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
-    if src_end_limit_sec - trim_start_sec <= 1e-9 {
-        return Err("Trim range too small".to_string());
-    }
-    
-    let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
-    let src_i1 = (src_end_limit_sec * in_rate as f64)
-        .ceil()
-        .max(src_i0 as f64) as usize;
-    let src_i1 = src_i1.min(in_frames);
-    if src_i1 <= src_i0 + 1 {
-        return Err("Invalid trim indices".to_string());
-    }
-    
-    let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
-    
-    // Resample to 44100 Hz
-    let segment = crate::mixdown::linear_resample_interleaved(segment, in_channels_usize, in_rate, 44100);
+    // 全量分析策略：分析完整源音频，trim/rate 在组装阶段处理
+    // Resample 全量 PCM 到 44100 Hz
+    let segment = crate::mixdown::linear_resample_interleaved(&pcm, in_channels_usize, in_rate, 44100);
     let seg_frames = segment.len() / in_channels_usize;
     if seg_frames < 2 {
         return Err("Resampled audio too short".to_string());
@@ -714,6 +688,13 @@ fn process_single_clip(
     let clip_end_sec = clip_start_sec + clip_timeline_len_sec;
     
     let track_gain_value = tracks_gain.get(&clip.track_id).copied().unwrap_or(1.0);
+
+    eprintln!(
+        "[pitch:process] clip_id={} start={:.3}s len={:.3}s src_start={:.3}s src_end={:.3}s pr={:.2} track_gain={:.2}",
+        clip.id, clip_start_sec, clip_timeline_len_sec,
+        clip.source_start_sec, clip.source_end_sec,
+        clip.playback_rate, track_gain_value,
+    );
     
     // Check if clip has valid source
     let Some(_source_path) = clip.source_path.as_ref() else {
@@ -732,9 +713,6 @@ fn process_single_clip(
             source_path: _source_path.clone(),
             file_size,
             file_mtime,
-            trim_start_sec: crate::clip_pitch_cache::quantize_i64(clip.trim_start_sec, 1000.0),
-            trim_end_sec: crate::clip_pitch_cache::quantize_f64(clip.trim_end_sec, 1000.0),
-            playback_rate: crate::clip_pitch_cache::quantize_f64(clip.playback_rate as f64, 1000.0),
             algo: match algo {
                 PitchAnalysisAlgo::WorldDll => "world_dll",
                 PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx",
@@ -755,7 +733,7 @@ fn process_single_clip(
     };
     
     // Analyze clip (with caching)
-    // 在分析开始前，通知 tracker 当前正在处理的 clip
+    // 在分析开始前，通知 tracker 当前正在处理�?clip
     if let Some(tracker) = tracker {
         tracker.set_current_clip(Some(clip.name.clone()));
     }
@@ -774,7 +752,7 @@ fn process_single_clip(
     // Update progress
     if let Some(tracker) = tracker {
         let progress = tracker.report_clip_completed(duration_sec, was_cache_hit);
-        // 分析完成后清除当前 clip 名称
+        // 分析完成后清除当�?clip 名称
         tracker.set_current_clip(None);
         if debug {
             eprintln!(
@@ -788,14 +766,26 @@ fn process_single_clip(
     
     // Handle result
     match midi_result {
-        Ok(midi) => {
-            // Calculate pre_silence_sec for clip placement
-            let pre_silence_sec_src = (-clip.trim_start_sec).max(0.0);
+        Ok(full_midi) => {
+            // 全量分析策略：缓存中是全量源音频曲线，
+            // 需要做 trim+resample 转换为 timeline 对齐的曲线
             let playback_rate = if clip.playback_rate.is_finite() && clip.playback_rate > 0.0 {
                 clip.playback_rate as f64
             } else {
                 1.0
             };
+            
+            let midi = std::sync::Arc::new(crate::pitch_clip::trim_and_resample_midi(
+                &full_midi,
+                frame_period_ms,
+                clip.source_start_sec,
+                clip.source_end_sec,
+                playback_rate,
+                clip_timeline_len_sec,
+            ));
+            
+            // Calculate pre_silence_sec for clip placement
+            let pre_silence_sec_src = (-clip.source_start_sec).max(0.0);
             let pre_silence_sec = pre_silence_sec_src / playback_rate.max(1e-6);
             
             // Estimate clip_total_frames (from original audio)
@@ -1124,20 +1114,30 @@ fn compute_pitch_curve_with_incremental_refresh(
             debug,
         );
         
-        if let Ok(midi) = cache_result {
+        if let Ok(full_midi) = cache_result {
     let clip_start_sec = clip.start_sec.max(0.0);
     let clip_timeline_len_sec = clip.length_sec.max(0.0);
             let clip_end_sec = clip_start_sec + clip_timeline_len_sec;
             
             let track_gain_value = tracks_gain.get(&clip.track_id).copied().unwrap_or(1.0);
             
-            let pre_silence_sec_src = (-clip.trim_start_sec).max(0.0);
+            let pre_silence_sec_src = (-clip.source_start_sec).max(0.0);
             let playback_rate = if clip.playback_rate.is_finite() && clip.playback_rate > 0.0 {
                 clip.playback_rate as f64
             } else {
                 1.0
             };
             let pre_silence_sec = pre_silence_sec_src / playback_rate.max(1e-6);
+            
+            // 全量分析策略：缓存中是全量源音频曲线，做 trim+resample
+            let midi = std::sync::Arc::new(crate::pitch_clip::trim_and_resample_midi(
+                &full_midi,
+                frame_period_ms,
+                clip.source_start_sec,
+                clip.source_end_sec,
+                playback_rate,
+                clip_timeline_len_sec,
+            ));
             
             let clip_total_frames = if let Some(dur) = clip.duration_sec {
                 let in_rate = 44100.0;
@@ -1276,20 +1276,31 @@ fn fuse_clip_pitches_optimized(
     for (clip_idx, result) in clip_results.iter().enumerate() {
         let start_frame = ((result.clip_start_sec * 1000.0) / frame_period_ms).round().max(0.0) as usize;
         let end_frame = ((result.clip_end_sec * 1000.0) / frame_period_ms).round().max(0.0) as usize;
+
+        let nonzero = result.midi.iter().filter(|&&v| v.is_finite() && v > 0.0).count();
+        eprintln!(
+            "[pitch:fuse] clip[{}] id={} start={:.3}s end={:.3}s pre_silence={:.3}s midi_len={} nonzero={} start_frame={} end_frame={}",
+            clip_idx, result.clip_id,
+            result.clip_start_sec, result.clip_end_sec,
+            result.pre_silence_sec,
+            result.midi.len(), nonzero,
+            start_frame, end_frame,
+        );
         
         for frame in start_frame..end_frame.min(target_frames) {
             coverage[frame].get_or_insert_with(Vec::new).push(clip_idx);
         }
     }
     
-    if debug {
+    {
         let covered_frames = coverage.iter().filter(|c| c.is_some()).count();
         eprintln!(
-            "Fusion: {} clips, {} frames, {} covered frames ({:.1}%)",
+            "[pitch:fuse] summary: {} clips, target_frames={}, fp={:.1}ms, covered={} ({:.1}%)",
             clip_results.len(),
             target_frames,
+            frame_period_ms,
             covered_frames,
-            (covered_frames as f64 / target_frames as f64) * 100.0
+            (covered_frames as f64 / target_frames.max(1) as f64) * 100.0
         );
     }
     
@@ -1417,6 +1428,15 @@ fn fuse_clip_pitches_optimized(
             *out_v = 0.0;
         }
     }
+
+    {
+        let nonzero = out.iter().filter(|&&v| v.is_finite() && v > 0.0).count();
+        eprintln!(
+            "[pitch:fuse] result: {}/{} frames ({:.1}%) have pitch",
+            nonzero, out.len(),
+            (nonzero as f64 / out.len().max(1) as f64) * 100.0
+        );
+    }
     
     out
 }
@@ -1541,22 +1561,22 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
             1.0
         };
 
-        // Source trimming (already in sec).
-        let trim_start_sec = clip.trim_start_sec.max(0.0);
-        let trim_end_sec = clip.trim_end_sec.max(0.0);
-        let pre_silence_sec = (-clip.trim_start_sec).max(0.0) / playback_rate.max(1e-6);
+        // Source range (already in sec).
+        let source_start_sec = clip.source_start_sec.max(0.0);
+        let source_end_sec = clip.source_end_sec;
+        let pre_silence_sec = (-clip.source_start_sec).max(0.0) / playback_rate.max(1e-6);
 
         let total_sec = (in_frames as f64) / (in_rate.max(1) as f64);
         if !(total_sec.is_finite() && total_sec > 0.0) {
             continue;
         }
 
-        let src_end_limit_sec = (total_sec - trim_end_sec).max(trim_start_sec);
-        if src_end_limit_sec - trim_start_sec <= 1e-9 {
+        let src_end_limit_sec = source_end_sec.min(total_sec).max(source_start_sec);
+        if src_end_limit_sec - source_start_sec <= 1e-9 {
             continue;
         }
 
-        let src_i0 = (trim_start_sec * in_rate as f64).floor().max(0.0) as usize;
+        let src_i0 = (source_start_sec * in_rate as f64).floor().max(0.0) as usize;
         let src_i1 = (src_end_limit_sec * in_rate as f64)
             .ceil()
             .max(src_i0 as f64) as usize;
@@ -1667,8 +1687,8 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
             .max(1.0) as usize;
         let ratio = actual_audio_sec / clip_timeline_len_sec.max(1e-9);
         
-        // 当 playback_rate != 1 时，actual_audio_sec 与 clip_timeline_len_sec 不同是正常的
-        // （actual_audio_sec ≈ clip_timeline_len_sec × playback_rate），不应被当作错误
+        // �?playback_rate != 1 时，actual_audio_sec �?clip_timeline_len_sec 不同是正常的
+        // （actual_audio_sec �?clip_timeline_len_sec × playback_rate），不应被当作错�?
         if debug {
             eprintln!(
                 "pitch: [ALIGNMENT] clip_id={} clip_timeline_len_sec={:.3} actual_audio_sec={:.3} ratio={:.3} playback_rate={:.2}",
@@ -1686,7 +1706,7 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
             );
         }
         
-        // 始终使用 timeline 帧数：源时域的 F0 曲线需要 resample 到 timeline 时域
+        // 始终使用 timeline 帧数：源时域�?F0 曲线需�?resample �?timeline 时域
         // 这样 pitch_orig 中每帧对应的就是 timeline 上的 frame_period 步进
         let clip_frames = clip_frames_from_timeline;
         
@@ -1694,7 +1714,7 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
 
         let tg = track_gain.get(&clip.track_id).copied().unwrap_or(1.0);
 
-        // 始终使用 clip_end_sec（timeline 域），确保融合后曲线长度与 clip 显示范围一致
+        // 始终使用 clip_end_sec（timeline 域），确保融合后曲线长度�?clip 显示范围一�?
         let adjusted_end_sec = clip_end_sec;
 
         clip_pitches.push(ClipPitch {
@@ -1748,14 +1768,14 @@ fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<
     out
 }
 
-/// 从 per-clip 缓存（GLOBAL_CLIP_PITCH_CACHE）直接组装整体音高线。
+/// �?per-clip 缓存（GLOBAL_CLIP_PITCH_CACHE）直接组装整体音高线�?
 ///
-/// 策略：按 `tl.clips` 的顺序（即 z-order，越靠后的 clip 越"上方"）逐 clip 写入，
-/// 后面的 clip 直接覆盖前面的（非零值覆盖，零值不覆盖）。
+/// 策略：按 `tl.clips` 的顺序（�?z-order，越靠后�?clip �?上方"）�?clip 写入�?
+/// 后面�?clip 直接覆盖前面的（非零值覆盖，零值不覆盖）�?
 ///
-/// # 返回值
-/// - `Some((Vec<f32>, true))`：所有 clip 缓存均命中，组装成功
-/// - `Some((Vec<f32>, false))`：部分 clip 缓存未命中，返回已有部分的曲线（渐进更新）
+/// # 返回�?
+/// - `Some((Vec<f32>, true))`：所�?clip 缓存均命中，组装成功
+/// - `Some((Vec<f32>, false))`：部�?clip 缓存未命中，返回已有部分的曲线（渐进更新�?
 /// - `None`：内部错误（实际上不会发生）
 fn assemble_pitch_orig_from_cache(
     tl: &crate::state::TimelineState,
@@ -1766,7 +1786,7 @@ fn assemble_pitch_orig_from_cache(
     let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 { tl.bpm } else { 120.0 };
     let bs = 60.0 / bpm;
 
-    // 收集属于该 root track 的所有 clip（保持 tl.clips 原始顺序 = z-order）
+    // 收集属于�?root track 的所�?clip（保�?tl.clips 原始顺序 = z-order�?
     let clips: Vec<&crate::state::Clip> = tl
         .clips
         .iter()
@@ -1778,7 +1798,7 @@ fn assemble_pitch_orig_from_cache(
         .collect();
 
     if clips.is_empty() {
-        // 没有 clip，直接返回全零曲线（视为全部命中）
+        // 没有 clip，直接返回全零曲线（视为全部命中�?
         return Some((vec![0.0f32; target_frames], true));
     }
 
@@ -1787,24 +1807,24 @@ fn assemble_pitch_orig_from_cache(
     let mut out = vec![0.0f32; target_frames];
     let mut all_cache_hit = true;
 
-    // 按 z-order 从低到高（tl.clips 顺序）写入，后面的 clip 覆盖前面的
+    // �?z-order 从低到高（tl.clips 顺序）写入，后面�?clip 覆盖前面�?
     for clip in &clips {
-        // 查缓存
+        // 查缓�?
         let cached = match cache.get(&clip.id) {
             Some(c) => c,
             None => {
-                // 缓存未命中，跳过该 clip 继续组装（渐进更新）
+                // 缓存未命中，跳过�?clip 继续组装（渐进更新）
                 all_cache_hit = false;
                 continue;
             }
         };
 
-        // 验证 key 是否仍然有效（clip 参数未变）
+        // 验证 key 是否仍然有效（clip 参数未变�?
         let expected_key = {
-            // 用与 pitch_clip.rs 相同的 key 构建逻辑验证
-            // 简化：只要 cached.midi 非空就认为有效（key 校验由 schedule_clip_pitch_jobs 负责）
-            // 实际上 pitch_clip.rs 的 get_or_compute_clip_pitch_midi_global 已经做了 key 校验
-            // 这里我们直接信任缓存（因为 schedule_clip_pitch_jobs 会在 key 变化时重新分析）
+            // 用与 pitch_clip.rs 相同�?key 构建逻辑验证
+            // 简化：只要 cached.midi 非空就认为有效（key 校验�?schedule_clip_pitch_jobs 负责�?
+            // 实际�?pitch_clip.rs �?get_or_compute_clip_pitch_midi_global 已经做了 key 校验
+            // 这里我们直接信任缓存（因�?schedule_clip_pitch_jobs 会在 key 变化时重新分析）
             let _ = &cached.key; // 使用 key 字段避免 unused 警告
             true
         };
@@ -1812,40 +1832,61 @@ fn assemble_pitch_orig_from_cache(
             return None;
         }
 
-        // 计算 clip 在 timeline 中的起始帧
+        // 计算 clip �?timeline 中的起始�?
         let clip_start_sec = clip.start_sec.max(0.0);
         let clip_start_frame = ((clip_start_sec * 1000.0) / fp).round().max(0.0) as usize;
 
-        // 判断是否为全量源音频缓存（playback_rate == 1）
-        let is_full_source = (clip.playback_rate as f64 - 1.0).abs() <= 1e-6;
+        // 判断是否为全量源音频缓存（playback_rate == 1�?
+        let pr = clip.playback_rate as f64;
+        let is_full_source = pr.is_finite() && pr > 0.0 && (pr - 1.0).abs() <= 1e-6;
 
-        // 对于全量缓存：cached.midi 覆盖源音频全部，需要从 trim_start_sec 处偏移截取
-        // 对于拉伸缓存：cached.midi 已经是 trim 后的长度，直接使用
-        let src_offset = if is_full_source {
-            let trim_start_sec = clip.trim_start_sec.max(0.0);
-            ((trim_start_sec * 1000.0) / fp).round().max(0.0) as usize
-        } else {
-            0
-        };
-
-        // clip 在时间线上的可见长度（帧数）
+        // 缓存中始终是全量源音频的 MIDI 曲线�?
+        // is_full_source (rate==1)：从 source_start_sec 处偏移截取，直接写入 out
+        // !is_full_source (rate!=1)：从全量曲线中截�?source range 区间 �?resample �?clip timeline 长度 �?写入 out
         let clip_len_sec = clip.length_sec.max(0.0);
         let clip_len_frames = ((clip_len_sec * 1000.0) / fp).round().max(0.0) as usize;
 
-        // 将 clip 的 MIDI 曲线写入 out，后面的 clip 覆盖前面的
-        for local_i in 0..clip_len_frames {
-            let src_i = src_offset + local_i;
-            let global_i = clip_start_frame + local_i;
-            if global_i >= target_frames {
-                break;
+        if is_full_source {
+            // rate==1：从 source_start_sec 处偏移截取，直接写入
+            let src_offset = {
+                let source_start_sec = clip.source_start_sec.max(0.0);
+                ((source_start_sec * 1000.0) / fp).round().max(0.0) as usize
+            };
+            for local_i in 0..clip_len_frames {
+                let src_i = src_offset + local_i;
+                let global_i = clip_start_frame + local_i;
+                if global_i >= target_frames {
+                    break;
+                }
+                let pitch = cached.midi.get(src_i).copied().unwrap_or(0.0);
+                if pitch.is_finite() && pitch > 0.0 {
+                    out[global_i] = pitch;
+                } else {
+                    out[global_i] = 0.0;
+                }
             }
-            let pitch = cached.midi.get(src_i).copied().unwrap_or(0.0);
-            // 非零值覆盖（零值 = 无声/未检测到音高，不覆盖）
-            if pitch.is_finite() && pitch > 0.0 {
-                out[global_i] = pitch;
-            } else {
-                // 当前 clip 覆盖了这一帧但没有音高，清除下方 clip 的音高
-                out[global_i] = 0.0;
+        } else {
+            // rate!=1：从全量曲线中截�?source range 区间 �?resample �?clip timeline 长度
+            let pr_valid = if pr.is_finite() && pr > 0.0 { pr } else { 1.0 };
+            let resampled = crate::pitch_clip::trim_and_resample_midi(
+                &cached.midi,
+                fp,
+                clip.source_start_sec,
+                clip.source_end_sec,
+                pr_valid,
+                clip_len_sec,
+            );
+            for local_i in 0..clip_len_frames {
+                let global_i = clip_start_frame + local_i;
+                if global_i >= target_frames {
+                    break;
+                }
+                let pitch = resampled.get(local_i).copied().unwrap_or(0.0);
+                if pitch.is_finite() && pitch > 0.0 {
+                    out[global_i] = pitch;
+                } else {
+                    out[global_i] = 0.0;
+                }
             }
         }
     }
@@ -1855,65 +1896,64 @@ fn assemble_pitch_orig_from_cache(
 
 /// Returns whether pitch analysis is currently pending (scheduled or already inflight).
 pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool {
-    // 检查是否需要更新（compose_enabled、algo 等前置条件）
-    let job = {
-        let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
-        build_pitch_job(&tl, root_track_id)
-    };
-
-    let Some(job) = job else {
-        return false;
-    };
-
-    // 直接从 per-clip 缓存同步组装整体音高线（不再重新分析音频）
-    let curve_opt = {
-        let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
-        assemble_pitch_orig_from_cache(&tl, root_track_id)
-    };
-
-    let Some((curve, all_cache_hit)) = curve_opt else {
-        // assemble_pitch_orig_from_cache 目前永远返回 Some，此分支保留作为安全兜底
-        return true;
-    };
-
-    // 将组装好的曲线写入 state
+    // 单次 lock 保证 build_pitch_job �?assemble �?写入 的原子性，
+    // 避免多次 lock 之间 state.timeline 被前端命令修改导�?key 不一致�?
     let mut should_emit = false;
+    let mut emit_root_track_id = String::new();
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+
+        // 检查是否需要更新（compose_enabled、algo 等前置条件）
+        let job = match build_pitch_job(&tl, root_track_id) {
+            Some(j) => j,
+            None => return false,
+        };
+
+        // 直接�?per-clip 缓存同步组装整体音高线（不再重新分析音频�?
+        let (curve, all_cache_hit) = match assemble_pitch_orig_from_cache(&tl, root_track_id) {
+            Some(v) => v,
+            None => {
+                // assemble_pitch_orig_from_cache 目前永远返回 Some，此分支保留作为安全兜底
+                return true;
+            }
+        };
+
+        // 将组装好的曲线写�?state
         tl.ensure_params_for_root(&job.root_track_id);
         let current_key = build_root_pitch_key(&tl, &job.root_track_id);
         if current_key == job.key {
             if let Some(entry) = tl.params_by_root_track.get_mut(&job.root_track_id) {
                 entry.pitch_orig = curve;
-                // 只有所有 clip 缓存均命中时才标记 key 为已完成
-                // 否则保持 pitch_orig_key 为 None，确保后续 clip 完成时仍会触发推送
+                // 只有所�?clip 缓存均命中时才标�?key 为已完成
+                // 否则保持 pitch_orig_key �?None，确保后�?clip 完成时仍会触发推�?
                 if all_cache_hit {
                     entry.pitch_orig_key = Some(job.key.clone());
                 } else {
                     entry.pitch_orig_key = None;
                 }
 
-                // 如果用户尚未手动编辑，保持 edit 与 orig 同步
+                // 如果用户尚未手动编辑，保�?edit �?orig 同步
                 if !entry.pitch_edit_user_modified {
                     entry.pitch_edit = entry.pitch_orig.clone();
                 }
                 should_emit = true;
+                emit_root_track_id = job.root_track_id.clone();
             }
         }
     }
-
+    // lock 释放后再 emit，避免持锁时发事�?
     if should_emit {
         if let Some(app) = state.app_handle.get() {
             let _ = app.emit(
                 "pitch_orig_updated",
                 PitchOrigUpdatedEvent {
-                    root_track_id: job.root_track_id.clone(),
+                    root_track_id: emit_root_track_id,
                 },
             );
         }
     }
 
-    false // 同步完成，不再 pending
+    false // 同步完成，不�?pending
 }
 
 // Task 3.6: PitchProgressPayload for frontend API
@@ -1923,7 +1963,7 @@ pub struct PitchProgressPayload {
     pub root_track_id: String,
     pub progress: f32,
     pub eta_seconds: Option<f64>,
-    /// 当前正在分析的 clip 名称
+    /// 当前正在分析�?clip 名称
     pub current_clip_name: Option<String>,
     /// 已完成的 clip 数量
     pub completed_clips: u32,
@@ -1964,8 +2004,8 @@ mod tests {
             pitch_range: None,
             gain: 1.0,
             muted: false,
-            trim_start_sec: 0.0,
-            trim_end_sec: 0.0,
+            source_start_sec: 0.0,
+            source_end_sec: 4.0,
             playback_rate: 1.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
@@ -2002,8 +2042,8 @@ mod tests {
             pitch_range: None,
             gain: 1.0,
             muted: false,
-            trim_start_sec: 0.0,
-            trim_end_sec: 0.0,
+            source_start_sec: 0.0,
+            source_end_sec: 2.0,
             playback_rate: 1.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,        };
@@ -2064,8 +2104,8 @@ mod tests {
             pitch_range: None,
             gain: 1.0,
             muted: false,
-            trim_start_sec: 0.0,
-            trim_end_sec: 0.0,
+            source_start_sec: 0.0,
+            source_end_sec: 4.0,
             playback_rate: 1.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
@@ -2083,8 +2123,8 @@ mod tests {
                 pitch_range: None,
                 gain: 1.0,
                 muted: false,
-                trim_start_sec: 0.0,
-                trim_end_sec: 0.0,
+                source_start_sec: 0.0,
+                source_end_sec: 4.0,
                 playback_rate: 1.0,
                 fade_in_sec: 0.0,
                 fade_out_sec: 0.0,
@@ -2131,8 +2171,8 @@ mod tests {
                 pitch_range: None,
                 gain: 1.0,
                 muted: false,
-            trim_start_sec: 0.0,
-            trim_end_sec: 0.0,
+            source_start_sec: 0.0,
+            source_end_sec: 2.0,
             playback_rate: 1.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
@@ -2194,8 +2234,8 @@ mod tests {
                 pitch_range: None,
                 gain: 1.0,
                 muted: false,
-            trim_start_sec: 0.0,
-            trim_end_sec: 0.0,
+            source_start_sec: 0.0,
+            source_end_sec: 2.0,
             playback_rate: 1.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
@@ -2213,8 +2253,8 @@ mod tests {
                 pitch_range: None,
                 gain: 1.0,
                 muted: false,
-            trim_start_sec: 0.0,
-            trim_end_sec: 0.0,
+            source_start_sec: 0.0,
+            source_end_sec: 2.0,
             playback_rate: 1.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,

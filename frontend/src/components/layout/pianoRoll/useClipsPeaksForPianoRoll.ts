@@ -20,8 +20,8 @@ export interface ClipPeaksEntry {
     startSec: number;
     /** clip 的长度（秒，来自 ClipInfo.lengthSec），用于绘制宽度，不影响 peaks 请求 */
     lengthSec: number;
-    /** clip 的 trimStartSec（秒），渲染时用于计算波形偏移 */
-    trimStartSec: number;
+    /** clip 的 sourceStartSec（秒），渲染时用于计算波形偏移 */
+    sourceStartSec: number;
     /** source 文件总时长（秒），peaks 覆盖整个 source */
     sourceDurationSec: number;
     /** 播放速率 */
@@ -97,12 +97,11 @@ function buildClipPeaksRequest(
             legacyDurationSec: clip.durationSec,
             lengthSec: lengthSec,
             secPerBeat: secPerBeat,
-            trimStartSec: clip.trimStartSec,
-            trimEndSec: clip.trimEndSec,
+            sourceStartSec: clip.sourceStartSec,
+            sourceEndSec: clip.sourceEndSec,
             playbackRate: clip.playbackRate,
         },
     );
-
     // 固定请求整个 source 文件的 peaks，不依赖 trim 值
     // 这样 trim 拖动不会导致 peaks 重新请求或波形变化
     const startSecQ = 0;
@@ -300,7 +299,7 @@ export function useClipsPeaksForPianoRoll(args: {
             clipId: clip.id,
             startSec: clip.startSec,
             lengthSec: clip.lengthSec,
-            trimStartSec: Math.max(0, Number(clip.trimStartSec ?? 0) || 0),
+            sourceStartSec: Math.max(0, Number(clip.sourceStartSec ?? 0) || 0),
             sourceDurationSec: sourceDurationSec > 0 ? sourceDurationSec : 0,
             playbackRate: pr,
             peaks: entry

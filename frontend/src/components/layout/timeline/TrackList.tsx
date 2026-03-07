@@ -36,6 +36,8 @@ export const TrackList: React.FC<{
     onVolumeCommit: (trackId: string, nextVolume: number) => void;
     onAddTrack: () => void;
     onTrackColorChange?: (trackId: string, color: string) => void;
+    /** 外部持有该滚动容器的 ref，用于同步右侧轨道区的竖向滚动 */
+    listScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
 }> = ({
     t,
     tracks,
@@ -52,6 +54,7 @@ export const TrackList: React.FC<{
     onVolumeCommit,
     onAddTrack,
     onTrackColorChange,
+    listScrollRef,
 }) => {
     const listRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{
@@ -72,7 +75,9 @@ export const TrackList: React.FC<{
     } | null>(null);
 
     // 轨道颜色选择器弹出状态
-    const [colorPickerTrackId, setColorPickerTrackId] = useState<string | null>(null);
+    const [colorPickerTrackId, setColorPickerTrackId] = useState<string | null>(
+        null,
+    );
 
     // 点击其他区域关闭颜色选择器
     useEffect(() => {
@@ -229,8 +234,14 @@ export const TrackList: React.FC<{
                 </Text>
             </Box>
             <div
-                ref={listRef}
-                className="flex-1 overflow-y-auto custom-scrollbar relative"
+                ref={(el) => {
+                    (
+                        listRef as React.MutableRefObject<HTMLDivElement | null>
+                    ).current = el;
+                    if (listScrollRef) listScrollRef.current = el;
+                }}
+                className="flex-1 relative"
+                style={{ overflowY: "hidden" }}
             >
                 {dragUi?.mode === "reorder" &&
                 typeof dragUi.indicatorY === "number" ? (
@@ -417,7 +428,10 @@ export const TrackList: React.FC<{
                             {/* Always-visible left accent bar (pinned to list edge) */}
                             <div
                                 className={`absolute left-0 top-0 bottom-0 w-1 transition-opacity ${selected ? "opacity-100" : "opacity-80 group-hover:opacity-90"}`}
-                                style={{ backgroundColor: track.color || "var(--qt-highlight)" }}
+                                style={{
+                                    backgroundColor:
+                                        track.color || "var(--qt-highlight)",
+                                }}
                             />
 
                             {/* Left gutter: makes nesting depth visible at a glance */}
@@ -452,7 +466,11 @@ export const TrackList: React.FC<{
                                 {/* Keep a subtle in-row bar too, but don't rely on it */}
                                 <div
                                     className={`absolute left-0 top-0 bottom-0 w-1 transition-opacity ${selected ? "opacity-100" : "opacity-10 group-hover:opacity-30"}`}
-                                    style={{ backgroundColor: track.color || "var(--qt-highlight)" }}
+                                    style={{
+                                        backgroundColor:
+                                            track.color ||
+                                            "var(--qt-highlight)",
+                                    }}
                                 />
 
                                 {isOver && dragUi?.mode === "nest" ? (
@@ -474,45 +492,86 @@ export const TrackList: React.FC<{
                                     justify="center"
                                 >
                                     <Flex justify="between" align="center">
-                                        <Flex align="center" gap="1" className="min-w-0 flex-1">
+                                        <Flex
+                                            align="center"
+                                            gap="1"
+                                            className="min-w-0 flex-1"
+                                        >
                                             {/* 轨道颜色小圆点，点击弹出调色板 */}
-                                            <div className="relative shrink-0" data-track-color-picker>
+                                            <div
+                                                className="relative shrink-0"
+                                                data-track-color-picker
+                                            >
                                                 <button
                                                     className="w-3.5 h-3.5 rounded-full border border-white/20 hover:scale-125 transition-transform cursor-pointer"
-                                                    style={{ backgroundColor: track.color || "#4f8ef7" }}
-                                                    title={t("track_change_color")}
-                                                    onPointerDown={(e) => e.stopPropagation()}
+                                                    style={{
+                                                        backgroundColor:
+                                                            track.color ||
+                                                            "#4f8ef7",
+                                                    }}
+                                                    title={t(
+                                                        "track_change_color",
+                                                    )}
+                                                    onPointerDown={(e) =>
+                                                        e.stopPropagation()
+                                                    }
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         setColorPickerTrackId(
-                                                            colorPickerTrackId === track.id ? null : track.id,
+                                                            colorPickerTrackId ===
+                                                                track.id
+                                                                ? null
+                                                                : track.id,
                                                         );
                                                     }}
                                                 />
-                                                {colorPickerTrackId === track.id && (
+                                                {colorPickerTrackId ===
+                                                    track.id && (
                                                     <div
                                                         className="absolute left-0 top-full mt-1 z-50 p-1.5 rounded border border-qt-border bg-qt-window shadow-lg flex gap-1 flex-wrap"
                                                         style={{ width: 120 }}
                                                         data-track-color-picker
                                                     >
-                                                        {TRACK_COLOR_PALETTE_KEYS.map((opt) => (
-                                                            <button
-                                                                key={opt.value}
-                                                                title={t(opt.key)}
-                                                                className={`w-4 h-4 rounded-full transition-transform hover:scale-125 ${
-                                                                    (track.color || "#4f8ef7") === opt.value
-                                                                        ? "ring-2 ring-white/80 scale-110"
-                                                                        : ""
-                                                                }`}
-                                                                style={{ backgroundColor: opt.value }}
-                                                                onPointerDown={(e) => e.stopPropagation()}
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    onTrackColorChange?.(track.id, opt.value);
-                                                                    setColorPickerTrackId(null);
-                                                                }}
-                                                            />
-                                                        ))}
+                                                        {TRACK_COLOR_PALETTE_KEYS.map(
+                                                            (opt) => (
+                                                                <button
+                                                                    key={
+                                                                        opt.value
+                                                                    }
+                                                                    title={t(
+                                                                        opt.key,
+                                                                    )}
+                                                                    className={`w-4 h-4 rounded-full transition-transform hover:scale-125 ${
+                                                                        (track.color ||
+                                                                            "#4f8ef7") ===
+                                                                        opt.value
+                                                                            ? "ring-2 ring-white/80 scale-110"
+                                                                            : ""
+                                                                    }`}
+                                                                    style={{
+                                                                        backgroundColor:
+                                                                            opt.value,
+                                                                    }}
+                                                                    onPointerDown={(
+                                                                        e,
+                                                                    ) =>
+                                                                        e.stopPropagation()
+                                                                    }
+                                                                    onClick={(
+                                                                        e,
+                                                                    ) => {
+                                                                        e.stopPropagation();
+                                                                        onTrackColorChange?.(
+                                                                            track.id,
+                                                                            opt.value,
+                                                                        );
+                                                                        setColorPickerTrackId(
+                                                                            null,
+                                                                        );
+                                                                    }}
+                                                                />
+                                                            ),
+                                                        )}
                                                     </div>
                                                 )}
                                             </div>
@@ -546,8 +605,16 @@ export const TrackList: React.FC<{
                                         {isRoot ? (
                                             <IconButton
                                                 size="1"
-                                                variant={composeEnabled ? "solid" : "ghost"}
-                                                color={composeEnabled ? "blue" : "gray"}
+                                                variant={
+                                                    composeEnabled
+                                                        ? "solid"
+                                                        : "ghost"
+                                                }
+                                                color={
+                                                    composeEnabled
+                                                        ? "blue"
+                                                        : "gray"
+                                                }
                                                 title={t("compose")}
                                                 onPointerDown={(e) =>
                                                     e.stopPropagation()
@@ -559,7 +626,12 @@ export const TrackList: React.FC<{
                                                         !composeEnabled,
                                                     );
                                                 }}
-                                                style={{ fontWeight: 700, fontSize: 11, width: 20, height: 20 }}
+                                                style={{
+                                                    fontWeight: 700,
+                                                    fontSize: 11,
+                                                    width: 20,
+                                                    height: 20,
+                                                }}
                                             >
                                                 C
                                             </IconButton>
@@ -568,7 +640,11 @@ export const TrackList: React.FC<{
                                             size="1"
                                             variant={muted ? "solid" : "ghost"}
                                             color={muted ? "red" : "gray"}
-                                            title={muted ? t("clip_unmute") : t("clip_mute")}
+                                            title={
+                                                muted
+                                                    ? t("clip_unmute")
+                                                    : t("clip_mute")
+                                            }
                                             onPointerDown={(e) =>
                                                 e.stopPropagation()
                                             }
@@ -576,7 +652,12 @@ export const TrackList: React.FC<{
                                                 e.stopPropagation();
                                                 onToggleMute(track.id, !muted);
                                             }}
-                                            style={{ fontWeight: 700, fontSize: 11, width: 20, height: 20 }}
+                                            style={{
+                                                fontWeight: 700,
+                                                fontSize: 11,
+                                                width: 20,
+                                                height: 20,
+                                            }}
                                         >
                                             M
                                         </IconButton>
@@ -592,7 +673,12 @@ export const TrackList: React.FC<{
                                                 e.stopPropagation();
                                                 onToggleSolo(track.id, !solo);
                                             }}
-                                            style={{ fontWeight: 700, fontSize: 11, width: 20, height: 20 }}
+                                            style={{
+                                                fontWeight: 700,
+                                                fontSize: 11,
+                                                width: 20,
+                                                height: 20,
+                                            }}
                                         >
                                             S
                                         </IconButton>
