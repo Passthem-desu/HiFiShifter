@@ -1,14 +1,20 @@
 // Reaper 剪贴板粘贴命令
 //
-// 从 Windows 剪贴板读取 Reaper 的 "REAPERMedia" 自定义格式数据，
+// 从系统剪贴板读取 Reaper 的 "REAPERMedia" 自定义格式数据，
 // 解析并导入到当前时间线。
+// 支持 Windows / macOS / Linux (X11 & Wayland)。
 
 use crate::reaper_import;
 use crate::state::AppState;
 
 use super::core::get_timeline_state_from_ref;
 
-/// 读取 Windows 剪贴板中的 REAPERMedia 数据。
+// ---------------------------------------------------------------------------
+// 平台特定的剪贴板读取
+// ---------------------------------------------------------------------------
+
+/// Windows: 通过 clipboard-win 读取自定义格式 "REAPERMedia"。
+#[cfg(target_os = "windows")]
 fn read_reaper_clipboard() -> Result<Vec<u8>, String> {
     use clipboard_win::{register_format, Clipboard};
 
@@ -18,7 +24,6 @@ fn read_reaper_clipboard() -> Result<Vec<u8>, String> {
     let format =
         register_format("REAPERMedia").ok_or_else(|| "clipboard_format_not_found".to_string())?;
 
-    // 首先获取数据大小
     let size =
         clipboard_win::raw::size(format.get()).ok_or_else(|| "clipboard_empty".to_string())?;
 
@@ -28,6 +33,66 @@ fn read_reaper_clipboard() -> Result<Vec<u8>, String> {
 
     buf.truncate(bytes_read);
     Ok(buf)
+}
+
+/// macOS: 通过 NSPasteboard 读取自定义类型 "REAPERMedia"。
+#[cfg(target_os = "macos")]
+fn read_reaper_clipboard() -> Result<Vec<u8>, String> {
+    use objc2_app_kit::NSPasteboard;
+    use objc2_foundation::NSString;
+
+    let pasteboard = unsafe { NSPasteboard::generalPasteboard() };
+    let pb_type = NSString::from_str("REAPERMedia");
+
+    let data = unsafe { pasteboard.dataForType(&pb_type) }
+        .ok_or_else(|| "clipboard_empty".to_string())?;
+
+    let len = data.length();
+    if len == 0 {
+        return Err("clipboard_empty".to_string());
+    }
+    let ptr = data.bytes().cast::<u8>();
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    Ok(bytes.to_vec())
+}
+
+/// Linux: 通过 wl-paste (Wayland) 或 xclip (X11) 读取自定义目标 "REAPERMedia"。
+#[cfg(target_os = "linux")]
+fn read_reaper_clipboard() -> Result<Vec<u8>, String> {
+    use std::process::Command;
+
+    let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
+
+    let output = if is_wayland {
+        Command::new("wl-paste")
+            .args(["--type", "REAPERMedia"])
+            .output()
+    } else {
+        Command::new("xclip")
+            .args(["-selection", "clipboard", "-target", "REAPERMedia", "-o"])
+            .output()
+    };
+
+    let output = output.map_err(|e| {
+        let tool = if is_wayland { "wl-paste" } else { "xclip" };
+        format!("clipboard_read_failed: failed to run {}: {}", tool, e)
+    })?;
+
+    if !output.status.success() {
+        return Err("clipboard_empty".to_string());
+    }
+
+    if output.stdout.is_empty() {
+        return Err("clipboard_empty".to_string());
+    }
+
+    Ok(output.stdout)
+}
+
+/// 不支持的平台回退。
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn read_reaper_clipboard() -> Result<Vec<u8>, String> {
+    Err("clipboard_unsupported_platform".to_string())
 }
 
 /// 粘贴 Reaper 剪贴板数据到当前选中的轨道。

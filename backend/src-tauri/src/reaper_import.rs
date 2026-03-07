@@ -457,8 +457,14 @@ fn process_item(
             let actual_post_tl = actual_post_src / effective_rate;
 
             let clip_src_start = s_offs + cumulative_source_pos - actual_pre_src;
-            let clip_src_end = (s_offs + cumulative_source_pos + seg_source_duration + actual_post_src)
-                .min(source_duration_sec.max(s_offs + cumulative_source_pos + seg_source_duration));
+            // 计算原始的源结束位置（可能会超过真实音频长度）
+            let raw_clip_src_end =
+                s_offs + cumulative_source_pos + seg_source_duration + actual_post_src;
+            // 仅当已知源文件时长时才进行裁剪；否则保留原始计算值
+            let clip_src_end = match duration_sec {
+                Some(dur) => raw_clip_src_end.min(dur),
+                None => raw_clip_src_end,
+            };
             let clip_start = current_timeline_pos - actual_pre_tl;
             let clip_length = (seg_timeline_duration + actual_pre_tl + actual_post_tl).max(0.001);
 
@@ -541,7 +547,11 @@ fn process_item(
             gain: convert_volume(take_volume * gain_trim),
             muted: item_muted,
             source_start_sec: source_start.max(0.0),
-            source_end_sec: source_end.min(source_duration_sec.max(source_end)),
+            source_end_sec: if source_duration_sec > 0.0 {
+                source_end.min(source_duration_sec)
+            } else {
+                source_end
+            },
             playback_rate: (effective_rate as f32).clamp(0.1, 10.0),
             fade_in_sec,
             fade_out_sec,

@@ -17,6 +17,8 @@ dependencies = [
  "lru",
  "ndarray 0.16.1",
  "num-complex",
+ "objc2-app-kit",
+ "objc2-foundation",
  "ort",
  "rayon",
  "rfd",
