@@ -64,6 +64,11 @@ pub struct TrackParamsState {
 
     #[serde(skip)]
     pub pitch_orig_key: Option<String>,
+
+    /// 由 Reaper 导入产生的待应用音高偏移（半音）。
+    /// 当 pitch_orig 分析完成后，pitch_edit = pitch_orig + 此偏移。
+    #[serde(skip)]
+    pub pending_pitch_offset: Option<Vec<f32>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

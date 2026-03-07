@@ -1932,8 +1932,19 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
                     entry.pitch_orig_key = None;
                 }
 
-                // 如果用户尚未手动编辑，保�?edit �?orig 同步
-                if !entry.pitch_edit_user_modified {
+                // 应用 Reaper 导入的待定音高偏移
+                if let Some(offsets) = entry.pending_pitch_offset.take() {
+                    let len = entry.pitch_orig.len().min(offsets.len());
+                    entry.pitch_edit = entry.pitch_orig.clone();
+                    for i in 0..len {
+                        // 只对有音高的帧施加偏移（orig == 0 表示静音/无声段）
+                        if entry.pitch_orig[i].abs() > 1e-6 {
+                            entry.pitch_edit[i] = entry.pitch_orig[i] + offsets[i];
+                        }
+                    }
+                    entry.pitch_edit_user_modified = true;
+                } else if !entry.pitch_edit_user_modified {
+                    // 如果用户尚未手动编辑，保持 edit 与 orig 同步
                     entry.pitch_edit = entry.pitch_orig.clone();
                 }
                 should_emit = true;

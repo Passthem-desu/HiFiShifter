@@ -84,3 +84,24 @@ export const openVocalShifterFromDialog = createAsyncThunk(
         } as const;
     },
 );
+
+export const openReaperFromDialog = createAsyncThunk(
+    "session/openReaperFromDialog",
+    async (_, { rejectWithValue }) => {
+        const picked = await webApi.openReaperDialog();
+        if (!picked.ok) return rejectWithValue("open_reaper_dialog_failed");
+        if (picked.canceled || !picked.path) {
+            return { ok: true, canceled: true } as const;
+        }
+        const result = await webApi.importReaperProject(picked.path);
+        if (!result?.ok) {
+            return rejectWithValue(result?.error ?? "import_reaper_failed");
+        }
+        return {
+            ok: true,
+            canceled: false,
+            timeline: result,
+            skippedFiles: result.skipped_files as string[] | undefined,
+        } as const;
+    },
+);

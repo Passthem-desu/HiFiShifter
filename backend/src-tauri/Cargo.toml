@@ -51,6 +51,13 @@ rustfft = "6"
 num-complex = "0.4"
 ndarray = { version = "0.16", optional = true }
 
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", features = ["NSString", "NSData"] }
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
+
 [features]
 default = ["onnx"]
 onnx = ["dep:ort", "dep:ndarray"]
