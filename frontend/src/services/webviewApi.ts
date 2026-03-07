@@ -59,6 +59,9 @@ export const webApi = {
     openVocalShifterDialog: projectApi.openVocalShifterDialog,
     importVocalShifterProject: projectApi.importVocalShifterProject,
 
+    openReaperDialog: projectApi.openReaperDialog,
+    importReaperProject: projectApi.importReaperProject,
+
     // Waveform peaks
     getWaveformPeaksSegment: waveformApi.getWaveformPeaksSegment,
     getRootMixWaveformPeaksSegment: waveformApi.getRootMixWaveformPeaksSegment,
@@ -69,6 +72,7 @@ export const webApi = {
     setParamFrames: paramsApi.setParamFrames,
     restoreParamFrames: paramsApi.restoreParamFrames,
     pasteVocalShifterClipboard: paramsApi.pasteVocalShifterClipboard,
+    pasteReaperClipboard: paramsApi.pasteReaperClipboard,
 
     // Timeline
     getTimelineState: timelineApi.getTimelineState,

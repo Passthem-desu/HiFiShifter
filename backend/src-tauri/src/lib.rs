@@ -23,6 +23,8 @@ mod project;
 mod rubberband;
 mod vocalshifter_clipboard;
 mod vocalshifter_import;
+mod reaper_parser;
+mod reaper_import;
 mod state;
 mod time_stretch;
 mod waveform;
@@ -267,7 +269,10 @@ pub fn run() {
             commands::search_files_recursive,
             commands::open_vocalshifter_dialog,
             commands::import_vocalshifter_project,
-            commands::paste_vocalshifter_clipboard
+            commands::paste_vocalshifter_clipboard,
+            commands::open_reaper_dialog,
+            commands::import_reaper_project,
+            commands::paste_reaper_clipboard
             // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
             // commands::start_pitch_refresh_task,
             // commands::get_pitch_refresh_status,

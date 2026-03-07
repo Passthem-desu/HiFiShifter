@@ -57,3 +57,18 @@ export const pasteVocalShifterClipboard = createAsyncThunk(
         return result;
     },
 );
+
+export const pasteReaperClipboard = createAsyncThunk(
+    "session/pasteReaperClipboard",
+    async (_, { rejectWithValue }) => {
+        const result = await webApi.pasteReaperClipboard();
+        if (!result?.ok) {
+            return rejectWithValue(result?.error ?? "paste_reaper_clipboard_failed");
+        }
+        return {
+            ok: true,
+            timeline: result,
+            skippedFiles: result.skipped_files as string[] | undefined,
+        } as const;
+    },
+);
