@@ -33,4 +33,12 @@ export const projectApi = {
 
     importVocalShifterProject: (vspPath: string) =>
         invoke<TimelineResult & { error?: string; skipped_files?: string[] }>("import_vocalshifter_project", vspPath),
+
+    openReaperDialog: () =>
+        invoke<{ ok: boolean; canceled?: boolean; path?: string }>(
+            "open_reaper_dialog",
+        ),
+
+    importReaperProject: (rppPath: string) =>
+        invoke<TimelineResult & { error?: string; skipped_files?: string[] }>("import_reaper_project", rppPath),
 };

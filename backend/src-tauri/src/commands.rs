@@ -37,6 +37,10 @@ mod file_browser;
 mod vocalshifter;
 #[path = "commands/vocalshifter_clipboard.rs"]
 mod vocalshifter_clipboard;
+#[path = "commands/reaper.rs"]
+mod reaper;
+#[path = "commands/reaper_clipboard.rs"]
+mod reaper_clipboard;
 // TODO: 异步音高刷新功能未完成，缺少必要的状态管理和依赖
 // #[path = "commands/pitch_refresh_async.rs"]
 // mod pitch_refresh_async;
@@ -531,6 +535,27 @@ pub fn import_vocalshifter_project(
 #[tauri::command(rename_all = "camelCase")]
 pub fn paste_vocalshifter_clipboard(state: State<'_, AppState>) -> serde_json::Value {
     vocalshifter_clipboard::paste_vocalshifter_clipboard(state.inner())
+}
+
+// ===================== reaper =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn open_reaper_dialog() -> serde_json::Value {
+    reaper::open_reaper_dialog()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn import_reaper_project(
+    state: State<'_, AppState>,
+    window: Window,
+    rpp_path: String,
+) -> serde_json::Value {
+    reaper::import_reaper_project(state.inner(), &window, rpp_path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn paste_reaper_clipboard(state: State<'_, AppState>) -> serde_json::Value {
+    reaper_clipboard::paste_reaper_clipboard(state.inner())
 }
 
 // ===================== pitch_refresh_async (暂时禁用) =====================

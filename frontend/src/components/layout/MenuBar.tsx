@@ -18,7 +18,9 @@ import {
     openProjectFromDialog,
     openProjectFromPath,
     openVocalShifterFromDialog,
+    openReaperFromDialog,
     pasteVocalShifterClipboard,
+    pasteReaperClipboard,
     saveProjectRemote,
     saveProjectAsRemote,
 } from "../../features/session/sessionSlice";
@@ -147,6 +149,11 @@ export const MenuBar: React.FC = () => {
                         {t("menu_import_audio")}{" "}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
+                        onSelect={() => void dispatch(openReaperFromDialog())}
+                    >
+                        {t("menu_open_reaper")}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
                         onSelect={() => void dispatch(openVocalShifterFromDialog())}
                     >
                         {t("menu_open_vocalshifter")}
@@ -206,6 +213,11 @@ export const MenuBar: React.FC = () => {
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
+                    <DropdownMenu.Item
+                        onSelect={() => void dispatch(pasteReaperClipboard())}
+                    >
+                        {t("menu_paste_reaper_clipboard")}
+                    </DropdownMenu.Item>
                     <DropdownMenu.Item
                         onSelect={() => void dispatch(pasteVocalShifterClipboard())}
                     >

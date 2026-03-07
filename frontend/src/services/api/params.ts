@@ -1,4 +1,4 @@
-import type { ParamFramesPayload } from "../../types/api";
+import type { ParamFramesPayload, TimelineResult } from "../../types/api";
 
 import { invoke } from "../invoke";
 
@@ -54,5 +54,10 @@ export const paramsApi = {
     pasteVocalShifterClipboard: () =>
         invoke<{ ok: boolean; error?: string; updated?: number }>(
             "paste_vocalshifter_clipboard",
+        ),
+
+    pasteReaperClipboard: () =>
+        invoke<TimelineResult & { ok: boolean; error?: string; skipped_files?: string[] }>(
+            "paste_reaper_clipboard",
         ),
 };

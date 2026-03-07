@@ -37,6 +37,7 @@ import {
     openProjectFromDialog,
     openProjectFromPath,
     openVocalShifterFromDialog,
+    openReaperFromDialog,
     redoRemote,
     saveProjectAsRemote,
     saveProjectRemote,
@@ -65,6 +66,7 @@ import {
     exportAudio,
     exportSeparated,
     pasteVocalShifterClipboard,
+    pasteReaperClipboard,
     pickOutputPath,
     processAudio,
     synthesizeAudio,
@@ -177,6 +179,7 @@ export interface SessionState {
     error?: string;
     lastResult?: unknown;
     vocalShifterSkippedFilesDialog: string[] | null;
+    reaperSkippedFilesDialog: string[] | null;
 }
 
 interface StateSnapshot {
@@ -550,6 +553,7 @@ const initialState: SessionState = {
     busy: false,
     status: "Ready",
     vocalShifterSkippedFilesDialog: null,
+    reaperSkippedFilesDialog: null,
 };
 
 export {
@@ -559,6 +563,7 @@ export {
     openProjectFromDialog,
     openProjectFromPath,
     openVocalShifterFromDialog,
+    openReaperFromDialog,
     saveProjectRemote,
     saveProjectAsRemote,
 } from "./thunks/projectThunks";
@@ -610,6 +615,7 @@ export {
     exportAudio,
     exportSeparated,
     pasteVocalShifterClipboard,
+    pasteReaperClipboard,
 } from "./thunks/audioThunks";
 
 export {
@@ -663,6 +669,9 @@ const sessionSlice = createSlice({
         },
         closeVocalShifterSkippedFilesDialog(state) {
             state.vocalShifterSkippedFilesDialog = null;
+        },
+        closeReaperSkippedFilesDialog(state) {
+            state.reaperSkippedFilesDialog = null;
         },
         setSelectedClip(state, action: PayloadAction<string | null>) {
             state.selectedClipId = action.payload;
@@ -1315,6 +1324,28 @@ const sessionSlice = createSlice({
                 state.status = "Failed";
             })
 
+            .addCase(pasteReaperClipboard.pending, (state) =>
+                setPending(state, "Pasting Reaper clipboard data..."),
+            )
+            .addCase(pasteReaperClipboard.fulfilled, (state, action) => {
+                state.busy = false;
+                const payload = action.payload as any;
+                if (payload?.timeline) {
+                    applyTimelineState(state, payload.timeline);
+                }
+                const skippedFiles = payload?.skippedFiles;
+                state.reaperSkippedFilesDialog =
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0
+                        ? skippedFiles
+                        : null;
+                state.status = "Pasted Reaper clipboard data";
+            })
+            .addCase(pasteReaperClipboard.rejected, (state, action) => {
+                state.busy = false;
+                state.error = (action.payload as string) ?? action.error?.message ?? "Paste Reaper clipboard failed";
+                state.status = "Failed";
+            })
+
             .addCase(playOriginal.pending, (state) =>
                 setPending(state, "Playing original..."),
             )
@@ -1543,6 +1574,37 @@ const sessionSlice = createSlice({
             .addCase(openVocalShifterFromDialog.rejected, (state, action) => {
                 state.busy = false;
                 state.error = (action.payload as string) ?? action.error?.message ?? "Import VocalShifter failed";
+                state.status = "Import failed";
+            })
+
+            .addCase(openReaperFromDialog.pending, (state) =>
+                setPending(state, "Importing Reaper project..."),
+            )
+            .addCase(openReaperFromDialog.fulfilled, (state, action) => {
+                state.busy = false;
+                const payload = action.payload as
+                    | { ok: true; canceled: true }
+                    | {
+                          ok: true;
+                          canceled: false;
+                          timeline: TimelineState;
+                          skippedFiles?: string[];
+                      };
+                if (!payload || (payload as any).canceled) {
+                    state.status = "Import canceled";
+                    return;
+                }
+                applyTimelineState(state, (payload as any).timeline);
+                const skippedFiles = (payload as any).skippedFiles;
+                state.reaperSkippedFilesDialog =
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0
+                        ? skippedFiles
+                        : null;
+                state.status = "Reaper project imported";
+            })
+            .addCase(openReaperFromDialog.rejected, (state, action) => {
+                state.busy = false;
+                state.error = (action.payload as string) ?? action.error?.message ?? "Import Reaper failed";
                 state.status = "Import failed";
             })
 
@@ -1824,6 +1886,7 @@ export const {
     setOutputPath,
     setPitchShift,
     closeVocalShifterSkippedFilesDialog,
+    closeReaperSkippedFilesDialog,
     setSelectedClip,
     moveClipStart,
     moveClipTrack,
