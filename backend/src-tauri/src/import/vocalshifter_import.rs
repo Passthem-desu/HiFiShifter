@@ -672,6 +672,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     fade_out_sec: fade_out,
                     fade_in_curve: String::new(),
                     fade_out_curve: String::new(),
+                    extra_curves: None,
+                    extra_params: None,
                 });
 
                 // 写入 pitch 数据（源时间范围内的 Ctrp 点）
@@ -733,6 +735,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     fade_out_sec: 0.0,
                     fade_in_curve: String::new(),
                     fade_out_curve: String::new(),
+                    extra_curves: None,
+                    extra_params: None,
                 });
 
             // 写入 pitch 数据
@@ -790,6 +794,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
                     pending_pitch_offset: None,
+                    extra_curves: Default::default(),
+                    extra_params: Default::default(),
                 },
             );
         }

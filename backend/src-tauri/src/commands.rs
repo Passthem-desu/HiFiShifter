@@ -41,6 +41,8 @@ mod vocalshifter_clipboard;
 mod reaper;
 #[path = "commands/reaper_clipboard.rs"]
 mod reaper_clipboard;
+#[path = "commands/cache.rs"]
+mod cache;
 // TODO: 异步音高刷新功能未完成，缺少必要的状态管理和依赖
 // #[path = "commands/pitch_refresh_async.rs"]
 // mod pitch_refresh_async;
@@ -568,6 +570,13 @@ pub fn import_reaper_project(
 #[tauri::command(rename_all = "camelCase")]
 pub fn paste_reaper_clipboard(state: State<'_, AppState>) -> serde_json::Value {
     reaper_clipboard::paste_reaper_clipboard(state.inner())
+}
+
+// ===================== cache =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn clear_cache(state: State<'_, AppState>) -> Result<u64, String> {
+    cache::clear_cache(state)
 }
 
 // ===================== pitch_refresh_async (暂时禁用) =====================

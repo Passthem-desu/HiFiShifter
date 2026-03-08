@@ -122,6 +122,18 @@ impl SynthClipCache {
         self.order.clear();
     }
 
+    /// 清空所有缓存并返回估算释放的字节数（仅 PCM 数据部分）。
+    pub fn clear_and_estimate_bytes(&mut self) -> u64 {
+        let bytes: u64 = self
+            .inner
+            .values()
+            .map(|e| e.pcm_stereo.len() as u64 * 4) // f32 = 4 字节
+            .sum();
+        self.inner.clear();
+        self.order.clear();
+        bytes
+    }
+
     /// 当前缓存条目数。
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
@@ -230,6 +242,8 @@ pub fn cleanup_timeout_rendering_tasks() -> Vec<String> {
 /// - `start_frame` / `end_frame`：clip 在时间轴上的帧范围
 /// - `sr`：采样率
 /// - `pitch_edit` 曲线中与 clip 时间范围重叠的片段
+/// - `extra_curves`：声码器专属自动化曲线（AutomationCurve 类型）
+/// - `extra_params`：声码器专属静态参数（StaticEnum 类型）
 ///
 /// 任意参数变化 → hash 变化 → 缓存失效 → 重新合成。
 pub fn compute_param_hash(
@@ -239,6 +253,8 @@ pub fn compute_param_hash(
     sr: u32,
     renderer_id: &str,
     curves: &PitchCurvesSnapshot,
+    extra_curves: &std::collections::HashMap<String, Vec<f32>>,
+    extra_params: &std::collections::HashMap<String, f64>,
 ) -> u64 {
     // FNV-1a 64-bit 初始值
     let mut h: u64 = 14695981039346656037u64;
@@ -270,6 +286,24 @@ pub fn compute_param_hash(
     let hi = end_idx.min(edit.len());
     for &v in &edit[lo..hi] {
         mix_bytes!(&v.to_bits().to_le_bytes());
+    }
+
+    // 混入 extra_curves（AutomationCurve 类型参数），按 key 排序保证确定性
+    let mut sorted_curves: Vec<(&String, &Vec<f32>)> = extra_curves.iter().collect();
+    sorted_curves.sort_by_key(|(k, _)| k.as_str());
+    for (k, v) in sorted_curves {
+        mix_bytes!(k.as_bytes());
+        for &val in v.iter() {
+            mix_bytes!(&val.to_bits().to_le_bytes());
+        }
+    }
+
+    // 混入 extra_params（StaticEnum 类型参数），按 key 排序保证确定性
+    let mut sorted_params: Vec<(&String, &f64)> = extra_params.iter().collect();
+    sorted_params.sort_by_key(|(k, _)| k.as_str());
+    for (k, v) in sorted_params {
+        mix_bytes!(k.as_bytes());
+        mix_bytes!(&v.to_le_bytes());
     }
 
     h

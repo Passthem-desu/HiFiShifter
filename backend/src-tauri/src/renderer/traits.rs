@@ -2,7 +2,11 @@
 //!
 //! 通过 [`Renderer`] trait 将合成链路与调用方解耦，
 //! 未来新增渲染器只需实现该 trait 并在 `mod.rs` 中注册。
+//!
+//! 同时提供更高层的 [`ClipProcessor`] trait，统一封装全链路处理
+//! （音高合成 + 时间拉伸 + 所有声码器参数曲线）。
 
+use std::collections::HashMap;
 use crate::state::SynthPipelineKind;
 
 // ─── 上下文 ────────────────────────────────────────────────────────────────────
@@ -77,4 +81,118 @@ pub trait Renderer: Send + Sync {
     fn capabilities(&self) -> RendererCapabilities {
         RendererCapabilities::default()
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ClipProcessor：全链路合成接口（Phase 1 新增）
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── ClipProcessContext ────────────────────────────────────────────────────────
+
+/// 传递给 `ClipProcessor` 的全链路处理上下文（零拷贝借用）。
+pub struct ClipProcessContext<'a> {
+    /// 输入单声道 PCM（f32，已归一化）。
+    pub mono_pcm: &'a [f32],
+    /// 采样率（Hz）。
+    pub sample_rate: u32,
+    /// Clip 在时间轴上的起点（秒），用于曲线对齐。
+    pub clip_start_sec: f64,
+    /// 本次待处理片段在时间轴上的起点（秒）。
+    pub seg_start_sec: f64,
+    /// 本次待处理片段在时间轴上的终点（秒）。
+    pub seg_end_sec: f64,
+    /// 声码器帧周期（ms），决定 pitch_edit / extra_curves 长度。
+    pub frame_period_ms: f64,
+    /// 每帧绝对 MIDI 音高（cent），由音高编辑层输出。
+    pub pitch_edit: &'a [f32],
+    /// 每帧 Clip 原始 MIDI 音高（cent），用于计算相对偏移。
+    pub clip_midi: &'a [f32],
+    /// 回放速率（时间拉伸比例）；1.0 = 不拉伸。
+    pub playback_rate: f64,
+    /// 输出帧数（应用 playback_rate 后）。
+    pub out_frames: usize,
+    /// 用于缓存 key 的 Clip 唯一 ID。
+    pub clip_id: &'a str,
+    /// 声码器专属自动化曲线（逐帧 Vec<f32>，`AutomationCurve` 类型参数）。
+    /// key = `ParamDescriptor::id`；缺失 key 表示使用该参数的默认值。
+    pub extra_curves: &'a HashMap<String, Vec<f32>>,
+    /// 声码器专属静态参数（`StaticEnum` 类型参数，枚举整数值以 f64 存储）。
+    /// key = `ParamDescriptor::id`。
+    pub extra_params: &'a HashMap<String, f64>,
+}
+
+// ─── ProcessorCapabilities ────────────────────────────────────────────────────
+
+/// `ClipProcessor` 能力描述。
+#[derive(Debug, Clone, Default)]
+pub struct ProcessorCapabilities {
+    /// 是否原生处理 `playback_rate`（= true 时 compat 层不再调 RubberBand）。
+    pub handles_time_stretch: bool,
+    /// 是否支持逐帧共振峰偏移曲线（"formant_shift_cents"）。
+    pub supports_formant: bool,
+    /// 是否支持逐帧气声强度曲线（"breathiness"）。
+    pub supports_breathiness: bool,
+}
+
+// ─── ParamDescriptor ──────────────────────────────────────────────────────────
+
+/// 声码器参数种类。
+#[derive(Debug, Clone)]
+pub enum ParamKind {
+    /// 逐帧自动化曲线，显示在时间轴上，存入 `extra_curves`。
+    AutomationCurve {
+        /// 单位字符串，例："cents"、"×"、""。
+        unit: &'static str,
+        default_value: f32,
+        min_value: f32,
+        max_value: f32,
+    },
+    /// 静态枚举，前端渲染为按钮切换组，存入 `extra_params`（值为 i32 转 f64）。
+    StaticEnum {
+        /// 选项列表：(显示名, 整数值)。
+        options: &'static [(&'static str, i32)],
+        default_value: i32,
+    },
+}
+
+/// 声码器参数描述符（静态生命周期，可被 `param_descriptors()` 返回 `&'static [Self]`）。
+#[derive(Debug, Clone)]
+pub struct ParamDescriptor {
+    /// 参数唯一标识符；同时用作 `extra_curves` / `extra_params` 的 HashMap key。
+    pub id: &'static str,
+    /// 人类可读显示名称。
+    pub display_name: &'static str,
+    /// 前端面板分组标题。
+    pub group: &'static str,
+    /// 参数种类。
+    pub kind: ParamKind,
+}
+
+// ─── ClipProcessor trait ──────────────────────────────────────────────────────
+
+/// 全链路合成插件接口。
+///
+/// 一次 `process()` 调用涵盖——
+/// - 音高合成（声码器内核）
+/// - 时间拉伸（原生或 RubberBand Stage）
+/// - 所有声码器参数曲线（共振峰、气声等）
+///
+/// 实现者须 `Send + Sync`，以便在多线程场景下安全使用。
+pub trait ClipProcessor: Send + Sync {
+    /// 处理器唯一标识符（与 `SynthPipelineKind` 对应）。
+    fn id(&self) -> &str;
+    /// 人类可读显示名称。
+    fn display_name(&self) -> &str;
+    /// 运行时可用性检查（例：vslib 仅在 DLL 已加载时为 true）。
+    fn is_available(&self) -> bool;
+    /// 声明处理器支持的能力。
+    fn capabilities(&self) -> ProcessorCapabilities {
+        ProcessorCapabilities::default()
+    }
+    /// 静态声明支持的额外参数描述符（前端可据此动态渲染参数面板）。
+    fn param_descriptors(&self) -> Vec<ParamDescriptor> {
+        vec![]
+    }
+    /// 全链路处理：PCM → 合成 PCM（含音高 + 拉伸 + 声码器参数）。
+    fn process(&self, ctx: &ClipProcessContext<'_>) -> Result<Vec<f32>, String>;
 }

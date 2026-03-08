@@ -207,6 +207,8 @@ fn convert_reaper_items_to_existing_tracks(
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
                     pending_pitch_offset: Some(offset_frames),
+                    extra_curves: Default::default(),
+                    extra_params: Default::default(),
                 },
             );
         }
@@ -332,6 +334,8 @@ fn convert_reaper_data(
                         tension_edit: Vec::new(),
                         pitch_orig_key: None,
                         pending_pitch_offset: Some(offset_frames),
+                        extra_curves: Default::default(),
+                        extra_params: Default::default(),
                     },
                 );
             }
@@ -505,6 +509,8 @@ fn process_item(
                 fade_out_sec: fo,
                 fade_in_curve: "sine".to_string(),
                 fade_out_curve: "sine".to_string(),
+                extra_curves: None,
+                extra_params: None,
             });
 
             // 写入 pitch 偏移数据
@@ -558,6 +564,8 @@ fn process_item(
             fade_out_sec,
             fade_in_curve: "sine".to_string(),
             fade_out_curve: "sine".to_string(),
+            extra_curves: None,
+            extra_params: None,
         });
 
         // 写入 pitch 偏移数据

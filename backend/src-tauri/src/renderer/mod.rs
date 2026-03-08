@@ -3,18 +3,29 @@
 //! 通过 [`Renderer`] trait 将合成链路与调用方解耦，
 //! 未来新增渲染器只需实现该 trait 并在此处注册，
 //! 无需修改 `pitch_editing.rs` 等核心逻辑。
+//!
+//! `get_processor()` 返回统一的 `ClipProcessor` 实例，涵盖音高合成 +
+//! 时间拉伸 + 全部声码器参数曲线。
 
 mod traits;
 mod utils;
-mod world;
-mod hifigan;
+pub(crate) mod world;
+pub(crate) mod hifigan;
+pub(crate) mod chain;
 
-pub use traits::{Renderer, RenderContext, RendererCapabilities};
+#[cfg(feature = "vslib")]
+pub(crate) mod vslib_processor;
+
+pub use traits::{
+    Renderer, RenderContext, RendererCapabilities,
+    ClipProcessor, ClipProcessContext, ProcessorCapabilities, ParamDescriptor, ParamKind,
+};
 pub use utils::{edit_midi_at_time_or_none, clip_midi_at_time};
+pub use chain::{ProcessingStage, StageContext, ProcessorChain};
 
 use crate::state::SynthPipelineKind;
 
-// ─── 静态实例 ──────────────────────────────────────────────────────────────────
+// ─── 静态实例（Renderer，for backwards compat）────────────────────────────────
 
 static WORLD_RENDERER: world::WorldRenderer = world::WorldRenderer;
 static HIFIGAN_RENDERER: hifigan::HiFiGanRenderer = hifigan::HiFiGanRenderer;
@@ -29,6 +40,8 @@ pub fn get_renderer(kind: SynthPipelineKind) -> &'static dyn Renderer {
     match kind {
         SynthPipelineKind::WorldVocoder => &WORLD_RENDERER,
         SynthPipelineKind::NsfHifiganOnnx => &HIFIGAN_RENDERER,
+        #[cfg(feature = "vslib")]
+        SynthPipelineKind::VocalShifterVslib => &WORLD_RENDERER, // fallback
     }
 }
 
@@ -36,4 +49,21 @@ pub fn get_renderer(kind: SynthPipelineKind) -> &'static dyn Renderer {
 #[allow(dead_code)]
 pub fn all_renderers() -> Vec<&'static dyn Renderer> {
     vec![&WORLD_RENDERER, &HIFIGAN_RENDERER]
+}
+
+// ─── ClipProcessor 注册表 ──────────────────────────────────────────────────────
+
+/// 根据 [`SynthPipelineKind`] 创建对应的 [`ClipProcessor`] 实例（Box 分配）。
+///
+/// 对于 World / HiFiGAN，返回对应的 [`ProcessorChain`]（含 RubberBand + 声码器 Stage）。
+/// 对于 vslib，返回 [`VslibProcessor`]（需 `feature = "vslib"`）。
+pub fn get_processor(kind: SynthPipelineKind) -> Box<dyn ClipProcessor> {
+    match kind {
+        SynthPipelineKind::WorldVocoder => Box::new(chain::world_chain()),
+        SynthPipelineKind::NsfHifiganOnnx => Box::new(chain::hifigan_chain()),
+        #[cfg(feature = "vslib")]
+        SynthPipelineKind::VocalShifterVslib => {
+            Box::new(vslib_processor::VslibProcessor)
+        }
+    }
 }

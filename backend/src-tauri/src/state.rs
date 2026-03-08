@@ -32,6 +32,9 @@ pub enum PitchAnalysisAlgo {
 pub enum SynthPipelineKind {
     WorldVocoder,
     NsfHifiganOnnx,
+    /// VocalShifter vslib 原生声码器（仅限 Windows，需 vslib feature）。
+    #[cfg(feature = "vslib")]
+    VocalShifterVslib,
 }
 
 impl SynthPipelineKind {
@@ -69,6 +72,16 @@ pub struct TrackParamsState {
     /// 当 pitch_orig 分析完成后，pitch_edit = pitch_orig + 此偏移。
     #[serde(skip)]
     pub pending_pitch_offset: Option<Vec<f32>>,
+
+    /// 声码器专属逐帧自动化曲线（key = ParamDescriptor::id）。
+    /// 例："formant_shift_cents", "volume" 等；缺失 key = 使用参数默认值。
+    #[serde(default)]
+    pub extra_curves: HashMap<String, Vec<f32>>,
+
+    /// 声码器专属静态参数（key = ParamDescriptor::id，值为枚举整数转 f64）。
+    /// 例："synth_mode" = 1.0（SYNTHMODE_MF）。
+    #[serde(default)]
+    pub extra_params: HashMap<String, f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +136,14 @@ pub struct Clip {
     /// 淡出曲线类型（linear/sine/exponential/logarithmic/scurve），默认 sine
     #[serde(default = "default_fade_curve")]
     pub fade_out_curve: String,
+
+    /// Clip 级别的声码器曲线覆盖（None = 使用 Track 级别的 extra_curves）。
+    #[serde(default)]
+    pub extra_curves: Option<HashMap<String, Vec<f32>>>,
+
+    /// Clip 级别的声码器静态参数覆盖（None = 使用 Track 级别的 extra_params）。
+    #[serde(default)]
+    pub extra_params: Option<HashMap<String, f64>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -909,6 +930,8 @@ impl TimelineState {
             fade_out_sec: 0.0,
             fade_in_curve: default_fade_curve(),
             fade_out_curve: default_fade_curve(),
+            extra_curves: None,
+            extra_params: None,
         };
         self.clips.push(clip);
         self.selected_clip_id = Some(id.clone());

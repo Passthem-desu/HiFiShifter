@@ -276,7 +276,8 @@ pub fn run() {
             commands::paste_vocalshifter_clipboard,
             commands::open_reaper_dialog,
             commands::import_reaper_project,
-            commands::paste_reaper_clipboard
+            commands::paste_reaper_clipboard,
+            commands::clear_cache
             // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
             // commands::start_pitch_refresh_task,
             // commands::get_pitch_refresh_status,

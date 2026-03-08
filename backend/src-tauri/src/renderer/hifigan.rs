@@ -69,6 +69,8 @@ impl Renderer for HiFiGanRenderer {
             sr,
             self.id(),
             &curves_snapshot,
+            &std::collections::HashMap::new(), // HiFiGAN 不支持 extra_curves
+            &std::collections::HashMap::new(), // HiFiGAN 不支持 extra_params
         );
         let cache_key = crate::synth_clip_cache::SynthClipCacheKey {
             clip_id: ctx.clip_id.to_string(),
