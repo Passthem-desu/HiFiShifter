@@ -1,4 +1,8 @@
-import type { ParamFramesPayload, TimelineResult } from "../../types/api";
+import type {
+    ParamFramesPayload,
+    ProcessorParamDescriptor,
+    TimelineResult,
+} from "../../types/api";
 
 import { invoke } from "../invoke";
 
@@ -57,7 +61,14 @@ export const paramsApi = {
         ),
 
     pasteReaperClipboard: () =>
-        invoke<TimelineResult & { ok: boolean; error?: string; skipped_files?: string[] }>(
-            "paste_reaper_clipboard",
-        ),
+        invoke<
+            TimelineResult & {
+                ok: boolean;
+                error?: string;
+                skipped_files?: string[];
+            }
+        >("paste_reaper_clipboard"),
+
+    getProcessorParams: (algo: string) =>
+        invoke<ProcessorParamDescriptor[]>("get_processor_params", algo),
 };

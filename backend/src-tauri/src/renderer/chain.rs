@@ -43,6 +43,10 @@ pub struct ProcessorChain {
     pub id: String,
     pub display_name: String,
     pub stages: Vec<Box<dyn ProcessingStage>>,
+    /// 链内是否包含时间拉伸 Stage（[`RubberBandTimeStretchStage`]）。
+    /// 为 `true` 时调用方（`render_single_clip` / `render_mixdown_interleaved`）跳过外部
+    /// RubberBand 预拉伸，并将实际 `playback_rate` 通过 [`ClipProcessContext`] 传入链内。
+    pub handles_time_stretch: bool,
 }
 
 impl ClipProcessor for ProcessorChain {
@@ -61,7 +65,7 @@ impl ClipProcessor for ProcessorChain {
 
     fn capabilities(&self) -> ProcessorCapabilities {
         ProcessorCapabilities {
-            handles_time_stretch: false,
+            handles_time_stretch: self.handles_time_stretch,
             supports_formant: false,
             supports_breathiness: false,
         }
@@ -199,6 +203,7 @@ pub fn world_chain() -> ProcessorChain {
             Box::new(RubberBandTimeStretchStage),
             Box::new(WorldVocoderStage),
         ],
+        handles_time_stretch: true,
     }
 }
 
@@ -211,5 +216,6 @@ pub fn hifigan_chain() -> ProcessorChain {
             Box::new(RubberBandTimeStretchStage),
             Box::new(HiFiGanStage),
         ],
+        handles_time_stretch: true,
     }
 }

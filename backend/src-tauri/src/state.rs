@@ -21,6 +21,8 @@ pub enum PitchAnalysisAlgo {
     #[default]
     WorldDll,
     NsfHifiganOnnx,
+    #[serde(rename = "vslib")]
+    VocalShifterVslib,
     None,
     #[serde(other)]
     Unknown,
@@ -42,6 +44,8 @@ impl SynthPipelineKind {
     pub fn from_track_algo(algo: &PitchAnalysisAlgo) -> Self {
         match algo {
             PitchAnalysisAlgo::NsfHifiganOnnx => Self::NsfHifiganOnnx,
+            #[cfg(feature = "vslib")]
+            PitchAnalysisAlgo::VocalShifterVslib => Self::VocalShifterVslib,
             _ => Self::WorldVocoder,
         }
     }
@@ -1279,6 +1283,7 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
             match a {
                 PitchAnalysisAlgo::WorldDll => "world_dll".to_string(),
                 PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx".to_string(),
+                PitchAnalysisAlgo::VocalShifterVslib => "vslib".to_string(),
                 PitchAnalysisAlgo::None => "none".to_string(),
                 PitchAnalysisAlgo::Unknown => "unknown".to_string(),
             }
@@ -1334,6 +1339,7 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
                     pitch_analysis_algo: match t.pitch_analysis_algo {
                         PitchAnalysisAlgo::WorldDll => "world_dll".to_string(),
                         PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx".to_string(),
+                        PitchAnalysisAlgo::VocalShifterVslib => "vslib".to_string(),
                         PitchAnalysisAlgo::None => "none".to_string(),
                         PitchAnalysisAlgo::Unknown => "unknown".to_string(),
                     },

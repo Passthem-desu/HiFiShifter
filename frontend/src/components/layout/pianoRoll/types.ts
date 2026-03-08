@@ -1,5 +1,6 @@
-// 如需新增参数：1) 在此联合类型中添加字面量；2) 在 render.ts 的 PARAM_AXIS_CONFIGS 中添加配置；3) 后端实现对应的 get_param_frames 分支
-export type ParamName = "pitch" | "tension";
+// ParamName 是一个字符串，可以是 "pitch"、"tension" 或声码器额外参数 ID。
+// 具体可用值由后端 `get_processor_params` 动态返回。
+export type ParamName = string;
 
 export type StrokeMode = "draw" | "restore";
 

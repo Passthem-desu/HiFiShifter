@@ -5,8 +5,9 @@ export type FadeCurveType =
     | "exponential"
     | "logarithmic"
     | "scurve";
-// 如需新增参数：同步修改 pianoRoll/types.ts 中的 ParamName
-export type EditParam = "pitch" | "tension";
+// EditParam 是一个字符串，可以是 "pitch"、"tension" 或声码器额外参数 ID（如 "formant_shift_cents"）
+// 具体可用值由后端 `get_processor_params` 动态返回
+export type EditParam = string;
 export type GridSize = "1/4" | "1/8" | "1/16" | "1/32";
 
 export interface TrackInfo {

@@ -29,6 +29,8 @@ use crate::state::SynthPipelineKind;
 
 static WORLD_RENDERER: world::WorldRenderer = world::WorldRenderer;
 static HIFIGAN_RENDERER: hifigan::HiFiGanRenderer = hifigan::HiFiGanRenderer;
+#[cfg(feature = "vslib")]
+static VSLIB_RENDERER: vslib_processor::VslibRenderer = vslib_processor::VslibRenderer;
 
 // ─── 注册表 ────────────────────────────────────────────────────────────────────
 
@@ -41,7 +43,7 @@ pub fn get_renderer(kind: SynthPipelineKind) -> &'static dyn Renderer {
         SynthPipelineKind::WorldVocoder => &WORLD_RENDERER,
         SynthPipelineKind::NsfHifiganOnnx => &HIFIGAN_RENDERER,
         #[cfg(feature = "vslib")]
-        SynthPipelineKind::VocalShifterVslib => &WORLD_RENDERER, // fallback
+        SynthPipelineKind::VocalShifterVslib => &VSLIB_RENDERER,
     }
 }
 

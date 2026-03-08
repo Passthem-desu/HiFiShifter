@@ -122,6 +122,14 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                         clip_render_info.sr,
                     ) {
                         Ok(stereo_pcm) => {
+                            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                                let nonzero = stereo_pcm.iter().filter(|&&v| v.abs() > 1e-6).count();
+                                eprintln!(
+                                    "[play_original] clip rendered: id={} pcm_len={} nonzero={} hash={:#018x}",
+                                    clip_render_info.clip.id, stereo_pcm.len(), nonzero,
+                                    clip_render_info.cache_key.param_hash
+                                );
+                            }
                             let frames = (stereo_pcm.len() / 2) as u64;
                             let entry = crate::synth_clip_cache::RenderedClipCacheEntry {
                                 pcm_stereo: std::sync::Arc::new(stereo_pcm),
@@ -174,7 +182,32 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     );
                 }
 
-                // 所有 clip 渲染完成，开始播放
+                // 所有 clip 渲染完成（或已尝试），开始播放
+                // 若有渲染失败，snapshot 中对应 clip 会有 needs_synthesis=true、rendered_pcm=None，
+                // 音频回调会陷入 has_pending_clip=true 的永久静音等待。
+                // 解决方案：渲染失败时降级为播放原始音频（等同于无 pitch edit 路径）。
+                if any_error {
+                    eprintln!("[play_original] rendering had errors, falling back to original audio playback");
+                    // 推送失败通知
+                    let _ = app.emit(
+                        "playback_rendering_state",
+                        PlaybackRenderingStateEvent {
+                            active: false,
+                            progress: Some(1.0),
+                            target: Some("original".to_string()),
+                        },
+                    );
+                    // 降级：直接播放——audio engine 会使用源 PCM，不经过 rendered_pcm 路径
+                    // 注意：此时 engine 中没有该 clip 的 rendered_pcm，
+                    //   build_snapshot 在找不到缓存时会设 needs_synthesis=true, rendered_pcm=None。
+                    //   这会导致 has_pending_clip=true → 静音。
+                    //   因此改用 update_timeline 但不传 pitch edit 标记的 timeline（无此机制），
+                    //   最简单的降级是：直接 seek + play，让 audio engine 用原始 PCM 播放
+                    //   （此时 pitch_edit_user_modified 仍为 true，engine 仍会尝试查找 rendered_pcm
+                    //    并找不到，因此改为 stop 旧播放状态并提示用户）。
+                    engine.stop();
+                    return;
+                }
                 engine.seek_sec(render_start_sec);
                 engine.update_timeline(tl_for_render.clone());
                 engine.set_playing(true, Some("original"));
@@ -269,6 +302,8 @@ fn collect_clips_needing_render(
             pitch_edit,
             frame_period_ms,
             playback_rate,
+            &entry.extra_curves,
+            &entry.extra_params,
         );
         let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
             clip_id: clip.id.clone(),
@@ -362,8 +397,20 @@ fn render_single_clip(
     };
 
     // 5. 时间拉伸（playback_rate != 1）
+    // 若合成处理器声明自己处理时间拉伸（handles_time_stretch = true，如 vslib），
+    // 则跳过此处的 RubberBand，由处理器在 pitch edit 阶段通过 ClipProcessContext.playback_rate 内部完成。
+    let processor_handles_stretch = {
+        let clip_root = timeline.resolve_root_track_id(&clip.track_id);
+        clip_root
+            .and_then(|root| timeline.tracks.iter().find(|t| t.id == root))
+            .map(|t| {
+                let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
+                crate::renderer::get_processor(kind).capabilities().handles_time_stretch
+            })
+            .unwrap_or(false)
+    };
     let mut segment = segment;
-    if (playback_rate - 1.0).abs() > 1e-6 {
+    if (playback_rate - 1.0).abs() > 1e-6 && !processor_handles_stretch {
         let seg_frames_in = segment.len() / 2;
         let target_frames = ((seg_frames_in as f64) / playback_rate).round().max(2.0) as usize;
         segment = crate::time_stretch::time_stretch_interleaved(
@@ -398,12 +445,10 @@ fn render_single_clip(
             }
             Ok(false) => {}
             Err(e) => {
-                if debug {
-                    eprintln!(
-                        "render_single_clip: pitch_edit error for clip_id={}: {}",
-                        &clip.id, e
-                    );
-                }
+                eprintln!(
+                    "[pitch_edit] clip_id={} ERROR: {e}",
+                    &clip.id
+                );
             }
         }
     }
@@ -447,25 +492,17 @@ pub(super) fn play_synthesized(state: State<'_, AppState>, start_sec: f64) -> se
         }
         let start_sec = playhead_sec.max(0.0) + start_sec.max(0.0);
 
-        let mut synthesized_path = {
-            state
-                .runtime
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .synthesized_wav_path
-                .clone()
+        // 每次 play_synthesized 都重新渲染，确保 pitch 编辑后立即生效。
+        // synthesize 命令（synth.rs）负责显式预渲染导出流程。
+        let out_path = match new_temp_wav_path("synth") {
+            Ok(p) => p,
+            Err(e) => return serde_json::json!({"ok": false, "error": e}),
         };
-
-        if synthesized_path.is_none() {
-            // Render on-demand.
-            let out_path = match new_temp_wav_path("synth") {
-                Ok(p) => p,
-                Err(e) => return serde_json::json!({"ok": false, "error": e}),
-            };
-            if let Err(e) = render_timeline_to_wav(&state, &out_path, 0.0, None) {
-                return serde_json::json!({"ok": false, "error": e});
-            }
-            synthesized_path = Some(out_path.display().to_string());
+        if let Err(e) = render_timeline_to_wav(&state, &out_path, 0.0, None) {
+            return serde_json::json!({"ok": false, "error": e});
+        }
+        let synthesized_path = Some(out_path.display().to_string());
+        {
             let mut rt = state.runtime.lock().unwrap_or_else(|e| e.into_inner());
             rt.has_synthesized = true;
             rt.synthesized_wav_path = synthesized_path.clone();

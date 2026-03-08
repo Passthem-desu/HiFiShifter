@@ -129,6 +129,7 @@ impl PitchEditAlgorithm {
         match algo {
             PitchAnalysisAlgo::WorldDll | PitchAnalysisAlgo::Unknown => Self::WorldVocoder,
             PitchAnalysisAlgo::NsfHifiganOnnx => Self::NsfHifiganOnnx,
+            PitchAnalysisAlgo::VocalShifterVslib => Self::WorldVocoder,
             PitchAnalysisAlgo::None => Self::Bypass,
         }
     }

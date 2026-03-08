@@ -19,6 +19,8 @@ import {
 import { resolveRootTrackId } from "../../features/session/trackUtils";
 import { useAppTheme } from "../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../theme/waveformColors";
+import type { ProcessorParamDescriptor } from "../../types/api";
+import { paramsApi } from "../../services/api/params";
 
 import {
     BackgroundGrid,
@@ -146,19 +148,29 @@ export const PianoRollPanel: React.FC = () => {
         center: (PITCH_MIN_MIDI + PITCH_MAX_MIDI) / 2,
         span: PITCH_MAX_MIDI - PITCH_MIN_MIDI,
     }));
-    const [tensionView, setTensionView] = useState<ValueViewport>(() => ({
-        center: 0.5,
-        span: 1,
-    }));
+    // 按参数 id 屘化的视口状态（音高以外的所有参数）
+    const [paramViews, setParamViews] = useState<Record<string, ValueViewport>>(
+        {},
+    );
     const pitchViewRef = useRef(pitchView);
-    const tensionViewRef = useRef(tensionView);
+    const paramViewsRef = useRef(paramViews);
 
     useEffect(() => {
         pitchViewRef.current = pitchView;
     }, [pitchView]);
     useEffect(() => {
-        tensionViewRef.current = tensionView;
-    }, [tensionView]);
+        paramViewsRef.current = paramViews;
+    }, [paramViews]);
+
+    /** 更新单个非音高参数的视口 */
+    const setParamViewport = useCallback(
+        (param: string, next: ValueViewport) => {
+            setParamViews((prev) => ({ ...prev, [param]: next }));
+            // 同时就地更新 ref，保证 pointer 回调内能立即得到新属性
+            paramViewsRef.current = { ...paramViewsRef.current, [param]: next };
+        },
+        [],
+    );
 
     const rootTrackId = useMemo(() => {
         return resolveRootTrackId(s.tracks, effectiveSelectedTrackId);
@@ -168,6 +180,66 @@ export const PianoRollPanel: React.FC = () => {
         if (!rootTrackId) return null;
         return s.tracks.find((tr) => tr.id === rootTrackId) ?? null;
     }, [s.tracks, rootTrackId]);
+
+    // 声码器参数描述符（由 algo 动态定制面板）
+    const [processorParams, setProcessorParams] = useState<
+        ProcessorParamDescriptor[]
+    >([]);
+    const processorParamsRef = useRef<ProcessorParamDescriptor[]>([]);
+
+    // 当 algo 变化时，重新抓取参数描述符
+    useEffect(() => {
+        const algo = rootTrack?.pitchAnalysisAlgo ?? "world_dll";
+        let cancelled = false;
+        paramsApi
+            .getProcessorParams(algo)
+            .then((params) => {
+                if (cancelled) return;
+                // 只保留 AutomationCurve 类型（可以绘制曲线的）
+                const curvable = params.filter(
+                    (p) => p.kind.type === "automation_curve",
+                );
+                processorParamsRef.current = curvable;
+                setProcessorParams(curvable);
+                // 初始化还没有视口的参数
+                setParamViews((prev) => {
+                    const next = { ...prev };
+                    for (const p of curvable) {
+                        if (!next[p.id] && p.kind.type === "automation_curve") {
+                            const { min_value, max_value, default_value } =
+                                p.kind;
+                            const span = max_value - min_value;
+                            next[p.id] = {
+                                center: default_value,
+                                span: span > 0 ? span : 1,
+                            };
+                        }
+                    }
+                    return next;
+                });
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    processorParamsRef.current = [];
+                    setProcessorParams([]);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rootTrack?.pitchAnalysisAlgo]);
+
+    // 当 processorParams 变化时，若 editParam 不在可用集合内，自动回退到 pitch
+    useEffect(() => {
+        const available = new Set([
+            "pitch",
+            ...processorParams.map((p) => p.id),
+        ]);
+        if (!available.has(editParam)) {
+            dispatch(setEditParam("pitch"));
+        }
+    }, [processorParams, editParam, dispatch]);
 
     // 收集轨道组内所有 trackId（root + 递归所有子轨道）
     const groupTrackIds = useMemo(() => {
@@ -326,10 +398,22 @@ export const PianoRollPanel: React.FC = () => {
                 return (1 - t) * H;
             }
 
-            const view = tensionViewRef.current;
-            const span = clamp(view.span, 1e-6, 1);
-            const min = clamp(view.center - span / 2, 0, 1 - span);
-            const t = (clamp(v, 0, 1) - min) / Math.max(1e-9, span);
+            const desc = processorParamsRef.current.find((d) => d.id === param);
+            const absMin =
+                desc?.kind.type === "automation_curve"
+                    ? desc.kind.min_value
+                    : 0;
+            const absMax =
+                desc?.kind.type === "automation_curve"
+                    ? desc.kind.max_value
+                    : 1;
+            const view = paramViewsRef.current[param] ?? {
+                center: (absMin + absMax) / 2,
+                span: absMax - absMin || 1,
+            };
+            const span = clamp(view.span, 1e-6, absMax - absMin || 1);
+            const min = clamp(view.center - span / 2, absMin, absMax - span);
+            const t = (clamp(v, absMin, absMax) - min) / Math.max(1e-9, span);
             return (1 - t) * H;
         },
         [],
@@ -356,21 +440,45 @@ export const PianoRollPanel: React.FC = () => {
                 );
                 return clamp(min + t * span, absMin, absMax);
             }
-            const view = tensionViewRef.current;
-            const span = clamp(view.span, 1e-6, 1);
-            const min = clamp(view.center - span / 2, 0, 1 - span);
-            return clamp(min + t * span, 0, 1);
+            const desc = processorParamsRef.current.find((d) => d.id === param);
+            const absMin =
+                desc?.kind.type === "automation_curve"
+                    ? desc.kind.min_value
+                    : 0;
+            const absMax =
+                desc?.kind.type === "automation_curve"
+                    ? desc.kind.max_value
+                    : 1;
+            const view = paramViewsRef.current[param] ?? {
+                center: (absMin + absMax) / 2,
+                span: absMax - absMin || 1,
+            };
+            const span = clamp(view.span, 1e-6, absMax - absMin || 1);
+            const min = clamp(view.center - span / 2, absMin, absMax - span);
+            return clamp(min + t * span, absMin, absMax);
         },
         [],
     );
 
     function clampViewport(param: ParamName, v: ValueViewport): ValueViewport {
-        const isLinear = param !== "pitch";
-        const absMin = isLinear ? 0 : PITCH_MIN_MIDI;
-        const absMax = isLinear ? 1 : PITCH_MAX_MIDI;
-        const maxSpan = absMax - absMin;
-        const minSpan = isLinear ? 0.05 : 6;
-        const span = clamp(v.span, minSpan, maxSpan);
+        if (param === "pitch") {
+            const absMin = PITCH_MIN_MIDI;
+            const absMax = PITCH_MAX_MIDI;
+            const span = clamp(v.span, 6, absMax - absMin);
+            const center = clamp(
+                v.center,
+                absMin + span / 2,
+                absMax - span / 2,
+            );
+            return { center, span };
+        }
+        const desc = processorParamsRef.current.find((d) => d.id === param);
+        const absMin =
+            desc?.kind.type === "automation_curve" ? desc.kind.min_value : 0;
+        const absMax =
+            desc?.kind.type === "automation_curve" ? desc.kind.max_value : 1;
+        const range = Math.max(1e-6, absMax - absMin);
+        const span = clamp(v.span, range * 0.05, range);
         const center = clamp(v.center, absMin + span / 2, absMax - span / 2);
         return { center, span };
     }
@@ -471,7 +579,7 @@ export const PianoRollPanel: React.FC = () => {
 
     useEffect(() => {
         invalidate();
-    }, [pitchView, tensionView, editParam, invalidate]);
+    }, [pitchView, paramViews, editParam, invalidate]);
 
     // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后�?
     // useEffect 已移�?detectedPitchCurves useMemo 定义之后，见下方�?
@@ -536,14 +644,14 @@ export const PianoRollPanel: React.FC = () => {
     drawRef.current = () => {
         // 确定副参数名称（非当�?editParam 的另一个参数）
         const secondaryParam: ParamName =
-            editParam === "pitch" ? "tension" : "pitch";
+            editParam === "pitch" ? (processorParams[0]?.id ?? "") : "pitch";
         drawPianoRoll({
             axisCanvas: axisCanvasRef.current,
             canvas: canvasRef.current,
             viewSize: viewSizeRef.current,
             editParam,
             pitchView: pitchViewRef.current,
-            tensionView: tensionViewRef.current,
+            paramViews: paramViewsRef.current,
             valueToY,
             clipPeaks,
             paramView,
@@ -577,9 +685,9 @@ export const PianoRollPanel: React.FC = () => {
         pxPerBeatRef,
         setPxPerBeat: setPxPerBeatImmediate,
         setPitchView,
-        setTensionView,
+        setParamViewport,
         pitchViewRef,
-        tensionViewRef,
+        paramViewsRef,
         scrollerRef,
         canvasRef,
         viewSizeRef,
@@ -707,44 +815,54 @@ export const PianoRollPanel: React.FC = () => {
                                 )}
                             </IconButton>
                         ) : null}
-                        <Button
-                            size="1"
-                            variant={editParam === "tension" ? "solid" : "soft"}
-                            color={editParam === "tension" ? "amber" : "gray"}
-                            onClick={() => dispatch(setEditParam("tension"))}
-                            style={{ cursor: "pointer" }}
-                        >
-                            {t("tension")}
-                        </Button>
-                        {/* �?editParam 不是 tension 时，显示 tension 副参数开�?*/}
-                        {editParam !== "tension" ? (
-                            <IconButton
-                                size="1"
-                                variant={
-                                    secondaryParamVisible["tension"]
-                                        ? "soft"
-                                        : "ghost"
-                                }
-                                color={
-                                    secondaryParamVisible["tension"]
-                                        ? "orange"
-                                        : "gray"
-                                }
-                                onClick={() => toggleSecondaryParam("tension")}
-                                style={{ cursor: "pointer" }}
-                                title={
-                                    secondaryParamVisible["tension"]
-                                        ? t("hide_secondary_param")
-                                        : t("show_secondary_param")
-                                }
-                            >
-                                {secondaryParamVisible["tension"] ? (
-                                    <EyeOpenIcon />
-                                ) : (
-                                    <EyeClosedIcon />
-                                )}
-                            </IconButton>
-                        ) : null}
+                        {/* 由后端 processorParams 驱动的动态参数按钮 */}
+                        {processorParams.map((p) => (
+                            <React.Fragment key={p.id}>
+                                <Button
+                                    size="1"
+                                    variant={
+                                        editParam === p.id ? "solid" : "soft"
+                                    }
+                                    color={
+                                        editParam === p.id ? "amber" : "gray"
+                                    }
+                                    onClick={() => dispatch(setEditParam(p.id))}
+                                    style={{ cursor: "pointer" }}
+                                >
+                                    {p.display_name}
+                                </Button>
+                                {editParam !== p.id ? (
+                                    <IconButton
+                                        size="1"
+                                        variant={
+                                            secondaryParamVisible[p.id]
+                                                ? "soft"
+                                                : "ghost"
+                                        }
+                                        color={
+                                            secondaryParamVisible[p.id]
+                                                ? "orange"
+                                                : "gray"
+                                        }
+                                        onClick={() =>
+                                            toggleSecondaryParam(p.id)
+                                        }
+                                        style={{ cursor: "pointer" }}
+                                        title={
+                                            secondaryParamVisible[p.id]
+                                                ? t("hide_secondary_param")
+                                                : t("show_secondary_param")
+                                        }
+                                    >
+                                        {secondaryParamVisible[p.id] ? (
+                                            <EyeOpenIcon />
+                                        ) : (
+                                            <EyeClosedIcon />
+                                        )}
+                                    </IconButton>
+                                ) : null}
+                            </React.Fragment>
+                        ))}
                     </Flex>
 
                     {editParam === "pitch" ? (
@@ -814,6 +932,7 @@ export const PianoRollPanel: React.FC = () => {
                                     [
                                         "world_dll",
                                         "nsf_hifigan_onnx",
+                                        "vslib",
                                         "none",
                                     ].includes(rootTrack.pitchAnalysisAlgo)
                                         ? rootTrack.pitchAnalysisAlgo
@@ -836,6 +955,9 @@ export const PianoRollPanel: React.FC = () => {
                                     </Select.Item>
                                     <Select.Item value="nsf_hifigan_onnx">
                                         nsf-hifigan
+                                    </Select.Item>
+                                    <Select.Item value="vslib">
+                                        vslib
                                     </Select.Item>
                                     <Select.Item value="none">
                                         {t("none")}

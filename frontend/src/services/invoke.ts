@@ -331,6 +331,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "search_files_recursive":
             return { dirPath: args[0], query: args[1] };
 
+        case "get_processor_params":
+            return { algo: args[0] };
+
         default:
             return { __unwired: true };
     }

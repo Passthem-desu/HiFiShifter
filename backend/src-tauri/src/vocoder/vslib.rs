@@ -157,11 +157,26 @@ pub struct AWDINFO {
     pub targetch: c_int,     // 目标声道
 }
 
+pub fn vslib_error_name(code: c_int) -> &'static str {
+    match code {
+        VSERR_NOERR => "VSERR_NOERR",
+        VSERR_PRM => "VSERR_PRM",
+        VSERR_PRJOPEN => "VSERR_PRJOPEN",
+        VSERR_PRJFORMAT => "VSERR_PRJFORMAT",
+        VSERR_WAVEOPEN => "VSERR_WAVEOPEN",
+        VSERR_WAVEFORMAT => "VSERR_WAVEFORMAT",
+        VSERR_FREQ => "VSERR_FREQ",
+        VSERR_MAX => "VSERR_MAX",
+        VSERR_NOMEM => "VSERR_NOMEM",
+        _ => "VSERR_UNKNOWN",
+    }
+}
+
 //--------------------------------------------------------------
-// 外部函数声明 (stdcall, Windows)
+// 外部函数声明 (Windows system ABI)
 //--------------------------------------------------------------
 #[link(name = "vslib_x64")]
-extern "stdcall" {
+extern "system" {
     // 库版本
     pub fn VslibGetVersion() -> c_int;
 
@@ -272,7 +287,7 @@ pub enum VslibError {
 impl std::fmt::Display for VslibError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VslibError::Code(c) => write!(f, "vslib error code {c}"),
+            VslibError::Code(c) => write!(f, "vslib error code {c} ({})", vslib_error_name(*c)),
         }
     }
 }
@@ -321,7 +336,9 @@ impl VsProject {
         Ok(n)
     }
 
-    /// 取混音 PCM 数据（16-bit 立体声）到给定 buffer
+    /// 取混音 PCM 数据（16-bit 立体声）到给定 buffer。
+    /// `buf` 长度须为帧数 × 2（channel=2 立体声 i16 交错）。
+    /// size 参数 = 帧数（= buf.len() / 2），vslib 内部 × channel 计算写入量。
     pub fn mix_data_i16(&self, buf: &mut [i16], index: c_int) -> Result<(), VslibError> {
         check(unsafe {
             VslibGetMixData(
@@ -330,7 +347,7 @@ impl VsProject {
                 16,
                 2,
                 index,
-                buf.len() as c_int,
+                (buf.len() / 2) as c_int, // 帧数 = 总 i16 / channel(2)
             )
         })
     }
@@ -341,5 +358,17 @@ impl Drop for VsProject {
         if !self.0.is_null() {
             unsafe { VslibDeleteProject(self.0) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{vslib_error_name, VSERR_NOERR, VSERR_WAVEOPEN};
+
+    #[test]
+    fn error_name_maps_known_codes() {
+        assert_eq!(vslib_error_name(VSERR_NOERR), "VSERR_NOERR");
+        assert_eq!(vslib_error_name(VSERR_WAVEOPEN), "VSERR_WAVEOPEN");
+        assert_eq!(vslib_error_name(9999), "VSERR_UNKNOWN");
     }
 }

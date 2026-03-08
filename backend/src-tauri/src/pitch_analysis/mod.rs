@@ -89,6 +89,7 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
     hasher.update(match algo {
         PitchAnalysisAlgo::WorldDll => b"world_dll",
         PitchAnalysisAlgo::NsfHifiganOnnx => b"nsf_hifigan_onnx",
+        PitchAnalysisAlgo::VocalShifterVslib => b"vslib",
         PitchAnalysisAlgo::None => b"none",
         PitchAnalysisAlgo::Unknown => b"unknown",
     });

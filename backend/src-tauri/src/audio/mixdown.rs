@@ -388,8 +388,21 @@ pub fn render_mixdown_interleaved(
         // Pitch-preserving time-stretch:
         // - playback_rate == 1: keep source window duration as-is.
         // - playback_rate != 1: stretch the trimmed window to (src_len / playback_rate) in timeline time.
+        // 若合成处理器声明自己处理时间拉伸（handles_time_stretch = true，如 vslib），
+        // 则跳过此处外部拉伸，由 pitch edit 阶段的处理器内部完成。
+        let processor_handles_stretch = timeline
+            .resolve_root_track_id(&clip.track_id)
+            .and_then(|root| timeline.tracks.iter().find(|t| t.id == root))
+            .map(|t| {
+                let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
+                crate::renderer::get_processor(kind).capabilities().handles_time_stretch
+            })
+            .unwrap_or(false);
         let mut segment = segment;
-        if (playback_rate - 1.0).abs() > 1e-6 {
+        // 外部 RubberBand 拉伸的执行条件：
+        //   !processor_handles_stretch → 处理器不内部拉伸（World/HiFiGAN chain 内有 RubberBandStage，vslib 原生拉伸）
+        //   !opts.apply_pitch_edit    → pitch edit 链不会运行，内部拉伸无法触发，需回退到外部拉伸
+        if (playback_rate - 1.0).abs() > 1e-6 && (!processor_handles_stretch || !opts.apply_pitch_edit) {
             let seg_frames_in = segment.len() / 2;
             let target_frames = ((seg_frames_in as f64) / playback_rate).round().max(2.0) as usize;
             segment = time_stretch_interleaved(&segment, 2, out_rate, target_frames, opts.stretch);
@@ -417,9 +430,7 @@ pub fn render_mixdown_interleaved(
                         segment = seg;
                     }
                     Err(e) => {
-                        if debug {
-                            eprintln!("mixdown: per-clip pitch_edit skipped due to error: {e}");
-                        }
+                        eprintln!("[pitch_edit] clip_id={} ERROR: {e}", clip.id);
                         segment = seg;
                     }
                 }

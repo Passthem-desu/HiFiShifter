@@ -333,9 +333,7 @@ fn build_vslib() {
             .ancestors()
             .nth(3)
             .expect("[vslib] unexpected OUT_DIR depth");
-        let vslib_dir = target_dir.join("vslib");
-        let _ = std::fs::create_dir_all(&vslib_dir);
-        let dll_dst = vslib_dir.join("vslib_x64.dll");
+        let dll_dst = target_dir.join("vslib_x64.dll");
         if let Err(e) = std::fs::copy(&dll_src, &dll_dst) {
             println!("cargo:warning=[vslib] could not copy DLL to {}: {}", dll_dst.display(), e);
         } else {

@@ -166,6 +166,7 @@ pub(super) fn set_track_state(
     let algo = pitch_analysis_algo.as_deref().map(|s| match s {
         "world_dll" | "world" => crate::state::PitchAnalysisAlgo::WorldDll,
         "nsf_hifigan_onnx" | "nsf_hifigan" | "onnx" => crate::state::PitchAnalysisAlgo::NsfHifiganOnnx,
+        "vslib" | "vocalshifter_vslib" => crate::state::PitchAnalysisAlgo::VocalShifterVslib,
         "none" => crate::state::PitchAnalysisAlgo::None,
         _ => crate::state::PitchAnalysisAlgo::Unknown,
     });

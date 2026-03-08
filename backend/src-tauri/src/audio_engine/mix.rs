@@ -147,6 +147,26 @@ fn mix_into_scratch_stereo(
 
     if has_pending_clip {
         // cursor 暂停，不推进 position，输出静音等待
+        // 调试：每隔约 1s 打印一次（避免刷屏）
+        if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+            static LAST_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let now = pos0 / 44100; // rough seconds
+            let last = LAST_LOG.load(Ordering::Relaxed);
+            if now != last {
+                LAST_LOG.store(now, Ordering::Relaxed);
+                for clip in snap.clips.iter() {
+                    if clip.needs_synthesis && clip.rendered_pcm.is_none() {
+                        let clip_end = clip.start_frame.saturating_add(clip.length_frames);
+                        if clip.start_frame < pos1 && clip_end > pos0 {
+                            eprintln!(
+                                "[mix] PENDING clip_id={} needs_synthesis=true rendered_pcm=None pos={}",
+                                clip.clip_id, pos0
+                            );
+                        }
+                    }
+                }
+            }
+        }
         return;
     }
 

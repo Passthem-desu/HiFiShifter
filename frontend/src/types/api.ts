@@ -206,3 +206,26 @@ export interface PitchTaskStatusPayload {
     error?: string | null;
     result_key?: string | null;
 }
+
+// ─── Processor param descriptors ────────────────────────────────────────────
+
+export type ParamKindDto =
+    | {
+          type: "automation_curve";
+          unit: string;
+          default_value: number;
+          min_value: number;
+          max_value: number;
+      }
+    | {
+          type: "static_enum";
+          options: [string, number][];
+          default_value: number;
+      };
+
+export interface ProcessorParamDescriptor {
+    id: string;
+    display_name: string;
+    group: string;
+    kind: ParamKindDto;
+}

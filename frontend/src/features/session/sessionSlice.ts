@@ -116,13 +116,7 @@ export interface SessionState {
     clips: ClipInfo[];
     selectedTrackId: string | null;
     selectedClipId: string | null;
-    clipAutomation: Record<
-        string,
-        {
-            pitch: AutomationPoint[];
-            tension: AutomationPoint[];
-        }
-    >;
+    clipAutomation: Record<string, Record<string, AutomationPoint[]>>;
     selectedPointId: string | null;
     clipWaveforms: Record<string, WaveformPreview>;
     clipPitchRanges: Record<string, { min: number; max: number }>;
@@ -1355,7 +1349,10 @@ const sessionSlice = createSlice({
             })
             .addCase(pasteReaperClipboard.rejected, (state, action) => {
                 state.busy = false;
-                state.error = (action.payload as string) ?? action.error?.message ?? "Paste Reaper clipboard failed";
+                state.error =
+                    (action.payload as string) ??
+                    action.error?.message ??
+                    "Paste Reaper clipboard failed";
                 state.status = "Failed";
             })
 
@@ -1620,7 +1617,10 @@ const sessionSlice = createSlice({
             })
             .addCase(openReaperFromDialog.rejected, (state, action) => {
                 state.busy = false;
-                state.error = (action.payload as string) ?? action.error?.message ?? "Import Reaper failed";
+                state.error =
+                    (action.payload as string) ??
+                    action.error?.message ??
+                    "Import Reaper failed";
                 state.status = "Import failed";
             })
 

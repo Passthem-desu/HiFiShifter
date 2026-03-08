@@ -8,6 +8,26 @@ import {
     renderWaveformCanvas,
 } from "../../../utils/waveformRenderer";
 
+/** 为数值轴选择"好看"的刻度步长 */
+function niceAxisStep(range: number, targetCount: number): number {
+    const roughStep = range / targetCount;
+    const mag = Math.pow(10, Math.floor(Math.log10(roughStep)));
+    const normalized = roughStep / mag;
+    let nice: number;
+    if (normalized < 1.5) nice = 1;
+    else if (normalized < 3.5) nice = 2;
+    else if (normalized < 7.5) nice = 5;
+    else nice = 10;
+    return nice * mag;
+}
+
+/** 格式化轴标记数值，避免浮点噪声 */
+function formatAxisMark(v: number): string {
+    // 最多保留 4 位有效数字，去掉尾随零
+    const s = parseFloat(v.toPrecision(4)).toString();
+    return s;
+}
+
 function isBlackKey(midi: number): boolean {
     const pc = ((midi % 12) + 12) % 12;
     return pc === 1 || pc === 3 || pc === 6 || pc === 8 || pc === 10;
@@ -188,7 +208,8 @@ export function drawPianoRoll(args: {
     viewSize: { w: number; h: number };
     editParam: ParamName;
     pitchView: ValueViewport;
-    tensionView: ValueViewport;
+    /** 每个参数 id 的视口（非音高参数用） */
+    paramViews: Record<string, ValueViewport>;
     valueToY: (param: ParamName, v: number, h: number) => number;
     clipPeaks: ClipPeaksEntry[];
     paramView: ParamViewSegment | null;
@@ -214,7 +235,7 @@ export function drawPianoRoll(args: {
         viewSize,
         editParam,
         pitchView,
-        tensionView,
+        paramViews,
         valueToY,
         clipPeaks,
         paramView,
@@ -394,15 +415,26 @@ export function drawPianoRoll(args: {
                     ctx.lineWidth = 1;
                 }
             } else {
-                // tension axis labels
+                // 非音高参数轴标签：根据当前视口动态计算刷分标记
+                const view = paramViews[editParam] ?? { center: 0.5, span: 1 };
+                const span = Math.max(1e-6, view.span);
+                const vMin = view.center - span / 2;
+                const vMax = view.center + span / 2;
+                // 若干标尺刻度：选择让屏内展示 3–5 个标记
+                const niceStep = niceAxisStep(span, 4);
+                const firstMark = Math.ceil(vMin / niceStep) * niceStep;
                 ctx.fillStyle = colors.tensionLabel;
                 ctx.font = "10px sans-serif";
                 ctx.textBaseline = "middle";
-                const marks = [1, 0.5, 0];
-                for (const m of marks) {
-                    const y = valueToY("tension", m, h);
-                    ctx.fillText(String(m), 6, y);
+                for (
+                    let m = firstMark;
+                    m <= vMax + niceStep * 0.01;
+                    m += niceStep
+                ) {
+                    const y = valueToY(editParam, m, h);
+                    ctx.fillText(formatAxisMark(m), 6, y);
                     ctx.strokeStyle = colors.tensionLine;
+                    ctx.lineWidth = 1;
                     ctx.beginPath();
                     ctx.moveTo(0, y + 0.5);
                     ctx.lineTo(w, y + 0.5);
@@ -611,16 +643,14 @@ export function drawPianoRoll(args: {
         secondaryParamView &&
         secondaryParamView.edit.length >= 2
     ) {
-        // 根据副参数类型选择颜色：pitch 用蓝色，tension 用橙�?
-        const secondaryParam: ParamName = secondaryParamView.key.includes(
-            "|pitch|",
-        )
+        // 根据副参数类型选择颜色：pitch 用蓝色，其他用橙色
+        const secondaryIsPitch = secondaryParamView.key.includes("|pitch|");
+        const secondaryParam: ParamName = secondaryIsPitch
             ? "pitch"
-            : "tension";
-        const secondaryColor =
-            secondaryParam === "pitch"
-                ? "rgba(100, 200, 255, 0.45)"
-                : "rgba(255, 180, 60, 0.45)";
+            : editParam;
+        const secondaryColor = secondaryIsPitch
+            ? "rgba(100, 200, 255, 0.45)"
+            : "rgba(255, 180, 60, 0.45)";
         ctx.save();
         ctx.strokeStyle = secondaryColor;
         ctx.lineWidth = 1.5;
@@ -738,7 +768,4 @@ export function drawPianoRoll(args: {
     ctx.moveTo(phx + 0.5, 0);
     ctx.lineTo(phx + 0.5, h);
     ctx.stroke();
-
-    // Keep tensionView referenced to avoid unused warning (future).
-    void tensionView;
 }

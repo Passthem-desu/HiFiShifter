@@ -283,7 +283,12 @@ pub(crate) fn build_snapshot(
 
         let src = match get_resampled_stereo_cached(path, out_rate, cache) {
             Some(v) => v,
-            None => continue,
+            None => {
+                if debug {
+                    eprintln!("[snapshot] SKIP clip_id={} reason=source_not_in_resource_cache path={}", clip.id, path.display());
+                }
+                continue;
+            }
         };
 
         let (mut src_start, mut src_end) =
@@ -361,9 +366,9 @@ pub(crate) fn build_snapshot(
                         let track = timeline.tracks.iter().find(|t| t.id == root)?;
                         let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
                         let renderer_id = crate::renderer::get_renderer(kind).id();
-                        Some((entry.pitch_edit.as_slice(), entry.frame_period_ms, renderer_id))
+                        Some((entry.pitch_edit.as_slice(), entry.frame_period_ms, renderer_id, &entry.extra_curves, &entry.extra_params))
                     });
-                if let Some((pitch_edit, frame_period_ms, renderer_id)) = params {
+                if let Some((pitch_edit, frame_period_ms, renderer_id, extra_curves, extra_params)) = params {
                     let end_frame = start_frame.saturating_add(length_frames);
                     // 关键：使用原始 playback_rate，与 render_single_clip 存入时一致
                     let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
@@ -376,6 +381,8 @@ pub(crate) fn build_snapshot(
                         pitch_edit,
                         frame_period_ms,
                         playback_rate,
+                        extra_curves,
+                        extra_params,
                     );
                     let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
                         clip_id: clip.id.clone(),
@@ -385,6 +392,12 @@ pub(crate) fn build_snapshot(
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
                     let pcm = rendered_cache.get(&cache_key).map(|entry| entry.pcm_stereo.clone());
+                    if debug {
+                        eprintln!(
+                            "[snapshot] clip_id={} hash={:#018x} rendered_cache_hit={} needs_synthesis=true",
+                            clip.id, cache_key.param_hash, pcm.is_some()
+                        );
+                    }
                     // 该 clip 需要合成；若 pcm 为 None 则表示尚未完成，应静音等待
                     (pcm, true)
                 } else {

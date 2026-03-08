@@ -39,9 +39,9 @@ export function usePianoRollInteractions(args: {
     /** 当前 BPM，用于动态计�?pxPerBeat 的合法范�?*/
     bpm: number;
     setPitchView: (next: ValueViewport) => void;
-    setTensionView: (next: ValueViewport) => void;
+    setParamViewport: (param: string, next: ValueViewport) => void;
     pitchViewRef: MutableRefObject<ValueViewport>;
-    tensionViewRef: MutableRefObject<ValueViewport>;
+    paramViewsRef: MutableRefObject<Record<string, ValueViewport>>;
 
     scrollerRef: MutableRefObject<HTMLDivElement | null>;
     canvasRef: MutableRefObject<HTMLCanvasElement | null>;
@@ -117,9 +117,9 @@ export function usePianoRollInteractions(args: {
         setPxPerBeat,
         bpm,
         setPitchView,
-        setTensionView,
+        setParamViewport,
         pitchViewRef,
-        tensionViewRef,
+        paramViewsRef,
         scrollerRef,
         canvasRef,
         viewSizeRef,
@@ -372,13 +372,16 @@ export function usePianoRollInteractions(args: {
                     });
                     setPitchView(next);
                 } else {
-                    const cur = tensionViewRef.current;
+                    const cur = paramViewsRef.current[editParam] ?? {
+                        center: 0.5,
+                        span: 1,
+                    };
                     const nextSpan = cur.span * factor;
                     const next = clampViewport(editParam, {
                         span: nextSpan,
                         center: valueAtPointer - (0.5 - t) * nextSpan,
                     });
-                    setTensionView(next);
+                    setParamViewport(editParam, next);
                 }
                 invalidate();
                 return;
@@ -416,10 +419,10 @@ export function usePianoRollInteractions(args: {
             yToViewportT,
             yToValue,
             pitchViewRef,
-            tensionViewRef,
+            paramViewsRef,
             clampViewport,
             setPitchView,
-            setTensionView,
+            setParamViewport,
             invalidate,
             pxPerBeatRef,
             setPxPerBeat,
@@ -436,7 +439,6 @@ export function usePianoRollInteractions(args: {
     const onCanvasPointerDown = useCallback(
         (e: ReactPointerEvent<HTMLCanvasElement>) => {
             if (!rootTrackId) return;
-            if (editParam !== "pitch" && editParam !== "tension") return;
 
             // Middle mouse: pan (time axis)
             if (e.button === 1) {
@@ -452,7 +454,10 @@ export function usePianoRollInteractions(args: {
                     startView:
                         editParam === "pitch"
                             ? pitchViewRef.current
-                            : tensionViewRef.current,
+                            : (paramViewsRef.current[editParam] ?? {
+                                  center: 0.5,
+                                  span: 1,
+                              }),
                     startRectH:
                         (canvasRef.current?.getBoundingClientRect().height ??
                             viewSizeRef.current.h) ||
@@ -477,8 +482,9 @@ export function usePianoRollInteractions(args: {
                             }),
                         );
                     } else {
-                        setTensionView(
-                            clampViewport("tension", {
+                        setParamViewport(
+                            editParam,
+                            clampViewport(editParam, {
                                 span: pan.startView.span,
                                 center: pan.startView.center + deltaCenter,
                             }),
@@ -833,11 +839,11 @@ export function usePianoRollInteractions(args: {
             viewSizeRef,
             panRef,
             pitchViewRef,
-            tensionViewRef,
+            paramViewsRef,
             syncScrollLeft,
             clampViewport,
             setPitchView,
-            setTensionView,
+            setParamViewport,
             invalidate,
             pointerBeat,
             selectionRef,

@@ -441,6 +441,8 @@ pub fn global_rendered_clip_cache() -> &'static Mutex<RenderedClipCache> {
 /// - `sr`：采样率
 /// - `pitch_edit` 曲线中与 clip 时间范围重叠的片段
 /// - `playback_rate`：播放速率
+/// - `extra_curves`：声码器专属自动化曲线（AutomationCurve 类型）
+/// - `extra_params`：声码器专属静态参数（StaticEnum 类型）
 pub fn compute_rendered_clip_hash(
     clip_id: &str,
     source_path: &str,
@@ -451,6 +453,8 @@ pub fn compute_rendered_clip_hash(
     pitch_edit: &[f32],
     frame_period_ms: f64,
     playback_rate: f64,
+    extra_curves: &std::collections::HashMap<String, Vec<f32>>,
+    extra_params: &std::collections::HashMap<String, f64>,
 ) -> u64 {
     let mut h: u64 = 14695981039346656037u64;
 
@@ -482,6 +486,24 @@ pub fn compute_rendered_clip_hash(
     let hi = end_idx.min(pitch_edit.len());
     for &v in &pitch_edit[lo..hi] {
         mix_bytes!(&v.to_bits().to_le_bytes());
+    }
+
+    // 混入 extra_curves（AutomationCurve 类型参数），按 key 排序保证确定性
+    let mut sorted_curves: Vec<(&String, &Vec<f32>)> = extra_curves.iter().collect();
+    sorted_curves.sort_by_key(|(k, _)| k.as_str());
+    for (k, v) in sorted_curves {
+        mix_bytes!(k.as_bytes());
+        for &val in v.iter() {
+            mix_bytes!(&val.to_bits().to_le_bytes());
+        }
+    }
+
+    // 混入 extra_params（StaticEnum 类型参数），按 key 排序保证确定性
+    let mut sorted_params: Vec<(&String, &f64)> = extra_params.iter().collect();
+    sorted_params.sort_by_key(|(k, _)| k.as_str());
+    for (k, v) in sorted_params {
+        mix_bytes!(k.as_bytes());
+        mix_bytes!(&v.to_le_bytes());
     }
 
     h

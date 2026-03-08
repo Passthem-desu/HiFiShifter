@@ -18,6 +18,8 @@ fn pitch_edit_algo_from_env() -> Option<String> {
 pub enum PitchEditAlgorithm {
     WorldVocoder,
     NsfHifiganOnnx,
+    #[cfg(feature = "vslib")]
+    VocalShifterVslib,
     Bypass,
 }
 
@@ -129,6 +131,10 @@ impl PitchEditAlgorithm {
         match algo {
             PitchAnalysisAlgo::WorldDll | PitchAnalysisAlgo::Unknown => Self::WorldVocoder,
             PitchAnalysisAlgo::NsfHifiganOnnx => Self::NsfHifiganOnnx,
+            #[cfg(feature = "vslib")]
+            PitchAnalysisAlgo::VocalShifterVslib => Self::VocalShifterVslib,
+            #[cfg(not(feature = "vslib"))]
+            PitchAnalysisAlgo::VocalShifterVslib => Self::Bypass,
             PitchAnalysisAlgo::None => Self::Bypass,
         }
     }
@@ -351,7 +357,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     clip_start_sec: f64,
     seg_start_sec: f64,
     sample_rate: u32,
-    pcm_stereo: &mut [f32],
+    pcm_stereo: &mut Vec<f32>,
 ) -> Result<bool, String> {
     if pcm_stereo.len() < 32 {
         return Ok(false);
@@ -400,54 +406,93 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let frame_period_ms = entry.frame_period_ms.max(0.1);
     let pitch_edit = entry.pitch_edit.as_slice();
 
+    // 预计算处理器能力：决定 seg_end_sec 的时间轴计算方式。
+    // - handles_time_stretch=true（如 World/HiFiGAN chain、vslib）：
+    //     输入 PCM 为源速率，输出 = 源帧数 / playback_rate（时间轴帧数）
+    // - handles_time_stretch=false：输入 PCM 已由外部 RubberBand 预拉伸，帧数 = 时间轴帧数
+    let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+    let clip_playback_rate = (clip.playback_rate as f64).max(1e-6);
+    let processor_handles_stretch =
+        crate::renderer::get_processor(kind).capabilities().handles_time_stretch;
+
     // Quick skip when user never set a target in this segment window.
     let seg_frames = pcm_stereo.len() / 2;
-    let seg_end_sec = seg_start_sec + (seg_frames as f64) / (sample_rate.max(1) as f64);
+    // 输出帧数（时间轴帧数）：内部拉伸时需折算，外部预拉伸时 seg_frames 已是时间轴帧数
+    let expected_out_frames = if processor_handles_stretch {
+        ((seg_frames as f64) / clip_playback_rate).round().max(2.0) as usize
+    } else {
+        seg_frames
+    };
+    // seg_end_sec 始终以时间轴坐标（输出帧）计，确保音高编辑范围检测与声码器上下文一致
+    let seg_end_sec =
+        seg_start_sec + (expected_out_frames as f64) / (sample_rate.max(1) as f64);
     if !any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec) {
         return Ok(false);
     }
 
+    eprintln!(
+        "[pitch_edit] clip_id={} algo={:?} seg=[{:.3},{:.3}) compose_enabled={} user_modified={}",
+        clip.id, algo, seg_start_sec, seg_end_sec,
+        track.compose_enabled, entry.pitch_edit_user_modified
+    );
+
+    // vslib 使用自身内部分析（ANALYZE_OPTION_VOCAL_SHIFTER），不依赖 WORLD 音高轮廓；
+    // 向 VslibSetPitchArray 传递绝对目标音高，不需要原始 MIDI 曲线。
+    // 因此对 vslib 跳过 get_or_compute_clip_pitch_midi_global 和 any_effective_pitch_change_in_range，
+    // 仅凭 any_user_edit_in_range（已在上方通过）即可触发合成。
+    #[cfg(feature = "vslib")]
+    let is_vslib = matches!(algo, PitchEditAlgorithm::VocalShifterVslib);
+    #[cfg(not(feature = "vslib"))]
+    let is_vslib = false;
+
     // Get per-clip original MIDI curve (full source, source-time indexed).
-    let clip_pitch = crate::pitch_clip::get_or_compute_clip_pitch_midi_global(
-        timeline,
-        clip,
-        &root,
-        frame_period_ms,
-    );
-    let Some(clip_pitch) = clip_pitch else {
-        return Ok(false);
+    let timeline_midi: Vec<f32> = if is_vslib {
+        // vslib 不需要原始音高轮廓，传空切片，VslibProcessor 会忽略 clip_midi 字段。
+        Vec::new()
+    } else {
+        let clip_pitch = crate::pitch_clip::get_or_compute_clip_pitch_midi_global(
+            timeline,
+            clip,
+            &root,
+            frame_period_ms,
+        );
+        let Some(clip_pitch) = clip_pitch else {
+            return Ok(false);
+        };
+
+        // 将源时间索引的 MIDI 曲线 trim+resample 为时间轴对齐的曲线：
+        // timeline_midi[0] 对应 clip_start_sec，每帧 frame_period_ms，按 playback_rate 拉伸后的时间轴坐标。
+        // 这与前端显示所用的曲线变换完全一致（见 emit_clip_pitch_data_for_clip）。
+        let tm = crate::pitch_clip::trim_and_resample_midi(
+            &clip_pitch.midi,
+            frame_period_ms,
+            clip.source_start_sec,
+            clip.source_end_sec,
+            clip_playback_rate,
+            clip.length_sec.max(0.0),
+        );
+        if tm.is_empty() {
+            return Ok(false);
+        }
+
+        // Skip expensive processing if the edit curve does not actually change pitch vs clip's original MIDI.
+        if !any_effective_pitch_change_in_range(
+            frame_period_ms,
+            pitch_edit,
+            clip_start_sec,
+            &tm,
+            seg_start_sec,
+            seg_end_sec,
+        ) {
+            return Ok(false);
+        }
+        tm
     };
-
-    // 将源时间索引的 MIDI 曲线 trim+resample 为时间轴对齐的曲线：
-    // timeline_midi[0] 对应 clip_start_sec，每帧 frame_period_ms，按 playback_rate 拉伸后的时间轴坐标。
-    // 这与前端显示所用的曲线变换完全一致（见 emit_clip_pitch_data_for_clip）。
-    let playback_rate = (clip.playback_rate as f64).max(1e-6);
-    let timeline_midi = crate::pitch_clip::trim_and_resample_midi(
-        &clip_pitch.midi,
-        frame_period_ms,
-        clip.source_start_sec,
-        clip.source_end_sec,
-        playback_rate,
-        clip.length_sec.max(0.0),
-    );
-    if timeline_midi.is_empty() {
-        return Ok(false);
-    }
-
-    // Skip expensive processing if the edit curve does not actually change pitch vs clip's original MIDI.
-    if !any_effective_pitch_change_in_range(
-        frame_period_ms,
-        pitch_edit,
-        clip_start_sec,
-        &timeline_midi,
-        seg_start_sec,
-        seg_end_sec,
-    ) {
-        return Ok(false);
-    }
 
     // stereo -> mono (we don't preserve stereo; use left channel for cheaper conversion)
     let frames = seg_frames;
+    // kind / clip_playback_rate / processor_handles_stretch / expected_out_frames 已在函数上方计算
+
     let processed: Option<Vec<f32>> = MONO_SCRATCH.with(|buf| -> Result<Option<Vec<f32>>, String> {
         let mut mono = buf.borrow_mut();
         mono.clear();
@@ -456,16 +501,13 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             mono[f] = pcm_stereo[f * 2];
         }
 
-        // 通过 ClipProcessor trait 调用，解耦合成链路（含音高合成，不含时间拉伸）。
-        let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+        // 通过 ClipProcessor trait 调用，解耦合成链路（含音高合成）。
         let processor = crate::renderer::get_processor(kind);
         if !processor.is_available() {
             return Ok(None);
         }
 
         // 从 TrackParamsState 读取声码器专属曲线/参数（Phase 5 新增字段）
-        let empty_curves = std::collections::HashMap::new();
-        let empty_params = std::collections::HashMap::new();
         let extra_curves = &entry.extra_curves;
         let extra_params = &entry.extra_params;
 
@@ -474,25 +516,52 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             clip.extra_curves.as_ref().unwrap_or(extra_curves);
         let extra_params: &std::collections::HashMap<String, f64> =
             clip.extra_params.as_ref().unwrap_or(extra_params);
-        let _ = (&empty_curves, &empty_params); // suppress unused warnings
+
+        // 若处理器自己处理时间拉伸（如 vslib 使用 Timing 控制点），传递实际 playback_rate；
+        // 否则 PCM 已由外部 RubberBand 预处理，rate=1.0。
+        let ctx_playback_rate = if processor_handles_stretch { clip_playback_rate } else { 1.0 };
 
         let ctx = crate::renderer::ClipProcessContext {
             mono_pcm: mono.as_slice(),
             sample_rate,
             clip_start_sec,
             seg_start_sec,
-            seg_end_sec: seg_start_sec + (frames as f64) / (sample_rate.max(1) as f64),
+            seg_end_sec: seg_start_sec + (expected_out_frames as f64) / (sample_rate.max(1) as f64),
             frame_period_ms,
             pitch_edit,
             clip_midi: &timeline_midi,
-            // PCM 在此阶段已经过时间拉伸（由 playback.rs 外部完成），rate=1.0
-            playback_rate: 1.0,
-            out_frames: frames,
+            playback_rate: ctx_playback_rate,
+            out_frames: expected_out_frames,
             clip_id: &clip.id,
             extra_curves,
             extra_params,
         };
+        if is_vslib {
+            eprintln!(
+                "[pitch_edit:vslib] dispatch clip_id={} processor={} available={} handles_stretch={} in_frames={} out_frames={} seg=[{:.3},{:.3}) rate={:.3}",
+                clip.id,
+                processor.id(),
+                processor.is_available(),
+                processor.capabilities().handles_time_stretch,
+                mono.len(),
+                expected_out_frames,
+                seg_start_sec,
+                ctx.seg_end_sec,
+                ctx.playback_rate,
+            );
+        }
         let out = processor.process(&ctx)?;
+        if is_vslib {
+            let nonzero = out.iter().filter(|&&v| v.abs() > 1e-6).count();
+            let peak = out.iter().fold(0.0f32, |acc, &v| acc.max(v.abs()));
+            eprintln!(
+                "[pitch_edit:vslib] result clip_id={} out_frames={} nonzero={} peak={:.6}",
+                clip.id,
+                out.len(),
+                nonzero,
+                peak,
+            );
+        }
         Ok(Some(out))
     })?;
 
@@ -500,11 +569,19 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         return Ok(false);
     };
 
-    if processed.len() != frames {
-        return Err("pitch_edit: output length mismatch".to_string());
+    if processed.len() != expected_out_frames {
+        return Err(format!(
+            "pitch_edit: output length mismatch (got {}, expected {})",
+            processed.len(), expected_out_frames
+        ));
     }
 
-    for f in 0..frames {
+    // 若输出尺寸与输入不同（处理器内部完成了时间拉伸），原地调整 Vec 大小。
+    let stereo_out = expected_out_frames * 2;
+    if pcm_stereo.len() != stereo_out {
+        pcm_stereo.resize(stereo_out, 0.0);
+    }
+    for f in 0..expected_out_frames {
         let v = processed[f];
         pcm_stereo[f * 2] = v;
         pcm_stereo[f * 2 + 1] = v;
@@ -566,6 +643,8 @@ pub fn is_pitch_edit_backend_available(timeline: &TimelineState) -> bool {
     match algo {
         PitchEditAlgorithm::WorldVocoder => crate::world_vocoder::is_available(),
         PitchEditAlgorithm::NsfHifiganOnnx => crate::nsf_hifigan_onnx::is_available(),
+        #[cfg(feature = "vslib")]
+        PitchEditAlgorithm::VocalShifterVslib => true, // DLL 加载失败时 process() 内部会报错
         PitchEditAlgorithm::Bypass => true,
     }
 }
@@ -662,7 +741,7 @@ mod tests {
             solo: false,
             volume: 1.0,
             compose_enabled: true,
-            pitch_analysis_algo: PitchAnalysisAlgo::World,
+            pitch_analysis_algo: PitchAnalysisAlgo::WorldDll,
             color: String::new(),
         };
 

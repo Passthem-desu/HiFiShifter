@@ -72,6 +72,8 @@ pub(super) fn get_param_frames(
             crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx => {
                 crate::nsf_hifigan_onnx::is_available()
             }
+            #[cfg(feature = "vslib")]
+            crate::pitch_editing::PitchEditAlgorithm::VocalShifterVslib => true,
             crate::pitch_editing::PitchEditAlgorithm::Bypass => true,
         };
         Some(available)
@@ -106,25 +108,41 @@ pub(super) fn get_param_frames(
     let count = (frame_count as usize).max(1);
     let step = (stride.unwrap_or(1).max(1)) as usize;
 
-    let (orig_src, edit_src) = match param.as_str() {
-        "pitch" => (&entry.pitch_orig, &entry.pitch_edit),
-        "tension" => (&entry.tension_orig, &entry.tension_edit),
-        _ => (&entry.pitch_orig, &entry.pitch_edit),
-    };
-
     let mut orig = Vec::with_capacity(count);
     let mut edit = Vec::with_capacity(count);
-    for i in 0..count {
-        let idx = start.saturating_add(i.saturating_mul(step));
-        let o = orig_src.get(idx).copied().unwrap_or(0.0);
-        let mut e = edit_src.get(idx).copied().unwrap_or(o);
-        // For pitch, treat 0 as "unset" in edit curve and fall back to orig.
-        // (UI edits are clamped to MIDI range, so 0 is not a meaningful edited value.)
-        if param == "pitch" && e == 0.0 && o != 0.0 {
-            e = o;
+
+    match param.as_str() {
+        "pitch" => {
+            for i in 0..count {
+                let idx = start.saturating_add(i.saturating_mul(step));
+                let o = entry.pitch_orig.get(idx).copied().unwrap_or(0.0);
+                let e_raw = entry.pitch_edit.get(idx).copied().unwrap_or(0.0);
+                // Treat 0 as "unset" and fall back to orig.
+                let e = if e_raw == 0.0 && o != 0.0 { o } else { e_raw };
+                orig.push(o);
+                edit.push(e);
+            }
         }
-        orig.push(o);
-        edit.push(e);
+        "tension" => {
+            for i in 0..count {
+                let idx = start.saturating_add(i.saturating_mul(step));
+                let o = entry.tension_orig.get(idx).copied().unwrap_or(0.0);
+                let e = entry.tension_edit.get(idx).copied().unwrap_or(o);
+                orig.push(o);
+                edit.push(e);
+            }
+        }
+        _ => {
+            // Extra automation curve — edit is stored in extra_curves; no separate orig.
+            let curve = entry.extra_curves.get(&param);
+            for i in 0..count {
+                let idx = start.saturating_add(i.saturating_mul(step));
+                let e = curve.and_then(|v| v.get(idx)).copied().unwrap_or(0.0);
+                // orig == edit for extra curves (no separate original)
+                orig.push(e);
+                edit.push(e);
+            }
+        }
     }
 
     crate::models::ParamFramesPayload {
@@ -168,10 +186,24 @@ pub(super) fn set_param_frames(
         return serde_json::json!({"ok": false, "error": "params missing"});
     };
 
+    // For extra_curves we need separate handling; batch into known vs extra below.
+    let is_extra_curve = !matches!(param.as_str(), "pitch" | "tension");
+    if is_extra_curve {
+        // Ensure the curve vector exists and is long enough.
+        let curve = entry.extra_curves.entry(param.clone()).or_insert_with(Vec::new);
+        let needed = start_frame as usize + values.len();
+        if curve.len() < needed {
+            curve.resize(needed, 0.0);
+        }
+    }
+
     let dst = match param.as_str() {
         "pitch" => &mut entry.pitch_edit,
         "tension" => &mut entry.tension_edit,
-        _ => &mut entry.pitch_edit,
+        _ => {
+            // Safety: we ensured extra_curves[&param] exists above.
+            entry.extra_curves.get_mut(&param).unwrap()
+        }
     };
 
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
@@ -311,7 +343,18 @@ pub(super) fn restore_param_frames(
                 entry.tension_edit[idx] = o;
             }
         }
-        _ => {}
+        _ => {
+            // Reset extra_curve values back to 0 (default = no override).
+            if let Some(curve) = entry.extra_curves.get_mut(&param) {
+                for i in 0..count {
+                    let idx = start.saturating_add(i);
+                    if idx >= curve.len() {
+                        break;
+                    }
+                    curve[idx] = 0.0;
+                }
+            }
+        }
     }
 
     // Ensure realtime playback reflects edits immediately.

@@ -7,7 +7,7 @@ mod pitch_analysis;
 #[path = "pitch/pitch_clip.rs"] mod pitch_clip;
 #[path = "pitch/pitch_config.rs"] mod pitch_config;
 #[cfg(test)] #[path = "pitch/pitch_config_tests.rs"] mod pitch_config_tests;
-#[path = "pitch/pitch_editing.rs"] mod pitch_editing;
+mod pitch_editing;
 mod synth_clip_cache;
 #[path = "pitch/clip_pitch_cache.rs"] mod clip_pitch_cache;
 #[path = "pitch/pitch_progress.rs"] mod pitch_progress;
@@ -277,7 +277,8 @@ pub fn run() {
             commands::open_reaper_dialog,
             commands::import_reaper_project,
             commands::paste_reaper_clipboard,
-            commands::clear_cache
+            commands::clear_cache,
+            commands::get_processor_params
             // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
             // commands::start_pitch_refresh_task,
             // commands::get_pitch_refresh_status,

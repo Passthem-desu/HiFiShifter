@@ -43,6 +43,8 @@ mod reaper;
 mod reaper_clipboard;
 #[path = "commands/cache.rs"]
 mod cache;
+#[path = "commands/processor_caps.rs"]
+mod processor_caps;
 // TODO: 异步音高刷新功能未完成，缺少必要的状态管理和依赖
 // #[path = "commands/pitch_refresh_async.rs"]
 // mod pitch_refresh_async;
@@ -577,6 +579,13 @@ pub fn paste_reaper_clipboard(state: State<'_, AppState>) -> serde_json::Value {
 #[tauri::command(rename_all = "camelCase")]
 pub fn clear_cache(state: State<'_, AppState>) -> Result<u64, String> {
     cache::clear_cache(state)
+}
+
+// ===================== processor_caps =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_processor_params(algo: String) -> Vec<processor_caps::ParamDescriptorDto> {
+    processor_caps::get_processor_params(algo)
 }
 
 // ===================== pitch_refresh_async (暂时禁用) =====================

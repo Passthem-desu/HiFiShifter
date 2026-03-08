@@ -59,6 +59,6 @@ objc2-foundation = { version = "0.3", features = ["NSString", "NSData"] }
 objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
 
 [features]
-default = ["onnx"]
+default = ["onnx", "vslib"]
 onnx = ["dep:ort", "dep:ndarray"]
 vslib = []
