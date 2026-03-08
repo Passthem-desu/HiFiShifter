@@ -150,41 +150,140 @@ pub trait ClipProcessor: Send + Sync {
 
 ---
 
-## ClipProcessorCompat 包装策略
+## ProcessorChain：组件化 Stage 链
 
-为使 World / HiFiGAN 零修改接入新接口，引入适配器：
+用 **Stage 链**取代泛型 `ClipProcessorCompat<T>`。每个 `ProcessingStage` 接收上一步输出的 PCM，返回新 PCM；`ProcessorChain` 串联多个 Stage 并实现 `ClipProcessor`。新增功能（降噪、后处理混响等）只需 push 一个新 Stage，无需修改现有代码。
+
+### ProcessingStage trait
 
 ```rust
-pub struct ClipProcessorCompat<T: Renderer> {
-    inner: T,
-    id:           &'static str,
-    display_name: &'static str,
+/// 传递给每个 Stage 的上下文（含完整 ClipProcessContext 引用）
+pub struct StageContext<'a> {
+    pub clip_ctx: &'a ClipProcessContext<'a>,
 }
 
-impl<T: Renderer + Send + Sync> ClipProcessor for ClipProcessorCompat<T> {
-    fn handles_time_stretch(&self) -> bool { false }
+pub trait ProcessingStage: Send + Sync {
+    fn id(&self) -> &str;
+    fn display_name(&self) -> &str;
+    /// Stage 自身贡献的参数描述符（可选）
     fn param_descriptors(&self) -> &'static [ParamDescriptor] { &[] }
+    /// 接收上一步 PCM，输出处理后 PCM
+    fn process(&self, input_pcm: Vec<f32>, ctx: &StageContext<'_>) -> Result<Vec<f32>, String>;
+}
+```
+
+### ProcessorChain
+
+```rust
+pub struct ProcessorChain {
+    pub id:           String,
+    pub display_name: String,
+    pub stages:       Vec<Box<dyn ProcessingStage>>,
+}
+
+impl ClipProcessor for ProcessorChain {
+    fn id(&self) -> &str { &self.id }
+    fn display_name(&self) -> &str { &self.display_name }
+    fn is_available(&self) -> bool { true }
+
+    fn capabilities(&self) -> ProcessorCapabilities {
+        // 聚合所有 Stage 的能力（当前 World/HiFiGAN 链均不原生处理拉伸）
+        ProcessorCapabilities {
+            handles_time_stretch: false,
+            supports_formant:     false,
+            supports_breathiness: false,
+        }
+    }
+
+    /// 聚合所有 Stage 的参数描述符
+    fn param_descriptors(&self) -> Vec<&'static ParamDescriptor> {
+        self.stages.iter().flat_map(|s| s.param_descriptors()).collect()
+    }
 
     fn process(&self, ctx: &ClipProcessContext<'_>) -> Result<Vec<f32>, String> {
-        // Step 1: 若 playback_rate != 1.0，先用 RubberBand 做时间拉伸
-        let pcm = if (ctx.playback_rate - 1.0).abs() > 1e-6 {
-            time_stretch_interleaved(ctx.mono_pcm, ctx.sample_rate, ctx.playback_rate)?
-        } else {
-            ctx.mono_pcm.to_vec()
-        };
-
-        // Step 2: 构造 RenderContext，调用原有 Renderer
-        let render_ctx = RenderContext {
-            mono_pcm: &pcm,
-            sample_rate: ctx.sample_rate,
-            frame_period_ms: ctx.frame_period_ms,
-            pitch_edit: ctx.pitch_edit,
-            clip_midi: ctx.clip_midi,
-            // 其余字段对齐
-        };
-        self.inner.render(&render_ctx)
+        let stage_ctx = StageContext { clip_ctx: ctx };
+        let mut pcm = ctx.mono_pcm.to_vec();
+        for stage in &self.stages {
+            pcm = stage.process(pcm, &stage_ctx)?;
+        }
+        Ok(pcm)
     }
 }
+```
+
+### 内置 Stage 实现
+
+```rust
+/// Stage 1：RubberBand 时间拉伸（playback_rate == 1.0 时直接透传）
+pub struct RubberBandTimeStretchStage;
+impl ProcessingStage for RubberBandTimeStretchStage {
+    fn id(&self) -> &str { "rubberband_stretch" }
+    fn display_name(&self) -> &str { "时间拉伸 (RubberBand)" }
+    fn process(&self, input_pcm: Vec<f32>, ctx: &StageContext<'_>) -> Result<Vec<f32>, String> {
+        let rate = ctx.clip_ctx.playback_rate;
+        if (rate - 1.0).abs() > 1e-6 {
+            time_stretch_interleaved(&input_pcm, ctx.clip_ctx.sample_rate, rate)
+        } else {
+            Ok(input_pcm)
+        }
+    }
+}
+
+/// Stage 2a：WORLD 声码器合成
+pub struct WorldVocoderStage;
+impl ProcessingStage for WorldVocoderStage {
+    fn id(&self) -> &str { "world_vocoder" }
+    fn display_name(&self) -> &str { "WORLD 声码器" }
+    fn process(&self, input_pcm: Vec<f32>, ctx: &StageContext<'_>) -> Result<Vec<f32>, String> {
+        let cc = ctx.clip_ctx;
+        let render_ctx = RenderContext {
+            mono_pcm: &input_pcm,
+            sample_rate: cc.sample_rate,
+            frame_period_ms: cc.frame_period_ms,
+            pitch_edit: cc.pitch_edit,
+            clip_midi: cc.clip_midi,
+        };
+        WorldRenderer.render(&render_ctx)
+    }
+}
+
+/// Stage 2b：NSF-HiFiGAN 合成
+pub struct HiFiGanStage;
+impl ProcessingStage for HiFiGanStage { /* 同上，调用 HiFiGanRenderer */ }
+```
+
+### 预设链构造
+
+```rust
+pub fn world_chain() -> ProcessorChain {
+    ProcessorChain {
+        id:           "world".into(),
+        display_name: "WORLD Vocoder".into(),
+        stages: vec![
+            Box::new(RubberBandTimeStretchStage),
+            Box::new(WorldVocoderStage),
+        ],
+    }
+}
+
+pub fn hifigan_chain() -> ProcessorChain {
+    ProcessorChain {
+        id:           "nsf_hifigan".into(),
+        display_name: "NSF-HiFiGAN".into(),
+        stages: vec![
+            Box::new(RubberBandTimeStretchStage),
+            Box::new(HiFiGanStage),
+        ],
+    }
+}
+```
+
+### 未来扩展示例
+
+```rust
+// 在任意链末尾插入后处理 Stage，无需改动现有代码
+world_chain().stages.push(Box::new(NoiseReductionStage));
+world_chain().stages.push(Box::new(ReverbStage));
 ```
 
 ---
@@ -300,8 +399,8 @@ impl ClipProcessor for VslibProcessor {
 
 | 声码器                     | 时间拉伸           | 合成模式按钮       | 音量/强弱/声像曲线 | 共振峰曲线               | 气声曲线 |
 | -------------------------- | ------------------ | ------------------ | ------------------ | ------------------------ | -------- |
-| WorldVocoder（compat）     | RubberBand 外部    | ✗                  | ✗                  | ✗                        | ✗        |
-| NsfHiFiGAN（compat）       | RubberBand 外部    | ✗                  | ✗                  | ✗                        | ✗        |
+| WorldVocoder（链）         | RubberBand Stage   | ✗                  | ✗                  | ✗                        | ✗        |
+| NsfHiFiGAN（链）           | RubberBand Stage   | ✗                  | ✗                  | ✗                        | ✗        |
 | VocalShifter（vslib 原生） | 原生 Timing 控制点 | ✓ SYNTHMODE_M/MF/P | ✓ 逐帧             | ✓ 逐帧 cent（MF/P 模式） | ✓ 逐帧   |
 
 > **不暴露**：`eq1` / `eq2` / `heq`（vslib 内部字段，不传给用户）  
@@ -372,12 +471,13 @@ for (k, v) in extra_params.iter().sorted_by_key(|(k, _)| *k) {
 
 ---
 
-### Phase 2 — Compat 包装层（`renderer/compat.rs`）
-- 新建 `src/renderer/compat.rs`
-- 实现 `ClipProcessorCompat<T: Renderer>`
-- 为 `WorldRenderer` 和 `HiFiGanRenderer` 创建全局单例（`get_processor(SynthPipelineKind)`）
+### Phase 2 — ProcessorChain 层（`renderer/chain.rs`）
+- 新建 `src/renderer/chain.rs`
+- 实现 `ProcessingStage` trait、`StageContext`、`ProcessorChain`
+- 实现内置 Stage：`RubberBandTimeStretchStage`、`WorldVocoderStage`、`HiFiGanStage`
+- 构造 `world_chain()` 和 `hifigan_chain()` 预设链，注册到 `get_processor(SynthPipelineKind)`
 
-**影响文件**：新建 `src/renderer/compat.rs`，修改 `src/renderer/mod.rs`
+**影响文件**：新建 `src/renderer/chain.rs`，修改 `src/renderer/mod.rs`
 
 ---
 
@@ -468,8 +568,8 @@ pub fn clear_cache(state: tauri::State<AppState>) -> Result<u64, String> {
 | 文件                              | 操作                                                            | 阶段      |
 | --------------------------------- | --------------------------------------------------------------- | --------- |
 | `src/renderer/traits.rs`          | 新增 ClipProcessor trait + 相关结构体                           | Phase 1   |
-| `src/renderer/compat.rs`          | 新建 ClipProcessorCompat                                        | Phase 2   |
-| `src/renderer/mod.rs`             | 注册 compat + vslib processor                                   | Phase 2-3 |
+| `src/renderer/chain.rs`           | 新建 ProcessingStage trait、ProcessorChain、内置 Stage、预设链  | Phase 2   |
+| `src/renderer/mod.rs`             | 注册 chain + vslib processor                                    | Phase 2-3 |
 | `src/renderer/vslib_processor.rs` | 新建 VslibProcessor                                             | Phase 3   |
 | `src/state.rs`                    | 扩展 TrackParamsState, Clip, SynthPipelineKind                  | Phase 5   |
 | `src/models.rs`                   | 同步序列化结构体                                                | Phase 5   |
