@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::super::pitch_config::*;
+    use crate::pitch_config::*;
 
     #[test]
     fn test_compute_rms_windows() {

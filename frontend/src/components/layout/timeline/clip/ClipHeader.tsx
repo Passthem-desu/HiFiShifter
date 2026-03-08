@@ -6,6 +6,7 @@ import { useI18n } from "../../../../i18n/I18nProvider";
 
 export const ClipHeader: React.FC<{
     clip: ClipInfo;
+    clipWidthPx: number;
     ensureSelected: (clipId: string) => void;
     selectClipRemote: (clipId: string) => void;
     startEditDrag: (
@@ -24,6 +25,7 @@ export const ClipHeader: React.FC<{
     onGainCommit?: (clipId: string, db: number) => void;
 }> = ({
     clip,
+    clipWidthPx,
     ensureSelected,
     selectClipRemote,
     startEditDrag,
@@ -36,6 +38,14 @@ export const ClipHeader: React.FC<{
     onGainCommit,
 }) => {
     const { t } = useI18n();
+
+    // 根据 clip 像素宽度决定显示哪些元素（从右往左依次隐藏）
+    // >= 120px: 全显示 | 80-120px: 隐藏名称 | 52-80px: 隐藏名称+增益值 | 32-52px: 只留M | < 32px: 全隐藏
+    const showAny      = clipWidthPx >= 32;
+    const showMute     = clipWidthPx >= 32;
+    const showGainKnob = clipWidthPx >= 52;
+    const showGainVal  = clipWidthPx >= 80;
+    const showName     = clipWidthPx >= 120;
 
     // ── 增益双击输入框 ──────────────────────────────────────────────────────
     const [gainEditing, setGainEditing] = useState(false);
@@ -93,6 +103,8 @@ export const ClipHeader: React.FC<{
         onRenameDone?.();
     }
 
+    if (!showAny) return null;
+
     return (
         <div
             className="absolute left-1 right-1 flex items-center gap-1 z-50 select-none"
@@ -102,7 +114,7 @@ export const ClipHeader: React.FC<{
             }}
         >
             {/* 静音按钮 */}
-            <button
+            {showMute && <button
                 className={`w-5 h-4 rounded flex items-center justify-center border transition-all text-[10px] font-bold ${clip.muted ? "bg-qt-danger-bg text-qt-danger-text border-qt-danger-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-danger-border hover:bg-qt-danger-bg hover:text-qt-danger-text"}`}
                 onPointerDown={(e) => {
                     e.preventDefault();
@@ -116,10 +128,10 @@ export const ClipHeader: React.FC<{
                 title={clip.muted ? t("clip_unmute") : t("clip_mute")}
             >
                 M
-            </button>
+            </button>}
 
             {/* 增益拖拽把手 */}
-            <div
+            {showGainKnob && <div
                 title={t("clip_gain_drag_hint")}
                 style={{ cursor: "ns-resize" }}
                 onPointerDown={(e) => {
@@ -138,10 +150,10 @@ export const ClipHeader: React.FC<{
                 }}
             >
                 <div className="w-4 h-4 rounded-full border border-white/60 bg-white/10" />
-            </div>
+            </div>}
 
             {/* Clip 名称区域 */}
-            <div className="flex-1 min-w-0">
+            {showName && <div className="flex-1 min-w-0">
                 {nameEditing ? (
                     <input
                         ref={nameInputRef}
@@ -171,10 +183,10 @@ export const ClipHeader: React.FC<{
                         {clip.name}
                     </div>
                 )}
-            </div>
+            </div>}
 
             {/* 增益数值显示 / 输入框 */}
-            {gainEditing ? (
+            {showGainVal && gainEditing ? (
                 <input
                     ref={gainInputRef}
                     className="w-14 text-xs text-white bg-black/50 border border-white/40 rounded px-1 outline-none text-right"
@@ -188,7 +200,7 @@ export const ClipHeader: React.FC<{
                     onBlur={commitGainEdit}
                     onPointerDown={(e) => e.stopPropagation()}
                 />
-            ) : (
+            ) : showGainVal ? (
                 <div
                     className="text-xs text-white/80 drop-shadow-md cursor-ns-resize"
                     title={t("clip_gain_drag_hint")}
@@ -201,7 +213,7 @@ export const ClipHeader: React.FC<{
                     {gainToDb(clip.gain) >= 0 ? "+" : ""}
                     {gainToDb(clip.gain).toFixed(1)}dB
                 </div>
-            )}
+            ) : null}
         </div>
     );
 };

@@ -2,9 +2,7 @@ mod engine;
 mod io;
 mod mix;
 mod resource_manager;
-mod ring;
 pub(crate) mod snapshot;
-pub(crate) mod stretch_stream;
 pub(crate) mod types;
 mod util;
 

@@ -1,14 +1,12 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Arc, Mutex,
 };
 
 use crate::state::{Clip, TimelineState, Track};
 
 use super::io::{get_resampled_stereo_cached, is_audio_path};
-use super::ring::StreamRingStereo;
 use super::types::{EngineClip, EngineSnapshot, ResampledStereo, StretchJob, StretchKey};
 use super::util::{clamp01, quantize_i64, quantize_u32};
 
@@ -220,10 +218,6 @@ pub(crate) fn build_snapshot(
     out_rate: u32,
     cache: &Arc<Mutex<HashMap<(PathBuf, u32), ResampledStereo>>>,
     stretch_cache: &Arc<Mutex<HashMap<StretchKey, ResampledStereo>>>,
-    position_frames: &Arc<AtomicU64>,
-    is_playing: &Arc<AtomicBool>,
-    stretch_stream_epoch: &Arc<AtomicU64>,
-    clip_stretch_epochs: &HashMap<String, Arc<AtomicU64>>,
 ) -> EngineSnapshot {
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
     let bpm = if timeline.bpm.is_finite() && timeline.bpm > 0.0 {
@@ -300,7 +294,6 @@ pub(crate) fn build_snapshot(
 
         // Timeline clips never loop/repeat; out-of-range source time is treated as silence.
         let mut repeat = false;
-        let mut stretch_stream: Option<Arc<StreamRingStereo>> = None;
 
         // Negative trimStart means the clip starts before the source: render leading silence.
         // trim_* are expressed in SOURCE seconds (i.e. they already incorporate playbackRate in UI).
@@ -335,51 +328,6 @@ pub(crate) fn build_snapshot(
                     playback_rate_render = 1.0;
                     repeat = false;
                 }
-            }
-
-            // Streaming stage (low-latency): if cache is missing, start a realtime stretcher
-            // that incrementally fills a small ring buffer for the audio callback.
-            if (playback_rate_render - 1.0).abs() > 1e-6 && crate::rubberband::is_available() {
-                let cap_frames = (out_rate as u64).saturating_mul(2); // ~2s buffer
-                let ring = Arc::new(StreamRingStereo::new(cap_frames));
-
-                // Start close to current playhead to reduce perceived delay.
-                let now = position_frames.load(Ordering::Relaxed);
-                let local0 = now.saturating_sub(start_frame);
-                ring.reset(local0);
-
-                let my_epoch = clip_stretch_epochs
-                    .get(&clip.id)
-                    .map(|e| e.load(Ordering::Relaxed))
-                    .unwrap_or_else(|| stretch_stream_epoch.load(Ordering::Relaxed));
-                let per_clip_epoch = clip_stretch_epochs
-                    .get(&clip.id)
-                    .cloned()
-                    .unwrap_or_else(|| stretch_stream_epoch.clone());
-                let silence_frames_u: u64 = if local_src_offset_frames < 0 {
-                    (-local_src_offset_frames) as u64
-                } else {
-                    0
-                };
-
-                super::stretch_stream::spawn_stretch_stream(
-                    ring.clone(),
-                    src_render.clone(),
-                    src_start,
-                    src_end,
-                    playback_rate_render,
-                    start_frame,
-                    length_frames,
-                    repeat,
-                    silence_frames_u,
-                    out_rate,
-                    position_frames.clone(),
-                    is_playing.clone(),
-                    per_clip_epoch,
-                    my_epoch,
-                );
-
-                stretch_stream = Some(ring);
             }
         }
 
@@ -458,7 +406,6 @@ pub(crate) fn build_snapshot(
             src_start_frame: src_start,
             src_end_frame: src_end,
             playback_rate: playback_rate_render,
-            stretch_stream,
             local_src_offset_frames,
             repeat,
             fade_in_frames,
@@ -532,7 +479,6 @@ pub(crate) fn build_snapshot_for_file(
             src_start_frame: offset_frames,
             src_end_frame,
             playback_rate: 1.0,
-            stretch_stream: None,
             local_src_offset_frames: 0,
             repeat: false,
             fade_in_frames: 0,

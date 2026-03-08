@@ -1,38 +1,42 @@
 mod audio_engine;
-mod audio_utils;
+#[path = "audio/audio_utils.rs"] mod audio_utils;
 mod commands;
-mod mixdown;
+#[path = "audio/mixdown.rs"] mod mixdown;
 mod models;
 mod pitch_analysis;
-mod pitch_clip;
-mod pitch_editing;
+#[path = "pitch/pitch_clip.rs"] mod pitch_clip;
+#[path = "pitch/pitch_config.rs"] mod pitch_config;
+#[cfg(test)] #[path = "pitch/pitch_config_tests.rs"] mod pitch_config_tests;
+#[path = "pitch/pitch_editing.rs"] mod pitch_editing;
 mod synth_clip_cache;
-mod clip_pitch_cache;
-mod pitch_progress;
+#[path = "pitch/clip_pitch_cache.rs"] mod clip_pitch_cache;
+#[path = "pitch/pitch_progress.rs"] mod pitch_progress;
 mod renderer;
-mod clip_rendering_state;
+#[path = "pitch/clip_rendering_state.rs"] mod clip_rendering_state;
 
 #[cfg(feature = "onnx")]
-mod nsf_hifigan_onnx;
+#[path = "vocoder/nsf_hifigan_onnx.rs"] mod nsf_hifigan_onnx;
 #[cfg(not(feature = "onnx"))]
-mod nsf_hifigan_onnx_stub;
+#[path = "vocoder/nsf_hifigan_onnx_stub.rs"] mod nsf_hifigan_onnx_stub;
 #[cfg(not(feature = "onnx"))]
 use nsf_hifigan_onnx_stub as nsf_hifigan_onnx;
 
 mod project;
-mod rubberband;
-mod vocalshifter_clipboard;
-mod vocalshifter_import;
-mod reaper_parser;
-mod reaper_import;
+#[path = "audio/rubberband.rs"] mod rubberband;
+#[path = "import/vocalshifter_clipboard.rs"] mod vocalshifter_clipboard;
+#[path = "import/vocalshifter_import.rs"] mod vocalshifter_import;
+#[path = "import/reaper_parser.rs"] mod reaper_parser;
+#[path = "import/reaper_import.rs"] mod reaper_import;
 mod state;
-mod time_stretch;
-mod waveform;
-mod waveform_disk_cache;
+#[path = "audio/time_stretch.rs"] mod time_stretch;
+#[path = "audio/waveform.rs"] mod waveform;
+#[path = "audio/waveform_disk_cache.rs"] mod waveform_disk_cache;
 mod config;
-mod world;
-mod streaming_world;
-mod world_vocoder;
+#[path = "vocoder/world.rs"] mod world;
+#[path = "vocoder/streaming_world.rs"] mod streaming_world;
+#[path = "vocoder/world_vocoder.rs"] mod world_vocoder;
+#[cfg(feature = "vslib")]
+#[path = "vocoder/vslib.rs"] mod vslib;
 
 use tauri::Manager;
 

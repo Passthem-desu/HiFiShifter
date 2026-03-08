@@ -504,6 +504,7 @@ export const ClipItem: React.FC<{
 
             <ClipHeader
                 clip={clip}
+                clipWidthPx={width}
                 ensureSelected={ensureSelected}
                 selectClipRemote={selectClipRemote}
                 startEditDrag={startEditDrag}

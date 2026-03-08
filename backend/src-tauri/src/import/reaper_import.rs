@@ -2,7 +2,7 @@
 //
 // 将 reaper_parser 解析出的 ReaperData 转换为 HiFiShifter 的 TimelineState。
 
-use crate::audio_utils::try_read_wav_info;
+use crate::audio_utils::try_read_audio_header_only;
 use crate::models::PitchRange;
 use crate::reaper_parser::{
     self, ReaperData, ReaperEnvelope,  ReaperItem,
@@ -155,7 +155,7 @@ fn convert_reaper_items_to_existing_tracks(
                 muted: false,
                 solo: false,
                 volume: 0.9,
-                compose_enabled: true,
+                compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
                 color: TRACK_COLORS[color_idx].to_string(),
             });
@@ -273,7 +273,7 @@ fn convert_reaper_data(
             muted,
             solo,
             volume,
-            compose_enabled: has_audio_items,
+            compose_enabled: false,
             pitch_analysis_algo: PitchAnalysisAlgo::default(),
             color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
         });
@@ -403,15 +403,16 @@ fn process_item(
     }
 
     // 读取音频文件信息
-    let audio_info = try_read_wav_info(Path::new(&audio_path), 4096);
-    let (duration_sec, duration_frames, source_sr, waveform_preview) = match &audio_info {
+    // 只读 header/codec params 获取时长与采样率，不生成 waveform_preview（避免全量解码）。
+    // 波形 peaks 由前端按需通过 get_waveform_peaks_segment 命令懒加载（有磁盘缓存）。
+    let audio_info = try_read_audio_header_only(Path::new(&audio_path));
+    let (duration_sec, duration_frames, source_sr) = match &audio_info {
         Some(info) => (
             Some(info.duration_sec),
             Some(info.total_frames),
             Some(info.sample_rate),
-            Some(info.waveform_preview.clone()),
         ),
-        None => (None, None, None, None),
+        None => (None, None, None),
     };
     let source_duration_sec = duration_sec.unwrap_or(0.0);
 
@@ -493,7 +494,7 @@ fn process_item(
                 duration_sec,
                 duration_frames,
                 source_sample_rate: source_sr,
-                waveform_preview: waveform_preview.clone(),
+                waveform_preview: None,
                 pitch_range: Some(PitchRange { min: -24.0, max: 24.0 }),
                 gain: convert_volume(take_volume * gain_trim),
                 muted: item_muted,
@@ -542,7 +543,7 @@ fn process_item(
             duration_sec,
             duration_frames,
             source_sample_rate: source_sr,
-            waveform_preview,
+            waveform_preview: None,
             pitch_range: Some(PitchRange { min: -24.0, max: 24.0 }),
             gain: convert_volume(take_volume * gain_trim),
             muted: item_muted,

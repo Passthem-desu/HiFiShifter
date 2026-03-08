@@ -166,6 +166,58 @@ pub fn try_read_wav_info(path: &Path, preview_points: usize) -> Option<WavInfo> 
     try_read_audio_info_symphonia(path, preview_points)
 }
 
+/// 快速只读 sample_rate / total_frames / duration_sec，不生成 waveform_preview。
+///
+/// - WAV：hound 单次文件打开，读 header 后直接返回，无样本扫描。
+/// - 非 WAV：优先从 codec params 的 n_frames 字段获取帧数（O(1)，无需解码），
+///           若容器未提供则回退到 symphonia 全量计帧（跳过 preview 生成）。
+pub fn try_read_audio_header_only(path: &Path) -> Option<WavInfo> {
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("wav"))
+        .unwrap_or(false)
+    {
+        if let Some(info) = try_read_wav_info_hound(path, 0) {
+            return Some(info);
+        }
+    }
+    try_read_duration_symphonia(path)
+}
+
+fn try_read_duration_symphonia(path: &Path) -> Option<WavInfo> {
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let file = std::fs::File::open(path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .ok()?;
+    let format = probed.format;
+    let track = format.default_track()?;
+    let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+
+    if let Some(n_frames) = track.codec_params.n_frames {
+        // 容器直接提供帧数，O(1)，无需任何解码。
+        return Some(WavInfo {
+            sample_rate,
+            total_frames: n_frames,
+            duration_sec: n_frames as f64 / sample_rate as f64,
+            waveform_preview: vec![],
+        });
+    }
+
+    // n_frames 不可用（如 CBR MP3）：回退到解码计帧，但跳过 preview 生成。
+    try_read_audio_info_symphonia(path, 0)
+}
+
 pub fn compute_minmax_peaks(
     path: &Path,
     hop: usize,

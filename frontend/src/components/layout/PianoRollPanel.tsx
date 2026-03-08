@@ -460,11 +460,11 @@ export const PianoRollPanel: React.FC = () => {
         clips: trackClips,
         visibleStartSec,
         visibleEndSec,
-        secPerBeat,
     });
     // Data and viewport changes should always trigger a canvas redraw.
     // usePianoRollData() may call invalidate() before these refs update,
     // so we schedule a follow-up redraw after React commits state.
+    // clipPeaks 已经通过 useMemo 稳定化，只在数据真正变化时才产生新引用。
     useEffect(() => {
         invalidate();
     }, [clipPeaks, paramView, pxPerBeat, viewSize.w, viewSize.h, invalidate]);

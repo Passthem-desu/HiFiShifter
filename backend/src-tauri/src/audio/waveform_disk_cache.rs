@@ -7,6 +7,12 @@ const MAGIC: &[u8; 8] = b"HFSPEAKS";
 const VERSION: u32 = 1;
 
 pub fn default_cache_dir() -> PathBuf {
+    // 打包后放在 exe 旁边的 peaks/ 目录；开发期间回退到 temp 目录。
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            return dir.join("peaks");
+        }
+    }
     std::env::temp_dir()
         .join("hifishifter")
         .join("waveform_peaks_cache")

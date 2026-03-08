@@ -3,6 +3,7 @@ fn main() {
     tauri_build::build();
     build_world_static();
     build_rubberband_static();
+    build_vslib();
 }
 
 /// 在编译时自动构建前端静态资源。
@@ -291,4 +292,54 @@ fn build_rubberband_static() {
     build.compile("rubberband");
 
     println!("cargo:rustc-link-lib=static=rubberband");
+}
+
+/// Link against vslib_x64.dll via its import library.
+///
+/// The DLL and import lib live in third_party/vslib/:
+///   vslib_x64.dll  — needs to sit next to the final binary at runtime
+///   vslib_x64.lib  — import library linked at compile time
+///
+/// Enabled only when the `vslib` cargo feature is active.
+fn build_vslib() {
+    if !cfg!(feature = "vslib") {
+        return;
+    }
+
+    let lib_dir = std::path::Path::new("third_party/vslib");
+
+    if !lib_dir.exists() {
+        panic!(
+            "[vslib] third_party/vslib/ not found. \
+             Place vslib_x64.dll and vslib_x64.lib there."
+        );
+    }
+
+    // Resolve to an absolute path so rustc can find the import lib
+    let abs = lib_dir
+        .canonicalize()
+        .expect("[vslib] failed to canonicalize third_party/vslib path");
+
+    println!("cargo:rerun-if-changed=third_party/vslib/vslib_x64.lib");
+    println!("cargo:rerun-if-changed=third_party/vslib/vslib_x64.dll");
+    println!("cargo:rustc-link-search=native={}", abs.display());
+    println!("cargo:rustc-link-lib=dylib=vslib_x64");
+
+    // Copy the DLL next to the output binary so `cargo tauri dev` works.
+    // OUT_DIR = .../target/<profile>/build/<pkg>/out  →  4 levels up = target/<profile>/
+    if let Ok(out_dir) = std::env::var("OUT_DIR") {
+        let dll_src = lib_dir.join("vslib_x64.dll");
+        let target_dir = std::path::Path::new(&out_dir)
+            .ancestors()
+            .nth(3)
+            .expect("[vslib] unexpected OUT_DIR depth");
+        let vslib_dir = target_dir.join("vslib");
+        let _ = std::fs::create_dir_all(&vslib_dir);
+        let dll_dst = vslib_dir.join("vslib_x64.dll");
+        if let Err(e) = std::fs::copy(&dll_src, &dll_dst) {
+            println!("cargo:warning=[vslib] could not copy DLL to {}: {}", dll_dst.display(), e);
+        } else {
+            println!("cargo:warning=[vslib] copied vslib_x64.dll to {}", dll_dst.display());
+        }
+    }
 }

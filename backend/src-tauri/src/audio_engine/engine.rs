@@ -383,9 +383,6 @@ impl AudioEngine {
 
             let mut last_timeline: Option<TimelineState> = None;
             let mut last_play_file: Option<(PathBuf, f64, String)> = None;
-            let stretch_stream_epoch: Arc<AtomicU64> = Arc::new(AtomicU64::new(1));
-            // per-clip stretch epoch map（方案 D）
-            let mut clip_stretch_epochs: HashMap<String, Arc<AtomicU64>> = HashMap::new();
             let mut app_handle_for_worker: Option<tauri::AppHandle> = app_handle;
 
             loop {
@@ -404,8 +401,6 @@ impl AudioEngine {
                             stretch_cache: &stretch_cache_for_cmd,
                             stretch_inflight: &stretch_inflight_for_cmd,
                             stretch_tx: &stretch_tx,
-                            stretch_stream_epoch: &stretch_stream_epoch,
-                            clip_stretch_epochs: &mut clip_stretch_epochs,
                             resources: &resources,
                             tx: &tx_for_worker,
                             last_timeline: &mut last_timeline,
@@ -535,9 +530,6 @@ struct EngineWorkerState<'a> {
     stretch_cache: &'a Arc<Mutex<HashMap<StretchKey, ResampledStereo>>>,
     stretch_inflight: &'a Arc<Mutex<HashSet<StretchKey>>>,
     stretch_tx: &'a mpsc::Sender<StretchJob>,
-    stretch_stream_epoch: &'a Arc<AtomicU64>,
-    /// per-clip stretch epoch map，用于细化 cancel 粒度（方案 D）
-    clip_stretch_epochs: &'a mut HashMap<String, Arc<AtomicU64>>,
     resources: &'a ResourceManager,
     tx: &'a mpsc::Sender<EngineCommand>,
     last_timeline: &'a mut Option<TimelineState>,
@@ -571,27 +563,7 @@ fn handle_set_playing(s: &mut EngineWorkerState, playing: bool, target: Option<S
 fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     eprintln!("[engine] handle_update_timeline: tracks={}, clips={}", tl.tracks.len(), tl.clips.len());
     
-    // ── 1. per-clip stretch epoch（方案 D）────────────────────────────────
-    // 对拉伸参数变化的 clip 递增其 stretch epoch；新增 clip 也初始化。
-    for clip in &tl.clips {
-        let changed = s
-            .last_timeline
-            .as_ref()
-            .and_then(|old_tl| old_tl.clips.iter().find(|c| c.id == clip.id))
-            .map(|old| clip_stretch_params_changed(old, clip))
-            .unwrap_or(true); // 新 clip 视为"已变化"
-        if changed {
-            s.clip_stretch_epochs
-                .entry(clip.id.clone())
-                .or_insert_with(|| Arc::new(AtomicU64::new(1)))
-                .fetch_add(1, Ordering::Relaxed);
-        }
-    }
-    // 清理已删除 clip 的 stretch epoch
-    s.clip_stretch_epochs
-        .retain(|id, _| tl.clips.iter().any(|c| &c.id == id));
-
-    // ── 2. 合成缓存失效 ──────────────────────────────────────────────────
+    // ── 1. 合成缓存失效 ──────────────────────────────────────────────────
     // 当某个 root_track 的 pitch_edit 曲线发生变化时，
     // 使该 track 上所有 clip 的合成缓存失效，触发下次播放时重新合成。
     // WORLD 和 ONNX 共享同一个 synth_clip_cache。
@@ -699,9 +671,6 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     *s.last_timeline = Some(tl.clone());
     *s.last_play_file = None;
 
-    // 全局 epoch 仍然递增（用于 base_stream / pitch_stream）。
-    s.stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
-
     // Pre-request decoded PCM for all audible clips (async, non-blocking).
     {
         let track_gain = super::snapshot::compute_track_gains(&tl.tracks);
@@ -781,11 +750,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
         s.sr,
         s.cache,
         s.stretch_cache,
-        s.position_frames,
-        s.is_playing,
-        s.stretch_stream_epoch,
-            s.clip_stretch_epochs,
-        );
+    );
     s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
     s.snapshot.store(Arc::new(snap));
 }
@@ -794,8 +759,6 @@ fn handle_stretch_ready(s: &mut EngineWorkerState, key: StretchKey) {
     if let Ok(mut inflight) = s.stretch_inflight.lock() {
         inflight.remove(&key);
     }
-    // Switch to cache-backed buffers; stop any streaming workers.
-    s.stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
 
     // 拉伸完成后，pitch 分析不再依赖拉伸 PCM（始终分析原始源音频），
     // 所以不需要 invalidate pitch 缓存或重新调度分析。
@@ -829,10 +792,6 @@ fn handle_stretch_ready(s: &mut EngineWorkerState, key: StretchKey) {
             s.sr,
             s.cache,
             s.stretch_cache,
-            s.position_frames,
-            s.is_playing,
-            s.stretch_stream_epoch,
-            s.clip_stretch_epochs,
         );
         s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
         s.snapshot.store(Arc::new(snap));
@@ -878,10 +837,6 @@ fn handle_clip_pitch_ready(s: &mut EngineWorkerState, clip_id: String) {
             s.sr,
             s.cache,
             s.stretch_cache,
-            s.position_frames,
-            s.is_playing,
-            s.stretch_stream_epoch,
-            s.clip_stretch_epochs,
         );
         eprintln!("[engine] Snapshot built successfully, duration_frames={}", snap.duration_frames);
         s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
@@ -899,10 +854,6 @@ fn handle_audio_ready(s: &mut EngineWorkerState, _key: super::types::AudioKey) {
             s.sr,
             s.cache,
             s.stretch_cache,
-            s.position_frames,
-            s.is_playing,
-            s.stretch_stream_epoch,
-            s.clip_stretch_epochs,
         );
         s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
         s.snapshot.store(Arc::new(snap));
@@ -925,8 +876,6 @@ fn handle_play_file(
     // Request decode asynchronously (snapshot building is cache-only).
     let _ = s.resources.get_or_request(path.as_path(), s.sr);
 
-    // Snapshot will be replaced; stop any timeline streamers.
-    s.stretch_stream_epoch.fetch_add(1, Ordering::Relaxed);
     // Represent the file as a single clip in a snapshot.
     let snap = build_snapshot_for_file(&path, s.sr, offset_sec, s.cache);
     s.duration_frames.store(snap.duration_frames, Ordering::Relaxed);
@@ -1007,14 +956,6 @@ fn emit_clip_pitch_data_for_clip(
         frame_period_ms,
     };
     let _ = app.emit("clip_pitch_data", payload);
-}
-
-/// 判断 clip 的 stretch 相关参数是否发生变化。
-/// 只有这些参数变化时才需要 cancel 并重建该 clip 的 stretch_stream worker。
-fn clip_stretch_params_changed(old: &crate::state::Clip, new: &crate::state::Clip) -> bool {
-    (old.playback_rate - new.playback_rate).abs() > 1e-6
-        || (old.source_start_sec - new.source_start_sec).abs() > 1e-6
-        || (old.source_end_sec - new.source_end_sec).abs() > 1e-6
 }
 
 /// 判断 clip 的 pitch 分析相关参数是否发生变化。

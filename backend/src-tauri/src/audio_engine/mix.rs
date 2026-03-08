@@ -21,13 +21,6 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
         return None;
     }
 
-    // 次高优先级：stretch_stream ring（实时拉伸缓存）
-    if let Some(stream) = clip.stretch_stream.as_ref() {
-        if let Some((sl, sr)) = stream.read_frame(local) {
-            return Some((sl, sr));
-        }
-    }
-
     // 若该 clip 需要合成（pitch edit）但尚未渲染完成，静音等待
     if clip.needs_synthesis {
         return None;

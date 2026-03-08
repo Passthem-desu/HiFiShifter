@@ -246,18 +246,11 @@ fn beat_sec(bpm: f64) -> f64 {
 }
 
 fn build_clip_pitch_key(
-    tl: &TimelineState,
+    _tl: &TimelineState,
     clip: &Clip,
-    root_track_id: &str,
+    _root_track_id: &str,
     frame_period_ms: f64,
 ) -> Option<ClipPitchKey> {
-    let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 {
-        tl.bpm
-    } else {
-        120.0
-    };
-    let bs = beat_sec(bpm);
-
     let source_path = clip.source_path.as_deref()?;
 
     let clip_timeline_len_sec = clip.length_sec.max(0.0);
@@ -272,32 +265,20 @@ fn build_clip_pitch_key(
         1.0
     };
 
-    // Source range in sec.
-    let source_start_sec_src = clip.source_start_sec.max(0.0);
-    let source_end_sec_src = clip.source_end_sec;
-    let pre_silence_sec_src = (-clip.source_start_sec).max(0.0);
-
-    let source_start_sec = source_start_sec_src;
-    let pre_silence_sec = pre_silence_sec_src / playback_rate.max(1e-6);
+    let pre_silence_sec = (-clip.source_start_sec).max(0.0) / playback_rate.max(1e-6);
 
     let fp = frame_period_ms.max(0.1);
 
+    // 缓存 key 只包含影响原始音频分析结果的字段：source_path（文件内容签名）+ frame_period。
+    // clip_id、root_track_id、bpm 均不参与 hash——相同源文件的多个 clip 共享同一缓存条目，
+    // trim/rate 变化在推送/组装阶段按需截取+resample，无需重新分析。
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"clip_pitch_v2_world_midi");
-    hasher.update(root_track_id.as_bytes());
-    hasher.update(clip.id.as_bytes());
+    hasher.update(b"clip_pitch_v3_source_midi");
     hasher.update(source_path.as_bytes());
     let (len, mtime) = file_sig(Path::new(source_path));
     hasher.update(&len.to_le_bytes());
     hasher.update(&mtime.to_le_bytes());
-
-    hasher.update(&quantize_u32(bpm, 1000.0).to_le_bytes());
     hasher.update(&quantize_u32(fp, 1000.0).to_le_bytes());
-
-    // 缓存 key 只包含影响原始音频内容的字段：source_path、bpm、frame_period。
-    // playback_rate 和 trim 不参与 hash——缓存中始终存全量源音频的 MIDI 曲线，
-    // trim/rate 变化时在推送/组装阶段按需截取+resample，无需重新分析。
-    // 注意：start_sec（clip 位置）和 length_sec 也不参与 hash。
 
     let is_full_source = (playback_rate - 1.0).abs() <= 1e-6;
 
@@ -326,19 +307,20 @@ pub fn get_or_compute_clip_pitch_midi_global(
     let ck = build_clip_pitch_key(tl, clip, root_track_id, frame_period_ms)?;
 
     let cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(found) = cache.get(&ck.clip_id) {
-        if found.key == ck.key {
-            return Some(found.clone());
-        }
+    // 以内容哈希为 key 查找——相同源文件的多个 clip 共享同一缓存条目。
+    if let Some(found) = cache.get(&ck.key) {
+        return Some(found.clone());
     }
     // 缓存未命中，返回 None，等待异步预计算完成后由 ClipPitchReady 触发 snapshot rebuild。
     None
 }
 
 /// 将计算结果写入全局缓存（供异步 worker 调用）。
-fn store_clip_pitch_cache(clip_id: &str, cached: CachedClipPitch) {
+/// 以内容哈希（`cached.key`）为 key，相同源文件的多个 clip 共享同一条目。
+fn store_clip_pitch_cache(cached: CachedClipPitch) {
+    let content_key = cached.key.clone();
     let mut cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
-    cache.insert(clip_id.to_string(), cached);
+    cache.insert(content_key, cached);
 
     const MAX: usize = 256;
     if cache.len() > MAX {
@@ -424,23 +406,18 @@ pub fn schedule_clip_pitch_jobs(
             None => continue,
         };
 
-        // 缓存命中则跳过
+        // 缓存命中则跳过（以内容哈希为 key，相同源文件的 clip 共享缓存）
         {
             let cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(found) = cache.get(&ck.clip_id) {
-                if found.key == ck.key {
-                    eprintln!("[pitch_clip] clip '{}' ({}) cache HIT, skipping", clip.name, clip.id);
-                    continue;
-                } else {
-                    eprintln!("[pitch_clip] clip '{}' ({}) cache STALE, will reanalyze", clip.name, clip.id);
-                }
-            } else {
-                eprintln!("[pitch_clip] clip '{}' ({}) cache MISS, will analyze", clip.name, clip.id);
+            if cache.contains_key(&ck.key) {
+                eprintln!("[pitch_clip] clip '{}' ({}) cache HIT (shared key), skipping", clip.name, clip.id);
+                continue;
             }
+            eprintln!("[pitch_clip] clip '{}' ({}) cache MISS, will analyze", clip.name, clip.id);
         }
 
-        // inflight 去重
-        let inflight_key = format!("{}|{}", ck.clip_id, ck.key);
+        // inflight 去重：以内容哈希为 key，相同源文件只允许一个分析任务
+        let inflight_key = ck.key.clone();
         let should_spawn = {
             let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
             if set.contains(&inflight_key) {
@@ -561,11 +538,23 @@ pub fn schedule_clip_pitch_jobs(
                     key: job.ck.key.clone(),
                     midi: midi_data,
                 };
-                store_clip_pitch_cache(&job.ck.clip_id, cached);
-                // 通知引擎缓存已就绪，触发 snapshot rebuild
-                let _ = tx.send(crate::audio_engine::types::EngineCommand::ClipPitchReady {
-                    clip_id: job.ck.clip_id.clone(),
-                });
+                store_clip_pitch_cache(cached);
+                // 通知引擎缓存已就绪，触发 snapshot rebuild。
+                // 以内容哈希查找所有共享该源文件的 clip，逐一发送通知。
+                let sharing_clip_ids: Vec<String> = tl_clone.clips.iter()
+                    .filter_map(|c| {
+                        let root = tl_clone.resolve_root_track_id(&c.track_id).unwrap_or_default();
+                        build_clip_pitch_key(&tl_clone, c, &root, frame_period_ms)
+                            .filter(|other_ck| other_ck.key == job.ck.key)
+                            .map(|_| c.id.clone())
+                    })
+                    .collect();
+                eprintln!("[pitch_clip] thread: notifying {} clip(s) sharing content key", sharing_clip_ids.len());
+                for cid in sharing_clip_ids {
+                    let _ = tx.send(crate::audio_engine::types::EngineCommand::ClipPitchReady {
+                        clip_id: cid,
+                    });
+                }
             }
 
             // 所有 clip 完成后，重置全局进度状态
@@ -800,21 +789,24 @@ pub fn trim_and_resample_midi(
     resample_curve_linear(trimmed, target_frames)
 }
 
-/// 使指定 clip 的 pitch MIDI 缓存失效（例如拉伸参数变化后调用）。
+/// 使指定 clip 的 pitch MIDI 缓存失效（例如源文件变化后调用）。
+/// 以 clip 所对应的 content_hash 为 key 删除缓存，影响所有共享该源文件的 clip。
 /// 下次 `schedule_clip_pitch_jobs` 时会重新提交检测任务。
-pub fn invalidate_clip_pitch_cache(clip_id: &str) {
+pub fn invalidate_clip_pitch_cache(tl: &TimelineState, clip: &Clip) {
+    let root = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+    let Some(ck) = build_clip_pitch_key(tl, clip, &root, 5.0) else { return };
     let mut cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
-    cache.remove(clip_id);
+    cache.remove(&ck.key);
 }
 
-/// 清除指定 clip 的所有 inflight 标记。
+/// 清除指定 clip 对应源文件的 inflight 标记。
 /// 当拉伸完成（handle_stretch_ready）后调用，确保后续的
 /// schedule_clip_pitch_jobs 不会因为残留的 inflight 标记而跳过该 clip。
-pub fn clear_clip_inflight(clip_id: &str) {
+pub fn clear_clip_inflight(tl: &TimelineState, clip: &Clip) {
+    let root = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+    let Some(ck) = build_clip_pitch_key(tl, clip, &root, 5.0) else { return };
     let mut set = global_inflight().lock().unwrap_or_else(|e| e.into_inner());
-    // inflight key 格式为 "{clip_id}|{hash_key}"，按 clip_id 前缀清除
-    let prefix = format!("{}|", clip_id);
-    set.retain(|k| !k.starts_with(&prefix));
+    set.remove(&ck.key);
 }
 
 #[allow(dead_code)]

@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use crate::state::TimelineState;
 
-use super::ring::StreamRingStereo;
-
 pub(crate) type AudioKey = (PathBuf, u32);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -66,10 +64,6 @@ pub(crate) struct EngineClip {
     pub(crate) src_start_frame: u64,
     pub(crate) src_end_frame: u64,
     pub(crate) playback_rate: f64,
-
-    // Optional pitch-preserving, streaming time-stretch buffer.
-    // When present and filled, we prefer it; otherwise we fall back to `src` + `playback_rate`.
-    pub(crate) stretch_stream: Option<Arc<StreamRingStereo>>,
 
     // Local (timeline) frame offset applied before sampling the source.
     // Negative values mean leading silence (i.e. slip-edit past the source start).

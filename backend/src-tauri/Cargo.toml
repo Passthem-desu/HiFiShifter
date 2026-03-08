@@ -61,3 +61,4 @@ objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
 [features]
 default = ["onnx"]
 onnx = ["dep:ort", "dep:ndarray"]
+vslib = []
