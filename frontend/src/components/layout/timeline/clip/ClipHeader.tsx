@@ -41,11 +41,11 @@ export const ClipHeader: React.FC<{
 
     // 根据 clip 像素宽度决定显示哪些元素（从右往左依次隐藏）
     // >= 120px: 全显示 | 80-120px: 隐藏名称 | 52-80px: 隐藏名称+增益值 | 32-52px: 只留M | < 32px: 全隐藏
-    const showAny      = clipWidthPx >= 32;
-    const showMute     = clipWidthPx >= 32;
+    const showAny = clipWidthPx >= 32;
+    const showMute = clipWidthPx >= 32;
     const showGainKnob = clipWidthPx >= 52;
-    const showGainVal  = clipWidthPx >= 80;
-    const showName     = clipWidthPx >= 120;
+    const showGainVal = clipWidthPx >= 80;
+    const showName = clipWidthPx >= 120;
 
     // ── 增益双击输入框 ──────────────────────────────────────────────────────
     const [gainEditing, setGainEditing] = useState(false);
@@ -114,76 +114,85 @@ export const ClipHeader: React.FC<{
             }}
         >
             {/* 静音按钮 */}
-            {showMute && <button
-                className={`w-5 h-4 rounded flex items-center justify-center border transition-all text-[10px] font-bold ${clip.muted ? "bg-qt-danger-bg text-qt-danger-text border-qt-danger-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-danger-border hover:bg-qt-danger-bg hover:text-qt-danger-text"}`}
-                onPointerDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }}
-                onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    toggleClipMuted(clip.id, !Boolean(clip.muted));
-                }}
-                title={clip.muted ? t("clip_unmute") : t("clip_mute")}
-            >
-                M
-            </button>}
+            {showMute && (
+                <button
+                    className={`w-5 h-4 rounded flex items-center justify-center border transition-all text-[10px] font-bold ${clip.muted ? "bg-qt-danger-bg text-qt-danger-text border-qt-danger-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-danger-border hover:bg-qt-danger-bg hover:text-qt-danger-text"}`}
+                    onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        toggleClipMuted(clip.id, !Boolean(clip.muted));
+                    }}
+                    title={clip.muted ? t("clip_unmute") : t("clip_mute")}
+                >
+                    M
+                </button>
+            )}
 
             {/* 增益拖拽把手 */}
-            {showGainKnob && <div
-                title={t("clip_gain_drag_hint")}
-                style={{ cursor: "ns-resize" }}
-                onPointerDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
-                        ensureSelected(clip.id);
-                    }
-                    selectClipRemote(clip.id);
-                    startEditDrag(e, clip.id, "gain");
-                }}
-                onDoubleClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    openGainEditor();
-                }}
-            >
-                <div className="w-4 h-4 rounded-full border border-white/60 bg-white/10" />
-            </div>}
+            {showGainKnob && (
+                <div
+                    title={t("clip_gain_drag_hint")}
+                    style={{ cursor: "ns-resize" }}
+                    onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                            ensureSelected(clip.id);
+                        }
+                        selectClipRemote(clip.id);
+                        startEditDrag(e, clip.id, "gain");
+                    }}
+                    onDoubleClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openGainEditor();
+                    }}
+                >
+                    <div className="w-4 h-4 rounded-full border border-white/60 bg-white/10" />
+                </div>
+            )}
 
             {/* Clip 名称区域 */}
-            {showName && <div className="flex-1 min-w-0">
-                {nameEditing ? (
-                    <input
-                        ref={nameInputRef}
-                    className="w-full text-xs text-white font-medium bg-black/50 border border-white/40 rounded px-1 outline-none"
-                        value={nameInputVal}
-                        onChange={(e) => setNameInputVal(e.target.value)}
-                        onKeyDown={(e) => {
-                            e.stopPropagation();
-                            if (e.key === "Enter") commitNameEdit();
-                            if (e.key === "Escape") cancelNameEdit();
-                        }}
-                        onBlur={commitNameEdit}
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onDoubleClick={(e) => e.stopPropagation()}
-                    />
-                ) : (
-                    <div
-                        className="text-xs text-white font-medium drop-shadow-md truncate cursor-text"
-                        onDoubleClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setNameInputVal(clip.name);
-                            setNameEditing(true);
-                            setTimeout(() => nameInputRef.current?.select(), 0);
-                        }}
-                    >
-                        {clip.name}
-                    </div>
-                )}
-            </div>}
+            {showName && (
+                <div className="flex-1 min-w-0">
+                    {nameEditing ? (
+                        <input
+                            ref={nameInputRef}
+                            className="w-full text-xs text-white font-medium bg-black/50 border border-white/40 rounded px-1 outline-none"
+                            value={nameInputVal}
+                            onChange={(e) => setNameInputVal(e.target.value)}
+                            onKeyDown={(e) => {
+                                e.stopPropagation();
+                                if (e.key === "Enter") commitNameEdit();
+                                if (e.key === "Escape") cancelNameEdit();
+                            }}
+                            onBlur={commitNameEdit}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onDoubleClick={(e) => e.stopPropagation()}
+                        />
+                    ) : (
+                        <div
+                            className="text-xs text-white font-medium drop-shadow-md truncate cursor-text"
+                            onDoubleClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setNameInputVal(clip.name);
+                                setNameEditing(true);
+                                setTimeout(
+                                    () => nameInputRef.current?.select(),
+                                    0,
+                                );
+                            }}
+                        >
+                            {clip.name}
+                        </div>
+                    )}
+                </div>
+            )}
 
             {/* 增益数值显示 / 输入框 */}
             {showGainVal && gainEditing ? (
