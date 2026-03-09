@@ -2,8 +2,10 @@
 //
 // 从系统剪贴板读取 Reaper 的 "REAPERMedia" 自定义格式数据，
 // 解析并导入到当前时间线。
+// 优先检测 "Standard MIDI File" 格式并作为 MIDI 导入。
 // 支持 Windows / macOS / Linux (X11 & Wayland)。
 
+use crate::midi_import;
 use crate::reaper_import;
 use crate::state::AppState;
 
@@ -95,9 +97,189 @@ fn read_reaper_clipboard() -> Result<Vec<u8>, String> {
     Err("clipboard_unsupported_platform".to_string())
 }
 
+// ---------------------------------------------------------------------------
+// 平台特定的 MIDI 剪贴板读取 ("Standard MIDI File")
+// ---------------------------------------------------------------------------
+
+/// Windows: 通过 clipboard-win 读取自定义格式 "Standard MIDI File"。
+#[cfg(target_os = "windows")]
+fn read_midi_clipboard() -> Result<Vec<u8>, String> {
+    use clipboard_win::{register_format, Clipboard};
+
+    let _clipboard =
+        Clipboard::new_attempts(10).map_err(|e| format!("clipboard_open_failed: {}", e))?;
+
+    let format = register_format("Standard MIDI File")
+        .ok_or_else(|| "midi_clipboard_format_not_found".to_string())?;
+
+    let size =
+        clipboard_win::raw::size(format.get()).ok_or_else(|| "midi_clipboard_empty".to_string())?;
+
+    let mut buf = vec![0u8; size.get()];
+    let bytes_read = clipboard_win::raw::get(format.get(), &mut buf)
+        .map_err(|e| format!("midi_clipboard_read_failed: {}", e))?;
+
+    buf.truncate(bytes_read);
+    Ok(buf)
+}
+
+/// macOS: 通过 NSPasteboard 读取自定义类型 "Standard MIDI File"。
+#[cfg(target_os = "macos")]
+fn read_midi_clipboard() -> Result<Vec<u8>, String> {
+    use objc2_app_kit::NSPasteboard;
+    use objc2_foundation::NSString;
+
+    let pasteboard = unsafe { NSPasteboard::generalPasteboard() };
+    let pb_type = NSString::from_str("Standard MIDI File");
+
+    let data = unsafe { pasteboard.dataForType(&pb_type) }
+        .ok_or_else(|| "midi_clipboard_empty".to_string())?;
+
+    let len = data.length();
+    if len == 0 {
+        return Err("midi_clipboard_empty".to_string());
+    }
+    let ptr = data.bytes().cast::<u8>();
+    let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+    Ok(bytes.to_vec())
+}
+
+/// Linux: 通过 wl-paste (Wayland) 或 xclip (X11) 读取自定义目标 "Standard MIDI File"。
+#[cfg(target_os = "linux")]
+fn read_midi_clipboard() -> Result<Vec<u8>, String> {
+    use std::process::Command;
+
+    let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
+
+    let output = if is_wayland {
+        Command::new("wl-paste")
+            .args(["--type", "Standard MIDI File"])
+            .output()
+    } else {
+        Command::new("xclip")
+            .args([
+                "-selection",
+                "clipboard",
+                "-target",
+                "Standard MIDI File",
+                "-o",
+            ])
+            .output()
+    };
+
+    let output = output.map_err(|e| {
+        let tool = if is_wayland { "wl-paste" } else { "xclip" };
+        format!(
+            "midi_clipboard_read_failed: failed to run {}: {}",
+            tool, e
+        )
+    })?;
+
+    if !output.status.success() {
+        return Err("midi_clipboard_empty".to_string());
+    }
+
+    if output.stdout.is_empty() {
+        return Err("midi_clipboard_empty".to_string());
+    }
+
+    Ok(output.stdout)
+}
+
+/// 不支持的平台回退。
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn read_midi_clipboard() -> Result<Vec<u8>, String> {
+    Err("clipboard_unsupported_platform".to_string())
+}
+
+// ---------------------------------------------------------------------------
+// MIDI 剪贴板粘贴实现
+// ---------------------------------------------------------------------------
+
+/// 将 MIDI 剪贴板数据写入当前选中轨道的 pitch_edit。
+///
+/// 使用工程 BPM 作为 Tempo 回退，导入起始点为当前光标位置。
+fn paste_midi_clipboard_inner(state: &AppState, midi_data: &[u8]) -> serde_json::Value {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+
+    let bpm = tl.bpm;
+    let playhead_sec = tl.playhead_sec;
+
+    // 解析 MIDI 数据，使用工程 BPM 作为 fallback tempo
+    let parse_result = match midi_import::parse_midi_bytes(midi_data, Some(bpm)) {
+        Ok(r) => r,
+        Err(e) => {
+            return serde_json::json!({"ok": false, "error": format!("midi_parse_failed: {}", e)});
+        }
+    };
+
+    // 合并所有轨道的音符
+    let mut all_notes: Vec<midi_import::MidiNoteEvent> = parse_result
+        .track_notes
+        .into_iter()
+        .flatten()
+        .collect();
+    all_notes.sort_by(|a, b| {
+        a.start_sec
+            .partial_cmp(&b.start_sec)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    if all_notes.is_empty() {
+        return serde_json::json!({"ok": false, "error": "midi_no_notes"});
+    }
+
+    // 确定目标轨道
+    let Some(selected_track_id) = tl.selected_track_id.clone() else {
+        return serde_json::json!({"ok": false, "error": "no_track_selected"});
+    };
+
+    let Some(root_track_id) = tl.resolve_root_track_id(&selected_track_id) else {
+        return serde_json::json!({"ok": false, "error": "no_track_selected"});
+    };
+
+    tl.ensure_params_for_root(&root_track_id);
+    let frame_period_ms = tl.frame_period_ms().max(0.1);
+
+    state.checkpoint_timeline(&tl);
+
+    let Some(entry) = tl.params_by_root_track.get_mut(&root_track_id) else {
+        return serde_json::json!({"ok": false, "error": "params_missing"});
+    };
+
+    // 以光标位置作为偏移写入 pitch_edit
+    let touched = midi_import::write_notes_to_pitch_edit(
+        &all_notes,
+        frame_period_ms,
+        &mut entry.pitch_edit,
+        playhead_sec,
+    );
+
+    if touched > 0 {
+        entry.pitch_edit_user_modified = true;
+    }
+
+    state.audio_engine.update_timeline(tl.clone());
+    drop(tl);
+
+    let payload = get_timeline_state_from_ref(state);
+    let mut json = serde_json::to_value(&payload).unwrap_or_default();
+    json["midi_imported"] = serde_json::json!({
+        "notes": all_notes.len(),
+        "frames_touched": touched,
+    });
+    json
+}
+
 /// 粘贴 Reaper 剪贴板数据到当前选中的轨道。
+/// 优先检测 "Standard MIDI File" 格式，若存在则作为 MIDI 导入到当前轨道的 pitch_edit。
 pub(super) fn paste_reaper_clipboard(state: &AppState) -> serde_json::Value {
-    // 读取剪贴板
+    // 优先尝试 MIDI 剪贴板
+    if let Ok(midi_data) = read_midi_clipboard() {
+        return paste_midi_clipboard_inner(state, &midi_data);
+    }
+
+    // 回退到 REAPERMedia 剪贴板
     let data = match read_reaper_clipboard() {
         Ok(d) => d,
         Err(e) => {
