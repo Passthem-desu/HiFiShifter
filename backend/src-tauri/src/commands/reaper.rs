@@ -92,7 +92,6 @@ pub(super) fn import_reaper_project(
     // 更新工程元信息
     {
         let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-        p.dirty = true; // 标记为未保存
         update_window_title(window, &p.name, p.dirty);
     }
 
