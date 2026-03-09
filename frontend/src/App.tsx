@@ -235,9 +235,7 @@ function AppInner() {
                   pitchAnalysis.progress != null &&
                   Number.isFinite(pitchAnalysis.progress)
               ) {
-                  parts.push(
-                      `${Math.round(pitchAnalysis.progress * 100)}%`,
-                  );
+                  parts.push(`${Math.round(pitchAnalysis.progress * 100)}%`);
               }
               return parts.join(" ");
           })()
@@ -477,19 +475,21 @@ function AppInner() {
             try {
                 const mod = await import("@tauri-apps/api/window");
                 const currentWindow = mod.getCurrentWindow();
-                unlisten = await currentWindow.onCloseRequested((event: any) => {
-                    if (allowWindowCloseRef.current) {
-                        allowWindowCloseRef.current = false;
-                        return;
-                    }
-                    if (!projectDirty) {
-                        return;
-                    }
-                    event.preventDefault();
-                    if (!disposed) {
-                        promptUnsavedAction("exit", closeWindowNow);
-                    }
-                });
+                unlisten = await currentWindow.onCloseRequested(
+                    (event: any) => {
+                        if (allowWindowCloseRef.current) {
+                            allowWindowCloseRef.current = false;
+                            return;
+                        }
+                        if (!projectDirty) {
+                            return;
+                        }
+                        event.preventDefault();
+                        if (!disposed) {
+                            promptUnsavedAction("exit", closeWindowNow);
+                        }
+                    },
+                );
             } catch {
                 // Safe no-op for non-Tauri builds.
             }
@@ -503,125 +503,174 @@ function AppInner() {
     }, [closeWindowNow, projectDirty, promptUnsavedAction]);
 
     // 统一快捷键处理（通过 keybindings 模块管理，用户可自定义）
-    const handleKeybindingAction = useCallback((actionId: ActionId) => {
-        switch (actionId) {
-            case "playback.toggle":
-                if (runtimeRef.current.isPlaying) {
-                    void dispatch(stopAudioPlayback());
-                } else {
-                    void dispatch(playOriginal());
-                }
-                break;
-            case "edit.undo":
-                void dispatch(undoRemote());
-                break;
-            case "edit.redo":
-                void dispatch(redoRemote());
-                break;
-            case "project.new":
-                handleNewProject();
-                break;
-            case "project.open":
-                handleOpenProject();
-                break;
-            case "project.save":
-                void dispatch(saveProjectRemote());
-                break;
-            case "project.saveAs":
-                void dispatch(saveProjectAsRemote());
-                break;
-            case "project.export":
-                void (async () => {
-                    const curPath = outputPathRef.current?.trim();
-                    if (!curPath) {
-                        const picked = await dispatch(pickOutputPath()).unwrap();
-                        if (picked.ok && !picked.canceled && picked.path) {
-                            await dispatch(exportAudio(picked.path));
-                        }
-                        return;
+    const handleKeybindingAction = useCallback(
+        (actionId: ActionId) => {
+            switch (actionId) {
+                case "playback.toggle":
+                    if (runtimeRef.current.isPlaying) {
+                        void dispatch(stopAudioPlayback());
+                    } else {
+                        void dispatch(playOriginal());
                     }
-                    await dispatch(exportAudio(curPath));
-                })();
-                break;
-            case "mode.toggle":
-                dispatch(
-                    setToolMode(
-                        runtimeRef.current.toolMode === "draw" ? "select" : "draw",
-                    ),
-                );
-                break;
-            case "quickSearch.open":
-                setQuickSearchOpen(true);
-                break;
-            case "track.add": {
-                const ss = store.getState().session;
-                const parentId = ss.selectedTrackId ?? null;
-                void dispatch(addTrackRemote({ parentTrackId: parentId }));
-                break;
-            }
-            case "pianoRoll.shiftParamUp":
-            case "pianoRoll.shiftParamDown": {
-                const isUp = actionId === "pianoRoll.shiftParamUp";
-                const ss = store.getState().session;
-                const rootTrkId = resolveRootTrackId(ss.tracks, ss.selectedTrackId);
-                if (!rootTrkId) break;
-                const editP = ss.editParam;
-                const rootTrk = ss.tracks.find((tr) => tr.id === rootTrkId);
-                // pitch 参数需要 pitch 分析可用才能操作
-                if (editP === "pitch") {
-                    if (!rootTrk?.composeEnabled || rootTrk.pitchAnalysisAlgo === "none") break;
-                }
-                const selClipId = ss.selectedClipId;
-                // 优先使用多选 clip 列表，否则 fallback 到单选
-                const multiIds = ss.multiSelectedClipIds;
-                const clipIds =
-                    multiIds.length >= 1
-                        ? multiIds
-                        : selClipId
-                          ? [selClipId]
-                          : [];
-                if (clipIds.length === 0) break;
-                const selClips = ss.clips.filter((c) => clipIds.includes(c.id));
-                if (selClips.length === 0) break;
-                const minSec = Math.min(...selClips.map((c) => c.startSec));
-                const maxSec = Math.max(...selClips.map((c) => c.startSec + c.lengthSec));
-                // 默认 framePeriodMs = 5
-                const fp = 5;
-                const startFrame = Math.max(0, Math.floor((minSec * 1000) / fp));
-                const frameCount = Math.max(1, Math.min(200_000, Math.ceil(((maxSec - minSec) * 1000) / fp)));
-                void (async () => {
-                    let descriptor: ProcessorParamDescriptor | undefined;
-                    if (editP !== "pitch" && rootTrk?.pitchAnalysisAlgo) {
-                        const algo = rootTrk.pitchAnalysisAlgo;
-                        let descriptors = processorParamCacheRef.current.get(algo);
-                        if (!descriptors) {
-                            try {
-                                descriptors = await paramsApi.getProcessorParams(algo);
-                                processorParamCacheRef.current.set(algo, descriptors);
-                            } catch {
-                                descriptors = undefined;
+                    break;
+                case "edit.undo":
+                    void dispatch(undoRemote());
+                    break;
+                case "edit.redo":
+                    void dispatch(redoRemote());
+                    break;
+                case "project.new":
+                    handleNewProject();
+                    break;
+                case "project.open":
+                    handleOpenProject();
+                    break;
+                case "project.save":
+                    void dispatch(saveProjectRemote());
+                    break;
+                case "project.saveAs":
+                    void dispatch(saveProjectAsRemote());
+                    break;
+                case "project.export":
+                    void (async () => {
+                        const curPath = outputPathRef.current?.trim();
+                        if (!curPath) {
+                            const picked =
+                                await dispatch(pickOutputPath()).unwrap();
+                            if (picked.ok && !picked.canceled && picked.path) {
+                                await dispatch(exportAudio(picked.path));
                             }
+                            return;
                         }
-                        descriptor = descriptors?.find((param) => param.id === editP);
+                        await dispatch(exportAudio(curPath));
+                    })();
+                    break;
+                case "mode.toggle":
+                    dispatch(
+                        setToolMode(
+                            runtimeRef.current.toolMode === "draw"
+                                ? "select"
+                                : "draw",
+                        ),
+                    );
+                    break;
+                case "quickSearch.open":
+                    setQuickSearchOpen(true);
+                    break;
+                case "track.add": {
+                    const ss = store.getState().session;
+                    const parentId = ss.selectedTrackId ?? null;
+                    void dispatch(addTrackRemote({ parentTrackId: parentId }));
+                    break;
+                }
+                case "pianoRoll.shiftParamUp":
+                case "pianoRoll.shiftParamDown": {
+                    const isUp = actionId === "pianoRoll.shiftParamUp";
+                    const ss = store.getState().session;
+                    const rootTrkId = resolveRootTrackId(
+                        ss.tracks,
+                        ss.selectedTrackId,
+                    );
+                    if (!rootTrkId) break;
+                    const editP = ss.editParam;
+                    const rootTrk = ss.tracks.find((tr) => tr.id === rootTrkId);
+                    // pitch 参数需要 pitch 分析可用才能操作
+                    if (editP === "pitch") {
+                        if (
+                            !rootTrk?.composeEnabled ||
+                            rootTrk.pitchAnalysisAlgo === "none"
+                        )
+                            break;
                     }
-                    const step = getParamShiftStep(editP, descriptor);
-                    const delta = isUp ? step : -step;
-                    const res = await paramsApi.getParamFrames(rootTrkId, editP, startFrame, frameCount, 1);
-                    if (!res?.ok) return;
-                    const payload = res as ParamFramesPayload;
-                    const editValues = (payload.edit ?? []).map((v) => Number(v) || 0);
-                    const shifted = editValues.map((v) => v + delta);
-                    await paramsApi.setParamFrames(rootTrkId, editP, startFrame, shifted, true);
-                    // 通知 PianoRoll 刷新曲线
-                    dispatch(checkpointHistory());
-                })();
-                break;
+                    const selClipId = ss.selectedClipId;
+                    // 优先使用多选 clip 列表，否则 fallback 到单选
+                    const multiIds = ss.multiSelectedClipIds;
+                    const clipIds =
+                        multiIds.length >= 1
+                            ? multiIds
+                            : selClipId
+                              ? [selClipId]
+                              : [];
+                    if (clipIds.length === 0) break;
+                    const selClips = ss.clips.filter((c) =>
+                        clipIds.includes(c.id),
+                    );
+                    if (selClips.length === 0) break;
+                    const minSec = Math.min(...selClips.map((c) => c.startSec));
+                    const maxSec = Math.max(
+                        ...selClips.map((c) => c.startSec + c.lengthSec),
+                    );
+                    // 默认 framePeriodMs = 5
+                    const fp = 5;
+                    const startFrame = Math.max(
+                        0,
+                        Math.floor((minSec * 1000) / fp),
+                    );
+                    const frameCount = Math.max(
+                        1,
+                        Math.min(
+                            200_000,
+                            Math.ceil(((maxSec - minSec) * 1000) / fp),
+                        ),
+                    );
+                    void (async () => {
+                        let descriptor: ProcessorParamDescriptor | undefined;
+                        if (editP !== "pitch" && rootTrk?.pitchAnalysisAlgo) {
+                            const algo = rootTrk.pitchAnalysisAlgo;
+                            let descriptors =
+                                processorParamCacheRef.current.get(algo);
+                            if (!descriptors) {
+                                try {
+                                    descriptors =
+                                        await paramsApi.getProcessorParams(
+                                            algo,
+                                        );
+                                    processorParamCacheRef.current.set(
+                                        algo,
+                                        descriptors,
+                                    );
+                                } catch {
+                                    descriptors = undefined;
+                                }
+                            }
+                            descriptor = descriptors?.find(
+                                (param) => param.id === editP,
+                            );
+                        }
+                        const step = getParamShiftStep(editP, descriptor);
+                        const delta = isUp ? step : -step;
+                        const res = await paramsApi.getParamFrames(
+                            rootTrkId,
+                            editP,
+                            startFrame,
+                            frameCount,
+                            1,
+                        );
+                        if (!res?.ok) return;
+                        const payload = res as ParamFramesPayload;
+                        const editValues = (payload.edit ?? []).map(
+                            (v) => Number(v) || 0,
+                        );
+                        const shifted = editValues.map((v) => v + delta);
+                        await paramsApi.setParamFrames(
+                            rootTrkId,
+                            editP,
+                            startFrame,
+                            shifted,
+                            true,
+                        );
+                        // 通知 PianoRoll 刷新曲线
+                        dispatch(checkpointHistory());
+                    })();
+                    break;
+                }
+                // clip.* 操作由 TimelinePanel 的 useKeyboardShortcuts 处理
+                default:
+                    break;
             }
-            // clip.* 操作由 TimelinePanel 的 useKeyboardShortcuts 处理
-            default:
-                break;
-        }
-    }, [dispatch, handleNewProject, handleOpenProject]);
+        },
+        [dispatch, handleNewProject, handleOpenProject],
+    );
 
     useKeybindings(handleKeybindingAction);
 
@@ -633,7 +682,9 @@ function AppInner() {
         const id = window.setInterval(() => {
             if (playbackSyncInFlightRef.current) return;
             playbackSyncInFlightRef.current = true;
-            const p = dispatch(syncPlaybackState()) as unknown as Promise<unknown>;
+            const p = dispatch(
+                syncPlaybackState(),
+            ) as unknown as Promise<unknown>;
             p.finally(() => {
                 playbackSyncInFlightRef.current = false;
             });
@@ -744,10 +795,18 @@ function AppInner() {
                         )}
                     </Dialog.Description>
                     <Flex justify="end" gap="2" mt="4">
-                        <Button variant="soft" color="gray" onClick={cancelUnsavedAction}>
+                        <Button
+                            variant="soft"
+                            color="gray"
+                            onClick={cancelUnsavedAction}
+                        >
                             {t("progress_cancel")}
                         </Button>
-                        <Button variant="soft" color="gray" onClick={discardUnsavedAndContinue}>
+                        <Button
+                            variant="soft"
+                            color="gray"
+                            onClick={discardUnsavedAndContinue}
+                        >
                             {t("unsaved_changes_discard")}
                         </Button>
                         <Button onClick={saveUnsavedAndContinue}>
@@ -770,7 +829,10 @@ function AppInner() {
             {/* Main Content Area: Splitter + optional File Browser */}
             <Flex className="flex-1 min-h-0">
                 {/* Left: Timeline / PianoRoll vertical splitter */}
-                <div ref={containerRef} className="flex-1 min-w-0 min-h-0 flex flex-col">
+                <div
+                    ref={containerRef}
+                    className="flex-1 min-w-0 min-h-0 flex flex-col"
+                >
                     {/* Top: Timeline / Tracks */}
                     <Box
                         className="min-h-[200px] border-b border-qt-border relative bg-qt-base"
@@ -829,7 +891,9 @@ function AppInner() {
                             }}
                         >
                             {t("status_stretching" as any)}
-                            {stretching.clipName ? ` "${stretching.clipName}"` : ""}
+                            {stretching.clipName
+                                ? ` "${stretching.clipName}"`
+                                : ""}
                         </span>
                     ) : null}
                     {pitchAnalysisText ? (
@@ -868,7 +932,8 @@ function AppInner() {
                                 lineHeight: "16px",
                             }}
                         >
-                            {(t as any)("refreshing_pitch_data") || "Refreshing pitch data"}
+                            {(t as any)("refreshing_pitch_data") ||
+                                "Refreshing pitch data"}
                             {pianoRollStatus.asyncRefreshProgress > 0
                                 ? ` ${Math.round(pianoRollStatus.asyncRefreshProgress)}%`
                                 : ""}
@@ -890,11 +955,14 @@ function AppInner() {
                                 : ""}
                         </span>
                     ) : null}
-                    <Text size="1" color={error ? "red" : "gray"} className="truncate">
+                    <Text
+                        size="1"
+                        color={error ? "red" : "gray"}
+                        className="truncate"
+                    >
                         {errorText}
                     </Text>
                 </Flex>
-
             </Flex>
         </Flex>
     );

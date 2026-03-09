@@ -22,7 +22,10 @@ import {
 import { fileBrowserApi } from "../../services/api/fileBrowser";
 import { useAppTheme } from "../../theme/AppThemeProvider";
 import { GlobeIcon } from "@radix-ui/react-icons";
-import { selectMergedKeybindings, formatKeybinding } from "../../features/keybindings/keybindingsSlice";
+import {
+    selectMergedKeybindings,
+    formatKeybinding,
+} from "../../features/keybindings/keybindingsSlice";
 import type { ActionId } from "../../features/keybindings/types";
 import { KeybindingsDialog } from "./KeybindingsDialog";
 
@@ -89,17 +92,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <span>{t("menu_file")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
-                    <DropdownMenu.Item
-                        onSelect={onNewProject}
-                    >
+                    <DropdownMenu.Item onSelect={onNewProject}>
                         {t("menu_new_project")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("project.new")}
                         </div>
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                        onSelect={onOpenProject}
-                    >
+                    <DropdownMenu.Item onSelect={onOpenProject}>
                         {t("menu_open_project")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("project.open")}
@@ -154,14 +153,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     >
                         {t("menu_import_audio")}{" "}
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                        onSelect={onOpenReaper}
-                    >
+                    <DropdownMenu.Item onSelect={onOpenReaper}>
                         {t("menu_open_reaper")}
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                        onSelect={onOpenVocalShifter}
-                    >
+                    <DropdownMenu.Item onSelect={onOpenVocalShifter}>
                         {t("menu_open_vocalshifter")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={handleExport}>
@@ -180,10 +175,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         {t("menu_pick_output")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
-                    <DropdownMenu.Item
-                        onSelect={onExit}
-                        color="red"
-                    >
+                    <DropdownMenu.Item onSelect={onExit} color="red">
                         {t("menu_exit")}
                     </DropdownMenu.Item>
                 </DropdownMenu.Content>
@@ -225,7 +217,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         {t("menu_paste_reaper_clipboard")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
-                        onSelect={() => void dispatch(pasteVocalShifterClipboard())}
+                        onSelect={() =>
+                            void dispatch(pasteVocalShifterClipboard())
+                        }
                     >
                         {t("menu_paste_vocalshifter_clipboard")}
                     </DropdownMenu.Item>
@@ -275,7 +269,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item onSelect={() => theme.toggleMode()}>
-                        {t("theme")}: {" "}
+                        {t("theme")}:{" "}
                         {theme.mode === "dark"
                             ? t("theme_dark")
                             : t("theme_light")}
@@ -317,7 +311,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             </Flex>
 
             {/* 快捷键设置对话框 */}
-            <KeybindingsDialog open={kbDialogOpen} onOpenChange={setKbDialogOpen} />
+            <KeybindingsDialog
+                open={kbDialogOpen}
+                onOpenChange={setKbDialogOpen}
+            />
         </Flex>
     );
 };
