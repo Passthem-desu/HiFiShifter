@@ -294,6 +294,8 @@ export const messages = {
         midi_import_failed: "MIDI import failed",
         midi_file_not_found: "MIDI file not found",
         midi_no_notes: "No notes in selected track",
+        midi_no_frames_touched:
+            "MIDI import did not write any frames. Check the playhead position and project length.",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -584,6 +586,8 @@ export const messages = {
         midi_import_failed: "MIDI 导入失败",
         midi_file_not_found: "MIDI 文件未找到",
         midi_no_notes: "选中的轨道没有音符",
+        midi_no_frames_touched:
+            "MIDI 导入没有写入任何帧，请检查播放头位置和工程长度",
     },
 } as const;
 

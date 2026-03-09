@@ -933,7 +933,9 @@ export const PianoRollPanel: React.FC = () => {
                                 variant="soft"
                                 color="blue"
                                 onClick={handleOpenMidiDialog}
+                                disabled={!pitchEnabled}
                                 style={{ cursor: "pointer" }}
+                                title={pitchHardDisableReason ?? undefined}
                             >
                                 {(t as (key: string) => string)("midi_import")}
                             </Button>
@@ -1111,6 +1113,7 @@ export const PianoRollPanel: React.FC = () => {
                 open={midiDialogOpen}
                 onOpenChange={setMidiDialogOpen}
                 midiPath={midiPath}
+                offsetSec={s.playheadSec}
                 onImported={handleMidiImported}
             />
         </Flex>

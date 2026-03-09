@@ -24,6 +24,8 @@ interface MidiTrackSelectDialogProps {
     onOpenChange: (open: boolean) => void;
     /** MIDI 文件路径（由文件对话框选定） */
     midiPath: string | null;
+    /** 导入到时间线的起始偏移，默认使用当前播放头 */
+    offsetSec?: number;
     /** 导入完成后的回调 */
     onImported?: (result: {
         notes_imported: number;
@@ -60,6 +62,7 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
     open,
     onOpenChange,
     midiPath,
+    offsetSec,
     onImported,
 }) => {
     const { t } = useI18n();
@@ -81,12 +84,17 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
             return;
         }
 
+        console.info("[midi_import_ui] load_tracks:start", {
+            midiPath,
+        });
+
         setLoading(true);
         setError(null);
 
         paramsApi
             .getMidiTracks(midiPath)
             .then((res) => {
+                console.info("[midi_import_ui] load_tracks:response", res);
                 if (res.ok && res.tracks) {
                     setTracks(res.tracks);
                     if (res.tracks.length === 1) {
@@ -99,7 +107,8 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                     setTracks([]);
                 }
             })
-            .catch(() => {
+            .catch((err) => {
+                console.error("[midi_import_ui] load_tracks:error", err);
                 setError(tAny("midi_import_failed"));
                 setTracks([]);
             })
@@ -115,11 +124,18 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                 selectedTrack === "all"
                     ? undefined
                     : parseInt(selectedTrack, 10);
+            console.info("[midi_import_ui] import:start", {
+                midiPath,
+                trackIndex,
+                offsetSec,
+                selectedTrack,
+            });
             const res = await paramsApi.importMidiToPitch(
                 midiPath,
                 trackIndex,
-                undefined,
+                offsetSec,
             );
+            console.info("[midi_import_ui] import:response", res);
             if (res.ok) {
                 onImported?.({
                     notes_imported: res.notes_imported ?? 0,
@@ -132,16 +148,20 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                 const knownErrors: Record<string, string> = {
                     file_not_found: tAny("midi_file_not_found"),
                     no_notes_in_track: tAny("midi_no_notes"),
+                    no_frames_touched: tAny("midi_no_frames_touched"),
                     no_pitch_line_selected: tAny("vs_paste_no_pitch_line"),
+                    pitch_requires_compose: tAny("pitch_requires_compose"),
+                    pitch_requires_algo: tAny("pitch_requires_algo"),
                 };
                 setError(knownErrors[errKey] ?? errKey);
             }
-        } catch {
+        } catch (err) {
+            console.error("[midi_import_ui] import:error", err);
             setError(tAny("midi_import_failed"));
         } finally {
             setImporting(false);
         }
-    }, [midiPath, selectedTrack, onImported, onOpenChange, tAny]);
+    }, [midiPath, offsetSec, selectedTrack, onImported, onOpenChange, tAny]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>

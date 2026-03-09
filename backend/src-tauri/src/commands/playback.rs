@@ -30,10 +30,9 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
         }
         let start_sec = playhead_sec.max(0.0) + start_sec.max(0.0);
 
-        // 检测是否有活跃的 pitch edit
-        let pitch_active = crate::pitch_editing::is_pitch_edit_active(&timeline);
-        let pitch_backend_ok = crate::pitch_editing::is_pitch_edit_backend_available(&timeline);
-        let need_prerender = pitch_active && pitch_backend_ok;
+        // 不依赖当前选中轨；按时间线里实际需要 pitch edit 的 clip 决定是否进入预渲染路径。
+        let clips_needing_render = collect_clips_needing_render(&timeline, state.audio_engine.sample_rate_hz());
+        let need_prerender = !clips_needing_render.is_empty();
 
         if !need_prerender {
             // 无 pitch edit：直接走实时 clip mixing（零延迟）
