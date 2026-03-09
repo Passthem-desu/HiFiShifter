@@ -1,7 +1,6 @@
 // Reaper 工程文件 / 剪贴板数据解析模块
 //
 // 将 Reaper RPP 文本格式解析为中间数据结构。
-// 参考 UltraPaste/ReaperDataParser 的 C# 实现移植。
 
 use std::path::{Path, PathBuf};
 
@@ -236,7 +235,7 @@ pub struct ReaperTempoEnvelope {
 // ─── 块解析器 ───
 
 const ENVELOPE_TYPES: &[&str] = &[
-    "ENVSEG", "VOLENV", "VOLENV2", "PANENV", "PANENV2", "MUTEENV", "TEMPOENVEX",
+    "ENVSEG", "VOLENV", "VOLENV2", "PANENV", "PANENV2", "MUTEENV", "TEMPOENVEX","PITCHENV",
 ];
 
 #[derive(Debug)]

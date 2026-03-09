@@ -151,12 +151,12 @@ export const MenuBar: React.FC = () => {
                     <DropdownMenu.Item
                         onSelect={() => void dispatch(openReaperFromDialog())}
                     >
-                        {t("menu_open_reaper")}
+                        {t("menu_import_reaper")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
                         onSelect={() => void dispatch(openVocalShifterFromDialog())}
                     >
-                        {t("menu_open_vocalshifter")}
+                        {t("menu_import_vocalshifter")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={handleExport}>
                         {t("menu_export_audio")}{" "}

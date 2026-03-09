@@ -146,9 +146,16 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
                     // 应用 Reaper 导入的待定音高偏移
                     if let Some(offsets) = entry.pending_pitch_offset.take() {
                         let len = entry.pitch_orig.len().min(offsets.len());
-                        entry.pitch_edit = entry.pitch_orig.clone();
+                        // 若已有用户编辑的 pitch_edit，在其基础上叠加偏移，避免重置其他片段的音高线
+                        if entry.pitch_edit.is_empty() || !entry.pitch_edit_user_modified {
+                            entry.pitch_edit = entry.pitch_orig.clone();
+                        }
+                        // 确保 pitch_edit 长度与 pitch_orig 一致
+                        if entry.pitch_edit.len() < entry.pitch_orig.len() {
+                            entry.pitch_edit.resize(entry.pitch_orig.len(), 0.0);
+                        }
                         for i in 0..len {
-                            if entry.pitch_orig[i].abs() > 1e-6 {
+                            if offsets[i].abs() > 1e-6 && entry.pitch_orig[i].abs() > 1e-6 {
                                 entry.pitch_edit[i] = entry.pitch_orig[i] + offsets[i];
                             }
                         }

@@ -455,12 +455,12 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
             // 需要拆分：为 World 和 非-World 各建一条轨道
             for &is_world in &[true, false] {
                 if algos.map(|s| s.contains(&is_world)).unwrap_or(false) {
-                    let suffix = if is_world { " (World)" } else { " (NSF-HiFiGAN)" };
+                    let suffix = if is_world { " (World)" } else { " (VsLib)" };
                     let id = new_track_id();
                     let algo = if is_world {
                         PitchAnalysisAlgo::WorldDll
                     } else {
-                        PitchAnalysisAlgo::NsfHifiganOnnx
+                        PitchAnalysisAlgo::VocalShifterVslib
                     };
                     hs_tracks.push(Track {
                         id: id.clone(),
@@ -486,7 +486,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
             let algo = if is_world {
                 PitchAnalysisAlgo::WorldDll
             } else {
-                PitchAnalysisAlgo::NsfHifiganOnnx
+                PitchAnalysisAlgo::VocalShifterVslib
             };
             let id = new_track_id();
             let has_items = algos.is_some();
