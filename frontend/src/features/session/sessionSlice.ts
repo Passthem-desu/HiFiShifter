@@ -82,6 +82,7 @@ import {
     removeSelectedClipRemote,
     setTrackStateRemote,
 } from "./thunks/trackThunks";
+import { markProjectDirty } from "./sessionDirtyState";
 
 export type {
     AutomationPoint,
@@ -266,6 +267,7 @@ function pushHistory(state: SessionState) {
         state.historyPast.shift();
     }
     state.historyFuture = [];
+    markProjectDirty(state.project);
 }
 
 function normalizeClipColor(color: string | undefined): ClipColor {

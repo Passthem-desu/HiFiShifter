@@ -45,6 +45,7 @@ import type { ActionId } from "./features/keybindings/types";
 import { store } from "./app/store";
 import { resolveRootTrackId } from "./features/session/trackUtils";
 import { getParamShiftStep } from "./components/layout/pianoRoll/paramShiftStep";
+import { runConfirmedExitClose } from "./confirmedExitClose";
 import { paramsApi } from "./services/api";
 import { coreApi } from "./services/api/core";
 import type { ParamFramesPayload, ProcessorParamDescriptor } from "./types/api";
@@ -351,9 +352,20 @@ function AppInner() {
     const renderingWasActiveRef = useRef(false);
 
     const closeWindowNow = useCallback(async () => {
-        allowWindowCloseRef.current = true;
         try {
-            await coreApi.closeWindow();
+            await runConfirmedExitClose({
+                markAllowClose: () => {
+                    allowWindowCloseRef.current = true;
+                },
+                destroyWindow: async () => {
+                    const mod = await import("@tauri-apps/api/window");
+                    const currentWindow = mod.getCurrentWindow();
+                    await currentWindow.destroy();
+                },
+                closeWindow: async () => {
+                    await coreApi.closeWindow();
+                },
+            });
         } catch (error) {
             allowWindowCloseRef.current = false;
             throw error;
@@ -381,12 +393,19 @@ function AppInner() {
 
     const executePendingUnsavedAction = useCallback(async () => {
         const action = pendingUnsavedActionRef.current;
+        const mode = unsavedDialog.mode;
         pendingUnsavedActionRef.current = null;
         setUnsavedDialog((current) => ({ ...current, open: false }));
         if (action) {
-            await action();
+            try {
+                await action();
+            } catch (error) {
+                pendingUnsavedActionRef.current = action;
+                setUnsavedDialog({ open: true, mode });
+                throw error;
+            }
         }
-    }, []);
+    }, [unsavedDialog.mode]);
 
     const cancelUnsavedAction = useCallback(() => {
         pendingUnsavedActionRef.current = null;
@@ -394,7 +413,7 @@ function AppInner() {
     }, []);
 
     const discardUnsavedAndContinue = useCallback(() => {
-        void executePendingUnsavedAction();
+        void executePendingUnsavedAction().catch(() => {});
     }, [executePendingUnsavedAction]);
 
     const saveUnsavedAndContinue = useCallback(() => {
