@@ -1010,7 +1010,8 @@ export const PianoRollPanel: React.FC = () => {
                                 </Select.Content>
                             </Select.Root>
                             {processorStaticParams.map((param) => {
-                                if (param.kind.type !== "static_enum") return null;
+                                if (param.kind.type !== "static_enum")
+                                    return null;
                                 const currentValue =
                                     processorStaticValues[param.id] ??
                                     param.kind.default_value;

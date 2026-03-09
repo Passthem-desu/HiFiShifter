@@ -56,8 +56,6 @@ export function usePianoRollData(args: {
         useState<ParamViewSegment | null>(null);
     const secondaryFetchReqIdRef = useRef(0);
 
-
-
     const [pitchEditUserModified, setPitchEditUserModified] = useState<
         boolean | null
     >(null);
@@ -493,8 +491,7 @@ export function usePianoRollData(args: {
                         framePeriodMs: fpRes,
                         startFrame: receivedStartFrame,
                         stride,
-                        referenceKind:
-                            payload.reference_kind ?? "source_curve",
+                        referenceKind: payload.reference_kind ?? "source_curve",
                         orig: (payload.orig ?? []).map((v) => Number(v) || 0),
                         edit: (payload.edit ?? []).map((v) => Number(v) || 0),
                     });
@@ -624,8 +621,7 @@ export function usePianoRollData(args: {
                             secPayload.start_frame ?? req.secondaryStartFrame,
                         ) || req.secondaryStartFrame,
                     stride,
-                    referenceKind:
-                        secPayload.reference_kind ?? "source_curve",
+                    referenceKind: secPayload.reference_kind ?? "source_curve",
                     orig: [],
                     edit: (secPayload.edit ?? []).map((v) => Number(v) || 0),
                 });
