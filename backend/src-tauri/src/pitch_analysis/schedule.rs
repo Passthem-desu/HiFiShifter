@@ -152,7 +152,12 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
                         }
                         // 确保 pitch_edit 长度与 pitch_orig 一致
                         if entry.pitch_edit.len() < entry.pitch_orig.len() {
+                            let old_len = entry.pitch_edit.len();
                             entry.pitch_edit.resize(entry.pitch_orig.len(), 0.0);
+                            // 新增区间以 pitch_orig 作为 baseline，避免 baseline 变为 0
+                            for i in old_len..entry.pitch_orig.len() {
+                                entry.pitch_edit[i] = entry.pitch_orig[i];
+                            }
                         }
                         for i in 0..len {
                             if offsets[i].abs() > 1e-6 && entry.pitch_orig[i].abs() > 1e-6 {
