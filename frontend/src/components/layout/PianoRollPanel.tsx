@@ -50,7 +50,6 @@ import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 import { useAsyncPitchRefresh } from "../../hooks/useAsyncPitchRefresh";
 import { ProgressBar } from "../ProgressBar";
 
-
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 import { coreApi } from "../../services/api/core";
@@ -887,7 +886,8 @@ export const PianoRollPanel: React.FC = () => {
                         ))}
                     </Flex>
 
-                    {editParam === "pitch" && rootTrack ? (                        <Flex align="center" gap="2">
+                    {editParam === "pitch" && rootTrack ? (
+                        <Flex align="center" gap="2">
                             <Text size="1" color="gray">
                                 {t("algo_label")}
                             </Text>
