@@ -159,9 +159,6 @@ export const TrackList: React.FC<{
 
         // 当鼠标在列表容器上方时，直接插入到顶层第一个位置
         if (bounds && clientY < bounds.top && tracks.length > 0) {
-            const roots = siblingsOf(null).filter(
-                (id) => id !== draggingTrackId,
-            );
             return {
                 parentTrackId: null,
                 targetIndex: 0,

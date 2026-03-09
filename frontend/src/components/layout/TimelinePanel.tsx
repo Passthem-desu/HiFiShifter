@@ -309,6 +309,7 @@ export const TimelinePanel: React.FC = () => {
                                     fileName: prev?.fileName ?? nextFileName,
                                     trackId,
                                     startSec: beat,
+                                    durationSec: prev?.durationSec ?? 0,
                                 };
                             });
                             return;
@@ -928,6 +929,7 @@ export const TimelinePanel: React.FC = () => {
                             fileName,
                             trackId,
                             startSec: beat,
+                            durationSec: 0,
                         });
                     }}
                     onDragLeave={(e) => {

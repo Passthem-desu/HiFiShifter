@@ -72,7 +72,6 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
 
     "track.add": { labelKey: "kb_track_add", group: "project" },
 
-    "clip.delete"
     "clip.delete": { labelKey: "kb_clip_delete", group: "clip" },
     "clip.copy": { labelKey: "kb_clip_copy", group: "clip" },
     "clip.paste": { labelKey: "kb_clip_paste", group: "clip" },

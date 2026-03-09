@@ -187,7 +187,7 @@ export const ClipItem: React.FC<{
     startClipDrag,
     startEditDrag,
     toggleClipMuted,
-    toggleMultiSelect,
+    toggleMultiSelect: _toggleMultiSelect,
     clearContextMenu,
     triggerRename,
     onRenameCommit,

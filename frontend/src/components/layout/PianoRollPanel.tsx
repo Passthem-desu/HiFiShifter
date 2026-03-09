@@ -95,14 +95,6 @@ export const PianoRollPanel: React.FC = () => {
         }
     }, []);
 
-    const handleMidiImported = useCallback(
-        (_result: { notes_imported: number; frames_touched: number }) => {
-            // 导入完成后刷新参数面板
-            refreshNow();
-        },
-        [refreshNow],
-    );
-
     const effectiveSelectedTrackId = useMemo(() => {
         if (s.selectedTrackId) return s.selectedTrackId;
         const clipId = s.selectedClipId;
@@ -550,6 +542,7 @@ export const PianoRollPanel: React.FC = () => {
         setParamView,
         secondaryParamView,
         bumpRefreshToken,
+        refreshNow,
         notifyLiveEditEnded,
         isLoading,
     } = usePianoRollData({
@@ -569,6 +562,14 @@ export const PianoRollPanel: React.FC = () => {
         invalidate,
         liveEditActiveRef,
     });
+
+    const handleMidiImported = useCallback(
+        (_result: { notes_imported: number; frames_touched: number }) => {
+            // 导入完成后刷新参数面板
+            refreshNow();
+        },
+        [refreshNow],
+    );
 
     // 获取当前 track 下的所�?clips，用�?per-clip 波形叠加绘制
     // 获取轨道组内所有 clips（包含 root 轨道及所有子轨道的 clip）
