@@ -2,6 +2,7 @@ mod audio_engine;
 #[path = "audio/audio_utils.rs"] mod audio_utils;
 mod commands;
 #[path = "audio/mixdown.rs"] mod mixdown;
+#[path = "audio/hifigan_tension.rs"] mod hifigan_tension;
 mod models;
 mod pitch_analysis;
 #[path = "pitch/pitch_clip.rs"] mod pitch_clip;
@@ -20,6 +21,13 @@ mod renderer;
 #[path = "vocoder/nsf_hifigan_onnx_stub.rs"] mod nsf_hifigan_onnx_stub;
 #[cfg(not(feature = "onnx"))]
 use nsf_hifigan_onnx_stub as nsf_hifigan_onnx;
+
+#[cfg(feature = "onnx")]
+#[path = "vocoder/hnsep_onnx.rs"] mod hnsep_onnx;
+#[cfg(not(feature = "onnx"))]
+#[path = "vocoder/hnsep_onnx_stub.rs"] mod hnsep_onnx_stub;
+#[cfg(not(feature = "onnx"))]
+use hnsep_onnx_stub as hnsep_onnx;
 
 mod project;
 #[path = "audio/rubberband.rs"] mod rubberband;
@@ -73,6 +81,15 @@ pub fn run() {
                 }
             }
 
+            if std::env::var_os("HIFISHIFTER_HNSEP_MODEL_DIR").is_none() {
+                if let Ok(res_dir) = app.path().resource_dir() {
+                    let p = res_dir.join("models").join("hnsep");
+                    if p.join("hnsep.onnx").exists() {
+                        std::env::set_var("HIFISHIFTER_HNSEP_MODEL_DIR", &p);
+                    }
+                }
+            }
+
             let state = app.state::<state::AppState>();
 
             // Expose app handle for background workers.
@@ -113,107 +130,6 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let state = window.state::<state::AppState>();
-                let (dirty, allow_close, has_path, name) = {
-                    let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-                    if p.allow_close {
-                        p.allow_close = false;
-                        return;
-                    }
-                    (p.dirty, p.allow_close, p.path.is_some(), p.name.clone())
-                };
-
-                let _ = allow_close;
-                if !dirty {
-                    return;
-                }
-
-                api.prevent_close();
-
-                let is_zh = {
-                    let locale = state
-                        .ui_locale
-                        .read()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .clone();
-                    locale.to_lowercase().starts_with("zh")
-                };
-
-                let unsaved_desc = if is_zh {
-                    "工程有未保存的更改。是否在退出前保存？"
-                } else {
-                    "Project has unsaved changes. Save before exiting?"
-                };
-
-                let decision = rfd::MessageDialog::new()
-                    .set_title("HiFiShifter")
-                    .set_description(unsaved_desc)
-                    .set_buttons(rfd::MessageButtons::YesNoCancel)
-                    .show();
-
-                match decision {
-                    rfd::MessageDialogResult::Yes => {
-                        let project_path = if has_path {
-                            let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-                            p.path.clone()
-                        } else {
-                            let default_name = if name.trim().is_empty() {
-                                "Untitled".to_string()
-                            } else {
-                                name
-                            };
-                            rfd::FileDialog::new()
-                                .add_filter("HiFiShifter Project", &["hshp", "hsp", "json"])
-                                .set_file_name(format!("{}.hshp", default_name))
-                                .save_file()
-                                .map(|p| p.display().to_string())
-                        };
-
-                        let Some(path) = project_path else {
-                            return; // canceled
-                        };
-
-                        match commands::save_project_to_path_inner(state.inner(), window, path) {
-                            Ok(_) => {
-                                {
-                                    let mut p =
-                                        state.project.lock().unwrap_or_else(|e| e.into_inner());
-                                    p.allow_close = true;
-                                }
-                                let _ = window.close();
-                            }
-                            Err(e) => {
-                                let save_failed_title = if is_zh {
-                                    "保存失败"
-                                } else {
-                                    "Save failed"
-                                };
-                                let _ = rfd::MessageDialog::new()
-                                    .set_title(save_failed_title)
-                                    .set_description(&e)
-                                    .set_buttons(rfd::MessageButtons::Ok)
-                                    .show();
-                            }
-                        }
-                    }
-                    rfd::MessageDialogResult::No => {
-                        {
-                            let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-                            p.allow_close = true;
-                        }
-                        let _ = window.close();
-                    }
-                    rfd::MessageDialogResult::Cancel => {
-                        // keep window open
-                    }
-                    _ => {
-                        // keep window open
-                    }
-                }
-            }
-        })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::get_runtime_info,
@@ -250,6 +166,8 @@ pub fn run() {
             commands::set_param_frames,
             commands::restore_param_frames,
             commands::add_clip,
+            commands::get_static_param,
+            commands::set_static_param,
             commands::remove_clip,
             commands::move_clip,
             commands::set_clip_state,

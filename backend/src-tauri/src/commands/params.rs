@@ -3,6 +3,49 @@ use tauri::State;
 
 // ===================== param curves =====================
 
+pub(super) fn resolve_extra_curve_default_value(
+    kind: crate::state::SynthPipelineKind,
+    param: &str,
+) -> f32 {
+    crate::renderer::automation_curve_default_value(kind, param).unwrap_or(0.0)
+}
+
+fn resolve_param_reference_value(kind: crate::state::SynthPipelineKind, param: &str) -> f32 {
+    match param {
+        "pitch" => 0.0,
+        "tension" => 0.0,
+        _ => resolve_extra_curve_default_value(kind, param),
+    }
+}
+
+fn resolve_param_reference_kind(param: &str) -> crate::models::ParamReferenceKind {
+    match param {
+        "pitch" => crate::models::ParamReferenceKind::SourceCurve,
+        _ => crate::models::ParamReferenceKind::DefaultValue,
+    }
+}
+
+fn resolve_extra_curve_frame_pair(
+    curve: Option<&Vec<f32>>,
+    default_value: f32,
+    idx: usize,
+) -> (f32, f32) {
+    let edit_value = curve
+        .and_then(|values| values.get(idx))
+        .copied()
+        .unwrap_or(default_value);
+    (default_value, edit_value)
+}
+
+fn resolve_static_param_default_value(
+    kind: crate::state::SynthPipelineKind,
+    param: &str,
+) -> f64 {
+    crate::renderer::static_enum_default_value(kind, param)
+        .map(|value| value as f64)
+        .unwrap_or(0.0)
+}
+
 
 
 
@@ -34,6 +77,7 @@ pub(super) fn get_param_frames(
                     start_frame,
                     orig: vec![],
                     edit: vec![],
+                    reference_kind: resolve_param_reference_kind("pitch"),
                     analysis_pending: None,
                     analysis_progress: None,
                     pitch_edit_user_modified: None,
@@ -90,6 +134,7 @@ pub(super) fn get_param_frames(
             start_frame,
             orig: vec![],
             edit: vec![],
+            reference_kind: resolve_param_reference_kind("pitch"),
             analysis_pending: None,
             analysis_progress: None,
             pitch_edit_user_modified,
@@ -107,6 +152,7 @@ pub(super) fn get_param_frames(
     let start = start_frame as usize;
     let count = (frame_count as usize).max(1);
     let step = (stride.unwrap_or(1).max(1)) as usize;
+    let kind = crate::state::SynthPipelineKind::from_track_algo(&pitch_algo);
 
     let mut orig = Vec::with_capacity(count);
     let mut edit = Vec::with_capacity(count);
@@ -124,22 +170,27 @@ pub(super) fn get_param_frames(
             }
         }
         "tension" => {
+            let reference_value = resolve_param_reference_value(kind, &param);
             for i in 0..count {
                 let idx = start.saturating_add(i.saturating_mul(step));
-                let o = entry.tension_orig.get(idx).copied().unwrap_or(0.0);
-                let e = entry.tension_edit.get(idx).copied().unwrap_or(o);
-                orig.push(o);
+                let e = entry
+                    .tension_edit
+                    .get(idx)
+                    .copied()
+                    .unwrap_or(reference_value);
+                orig.push(reference_value);
                 edit.push(e);
             }
         }
         _ => {
-            // Extra automation curve — edit is stored in extra_curves; no separate orig.
+            // Extra automation curve: dashed orig should stay at the processor default,
+            // while solid edit reflects the user-authored curve.
             let curve = entry.extra_curves.get(&param);
+            let default_value = resolve_param_reference_value(kind, &param);
             for i in 0..count {
                 let idx = start.saturating_add(i.saturating_mul(step));
-                let e = curve.and_then(|v| v.get(idx)).copied().unwrap_or(0.0);
-                // orig == edit for extra curves (no separate original)
-                orig.push(e);
+                let (o, e) = resolve_extra_curve_frame_pair(curve, default_value, idx);
+                orig.push(o);
                 edit.push(e);
             }
         }
@@ -148,11 +199,12 @@ pub(super) fn get_param_frames(
     crate::models::ParamFramesPayload {
         ok: true,
         root_track_id: root,
-        param,
+        param: param.clone(),
         frame_period_ms: fp,
         start_frame,
         orig,
         edit,
+        reference_kind: resolve_param_reference_kind(&param),
         analysis_pending,
         analysis_progress: None,
         pitch_edit_user_modified,
@@ -181,6 +233,12 @@ pub(super) fn set_param_frames(
         return serde_json::json!({"ok": false});
     };
     tl.ensure_params_for_root(&root);
+    let kind = tl
+        .tracks
+        .iter()
+        .find(|track| track.id == root)
+        .map(|track| crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo))
+        .unwrap_or(crate::state::SynthPipelineKind::WorldVocoder);
 
     let Some(entry) = tl.params_by_root_track.get_mut(&root) else {
         return serde_json::json!({"ok": false, "error": "params missing"});
@@ -192,8 +250,9 @@ pub(super) fn set_param_frames(
         // Ensure the curve vector exists and is long enough.
         let curve = entry.extra_curves.entry(param.clone()).or_insert_with(Vec::new);
         let needed = start_frame as usize + values.len();
+        let default_value = resolve_extra_curve_default_value(kind, &param);
         if curve.len() < needed {
-            curve.resize(needed, 0.0);
+            curve.resize(needed, default_value);
         }
     }
 
@@ -207,6 +266,9 @@ pub(super) fn set_param_frames(
     };
 
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+    let extra_curve_default = is_extra_curve
+        .then(|| resolve_extra_curve_default_value(kind, &param))
+        .unwrap_or(0.0);
 
     let start = start_frame as usize;
     let mut written = 0usize;
@@ -226,7 +288,7 @@ pub(super) fn set_param_frames(
             v
         } else {
             non_finite += 1;
-            0.0
+            if is_extra_curve { extra_curve_default } else { 0.0 }
         };
 
         match param.as_str() {
@@ -301,6 +363,12 @@ pub(super) fn restore_param_frames(
         return serde_json::json!({"ok": false});
     };
     tl.ensure_params_for_root(&root);
+    let kind = tl
+        .tracks
+        .iter()
+        .find(|track| track.id == root)
+        .map(|track| crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo))
+        .unwrap_or(crate::state::SynthPipelineKind::WorldVocoder);
     let Some(entry) = tl.params_by_root_track.get_mut(&root) else {
         return serde_json::json!({"ok": false, "error": "params missing"});
     };
@@ -334,24 +402,24 @@ pub(super) fn restore_param_frames(
             }
         }
         "tension" => {
+            let reference_value = resolve_param_reference_value(kind, &param);
             for i in 0..count {
                 let idx = start.saturating_add(i);
                 if idx >= entry.tension_edit.len() {
                     break;
                 }
-                let o = entry.tension_orig.get(idx).copied().unwrap_or(0.0);
-                entry.tension_edit[idx] = o;
+                entry.tension_edit[idx] = reference_value;
             }
         }
         _ => {
-            // Reset extra_curve values back to 0 (default = no override).
+            let default_value = resolve_param_reference_value(kind, &param);
             if let Some(curve) = entry.extra_curves.get_mut(&param) {
                 for i in 0..count {
                     let idx = start.saturating_add(i);
                     if idx >= curve.len() {
                         break;
                     }
-                    curve[idx] = 0.0;
+                    curve[idx] = default_value;
                 }
             }
         }
@@ -361,4 +429,127 @@ pub(super) fn restore_param_frames(
     state.audio_engine.update_timeline(tl.clone());
 
     serde_json::json!({"ok": true})
+}
+
+pub(super) fn get_static_param(
+    state: State<'_, AppState>,
+    track_id: String,
+    param: String,
+) -> crate::models::StaticParamValuePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+
+    let root = match tl.resolve_root_track_id(&track_id) {
+        Some(id) => id,
+        None => {
+            return crate::models::StaticParamValuePayload {
+                ok: false,
+                root_track_id: String::new(),
+                param,
+                value: 0.0,
+            }
+        }
+    };
+
+    tl.ensure_params_for_root(&root);
+    let kind = tl
+        .tracks
+        .iter()
+        .find(|track| track.id == root)
+        .map(|track| crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo))
+        .unwrap_or(crate::state::SynthPipelineKind::WorldVocoder);
+    let value = tl
+        .params_by_root_track
+        .get(&root)
+        .and_then(|entry| entry.extra_params.get(&param).copied())
+        .unwrap_or_else(|| resolve_static_param_default_value(kind, &param));
+
+    crate::models::StaticParamValuePayload {
+        ok: true,
+        root_track_id: root,
+        param,
+        value,
+    }
+}
+
+pub(super) fn set_static_param(
+    state: State<'_, AppState>,
+    track_id: String,
+    param: String,
+    value: f64,
+    checkpoint: Option<bool>,
+) -> serde_json::Value {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    let do_checkpoint = checkpoint.unwrap_or(true);
+    if do_checkpoint {
+        state.checkpoint_timeline(&tl);
+    }
+
+    let Some(root) = tl.resolve_root_track_id(&track_id) else {
+        return serde_json::json!({"ok": false});
+    };
+    tl.ensure_params_for_root(&root);
+
+    let Some(entry) = tl.params_by_root_track.get_mut(&root) else {
+        return serde_json::json!({"ok": false, "error": "params missing"});
+    };
+
+    entry.extra_params.insert(param, value);
+    state.audio_engine.update_timeline(tl.clone());
+
+    serde_json::json!({"ok": true})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        resolve_extra_curve_default_value, resolve_extra_curve_frame_pair,
+        resolve_param_reference_value,
+    };
+    use crate::state::SynthPipelineKind;
+
+    #[test]
+    fn breath_gain_uses_processor_default_value() {
+        let value = resolve_extra_curve_default_value(
+            SynthPipelineKind::NsfHifiganOnnx,
+            "breath_gain",
+        );
+        assert!((value - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn unknown_extra_curve_falls_back_to_zero() {
+        let value = resolve_extra_curve_default_value(
+            SynthPipelineKind::NsfHifiganOnnx,
+            "not_existing_param",
+        );
+        assert!(value.abs() < 1e-6);
+    }
+
+    #[test]
+    fn non_pitch_reference_curve_uses_backend_default_value() {
+        let tension = resolve_param_reference_value(SynthPipelineKind::NsfHifiganOnnx, "tension");
+        let breath_gain =
+            resolve_param_reference_value(SynthPipelineKind::NsfHifiganOnnx, "breath_gain");
+
+        assert!(tension.abs() < 1e-6);
+        assert!((breath_gain - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extra_curve_orig_stays_at_default_when_edit_exists() {
+        let curve = vec![1.25, 1.5, 0.75];
+
+        let (orig, edit) = resolve_extra_curve_frame_pair(Some(&curve), 1.0, 1);
+
+        assert!((orig - 1.0).abs() < 1e-6);
+        assert!((edit - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extra_curve_orig_and_edit_fall_back_to_default_when_missing() {
+        let (orig, edit) = resolve_extra_curve_frame_pair(None, 1.0, 12);
+
+        assert!((orig - 1.0).abs() < 1e-6);
+        assert!((edit - 1.0).abs() < 1e-6);
+    }
 }

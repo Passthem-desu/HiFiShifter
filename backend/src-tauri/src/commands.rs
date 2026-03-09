@@ -410,6 +410,26 @@ pub fn restore_param_frames(
     params::restore_param_frames(state, track_id, param, start_frame, frame_count, checkpoint)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_static_param(
+    state: State<'_, AppState>,
+    track_id: String,
+    param: String,
+) -> crate::models::StaticParamValuePayload {
+    params::get_static_param(state, track_id, param)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_static_param(
+    state: State<'_, AppState>,
+    track_id: String,
+    param: String,
+    value: f64,
+    checkpoint: Option<bool>,
+) -> serde_json::Value {
+    params::set_static_param(state, track_id, param, value, checkpoint)
+}
+
 // ===================== synth =====================
 
 #[tauri::command(rename_all = "camelCase")]

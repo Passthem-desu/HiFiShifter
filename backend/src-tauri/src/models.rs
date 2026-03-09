@@ -148,6 +148,13 @@ pub struct RealtimeRenderStatsPayload {
     pub legacy_callbacks_mixed: u64,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamReferenceKind {
+    SourceCurve,
+    DefaultValue,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ParamFramesPayload {
@@ -158,6 +165,7 @@ pub struct ParamFramesPayload {
     pub start_frame: u32,
     pub orig: Vec<f32>,
     pub edit: Vec<f32>,
+    pub reference_kind: ParamReferenceKind,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analysis_pending: Option<bool>,
@@ -170,6 +178,15 @@ pub struct ParamFramesPayload {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pitch_edit_backend_available: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct StaticParamValuePayload {
+    pub ok: bool,
+    pub root_track_id: String,
+    pub param: String,
+    pub value: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]

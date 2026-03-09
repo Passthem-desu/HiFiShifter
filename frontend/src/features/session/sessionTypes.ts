@@ -5,7 +5,7 @@ export type FadeCurveType =
     | "exponential"
     | "logarithmic"
     | "scurve";
-// EditParam 是一个字符串，可以是 "pitch"、"tension" 或声码器额外参数 ID（如 "formant_shift_cents"）
+// EditParam 是一个字符串，可以是 "pitch" 或声码器额外参数 ID（如 "breath_gain"、"hifigan_tension"）
 // 具体可用值由后端 `get_processor_params` 动态返回
 export type EditParam = string;
 export type GridSize = "1/4" | "1/8" | "1/16" | "1/32";

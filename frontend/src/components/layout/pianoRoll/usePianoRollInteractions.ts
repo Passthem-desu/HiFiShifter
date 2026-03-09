@@ -27,6 +27,8 @@ import type { MutableRefObject as MutRef } from "react";
 import { isModifierActive } from "../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../features/keybindings/types";
 
+type CanvasCursor = "default" | "crosshair" | "grab" | "grabbing";
+
 export function usePianoRollInteractions(args: {
     dispatch: AppDispatch;
     rootTrackId: string | null;
@@ -50,6 +52,7 @@ export function usePianoRollInteractions(args: {
 
     selectionRef: MutableRefObject<{ aBeat: number; bBeat: number } | null>;
     setSelectionUi: (next: { aBeat: number; bBeat: number } | null) => void;
+    setCanvasCursor: (next: CanvasCursor) => void;
 
     strokeRef: MutableRefObject<{
         mode: StrokeMode;
@@ -103,7 +106,7 @@ export function usePianoRollInteractions(args: {
 
     /** pointer down 期间设为 true，pointer up 后由 commitStroke 包装层重置为 false。
      *  用于保护 pitch_orig_updated 事件触发的曲线刷新不覆盖正在绘制的内容。 */
-    liveEditActiveRef?: MutableRefObject<boolean>;    /** pianoRoll.copy 绑定 */
+    liveEditActiveRef?: MutableRefObject<boolean>; /** pianoRoll.copy 绑定 */
     pianoRollCopyKb: Keybinding;
     /** pianoRoll.paste 绑定 */
     pianoRollPasteKb: Keybinding;
@@ -130,6 +133,7 @@ export function usePianoRollInteractions(args: {
         viewSizeRef,
         selectionRef,
         setSelectionUi,
+        setCanvasCursor,
         strokeRef,
         panRef,
         clipboardRef,
@@ -446,6 +450,77 @@ export function usePianoRollInteractions(args: {
         // no-op; wheel is handled via native listener with passive:false
     }, []);
 
+    const getDefaultCanvasCursor = useCallback((): CanvasCursor => {
+        return toolMode === "select" ? "default" : "crosshair";
+    }, [toolMode]);
+
+    const isPointerNearDraggableSelection = useCallback(
+        (clientX: number, clientY: number): boolean => {
+            if (toolMode !== "select") return false;
+            const sel = selectionRef.current;
+            const pv = paramViewRef.current;
+            const canvas = canvasRef.current;
+            if (!sel || !pv || pv.edit.length === 0 || !canvas) return false;
+
+            const beat = pointerBeat(clientX);
+            const aBeat = Math.min(sel.aBeat, sel.bBeat);
+            const bBeat = Math.max(sel.aBeat, sel.bBeat);
+            if (beat < aBeat || beat > bBeat) return false;
+
+            const fp = pv.framePeriodMs;
+            const sec = beat * secPerBeat;
+            const frame = Math.max(0, Math.floor((sec * 1000) / fp));
+            const idx = Math.round(
+                (frame - pv.startFrame) / Math.max(1, pv.stride),
+            );
+            const curveVal =
+                idx >= 0 && idx < pv.edit.length ? pv.edit[idx] : null;
+            if (curveVal == null) return false;
+
+            const rect = canvas.getBoundingClientRect();
+            const rectH = rect.height || viewSizeRef.current.h || 1;
+            const mouseY = clientY - rect.top;
+            const mappedCurveVal =
+                editParam === "pitch" ? curveVal + 0.5 : curveVal;
+            const curveY = valueToY(editParam, mappedCurveVal, rectH);
+            return Math.abs(mouseY - curveY) < 10;
+        },
+        [
+            toolMode,
+            selectionRef,
+            paramViewRef,
+            canvasRef,
+            pointerBeat,
+            secPerBeat,
+            viewSizeRef,
+            editParam,
+            valueToY,
+        ],
+    );
+
+    const onCanvasPointerMove = useCallback(
+        (e: ReactPointerEvent<HTMLCanvasElement>) => {
+            if (panRef.current || strokeRef.current) return;
+            if (isPointerNearDraggableSelection(e.clientX, e.clientY)) {
+                setCanvasCursor("grab");
+                return;
+            }
+            setCanvasCursor(getDefaultCanvasCursor());
+        },
+        [
+            panRef,
+            strokeRef,
+            isPointerNearDraggableSelection,
+            setCanvasCursor,
+            getDefaultCanvasCursor,
+        ],
+    );
+
+    const onCanvasPointerLeave = useCallback(() => {
+        if (panRef.current || strokeRef.current) return;
+        setCanvasCursor(getDefaultCanvasCursor());
+    }, [panRef, strokeRef, setCanvasCursor, getDefaultCanvasCursor]);
+
     const onCanvasPointerDown = useCallback(
         (e: ReactPointerEvent<HTMLCanvasElement>) => {
             if (!rootTrackId) return;
@@ -453,6 +528,7 @@ export function usePianoRollInteractions(args: {
             // Middle mouse: pan (time axis)
             if (e.button === 1) {
                 e.preventDefault();
+                setCanvasCursor("grabbing");
                 const scroller = scrollerRef.current;
                 if (!scroller) return;
                 const pid = e.pointerId;
@@ -504,6 +580,7 @@ export function usePianoRollInteractions(args: {
                 };
                 const onUp = () => {
                     panRef.current = null;
+                    setCanvasCursor(getDefaultCanvasCursor());
                     window.removeEventListener("pointermove", onMove);
                     window.removeEventListener("pointerup", onUp);
                     window.removeEventListener("pointercancel", onUp);
@@ -578,6 +655,7 @@ export function usePianoRollInteractions(args: {
                                 Math.abs(mouseY - curveY) < HIT_THRESHOLD_PX
                             ) {
                                 // 进入拖拽选中曲线模式（支持 X+Y 双向拖拽）
+                                setCanvasCursor("grabbing");
                                 const startMouseVal = mouseVal;
                                 const startBeat = pointerBeat(e.clientX);
                                 const pid = e.pointerId;
@@ -600,7 +678,8 @@ export function usePianoRollInteractions(args: {
                                 const selStartIdx = Math.max(
                                     0,
                                     Math.round(
-                                        (selStartFrame - pv.startFrame) / stride,
+                                        (selStartFrame - pv.startFrame) /
+                                            stride,
                                     ),
                                 );
                                 const selEndIdx = Math.min(
@@ -631,7 +710,9 @@ export function usePianoRollInteractions(args: {
                                     const currentBeat = pointerBeat(ev.clientX);
                                     const beatDelta = currentBeat - startBeat;
                                     const secDelta = beatDelta * secPerBeat;
-                                    lastFrameDelta = Math.round((secDelta * 1000) / fp);
+                                    lastFrameDelta = Math.round(
+                                        (secDelta * 1000) / fp,
+                                    );
 
                                     const pvNow = paramViewRef.current;
                                     if (!pvNow) return;
@@ -640,32 +721,63 @@ export function usePianoRollInteractions(args: {
 
                                     // 构造覆盖原选区 + 新位置的完整 dense 数组
                                     const selLen = selEndIdx - selStartIdx + 1;
-                                    const origDenseStart = pv.startFrame + selStartIdx * stride;
+                                    const origDenseStart =
+                                        pv.startFrame + selStartIdx * stride;
 
                                     // 计算需要覆盖的帧范围：原选区 ∪ 新位置选区
-                                    const newDenseStart = origDenseStart + lastFrameDelta;
-                                    const overallMinFrame = Math.max(0, Math.min(origDenseStart, newDenseStart));
-                                    const origDenseEnd = origDenseStart + (selLen - 1) * stride;
-                                    const newDenseEnd = newDenseStart + (selLen - 1) * stride;
-                                    const overallMaxFrame = Math.max(origDenseEnd, newDenseEnd);
+                                    const newDenseStart =
+                                        origDenseStart + lastFrameDelta;
+                                    const overallMinFrame = Math.max(
+                                        0,
+                                        Math.min(origDenseStart, newDenseStart),
+                                    );
+                                    const origDenseEnd =
+                                        origDenseStart + (selLen - 1) * stride;
+                                    const newDenseEnd =
+                                        newDenseStart + (selLen - 1) * stride;
+                                    const overallMaxFrame = Math.max(
+                                        origDenseEnd,
+                                        newDenseEnd,
+                                    );
 
-                                    const overallLen = Math.floor((overallMaxFrame - overallMinFrame) / stride) + 1;
+                                    const overallLen =
+                                        Math.floor(
+                                            (overallMaxFrame -
+                                                overallMinFrame) /
+                                                stride,
+                                        ) + 1;
                                     const dense = new Array<number>(overallLen);
 
                                     // 先用 orig 曲线填充整个范围（边界还原）
                                     for (let i = 0; i < overallLen; i++) {
-                                        const globalIdx = Math.round((overallMinFrame + i * stride - pv.startFrame) / stride);
-                                        dense[i] = (globalIdx >= 0 && globalIdx < pvNow.orig.length)
-                                            ? pvNow.orig[globalIdx]
-                                            : 0;
+                                        const globalIdx = Math.round(
+                                            (overallMinFrame +
+                                                i * stride -
+                                                pv.startFrame) /
+                                                stride,
+                                        );
+                                        dense[i] =
+                                            globalIdx >= 0 &&
+                                            globalIdx < pvNow.orig.length
+                                                ? pvNow.orig[globalIdx]
+                                                : 0;
                                     }
 
                                     // 再将选区值写入新位置（覆盖 orig）
                                     for (let i = 0; i < selLen; i++) {
-                                        const targetFrame = newDenseStart + i * stride;
-                                        const denseIdx = Math.round((targetFrame - overallMinFrame) / stride);
-                                        if (denseIdx >= 0 && denseIdx < overallLen) {
-                                            dense[denseIdx] = (origValues[i] ?? 0) + lastValueDelta;
+                                        const targetFrame =
+                                            newDenseStart + i * stride;
+                                        const denseIdx = Math.round(
+                                            (targetFrame - overallMinFrame) /
+                                                stride,
+                                        );
+                                        if (
+                                            denseIdx >= 0 &&
+                                            denseIdx < overallLen
+                                        ) {
+                                            dense[denseIdx] =
+                                                (origValues[i] ?? 0) +
+                                                lastValueDelta;
                                         }
                                     }
 
@@ -679,7 +791,10 @@ export function usePianoRollInteractions(args: {
                                     );
 
                                     // 实时更新选区位置显示
-                                    const beatDeltaForSel = (lastFrameDelta * fp) / 1000 / secPerBeat;
+                                    const beatDeltaForSel =
+                                        (lastFrameDelta * fp) /
+                                        1000 /
+                                        secPerBeat;
                                     selectionRef.current = {
                                         aBeat: aBeat + beatDeltaForSel,
                                         bBeat: bBeat + beatDeltaForSel,
@@ -706,49 +821,105 @@ export function usePianoRollInteractions(args: {
                                     // 提交拖拽结果到后端
                                     const pvNow = paramViewRef.current;
                                     if (pvNow && rootTrackId) {
-                                        const selLen = selEndIdx - selStartIdx + 1;
-                                        const origDenseStart = pv.startFrame + selStartIdx * stride;
-                                        const newDenseStart = origDenseStart + lastFrameDelta;
+                                        const selLen =
+                                            selEndIdx - selStartIdx + 1;
+                                        const origDenseStart =
+                                            pv.startFrame +
+                                            selStartIdx * stride;
+                                        const newDenseStart =
+                                            origDenseStart + lastFrameDelta;
 
-                                        const overallMinFrame = Math.max(0, Math.min(origDenseStart, newDenseStart));
-                                        const origDenseEnd = origDenseStart + (selLen - 1) * stride;
-                                        const newDenseEnd = newDenseStart + (selLen - 1) * stride;
-                                        const overallMaxFrame = Math.max(origDenseEnd, newDenseEnd);
-                                        const overallLen = Math.floor((overallMaxFrame - overallMinFrame) / stride) + 1;
+                                        const overallMinFrame = Math.max(
+                                            0,
+                                            Math.min(
+                                                origDenseStart,
+                                                newDenseStart,
+                                            ),
+                                        );
+                                        const origDenseEnd =
+                                            origDenseStart +
+                                            (selLen - 1) * stride;
+                                        const newDenseEnd =
+                                            newDenseStart +
+                                            (selLen - 1) * stride;
+                                        const overallMaxFrame = Math.max(
+                                            origDenseEnd,
+                                            newDenseEnd,
+                                        );
+                                        const overallLen =
+                                            Math.floor(
+                                                (overallMaxFrame -
+                                                    overallMinFrame) /
+                                                    stride,
+                                            ) + 1;
 
                                         // 构造最终提交的 dense 数组
-                                        const finalDense = new Array<number>(overallLen);
+                                        const finalDense = new Array<number>(
+                                            overallLen,
+                                        );
 
                                         // 先用 orig 填充整个范围
                                         for (let i = 0; i < overallLen; i++) {
-                                            const globalIdx = Math.round((overallMinFrame + i * stride - pvNow.startFrame) / stride);
-                                            finalDense[i] = (globalIdx >= 0 && globalIdx < pvNow.orig.length)
-                                                ? pvNow.orig[globalIdx]
-                                                : 0;
+                                            const globalIdx = Math.round(
+                                                (overallMinFrame +
+                                                    i * stride -
+                                                    pvNow.startFrame) /
+                                                    stride,
+                                            );
+                                            finalDense[i] =
+                                                globalIdx >= 0 &&
+                                                globalIdx < pvNow.orig.length
+                                                    ? pvNow.orig[globalIdx]
+                                                    : 0;
                                         }
 
                                         // 再将偏移后的选区值写入新位置
                                         for (let i = 0; i < selLen; i++) {
-                                            const targetFrame = newDenseStart + i * stride;
-                                            const denseIdx = Math.round((targetFrame - overallMinFrame) / stride);
-                                            if (denseIdx >= 0 && denseIdx < overallLen) {
-                                                finalDense[denseIdx] = (origValues[i] ?? 0) + lastValueDelta;
+                                            const targetFrame =
+                                                newDenseStart + i * stride;
+                                            const denseIdx = Math.round(
+                                                (targetFrame -
+                                                    overallMinFrame) /
+                                                    stride,
+                                            );
+                                            if (
+                                                denseIdx >= 0 &&
+                                                denseIdx < overallLen
+                                            ) {
+                                                finalDense[denseIdx] =
+                                                    (origValues[i] ?? 0) +
+                                                    lastValueDelta;
                                             }
                                         }
 
                                         // 立即同步更新本地 paramView state
                                         const nextEdit = pvNow.edit.slice();
                                         for (let i = 0; i < overallLen; i++) {
-                                            const globalIdx = Math.round((overallMinFrame + i * stride - pvNow.startFrame) / stride);
-                                            if (globalIdx >= 0 && globalIdx < nextEdit.length) {
-                                                nextEdit[globalIdx] = finalDense[i];
+                                            const globalIdx = Math.round(
+                                                (overallMinFrame +
+                                                    i * stride -
+                                                    pvNow.startFrame) /
+                                                    stride,
+                                            );
+                                            if (
+                                                globalIdx >= 0 &&
+                                                globalIdx < nextEdit.length
+                                            ) {
+                                                nextEdit[globalIdx] =
+                                                    finalDense[i];
                                             }
                                         }
-                                        setParamView({ ...pvNow, edit: nextEdit });
+                                        setParamView({
+                                            ...pvNow,
+                                            edit: nextEdit,
+                                        });
                                         liveEditOverrideRef.current = null;
 
                                         // 确保选区位置最终正确
-                                        const beatDeltaForSel = (lastFrameDelta * fp) / 1000 / secPerBeat;
+                                        const beatDeltaForSel =
+                                            (lastFrameDelta * fp) /
+                                            1000 /
+                                            secPerBeat;
                                         selectionRef.current = {
                                             aBeat: aBeat + beatDeltaForSel,
                                             bBeat: bBeat + beatDeltaForSel,
@@ -771,6 +942,7 @@ export function usePianoRollInteractions(args: {
                                         if (liveEditActiveRef)
                                             liveEditActiveRef.current = false;
                                     }
+                                    setCanvasCursor("grab");
                                     invalidate();
                                 };
 
@@ -812,6 +984,7 @@ export function usePianoRollInteractions(args: {
 
             const mode: StrokeMode = e.button === 2 ? "restore" : "draw";
             if (e.button !== 0 && e.button !== 2) return;
+            setCanvasCursor(getDefaultCanvasCursor());
             const pv = paramViewRef.current;
             if (pv) ensureLiveEditBase(pv);
             const fp = paramView?.framePeriodMs ?? 5;
@@ -954,6 +1127,8 @@ export function usePianoRollInteractions(args: {
         onScrollerKeyDown,
         onScrollerWheel,
         onScrollerWheelNative,
+        onCanvasPointerMove,
+        onCanvasPointerLeave,
         onCanvasPointerDown,
     };
 }

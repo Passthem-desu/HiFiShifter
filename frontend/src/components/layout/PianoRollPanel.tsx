@@ -1,4 +1,5 @@
 ﻿import React, {
+    type CSSProperties,
     useCallback,
     useEffect,
     useLayoutEffect,
@@ -39,6 +40,10 @@ import { usePianoRollData } from "./pianoRoll/usePianoRollData";
 import { useClipsPeaksForPianoRoll } from "./pianoRoll/useClipsPeaksForPianoRoll";
 import { usePianoRollInteractions } from "./pianoRoll/usePianoRollInteractions";
 import { useLiveParamEditing } from "./pianoRoll/useLiveParamEditing";
+import {
+    getActiveSecondaryParamId,
+    toggleSecondaryParamVisibility,
+} from "./pianoRoll/secondaryOverlaySelection";
 import type {
     ParamName,
     StrokeMode,
@@ -49,7 +54,6 @@ import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 
 import { useAsyncPitchRefresh } from "../../hooks/useAsyncPitchRefresh";
 import { ProgressBar } from "../ProgressBar";
-
 
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
@@ -157,10 +161,9 @@ export const PianoRollPanel: React.FC = () => {
     >({});
 
     const toggleSecondaryParam = useCallback((param: ParamName) => {
-        setSecondaryParamVisible((prev) => ({
-            ...prev,
-            [param]: !(prev[param] ?? false),
-        }));
+        setSecondaryParamVisible((prev) =>
+            toggleSecondaryParamVisibility(prev, param),
+        );
     }, []);
 
     const [pitchView, setPitchView] = useState<ValueViewport>(() => ({
@@ -205,6 +208,12 @@ export const PianoRollPanel: React.FC = () => {
         ProcessorParamDescriptor[]
     >([]);
     const processorParamsRef = useRef<ProcessorParamDescriptor[]>([]);
+    const [processorStaticParams, setProcessorStaticParams] = useState<
+        ProcessorParamDescriptor[]
+    >([]);
+    const [processorStaticValues, setProcessorStaticValues] = useState<
+        Record<string, number>
+    >({});
 
     // 当 algo 变化时，重新抓取参数描述符
     useEffect(() => {
@@ -218,8 +227,12 @@ export const PianoRollPanel: React.FC = () => {
                 const curvable = params.filter(
                     (p) => p.kind.type === "automation_curve",
                 );
+                const staticParams = params.filter(
+                    (p) => p.kind.type === "static_enum",
+                );
                 processorParamsRef.current = curvable;
                 setProcessorParams(curvable);
+                setProcessorStaticParams(staticParams);
                 // 初始化还没有视口的参数
                 setParamViews((prev) => {
                     const next = { ...prev };
@@ -236,18 +249,92 @@ export const PianoRollPanel: React.FC = () => {
                     }
                     return next;
                 });
+
+                if (!rootTrackId || staticParams.length === 0) {
+                    setProcessorStaticValues({});
+                    return;
+                }
+
+                Promise.all(
+                    staticParams.map((param) =>
+                        paramsApi.getStaticParam(rootTrackId, param.id),
+                    ),
+                )
+                    .then((values) => {
+                        if (cancelled) return;
+                        const nextValues: Record<string, number> = {};
+                        for (const item of values) {
+                            if (item.ok) {
+                                nextValues[item.param] = item.value;
+                            }
+                        }
+                        setProcessorStaticValues(nextValues);
+                    })
+                    .catch(() => {
+                        if (!cancelled) {
+                            setProcessorStaticValues({});
+                        }
+                    });
             })
             .catch(() => {
                 if (!cancelled) {
                     processorParamsRef.current = [];
                     setProcessorParams([]);
+                    setProcessorStaticParams([]);
+                    setProcessorStaticValues({});
                 }
             });
         return () => {
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [rootTrack?.pitchAnalysisAlgo]);
+    }, [rootTrack?.pitchAnalysisAlgo, rootTrackId]);
+
+    const handleStaticParamChange = useCallback(
+        async (paramId: string, value: number) => {
+            if (!rootTrackId) return;
+            const result = await paramsApi.setStaticParam(
+                rootTrackId,
+                paramId,
+                value,
+                true,
+            );
+            if (result.ok) {
+                setProcessorStaticValues((prev) => ({
+                    ...prev,
+                    [paramId]: value,
+                }));
+            }
+        },
+        [rootTrackId],
+    );
+
+    const getProcessorParamLabel = useCallback(
+        (param: ProcessorParamDescriptor) => {
+            switch (param.id) {
+                case "breath_enabled":
+                    return t("breath_mode_label");
+                case "breath_gain":
+                    return t("breath_gain_label");
+                case "hifigan_tension":
+                    return t("hifigan_tension_label");
+                default:
+                    return param.display_name;
+            }
+        },
+        [t],
+    );
+
+    const getStaticOptionLabel = useCallback(
+        (paramId: string, label: string, value: number) => {
+            if (paramId === "breath_enabled") {
+                if (value === 0) return t("switch_off");
+                if (value === 1) return t("switch_on");
+            }
+            return label;
+        },
+        [t],
+    );
 
     // 当 processorParams 变化时，若 editParam 不在可用集合内，自动回退到 pitch
     useEffect(() => {
@@ -293,6 +380,18 @@ export const PianoRollPanel: React.FC = () => {
 
     const pitchEnabled =
         editParam !== "pitch" || pitchHardDisableReason == null;
+
+    const activeSecondaryParamId = useMemo(() => {
+        const next = getActiveSecondaryParamId({
+            editParam,
+            processorParamIds: processorParams.map((p) => p.id),
+            secondaryParamVisible,
+        });
+        if (next === "pitch" && !pitchEnabled) {
+            return null;
+        }
+        return next;
+    }, [editParam, processorParams, secondaryParamVisible, pitchEnabled]);
 
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
     const contentWidth = Math.max(8, Math.ceil(s.projectSec * pxPerSec));
@@ -507,6 +606,9 @@ export const PianoRollPanel: React.FC = () => {
         aBeat: number;
         bBeat: number;
     } | null>(null);
+    const [canvasCursor, setCanvasCursor] = useState<CSSProperties["cursor"]>(
+        s.toolMode === "select" ? "default" : "crosshair",
+    );
 
     const strokeRef = useRef<{
         mode: StrokeMode;
@@ -543,10 +645,12 @@ export const PianoRollPanel: React.FC = () => {
         secondaryParamView,
         bumpRefreshToken,
         refreshNow,
+        refreshSecondaryNow,
         notifyLiveEditEnded,
         isLoading,
     } = usePianoRollData({
         editParam,
+        secondaryParamId: activeSecondaryParamId,
         pitchEnabled,
         paramsEpoch:
             (s as unknown as { paramsEpoch?: number }).paramsEpoch ?? 0,
@@ -562,6 +666,32 @@ export const PianoRollPanel: React.FC = () => {
         invalidate,
         liveEditActiveRef,
     });
+
+    const visibleSecondaryParamView = useMemo(() => {
+        if (!activeSecondaryParamId || !secondaryParamView) {
+            return null;
+        }
+        return secondaryParamView.key.includes(`|${activeSecondaryParamId}|`)
+            ? secondaryParamView
+            : null;
+    }, [activeSecondaryParamId, secondaryParamView]);
+
+    const refreshSecondaryNowRef = useRef(refreshSecondaryNow);
+    useEffect(() => {
+        refreshSecondaryNowRef.current = refreshSecondaryNow;
+    }, [refreshSecondaryNow]);
+
+    useEffect(() => {
+        if (!rootTrackId) {
+            invalidate();
+            return;
+        }
+        if (activeSecondaryParamId) {
+            void refreshSecondaryNowRef.current();
+            return;
+        }
+        invalidate();
+    }, [activeSecondaryParamId, invalidate, rootTrackId]);
 
     const handleMidiImported = useCallback(
         (_result: { notes_imported: number; frames_touched: number }) => {
@@ -595,11 +725,19 @@ export const PianoRollPanel: React.FC = () => {
     // clipPeaks 已经通过 useMemo 稳定化，只在数据真正变化时才产生新引用。
     useEffect(() => {
         invalidate();
-    }, [clipPeaks, paramView, pxPerBeat, viewSize.w, viewSize.h, invalidate]);
+    }, [
+        clipPeaks,
+        paramView,
+        visibleSecondaryParamView,
+        pxPerBeat,
+        viewSize.w,
+        viewSize.h,
+        invalidate,
+    ]);
 
     useEffect(() => {
         invalidate();
-    }, [pitchView, paramViews, editParam, invalidate]);
+    }, [pitchView, paramViews, editParam, activeSecondaryParamId, invalidate]);
 
     // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后�?
     // useEffect 已移�?detectedPitchCurves useMemo 定义之后，见下方�?
@@ -662,9 +800,6 @@ export const PianoRollPanel: React.FC = () => {
 
     // Keep draw function always up-to-date (invalidate() is stable and calls drawRef.current()).
     drawRef.current = () => {
-        // 确定副参数名称（非当�?editParam 的另一个参数）
-        const secondaryParam: ParamName =
-            editParam === "pitch" ? (processorParams[0]?.id ?? "") : "pitch";
         drawPianoRoll({
             axisCanvas: axisCanvasRef.current,
             canvas: canvasRef.current,
@@ -675,8 +810,9 @@ export const PianoRollPanel: React.FC = () => {
             valueToY,
             clipPeaks,
             paramView,
-            secondaryParamView,
-            showSecondaryParam: secondaryParamVisible[secondaryParam] ?? false,
+            secondaryParamView: visibleSecondaryParamView,
+            secondaryParamId: activeSecondaryParamId,
+            showSecondaryParam: activeSecondaryParamId != null,
             overlayText:
                 editParam === "pitch" && !pitchEnabled
                     ? pitchHardDisableReason
@@ -713,6 +849,7 @@ export const PianoRollPanel: React.FC = () => {
         viewSizeRef,
         selectionRef,
         setSelectionUi,
+        setCanvasCursor,
         strokeRef,
         panRef,
         clipboardRef,
@@ -756,6 +893,10 @@ export const PianoRollPanel: React.FC = () => {
 
     // Silence unused state warnings; selectionUi is future UI.
     void selectionUi;
+
+    useEffect(() => {
+        setCanvasCursor(s.toolMode === "select" ? "default" : "crosshair");
+    }, [s.toolMode]);
 
     // 切换工具时清除选区
     useEffect(() => {
@@ -851,7 +992,7 @@ export const PianoRollPanel: React.FC = () => {
                                     onClick={() => dispatch(setEditParam(p.id))}
                                     style={{ cursor: "pointer" }}
                                 >
-                                    {p.display_name}
+                                    {getProcessorParamLabel(p)}
                                 </Button>
                                 {editParam !== p.id ? (
                                     <IconButton
@@ -887,7 +1028,8 @@ export const PianoRollPanel: React.FC = () => {
                         ))}
                     </Flex>
 
-                    {editParam === "pitch" && rootTrack ? (                        <Flex align="center" gap="2">
+                    {editParam === "pitch" && rootTrack ? (
+                        <Flex align="center" gap="2">
                             <Text size="1" color="gray">
                                 {t("algo_label")}
                             </Text>
@@ -928,12 +1070,61 @@ export const PianoRollPanel: React.FC = () => {
                                     </Select.Item>
                                 </Select.Content>
                             </Select.Root>
+                            {processorStaticParams.map((param) => {
+                                if (param.kind.type !== "static_enum")
+                                    return null;
+                                const currentValue =
+                                    processorStaticValues[param.id] ??
+                                    param.kind.default_value;
+                                return (
+                                    <Flex key={param.id} align="center" gap="1">
+                                        <Text size="1" color="gray">
+                                            {getProcessorParamLabel(param)}
+                                        </Text>
+                                        {param.kind.options.map(
+                                            ([label, value]) => (
+                                                <Button
+                                                    key={`${param.id}-${value}`}
+                                                    size="1"
+                                                    variant={
+                                                        currentValue === value
+                                                            ? "solid"
+                                                            : "soft"
+                                                    }
+                                                    color={
+                                                        currentValue === value
+                                                            ? "blue"
+                                                            : "gray"
+                                                    }
+                                                    onClick={() => {
+                                                        void handleStaticParamChange(
+                                                            param.id,
+                                                            value,
+                                                        );
+                                                    }}
+                                                    style={{
+                                                        cursor: "pointer",
+                                                    }}
+                                                >
+                                                    {getStaticOptionLabel(
+                                                        param.id,
+                                                        label,
+                                                        value,
+                                                    )}
+                                                </Button>
+                                            ),
+                                        )}
+                                    </Flex>
+                                );
+                            })}
                             <Button
                                 size="1"
                                 variant="soft"
                                 color="blue"
                                 onClick={handleOpenMidiDialog}
+                                disabled={!pitchEnabled}
                                 style={{ cursor: "pointer" }}
+                                title={pitchHardDisableReason ?? undefined}
                             >
                                 {(t as (key: string) => string)("midi_import")}
                             </Button>
@@ -1098,6 +1289,13 @@ export const PianoRollPanel: React.FC = () => {
                                 <canvas
                                     ref={canvasRef}
                                     className="absolute inset-0"
+                                    style={{ cursor: canvasCursor }}
+                                    onPointerMove={
+                                        interactions.onCanvasPointerMove
+                                    }
+                                    onPointerLeave={
+                                        interactions.onCanvasPointerLeave
+                                    }
                                     onPointerDown={
                                         interactions.onCanvasPointerDown
                                     }
@@ -1111,6 +1309,7 @@ export const PianoRollPanel: React.FC = () => {
                 open={midiDialogOpen}
                 onOpenChange={setMidiDialogOpen}
                 midiPath={midiPath}
+                offsetSec={s.playheadSec}
                 onImported={handleMidiImported}
             />
         </Flex>

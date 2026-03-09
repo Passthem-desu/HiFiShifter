@@ -12,7 +12,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use crate::state::TimelineState;
 use crate::time_stretch::{time_stretch_interleaved, StretchAlgorithm};
 
-use super::mix::{render_callback_f32, render_callback_i16, render_callback_u16};
+use super::mix::{
+    render_callback_f32, render_callback_i16, render_callback_u16,
+    SnapshotTransitionState,
+};
 use super::resource_manager::ResourceManager;
 use super::snapshot::{
     build_snapshot, build_snapshot_for_file, schedule_stretch_jobs, source_bounds_frames,
@@ -279,6 +282,8 @@ impl AudioEngine {
             let config: cpal::StreamConfig = default_config.into();
 
             let mut scratch_mix: Vec<f32> = Vec::new();
+            let mut scratch_mix_fade_from: Vec<f32> = Vec::new();
+            let mut snapshot_transition = SnapshotTransitionState::default();
 
             // Clone atomics for the audio callback to avoid moving the originals.
             let is_playing_cb = is_playing_thread.clone();
@@ -300,6 +305,8 @@ impl AudioEngine {
                                     position_frames_cb.as_ref(),
                                     duration_frames_cb.as_ref(),
                                     &mut scratch_mix,
+                                    &mut scratch_mix_fade_from,
+                                    &mut snapshot_transition,
                                 );
                             }));
                             if r.is_err() {
@@ -327,6 +334,8 @@ impl AudioEngine {
                                     position_frames_cb.as_ref(),
                                     duration_frames_cb.as_ref(),
                                     &mut scratch_mix,
+                                    &mut scratch_mix_fade_from,
+                                    &mut snapshot_transition,
                                 );
                             }));
                             if r.is_err() {
@@ -354,6 +363,8 @@ impl AudioEngine {
                                     position_frames_cb.as_ref(),
                                     duration_frames_cb.as_ref(),
                                     &mut scratch_mix,
+                                    &mut scratch_mix_fade_from,
+                                    &mut snapshot_transition,
                                 );
                             }));
                             if r.is_err() {

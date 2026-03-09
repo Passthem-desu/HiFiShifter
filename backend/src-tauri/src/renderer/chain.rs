@@ -15,6 +15,42 @@ use super::traits::{
     RenderContext, Renderer,
 };
 
+static HIFIGAN_BREATH_OPTIONS: [(&str, i32); 2] = [("Off", 0), ("On", 1)];
+
+static HIFIGAN_PARAM_DESCRIPTORS: [ParamDescriptor; 3] = [
+    ParamDescriptor {
+        id: "breath_enabled",
+        display_name: "Breath",
+        group: "NSF-HiFiGAN",
+        kind: super::traits::ParamKind::StaticEnum {
+            options: &HIFIGAN_BREATH_OPTIONS,
+            default_value: 0,
+        },
+    },
+    ParamDescriptor {
+        id: "breath_gain",
+        display_name: "Breath Gain",
+        group: "NSF-HiFiGAN",
+        kind: super::traits::ParamKind::AutomationCurve {
+            unit: "x",
+            default_value: 1.0,
+            min_value: 0.0,
+            max_value: 2.0,
+        },
+    },
+    ParamDescriptor {
+        id: "hifigan_tension",
+        display_name: "Tension",
+        group: "NSF-HiFiGAN",
+        kind: super::traits::ParamKind::AutomationCurve {
+            unit: "%",
+            default_value: 0.0,
+            min_value: -100.0,
+            max_value: 100.0,
+        },
+    },
+];
+
 // ─── StageContext ──────────────────────────────────────────────────────────────
 
 /// 传递给每个 Stage 的完整上下文（持有对 [`ClipProcessContext`] 的引用）。
@@ -67,7 +103,10 @@ impl ClipProcessor for ProcessorChain {
         ProcessorCapabilities {
             handles_time_stretch: self.handles_time_stretch,
             supports_formant: false,
-            supports_breathiness: false,
+            supports_breathiness: self
+                .stages
+                .iter()
+                .any(|stage| stage.id() == "nsf_hifigan"),
         }
     }
 
@@ -163,6 +202,27 @@ impl ProcessingStage for WorldVocoderStage {
 /// Stage 2b：NSF-HiFiGAN ONNX 合成。
 pub struct HiFiGanStage;
 
+fn sample_curve_at_abs_sec(curve: Option<&Vec<f32>>, abs_sec: f64, frame_period_ms: f64, default_value: f32) -> f32 {
+    let Some(curve) = curve else {
+        return default_value;
+    };
+    if curve.is_empty() {
+        return default_value;
+    }
+
+    let fp = frame_period_ms.max(0.1);
+    let idx_f = (abs_sec.max(0.0) * 1000.0) / fp;
+    if !idx_f.is_finite() {
+        return default_value;
+    }
+    let i0 = idx_f.floor().max(0.0) as usize;
+    let i1 = (i0 + 1).min(curve.len().saturating_sub(1));
+    let frac = (idx_f - i0 as f64).clamp(0.0, 1.0) as f32;
+    let a = curve.get(i0).copied().unwrap_or(default_value);
+    let b = curve.get(i1).copied().unwrap_or(a);
+    a + (b - a) * frac
+}
+
 impl ProcessingStage for HiFiGanStage {
     fn id(&self) -> &str {
         "nsf_hifigan"
@@ -172,23 +232,68 @@ impl ProcessingStage for HiFiGanStage {
         "NSF-HiFiGAN"
     }
 
+    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+        &HIFIGAN_PARAM_DESCRIPTORS
+    }
+
     fn process(&self, input_pcm: Vec<f32>, ctx: &StageContext<'_>) -> Result<Vec<f32>, String> {
         let cc = ctx.clip_ctx;
         if !crate::nsf_hifigan_onnx::is_available() {
             return Ok(input_pcm);
         }
-        let render_ctx = RenderContext {
-            mono_pcm: &input_pcm,
-            sample_rate: cc.sample_rate,
-            seg_start_sec: cc.seg_start_sec,
-            seg_end_sec: cc.seg_end_sec,
-            clip_start_sec: cc.clip_start_sec,
-            frame_period_ms: cc.frame_period_ms,
-            pitch_edit: cc.pitch_edit,
-            clip_midi: cc.clip_midi,
-            clip_id: cc.clip_id,
+
+        let breath_enabled = crate::pitch_editing::extra_param_enabled(cc.extra_params, "breath_enabled");
+        if !breath_enabled {
+            let render_ctx = RenderContext {
+                mono_pcm: &input_pcm,
+                sample_rate: cc.sample_rate,
+                seg_start_sec: cc.seg_start_sec,
+                seg_end_sec: cc.seg_end_sec,
+                clip_start_sec: cc.clip_start_sec,
+                frame_period_ms: cc.frame_period_ms,
+                pitch_edit: cc.pitch_edit,
+                clip_midi: cc.clip_midi,
+                clip_id: cc.clip_id,
+            };
+            return crate::renderer::hifigan::HiFiGanRenderer.render(&render_ctx);
+        }
+
+        if !crate::hnsep_onnx::is_available() {
+            return Err("HNSEP is enabled but model is unavailable".to_string());
+        }
+
+        let (harmonic, noise) = crate::hnsep_onnx::infer_harmonic_noise_mono(
+            cc.clip_id,
+            &input_pcm,
+            cc.sample_rate,
+        )?;
+
+        let processed_harmonic = if cc.clip_midi.is_empty() {
+            harmonic
+        } else {
+            let render_ctx = RenderContext {
+                mono_pcm: &harmonic,
+                sample_rate: cc.sample_rate,
+                seg_start_sec: cc.seg_start_sec,
+                seg_end_sec: cc.seg_end_sec,
+                clip_start_sec: cc.clip_start_sec,
+                frame_period_ms: cc.frame_period_ms,
+                pitch_edit: cc.pitch_edit,
+                clip_midi: cc.clip_midi,
+                clip_id: cc.clip_id,
+            };
+            crate::renderer::hifigan::HiFiGanRenderer.render(&render_ctx)?
         };
-        crate::renderer::hifigan::HiFiGanRenderer.render(&render_ctx)
+
+        let breath_curve = cc.extra_curves.get("breath_gain");
+        let out_len = processed_harmonic.len().min(noise.len());
+        let mut mixed = vec![0.0f32; out_len];
+        for index in 0..out_len {
+            let abs_sec = cc.seg_start_sec + index as f64 / cc.sample_rate.max(1) as f64;
+            let gain = sample_curve_at_abs_sec(breath_curve, abs_sec, cc.frame_period_ms, 1.0);
+            mixed[index] = processed_harmonic[index] + noise[index] * gain;
+        }
+        Ok(mixed)
     }
 }
 

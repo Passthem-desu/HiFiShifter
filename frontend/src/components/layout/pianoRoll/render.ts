@@ -3,6 +3,7 @@ import type { ClipPeaksEntry } from "./useClipsPeaksForPianoRoll";
 import { clamp } from "../timeline";
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./constants";
 import { framesToTime, timeToPixel } from "./utils";
+import { resolveSecondaryOverlayValues } from "./secondaryOverlaySelection";
 import {
     processWaveformPeaks,
     renderWaveformCanvas,
@@ -214,6 +215,7 @@ export function drawPianoRoll(args: {
     clipPeaks: ClipPeaksEntry[];
     paramView: ParamViewSegment | null;
     secondaryParamView: ParamViewSegment | null;
+    secondaryParamId?: ParamName | null;
     showSecondaryParam: boolean;
     overlayText?: string | null;
     liveEditOverride: { key: string; edit: number[] } | null;
@@ -240,6 +242,7 @@ export function drawPianoRoll(args: {
         clipPeaks,
         paramView,
         secondaryParamView,
+        secondaryParamId,
         showSecondaryParam,
         overlayText,
         liveEditOverride,
@@ -640,25 +643,29 @@ export function drawPianoRoll(args: {
     // 副参数曲线（半透明、细线，绘制在主参数曲线下方�?
     if (
         showSecondaryParam &&
+        secondaryParamId &&
         secondaryParamView &&
-        secondaryParamView.edit.length >= 2
+        Math.max(
+            secondaryParamView.orig.length,
+            secondaryParamView.edit.length,
+        ) >= 2
     ) {
-        // 根据副参数类型选择颜色：pitch 用蓝色，其他用橙色
-        const secondaryIsPitch = secondaryParamView.key.includes("|pitch|");
-        const secondaryParam: ParamName = secondaryIsPitch
-            ? "pitch"
-            : editParam;
-        const secondaryColor = secondaryIsPitch
-            ? "rgba(100, 200, 255, 0.45)"
-            : "rgba(255, 180, 60, 0.45)";
+        const secondaryValues = resolveSecondaryOverlayValues({
+            orig: secondaryParamView.orig,
+            edit: secondaryParamView.edit,
+        });
+        const secondaryColor =
+            secondaryParamId === "pitch"
+                ? "rgba(100, 200, 255, 0.45)"
+                : "rgba(255, 180, 60, 0.45)";
         ctx.save();
         ctx.strokeStyle = secondaryColor;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([]);
         drawCurveTimed({
             ctx,
-            values: secondaryParamView.edit,
-            param: secondaryParam,
+            values: secondaryValues,
+            param: secondaryParamId,
             w,
             h,
             startFrame: secondaryParamView.startFrame,

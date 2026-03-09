@@ -69,3 +69,33 @@ pub fn get_processor(kind: SynthPipelineKind) -> Box<dyn ClipProcessor> {
         }
     }
 }
+
+pub fn get_param_descriptor(
+    kind: SynthPipelineKind,
+    param_id: &str,
+) -> Option<ParamDescriptor> {
+    get_processor(kind)
+        .param_descriptors()
+        .into_iter()
+        .find(|descriptor| descriptor.id == param_id)
+}
+
+pub fn automation_curve_default_value(
+    kind: SynthPipelineKind,
+    param_id: &str,
+) -> Option<f32> {
+    match get_param_descriptor(kind, param_id)?.kind {
+        ParamKind::AutomationCurve { default_value, .. } => Some(default_value),
+        _ => None,
+    }
+}
+
+pub fn static_enum_default_value(
+    kind: SynthPipelineKind,
+    param_id: &str,
+) -> Option<i32> {
+    match get_param_descriptor(kind, param_id)?.kind {
+        ParamKind::StaticEnum { default_value, .. } => Some(default_value),
+        _ => None,
+    }
+}

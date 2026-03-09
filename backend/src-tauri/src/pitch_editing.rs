@@ -1,5 +1,6 @@
 use crate::state::{PitchAnalysisAlgo, SynthPipelineKind, TimelineState};
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 thread_local! {
     static MONO_SCRATCH: RefCell<Vec<f32>> = RefCell::new(Vec::new());
@@ -118,6 +119,80 @@ pub(crate) fn selected_pitch_curves_snapshot(
     })
 }
 
+fn pitch_edit_backend_available_for_track(track: &crate::state::Track) -> bool {
+    let algo = PitchEditAlgorithm::from_track_algo(&track.pitch_analysis_algo);
+    match algo {
+        PitchEditAlgorithm::WorldVocoder => crate::world_vocoder::is_available(),
+        PitchEditAlgorithm::NsfHifiganOnnx => crate::nsf_hifigan_onnx::is_available(),
+        #[cfg(feature = "vslib")]
+        PitchEditAlgorithm::VocalShifterVslib => true,
+        PitchEditAlgorithm::Bypass => true,
+    }
+}
+
+pub(crate) fn extra_param_enabled(extra_params: &HashMap<String, f64>, key: &str) -> bool {
+    extra_params.get(key).copied().unwrap_or(0.0) >= 0.5
+}
+
+fn curve_differs_from_default_in_range(
+    curve: Option<&Vec<f32>>,
+    frame_period_ms: f64,
+    start_sec: f64,
+    end_sec: f64,
+    default_value: f32,
+) -> bool {
+    let Some(curve) = curve else {
+        return false;
+    };
+    if curve.is_empty() {
+        return false;
+    }
+
+    let fp = frame_period_ms.max(0.1);
+    let start_idx = ((start_sec.max(0.0) * 1000.0) / fp).floor().max(0.0) as usize;
+    let end_idx = ((end_sec.max(start_sec) * 1000.0) / fp).ceil().max(0.0) as usize;
+    let lo = start_idx.min(curve.len());
+    let hi = end_idx.min(curve.len());
+    curve[lo..hi]
+        .iter()
+        .any(|value| (value - default_value).abs() > 1e-3)
+}
+
+pub(crate) fn hifigan_tension_curve_for_clip<'a>(
+    entry: &'a crate::state::TrackParamsState,
+    clip: &'a crate::state::Clip,
+) -> Option<&'a Vec<f32>> {
+    clip.extra_curves
+        .as_ref()
+        .and_then(|curves| curves.get("hifigan_tension"))
+        .or_else(|| entry.extra_curves.get("hifigan_tension"))
+}
+
+pub(crate) fn hifigan_tension_active_for_clip(
+    entry: &crate::state::TrackParamsState,
+    clip: &crate::state::Clip,
+    clip_start_sec: f64,
+) -> bool {
+    let curve = hifigan_tension_curve_for_clip(entry, clip);
+    curve_differs_from_default_in_range(
+        curve,
+        entry.frame_period_ms.max(0.1),
+        clip_start_sec,
+        clip_start_sec + clip.length_sec.max(0.0),
+        0.0,
+    )
+}
+
+fn track_requests_extra_processing(
+    algo: PitchEditAlgorithm,
+    entry: &crate::state::TrackParamsState,
+    clip: &crate::state::Clip,
+) -> bool {
+    let extra_params = clip.extra_params.as_ref().unwrap_or(&entry.extra_params);
+    matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
+        && extra_param_enabled(extra_params, "breath_enabled")
+}
+
 impl PitchEditAlgorithm {
     pub fn from_track_algo(algo: &PitchAnalysisAlgo) -> Self {
         if let Some(v) = pitch_edit_algo_from_env() {
@@ -160,6 +235,15 @@ pub fn selected_pitch_edit_algorithm(timeline: &TimelineState) -> PitchEditAlgor
 
 fn semitone_ratio(semitones: f64) -> f64 {
     (2.0f64).powf(semitones / 12.0)
+}
+
+fn root_pitch_edit_state<'a>(
+    timeline: &'a TimelineState,
+    root_track_id: &str,
+) -> Option<(&'a crate::state::Track, &'a crate::state::TrackParamsState)> {
+    let track = timeline.tracks.iter().find(|track| track.id == root_track_id)?;
+    let entry = timeline.params_by_root_track.get(root_track_id)?;
+    Some((track, entry))
 }
 
 fn edit_midi_at_time_or_none(
@@ -397,9 +481,13 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         return Ok(false);
     };
 
+    let extra_processing = track_requests_extra_processing(algo, entry, clip);
+    let tension_processing = matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
+        && hifigan_tension_active_for_clip(entry, clip, clip_start_sec);
+
     // v2 semantics: do nothing until the user actually modified the edit curve.
     // This avoids treating auto-synced `pitch_edit` (e.g. copied from pitch_orig) as an edit.
-    if !entry.pitch_edit_user_modified {
+    if !entry.pitch_edit_user_modified && !extra_processing && !tension_processing {
         return Ok(false);
     }
 
@@ -426,7 +514,8 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     // seg_end_sec 始终以时间轴坐标（输出帧）计，确保音高编辑范围检测与声码器上下文一致
     let seg_end_sec =
         seg_start_sec + (expected_out_frames as f64) / (sample_rate.max(1) as f64);
-    if !any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec) {
+    let has_pitch_user_edit = any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec);
+    if !has_pitch_user_edit && !extra_processing && !tension_processing {
         return Ok(false);
     }
 
@@ -446,7 +535,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let is_vslib = false;
 
     // Get per-clip original MIDI curve (full source, source-time indexed).
-    let timeline_midi: Vec<f32> = if is_vslib {
+    let timeline_midi: Vec<f32> = if is_vslib || !has_pitch_user_edit {
         // vslib 不需要原始音高轮廓，传空切片，VslibProcessor 会忽略 clip_midi 字段。
         Vec::new()
     } else {
@@ -476,17 +565,23 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         }
 
         // Skip expensive processing if the edit curve does not actually change pitch vs clip's original MIDI.
-        if !any_effective_pitch_change_in_range(
+        let has_effective_pitch_change = any_effective_pitch_change_in_range(
             frame_period_ms,
             pitch_edit,
             clip_start_sec,
             &tm,
             seg_start_sec,
             seg_end_sec,
-        ) {
-            return Ok(false);
+        );
+        if !has_effective_pitch_change {
+            if extra_processing || tension_processing {
+                Vec::new()
+            } else {
+                return Ok(false);
+            }
+        } else {
+            tm
         }
-        tm
     };
 
     // stereo -> mono (we don't preserve stereo; use left channel for cheaper conversion)
@@ -639,14 +734,7 @@ pub fn is_pitch_edit_backend_available(timeline: &TimelineState) -> bool {
         return false;
     };
 
-    let algo = PitchEditAlgorithm::from_track_algo(&track.pitch_analysis_algo);
-    match algo {
-        PitchEditAlgorithm::WorldVocoder => crate::world_vocoder::is_available(),
-        PitchEditAlgorithm::NsfHifiganOnnx => crate::nsf_hifigan_onnx::is_available(),
-        #[cfg(feature = "vslib")]
-        PitchEditAlgorithm::VocalShifterVslib => true, // DLL 加载失败时 process() 内部会报错
-        PitchEditAlgorithm::Bypass => true,
-    }
+    pitch_edit_backend_available_for_track(track)
 }
 
 pub fn semitone_to_ratio(semitones: f64) -> f64 {
@@ -660,27 +748,25 @@ pub fn does_clip_need_pitch_edit(
     clip: &crate::state::Clip,
     clip_start_sec: f64,
 ) -> bool {
-    let selected = timeline
-        .selected_track_id
-        .clone()
-        .or_else(|| timeline.tracks.first().map(|t| t.id.clone()))
-        .unwrap_or_default();
-    let Some(root) = timeline.resolve_root_track_id(&selected) else {
-        return false;
-    };
+    does_clip_need_processor_render(timeline, clip, clip_start_sec)
+}
 
+pub fn does_clip_need_processor_render(
+    timeline: &TimelineState,
+    clip: &crate::state::Clip,
+    clip_start_sec: f64,
+) -> bool {
     let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
         return false;
     };
-    if clip_root != root {
-        return false;
-    }
 
-    let track = timeline.tracks.iter().find(|t| t.id == root);
-    let Some(track) = track else {
+    let Some((track, entry)) = root_pitch_edit_state(timeline, &clip_root) else {
         return false;
     };
     if !track.compose_enabled {
+        return false;
+    }
+    if !pitch_edit_backend_available_for_track(track) {
         return false;
     }
 
@@ -689,16 +775,19 @@ pub fn does_clip_need_pitch_edit(
         return false;
     }
 
-    let entry = timeline.params_by_root_track.get(&root);
-    let Some(entry) = entry else {
-        return false;
-    };
+    let extra_processing = track_requests_extra_processing(algo, entry, clip);
+    let tension_processing = matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
+        && hifigan_tension_active_for_clip(entry, clip, clip_start_sec);
 
     // v2 semantics: only treat pitch edit as active after the user modified the edit curve.
     // Otherwise `pitch_edit` may be auto-synced to `pitch_orig` and contain non-zero MIDI values,
     // which should NOT trigger synthesis / prerender.
-    if !entry.pitch_edit_user_modified {
+    if !entry.pitch_edit_user_modified && !extra_processing && !tension_processing {
         return false;
+    }
+
+    if extra_processing || tension_processing {
+        return true;
     }
 
     let frame_period_ms = entry.frame_period_ms.max(0.1);
@@ -802,6 +891,53 @@ mod tests {
 
         // Place clip into timeline so root resolution works.
         tl.clips.push(clip.clone());
+
+        assert!(does_clip_need_pitch_edit(&tl, &clip, 0.0));
+    }
+
+    #[test]
+    fn does_clip_need_pitch_edit_ignores_selected_track_id() {
+        let frame_period_ms = 5.0;
+        let mut tl = make_timeline_with_pitch_edit(frame_period_ms, true, 20_000, &[1.0]);
+
+        let other_track = Track {
+            id: "track_other".to_string(),
+            name: "Other".to_string(),
+            parent_id: None,
+            order: 1,
+            muted: false,
+            solo: false,
+            volume: 1.0,
+            compose_enabled: false,
+            pitch_analysis_algo: PitchAnalysisAlgo::None,
+            color: String::new(),
+        };
+        tl.tracks.push(other_track);
+        tl.selected_track_id = Some("track_other".to_string());
+
+        let clip = crate::state::Clip {
+            id: "clip1".to_string(),
+            track_id: "track_root".to_string(),
+            name: "c".to_string(),
+            start_sec: 0.0,
+            length_sec: 2.0,
+            color: String::new(),
+            source_path: None,
+            duration_sec: Some(2.0),
+            duration_frames: None,
+            source_sample_rate: None,
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            source_start_sec: 0.0,
+            source_end_sec: 2.0,
+            playback_rate: 1.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            fade_in_curve: "sine".to_string(),
+            fade_out_curve: "sine".to_string(),
+        };
 
         assert!(does_clip_need_pitch_edit(&tl, &clip, 0.0));
     }

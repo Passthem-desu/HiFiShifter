@@ -24,7 +24,8 @@ export const messages = {
         menu_import_vocalshifter: "Import VocalShifter Project",
         menu_paste_reaper_clipboard: "Paste Reaper Clipboard Data",
         menu_paste_vocalshifter_clipboard: "Paste VocalShifter Clipboard Data",
-        reaper_import_skipped_header: "Some audio files were skipped during Reaper import (unsupported format or file not found):",
+        reaper_import_skipped_header:
+            "Some audio files were skipped during Reaper import (unsupported format or file not found):",
         menu_pick_output: "Pick Output",
         language: "Language",
         lang_en: "English",
@@ -100,6 +101,11 @@ export const messages = {
         pitch_status_unavailable: "Unavailable",
         pitch_label: "Pitch (semitones)",
         tension_label: "Tension (0-1)",
+        breath_mode_label: "Breath",
+        breath_gain_label: "Breath Gain",
+        hifigan_tension_label: "Tension",
+        switch_on: "On",
+        switch_off: "Off",
         points_help: "Double click add · Drag move · Right click delete",
         points_count: "Points",
         selected: "Selected",
@@ -135,6 +141,12 @@ export const messages = {
         status_export_failed: "Export failed",
         status_export_separated_done: "Separated export completed",
         status_export_separated_failed: "Separated export failed",
+        unsaved_changes_title: "Unsaved Changes",
+        unsaved_changes_switch_desc:
+            "The current project has unsaved changes. Save before switching projects?",
+        unsaved_changes_exit_desc:
+            "The current project has unsaved changes. Save before closing the application?",
+        unsaved_changes_discard: "Don't Save",
 
         menu_export_separated: "Export Separated Tracks",
 
@@ -294,6 +306,8 @@ export const messages = {
         midi_import_failed: "MIDI import failed",
         midi_file_not_found: "MIDI file not found",
         midi_no_notes: "No notes in selected track",
+        midi_no_frames_touched:
+            "MIDI import did not write any frames. Check the playhead position and project length.",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -320,7 +334,8 @@ export const messages = {
         menu_import_vocalshifter: "导入 VocalShifter 工程",
         menu_paste_reaper_clipboard: "粘贴 Reaper 剪贴板数据",
         menu_paste_vocalshifter_clipboard: "粘贴 VocalShifter 剪贴板数据",
-        reaper_import_skipped_header: "Reaper 导入时跳过了以下音频文件（格式不支持或文件不存在）：",
+        reaper_import_skipped_header:
+            "Reaper 导入时跳过了以下音频文件（格式不支持或文件不存在）：",
         menu_pick_output: "选择导出路径",
         language: "语言",
         lang_en: "English",
@@ -393,6 +408,11 @@ export const messages = {
         pitch_status_unavailable: "不可用",
         pitch_label: "音高（半音）",
         tension_label: "张力（0-1）",
+        breath_mode_label: "气声",
+        breath_gain_label: "气声音量",
+        hifigan_tension_label: "张力",
+        switch_on: "开启",
+        switch_off: "关闭",
         points_help: "双击新增 · 拖拽移动 · 右键删除",
         points_count: "控制点",
         selected: "选中",
@@ -428,6 +448,12 @@ export const messages = {
         status_export_failed: "导出失败",
         status_export_separated_done: "分轨导出完成",
         status_export_separated_failed: "分轨导出失败",
+        unsaved_changes_title: "未保存更改",
+        unsaved_changes_switch_desc:
+            "当前工程有未保存的更改。切换工程前是否先保存？",
+        unsaved_changes_exit_desc:
+            "当前工程有未保存的更改。关闭应用前是否先保存？",
+        unsaved_changes_discard: "不保存",
 
         menu_export_separated: "导出分轨音频",
 
@@ -584,6 +610,8 @@ export const messages = {
         midi_import_failed: "MIDI 导入失败",
         midi_file_not_found: "MIDI 文件未找到",
         midi_no_notes: "选中的轨道没有音符",
+        midi_no_frames_touched:
+            "MIDI 导入没有写入任何帧，请检查播放头位置和工程长度",
     },
 } as const;
 

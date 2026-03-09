@@ -10,6 +10,11 @@ import { searchFilesRecursive } from "../../features/fileBrowser/fileBrowserSlic
 import { audioPreview } from "../../features/fileBrowser/audioPreview";
 import { importAudioAtPosition } from "../../features/session/thunks/importThunks";
 import type { FileEntry } from "../../services/api/fileBrowser";
+import {
+    getQuickSearchInitialPosition,
+    QUICK_SEARCH_POPUP_HEIGHT,
+    QUICK_SEARCH_POPUP_WIDTH,
+} from "./quickSearchPosition";
 
 /** 支持的音频扩展名 */
 const AUDIO_EXTENSIONS = new Set([
@@ -45,39 +50,44 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
     const [results, setResults] = useState<FileEntry[]>([]);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [loading, setLoading] = useState(false);
-    const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+    const [position, setPosition] = useState<{ x: number; y: number }>(() =>
+        getQuickSearchInitialPosition({
+            viewportWidth: typeof window === "undefined" ? QUICK_SEARCH_POPUP_WIDTH : window.innerWidth,
+            viewportHeight:
+                typeof window === "undefined" ? QUICK_SEARCH_POPUP_HEIGHT : window.innerHeight,
+            pointer: null,
+        }),
+    );
     const [previewingPath, setPreviewingPath] = useState<string | null>(null);
 
     const inputRef = useRef<HTMLInputElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const popupRef = useRef<HTMLDivElement>(null);
+    const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
 
-    // 打开时捕获鼠标位置并聚焦输入框
+    useEffect(() => {
+        const handlePointerMove = (event: PointerEvent) => {
+            lastPointerRef.current = { x: event.clientX, y: event.clientY };
+        };
+
+        window.addEventListener("pointermove", handlePointerMove);
+        return () => {
+            window.removeEventListener("pointermove", handlePointerMove);
+        };
+    }, []);
+
+    // 打开时使用最近一次鼠标位置，若没有则回退到窗口中心
     useEffect(() => {
         if (!open) return;
 
-        // 捕获当前鼠标位置
-        const handleMouseMove = (e: MouseEvent) => {
-            const x = Math.min(e.clientX, window.innerWidth - 340);
-            const y = Math.min(e.clientY, window.innerHeight - 420);
-            setPosition({ x: Math.max(0, x), y: Math.max(0, y) });
-            // 只需要一次
-            window.removeEventListener("mousemove", handleMouseMove);
-        };
-        window.addEventListener("mousemove", handleMouseMove, { once: true });
-
-        // 如果鼠标不移动，使用中心位置
-        const timer = setTimeout(() => {
-            window.removeEventListener("mousemove", handleMouseMove);
-            // 使用窗口中心
-            if (position.x === 0 && position.y === 0) {
-                setPosition({
-                    x: Math.round(window.innerWidth / 2 - 160),
-                    y: Math.round(window.innerHeight / 2 - 200),
-                });
-            }
-        }, 50);
+        setPosition(
+            getQuickSearchInitialPosition({
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+                pointer: lastPointerRef.current,
+            }),
+        );
 
         // 重置状态
         setQuery("");
@@ -92,8 +102,6 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
         });
 
         return () => {
-            window.removeEventListener("mousemove", handleMouseMove);
-            clearTimeout(timer);
         };
     }, [open]);
 
@@ -261,8 +269,8 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
             style={{
                 left: position.x,
                 top: position.y,
-                width: 320,
-                maxHeight: 400,
+                width: QUICK_SEARCH_POPUP_WIDTH,
+                maxHeight: QUICK_SEARCH_POPUP_HEIGHT,
                 background: "var(--qt-window)",
                 border: "1px solid var(--qt-border)",
                 borderRadius: 6,
