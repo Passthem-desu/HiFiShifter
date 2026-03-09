@@ -156,6 +156,19 @@ export const TrackList: React.FC<{
     } {
         const el = listRef.current;
         const bounds = el?.getBoundingClientRect();
+
+        // 当鼠标在列表容器上方时，直接插入到顶层第一个位置
+        if (bounds && clientY < bounds.top && tracks.length > 0) {
+            const roots = siblingsOf(null).filter(
+                (id) => id !== draggingTrackId,
+            );
+            return {
+                parentTrackId: null,
+                targetIndex: 0,
+                mode: "reorder",
+            };
+        }
+
         const { track: over, yInRow } = trackAtClientY(clientY);
 
         // Dropping outside -> append as root.
@@ -215,7 +228,21 @@ export const TrackList: React.FC<{
             (id) => id !== draggingTrackId,
         );
         const baseIndex = Math.max(0, siblings.indexOf(over.id));
-        const insertAfter = yInRow > rowHeight / 2;
+        // 使用 35% 边缘区域：上 35% 插入到上方，下 35% 插入到下方，中间 30% 保持不动
+        const edgeZone = rowHeight * 0.35;
+        const insertAfter = yInRow > rowHeight - edgeZone;
+        const insertBefore = yInRow < edgeZone;
+        // 如果鼠标在中间区域，保持原位不触发重排
+        if (!insertAfter && !insertBefore) {
+            const siblingsIncl = siblingsOf(parentTrackId);
+            const indexSelf = Math.max(
+                0,
+                siblingsIncl.indexOf(draggingTrackId),
+            );
+            // 如果不在同一层级，则追加到末尾
+            const targetIndex = indexSelf >= 0 ? indexSelf : siblings.length;
+            return { parentTrackId, targetIndex, mode: "reorder" };
+        }
         const targetIndex = Math.min(
             siblings.length,
             baseIndex + (insertAfter ? 1 : 0),
@@ -345,18 +372,34 @@ export const TrackList: React.FC<{
 
                                     let indicatorY: number | null = null;
                                     if (spec.mode === "reorder") {
-                                        const idx = overInfo.index;
-                                        if (!Number.isFinite(idx)) {
-                                            indicatorY = null;
-                                        } else if (!over) {
-                                            indicatorY =
-                                                tracks.length * rowHeight;
+                                        const listBounds = listRef.current?.getBoundingClientRect();
+                                        // 鼠标在列表上方时，指示线固定在顶部
+                                        if (listBounds && ev.clientY < listBounds.top) {
+                                            indicatorY = 0;
                                         } else {
-                                            const insertAfter =
-                                                overInfo.yInRow > rowHeight / 2;
-                                            indicatorY =
-                                                idx * rowHeight +
-                                                (insertAfter ? rowHeight : 0);
+                                            const idx = overInfo.index;
+                                            const edgeZone = rowHeight * 0.35;
+                                            if (!Number.isFinite(idx)) {
+                                                indicatorY = null;
+                                            } else if (!over) {
+                                                indicatorY =
+                                                    tracks.length * rowHeight;
+                                            } else {
+                                                const insertAfter =
+                                                    overInfo.yInRow > rowHeight - edgeZone;
+                                                const insertBefore =
+                                                    overInfo.yInRow < edgeZone;
+                                                if (insertAfter) {
+                                                    indicatorY =
+                                                        idx * rowHeight + rowHeight;
+                                                } else if (insertBefore) {
+                                                    indicatorY =
+                                                        idx * rowHeight;
+                                                } else {
+                                                    // 中间区域不显示指示线
+                                                    indicatorY = null;
+                                                }
+                                            }
                                         }
                                     }
 

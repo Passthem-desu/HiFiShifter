@@ -67,6 +67,8 @@ export function useClipDrag(deps: {
     noSnapKb: Keybinding;
     /** modifier.clipCopyDrag 绑定 */
     copyDragKb: Keybinding;
+    /** Ctrl+点击（未拖动）时的多选切换回调 */
+    onCtrlClick?: (clipId: string) => void;
 }) {
     const {
         scrollRef,
@@ -82,6 +84,7 @@ export function useClipDrag(deps: {
         slipEditKb,
         noSnapKb,
         copyDragKb,
+        onCtrlClick,
     } = deps;
 
     const clipDragRef = useRef<ClipDragState | null>(null);
@@ -241,6 +244,10 @@ export function useClipDrag(deps: {
             setGhostDrag(null);
 
             if (!drag.hasMoved) {
+                // Ctrl+点击（未移动）：执行多选切换
+                if (drag.copyMode && onCtrlClick) {
+                    onCtrlClick(drag.anchorClipId);
+                }
                 window.removeEventListener("pointermove", onMove);
                 window.removeEventListener("pointerup", end);
                 window.removeEventListener("pointercancel", end);

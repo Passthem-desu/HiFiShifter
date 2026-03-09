@@ -257,7 +257,6 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return { outputDir: args[0] };
 
         case "play_original":
-        case "play_synthesized":
             return { startSec: args[0] };
 
         case "open_project":
@@ -270,6 +269,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return { rppPath: args[0] };
 
         case "paste_vocalshifter_clipboard":
+            return {};
+
+        case "open_midi_dialog":
             return {};
 
         case "get_waveform_peaks_segment":
@@ -333,6 +335,16 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
 
         case "get_processor_params":
             return { algo: args[0] };
+
+        case "get_midi_tracks":
+            return { midiPath: args[0] };
+
+        case "import_midi_to_pitch":
+            return {
+                midiPath: args[0],
+                ...(args[1] !== undefined ? { trackIndex: args[1] } : {}),
+                ...(args[2] !== undefined ? { offsetSec: args[2] } : {}),
+            };
 
         default:
             return { __unwired: true };

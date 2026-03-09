@@ -7,7 +7,7 @@
     useState,
 } from "react";
 import { Flex, Text, Button, Select, Box, IconButton } from "@radix-ui/themes";
-import { EyeOpenIcon, EyeClosedIcon, UpdateIcon } from "@radix-ui/react-icons";
+import { EyeOpenIcon, EyeClosedIcon } from "@radix-ui/react-icons";
 
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
@@ -47,12 +47,13 @@ import type {
 } from "./pianoRoll/types";
 import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 
-import { PitchStatusBadge } from "./PitchStatusBadge";
 import { useAsyncPitchRefresh } from "../../hooks/useAsyncPitchRefresh";
 import { ProgressBar } from "../ProgressBar";
-import { LoadingSpinner } from "../LoadingSpinner";
-import { usePitchAnalysis } from "../../contexts/PitchAnalysisContext";
+
+
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
+import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
+import { coreApi } from "../../services/api/core";
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -76,7 +77,31 @@ export const PianoRollPanel: React.FC = () => {
 
     // Task 6.3: 集成 useAsyncPitchRefresh Hook
     const asyncRefresh = useAsyncPitchRefresh();
-    const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+    const [showSuccessMessage] = useState(false);
+
+    // MIDI 导入弹窗状态
+    const [midiDialogOpen, setMidiDialogOpen] = useState(false);
+    const [midiPath, setMidiPath] = useState<string | null>(null);
+
+    const handleOpenMidiDialog = useCallback(async () => {
+        try {
+            const res = await coreApi.openMidiDialog();
+            if (res.ok && !res.canceled && res.path) {
+                setMidiPath(res.path);
+                setMidiDialogOpen(true);
+            }
+        } catch {
+            // 静默忽略
+        }
+    }, []);
+
+    const handleMidiImported = useCallback(
+        (_result: { notes_imported: number; frames_touched: number }) => {
+            // 导入完成后刷新参数面板
+            refreshNow();
+        },
+        [refreshNow],
+    );
 
     const effectiveSelectedTrackId = useMemo(() => {
         if (s.selectedTrackId) return s.selectedTrackId;
@@ -99,6 +124,7 @@ export const PianoRollPanel: React.FC = () => {
     const pxPerBeat = pxPerSec * (60 / Math.max(1e-6, s.bpm));
     const scrollLeftRef = useRef(scrollLeft);
     const pxPerBeatRef = useRef(pxPerBeat);
+    const pxPerSecRef = useRef(pxPerSec);
 
     // BPM 变化时，按比例调�?scrollLeft，保持视口中心点的秒数不�?
     // scrollLeft_new = scrollLeft_old × (bpm_old / bpm_new)
@@ -119,19 +145,20 @@ export const PianoRollPanel: React.FC = () => {
 
     useEffect(() => {
         pxPerBeatRef.current = pxPerBeat;
+        pxPerSecRef.current = pxPerSec;
         localStorage.setItem("hifishifter.paramPxPerSec", String(pxPerSec));
     }, [pxPerBeat, pxPerSec]);
 
     const setPxPerBeatImmediate = useCallback(
         (next: number) => {
-            // next 是新�?pxPerBeat，需要反推回 pxPerSec
+            // next 是新的 pxPerBeat，需要反推回 pxPerSec
             const nextPxPerSec = next / (60 / Math.max(1e-6, s.bpm));
             pxPerBeatRef.current = next;
+            pxPerSecRef.current = nextPxPerSec;
             setPxPerSec(nextPxPerSec);
         },
         [s.bpm, setPxPerSec],
     );
-
     // 副参数独立显示开关，默认全部关闭
     const [secondaryParamVisible, setSecondaryParamVisible] = useState<
         Partial<Record<ParamName, boolean>>
@@ -511,11 +538,6 @@ export const PianoRollPanel: React.FC = () => {
         values: number[];
     } | null>(null);
 
-    // 从全局 Context 读取 pitch 分析进度状态（�?PitchAnalysisProvider 统一管理�?
-    const pitchAnalysis = usePitchAnalysis();
-    const pitchAnalysisPending = pitchAnalysis.pending;
-    const pitchAnalysisProgress = pitchAnalysis.progress;
-
     // 将 PianoRoll 加载状态同步到全局 Context（供 status bar 使用）
     const updatePianoRollStatus = usePianoRollStatusUpdate();
 
@@ -528,11 +550,8 @@ export const PianoRollPanel: React.FC = () => {
         setParamView,
         secondaryParamView,
         bumpRefreshToken,
-        refreshNow,
         notifyLiveEditEnded,
         isLoading,
-        pitchEditUserModified,
-        pitchEditBackendAvailable,
     } = usePianoRollData({
         editParam,
         pitchEnabled,
@@ -663,7 +682,7 @@ export const PianoRollPanel: React.FC = () => {
                     : null,
             liveEditOverride: liveEditOverrideRef.current,
             selection: selectionRef.current,
-            pxPerSec,
+            pxPerSec: pxPerSecRef.current,
             scrollLeft: scrollLeftRef.current,
             secPerBeat,
             playheadSec: s.playheadSec,
@@ -708,6 +727,8 @@ export const PianoRollPanel: React.FC = () => {
         ensureLiveEditBase,
         applyDenseToLiveEdit,
         commitStroke,
+        setParamView,
+        liveEditOverrideRef,
         liveEditActiveRef,
         pianoRollCopyKb,
         pianoRollPasteKb,
@@ -865,65 +886,7 @@ export const PianoRollPanel: React.FC = () => {
                         ))}
                     </Flex>
 
-                    {editParam === "pitch" ? (
-                        <PitchStatusBadge
-                            tracks={s.tracks}
-                            selectedTrackId={effectiveSelectedTrackId}
-                            status={
-                                pitchEnabled
-                                    ? {
-                                          analysisPending: pitchAnalysisPending,
-                                          analysisProgress:
-                                              pitchAnalysisProgress,
-                                          pitchEditUserModified,
-                                          pitchEditBackendAvailable,
-                                      }
-                                    : undefined
-                            }
-                        />
-                    ) : null}
-
-                    {/* Task 6.4: 刷新按钮修改为调�?startRefresh() */}
-                    <IconButton
-                        size="1"
-                        variant="soft"
-                        color="gray"
-                        disabled={
-                            isLoading ||
-                            pitchAnalysisPending ||
-                            asyncRefresh.isLoading
-                        }
-                        onClick={async () => {
-                            if (!rootTrackId) return;
-                            await asyncRefresh.startRefresh(rootTrackId);
-                            // Task 6.7: 任务完成后显�?1 秒成功提�?
-                            if (asyncRefresh.status === "completed") {
-                                setShowSuccessMessage(true);
-                                setTimeout(
-                                    () => setShowSuccessMessage(false),
-                                    1000,
-                                );
-                            }
-                            // 同时触发传统刷新以更�?UI（后续可优化为由后端事件驱动�?
-                            void refreshNow();
-                        }}
-                        style={{
-                            cursor:
-                                isLoading || asyncRefresh.isLoading
-                                    ? "default"
-                                    : "pointer",
-                        }}
-                        title={t("action_refresh")}
-                    >
-                        {asyncRefresh.isLoading ? (
-                            <LoadingSpinner size="sm" />
-                        ) : (
-                            <UpdateIcon />
-                        )}
-                    </IconButton>
-
-                    {editParam === "pitch" && rootTrack ? (
-                        <Flex align="center" gap="2">
+                    {editParam === "pitch" && rootTrack ? (                        <Flex align="center" gap="2">
                             <Text size="1" color="gray">
                                 {t("algo_label")}
                             </Text>
@@ -964,6 +927,15 @@ export const PianoRollPanel: React.FC = () => {
                                     </Select.Item>
                                 </Select.Content>
                             </Select.Root>
+                            <Button
+                                size="1"
+                                variant="soft"
+                                color="blue"
+                                onClick={handleOpenMidiDialog}
+                                style={{ cursor: "pointer" }}
+                            >
+                                {(t as (key: string) => string)("midi_import")}
+                            </Button>
                         </Flex>
                     ) : null}
                 </Flex>
@@ -1134,6 +1106,12 @@ export const PianoRollPanel: React.FC = () => {
                     </div>
                 </Flex>
             </Flex>
+            <MidiTrackSelectDialog
+                open={midiDialogOpen}
+                onOpenChange={setMidiDialogOpen}
+                midiPath={midiPath}
+                onImported={handleMidiImported}
+            />
         </Flex>
     );
 };

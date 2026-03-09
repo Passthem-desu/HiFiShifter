@@ -31,9 +31,21 @@ pub(super) fn pick_output_path() -> serde_json::Value {
     }
 }
 
-/// 打开文件夹选择对话框（用于文件浏览器）
 pub(super) fn pick_directory() -> serde_json::Value {
     let picked = rfd::FileDialog::new().pick_folder();
+
+    match picked {
+        None => serde_json::json!({"ok": true, "canceled": true}),
+        Some(path) => {
+            serde_json::json!({"ok": true, "canceled": false, "path": path.display().to_string()})
+        }
+    }
+}
+
+pub(super) fn open_midi_dialog() -> serde_json::Value {
+    let picked = rfd::FileDialog::new()
+        .add_filter("MIDI", &["mid", "midi"])
+        .pick_file();
 
     match picked {
         None => serde_json::json!({"ok": true, "canceled": true}),

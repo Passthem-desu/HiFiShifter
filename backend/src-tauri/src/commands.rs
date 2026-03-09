@@ -45,6 +45,8 @@ mod reaper_clipboard;
 mod cache;
 #[path = "commands/processor_caps.rs"]
 mod processor_caps;
+#[path = "commands/midi.rs"]
+mod midi;
 // TODO: 异步音高刷新功能未完成，缺少必要的状态管理和依赖
 // #[path = "commands/pitch_refresh_async.rs"]
 // mod pitch_refresh_async;
@@ -151,6 +153,11 @@ pub fn pick_output_path() -> serde_json::Value {
 #[tauri::command(rename_all = "camelCase")]
 pub fn pick_directory() -> serde_json::Value {
     dialogs::pick_directory()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn open_midi_dialog() -> serde_json::Value {
+    dialogs::open_midi_dialog()
 }
 
 // ===================== waveform =====================
@@ -448,11 +455,6 @@ pub fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde_json::
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn play_synthesized(state: State<'_, AppState>, start_sec: f64) -> serde_json::Value {
-    playback::play_synthesized(state, start_sec)
-}
-
-#[tauri::command(rename_all = "camelCase")]
 pub fn stop_audio(state: State<'_, AppState>) -> serde_json::Value {
     playback::stop_audio(state)
 }
@@ -586,6 +588,23 @@ pub fn clear_cache(state: State<'_, AppState>) -> Result<u64, String> {
 #[tauri::command(rename_all = "camelCase")]
 pub fn get_processor_params(algo: String) -> Vec<processor_caps::ParamDescriptorDto> {
     processor_caps::get_processor_params(algo)
+}
+
+// ===================== midi =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_midi_tracks(midi_path: String) -> serde_json::Value {
+    midi::get_midi_tracks(midi_path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn import_midi_to_pitch(
+    state: State<'_, AppState>,
+    midi_path: String,
+    track_index: Option<usize>,
+    offset_sec: Option<f64>,
+) -> serde_json::Value {
+    midi::import_midi_to_pitch(state.inner(), midi_path, track_index, offset_sec)
 }
 
 // ===================== pitch_refresh_async (暂时禁用) =====================

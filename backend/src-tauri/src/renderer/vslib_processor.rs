@@ -61,15 +61,35 @@ impl Renderer for VslibRenderer {
 ///
 /// vslib DLL 使用 Windows ANSI API（CP_ACP）打开文件，
 /// 若 %TEMP% 含非 ASCII 字符（如中文用户名），会导致 VSERR_WAVEOPEN=4。
-/// 按优先级尝试：%TEMP%（ASCII） → C:\Windows\Temp（可写验证） → %TEMP%（原回退）。
+///
+/// 策略（按优先级）：
+/// 1. %TEMP% 已是纯 ASCII → 直接返回
+/// 2. 通过 `GetShortPathNameW` 获取 8.3 短路径（纯 ASCII）→ 返回短路径
+/// 3. C:\Windows\Temp（可写验证）→ 回退
+/// 4. 原始 %TEMP%（最终回退，vslib 可能报错）
 #[cfg(feature = "vslib")]
 fn vslib_temp_dir() -> std::path::PathBuf {
     let t = std::env::temp_dir();
     if t.to_string_lossy().bytes().all(|b| b.is_ascii()) {
+        // %TEMP% 是纯 ASCII，优先使用 hifishifter/vslib/ 子目录统一管理
+        let unified = t.join("hifishifter").join("vslib");
+        if std::fs::create_dir_all(&unified).is_ok() {
+            return unified;
+        }
         return t;
     }
-    // %TEMP% 含非 ASCII 字符（常见于中文 Windows 用户名）
-    // C:\Windows\Temp 在标准 Windows 上始终是 ASCII，且普通用户可创建/删除自己的文件
+    // %TEMP% 含非 ASCII 字符（常见于中文 Windows 用户名），
+    // 尝试通过 GetShortPathNameW 获取 8.3 短路径（纯 ASCII）
+    if let Some(short) = get_short_path(&t) {
+        if short.to_string_lossy().bytes().all(|b| b.is_ascii()) {
+            eprintln!(
+                "[vslib] %TEMP% is non-ASCII, using 8.3 short path: {}",
+                short.display()
+            );
+            return short;
+        }
+    }
+    // 短路径不可用（NTFS 8.3 名称生成可能被禁用），回退到 C:\Windows\Temp
     let win_temp = std::path::PathBuf::from(r"C:\Windows\Temp");
     if win_temp.is_dir() {
         let probe = win_temp.join(".hs_vslib_probe");
@@ -82,6 +102,40 @@ fn vslib_temp_dir() -> std::path::PathBuf {
     // 最后回退：原始 temp 路径（vslib 可能报 VSERR_WAVEOPEN）
     eprintln!("[vslib] WARNING: temp dir is non-ASCII and C:\\Windows\\Temp is not writable; vslib will likely fail");
     t
+}
+
+/// 使用 Windows `GetShortPathNameW` API 获取 8.3 短路径。
+///
+/// 短路径仅包含 ASCII 字符，可安全传给使用 ANSI API 的 vslib DLL。
+/// 如果系统禁用了 8.3 名称生成或调用失败，返回 `None`。
+#[cfg(feature = "vslib")]
+fn get_short_path(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    // 直接声明 Windows API，避免引入 winapi / windows-sys crate
+    extern "system" {
+        fn GetShortPathNameW(
+            lpszLongPath: *const u16,
+            lpszShortPath: *mut u16,
+            cchBuffer: u32,
+        ) -> u32;
+    }
+
+    // 转换为以 null 结尾的 UTF-16 宽字符串
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    // 第一次调用：获取所需缓冲区长度
+    let len = unsafe { GetShortPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0) };
+    if len == 0 {
+        return None;
+    }
+    // 第二次调用：填充短路径
+    let mut buf = vec![0u16; len as usize];
+    let written = unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), len) };
+    if written == 0 || written >= len {
+        return None;
+    }
+    buf.truncate(written as usize);
+    Some(std::path::PathBuf::from(std::ffi::OsString::from_wide(&buf)))
 }
 
 /// 将单声道 f32 PCM 写入临时 WAV 文件（16-bit int），返回文件路径。
@@ -337,7 +391,7 @@ impl ClipProcessor for VslibProcessor {
         use std::ffi::{c_int, CString};
         use crate::vslib::{
             check, VsProject,
-            VslibAddItemEx, VslibSetItemInfo, VslibSetPitchArray,
+            VslibAddItemEx, VslibSetItemInfo,
             VslibGetCtrlPntInfoEx2, VslibSetCtrlPntInfoEx2,
             VslibAddTimeCtrlPnt, VslibGetMixData,
             VslibGetProjectInfo, VslibSetProjectInfo, VslibGetVersion,
@@ -465,75 +519,22 @@ impl ClipProcessor for VslibProcessor {
             synth_mode,
         );
 
-        // ── 6. 批量写入目标音高（覆盖 vslib 自带分析结果）────────────────────
-        //  ctx.pitch_edit[i] 为 timeline 时间索引的 MIDI（60.0 = C4），值 > 0 表示用户设定目标
-        //  vslib pitData 单位 = MIDI*100（6000=C4），0 表示保留 vslib 自身分析音高
-        //
-        //  注意：VslibSetPitchArray 操作的是源音频时间轴（item 内部时间），
-        //  而 ctx.pitch_edit 是 timeline 时间轴（已经过 playback_rate 拉伸）。
-        //  源音频帧 k 对应 timeline 位置 = seg_start_sec + k*fp/playback_rate。
-        if !ctx.pitch_edit.is_empty() && ctx.frame_period_ms > 0.0 {
-            let frame_period_sec = ctx.frame_period_ms / 1000.0;
-            // 源音频时长（n_frames 必须覆盖源音频，不能用输出时长）
-            let source_dur_sec = ctx.mono_pcm.len() as f64 / ctx.sample_rate.max(1) as f64;
-            let n_frames = ((source_dur_sec / frame_period_sec).ceil() as usize + 2)
-                .min(ctx.pitch_edit.len());
-            if n_frames > 0 {
-                let playback_rate = ctx.playback_rate.max(1e-6);
-                let mut pit_data: Vec<c_int> = (0..n_frames)
-                    .map(|k| {
-                        // 源帧 k → timeline 绝对时间
-                        let timeline_sec =
-                            ctx.seg_start_sec + (k as f64) * frame_period_sec / playback_rate;
-                        let edit_idx =
-                            (timeline_sec / frame_period_sec).floor().max(0.0) as usize;
-                        let v = ctx.pitch_edit.get(edit_idx).copied().unwrap_or(0.0);
-                        if v > 0.0 {
-                            (v * 100.0).round() as c_int
-                        } else {
-                            0
-                        }
-                    })
-                    .collect();
-                if debug {
-                    let nonzero = pit_data.iter().filter(|&&v| v != 0).count();
-                    let first_nonzero = pit_data.iter().position(|&v| v != 0);
-                    let min_pitch = pit_data.iter().copied().filter(|&v| v != 0).min();
-                    let max_pitch = pit_data.iter().copied().filter(|&v| v != 0).max();
-                    eprintln!(
-                        "[vslib] pitch_array: clip_id={} seg_start={:.3}s n_frames={} source_dur={:.3}s rate={:.3} nonzero={} first_nonzero={:?} min={:?} max={:?} first={:?} last={:?}",
-                        ctx.clip_id,
-                        ctx.seg_start_sec,
-                        n_frames,
-                        source_dur_sec,
-                        playback_rate,
-                        nonzero,
-                        first_nonzero,
-                        min_pitch,
-                        max_pitch,
-                        pit_data.first().copied(),
-                        pit_data.last().copied(),
-                    );
-                }
-                check(unsafe {
-                    VslibSetPitchArray(
-                        proj.0,
-                        item_num,
-                        pit_data.as_mut_ptr(),
-                        pit_data.len() as c_int,
-                        frame_period_sec,
-                    )
-                })
-                .map_err(|e| format!("VslibSetPitchArray: {e}"))?;
-            }
-        }
+        // ── 6. （已移除 VslibSetPitchArray）──────────────────────────────────
+        //  原步骤 6 使用 VslibSetPitchArray 批量写入 pitch，但与步骤 7 的逐控制点
+        //  VslibSetCtrlPntInfoEx2 写入 pitEdit 形成双重写入，导致 vslib DLL 内部
+        //  合成引擎数据不一致，触发 STATUS_ACCESS_VIOLATION (0xc0000005) 崩溃。
+        //  现在仅保留步骤 7 的逐控制点写入，这是官方 sample1.c 推荐的标准做法。
 
-        // ── 7. 逐控制点写入 volume / dyn_edit / pan / formant / breathiness ──
+        // ── 7. 逐控制点写入 pitch / volume / dyn_edit / pan / formant / breathiness ──
+        //  按官方 sample1.c 方式逐控制点写入 pitEdit + pitFlgEdit，
+        //  确保音高编辑一定生效。
         let has_curves = ctx.extra_curves.values().any(|v| !v.is_empty());
-        if has_curves && ctrl_pnt_num > 0 && ctrl_pnt_ps > 0 {
+        let has_pitch = !ctx.pitch_edit.is_empty() && ctx.frame_period_ms > 0.0;
+        if (has_curves || has_pitch) && ctrl_pnt_num > 0 && ctrl_pnt_ps > 0 {
             let cp_interval_sec = 1.0 / (ctrl_pnt_ps as f64);
             let fp = ctx.frame_period_ms;
             let seg_start = ctx.seg_start_sec;
+            let playback_rate = ctx.playback_rate.max(1e-6);
 
             let volume_c = ctx.extra_curves.get("volume");
             let dyn_c = ctx.extra_curves.get("dyn_edit");
@@ -541,6 +542,8 @@ impl ClipProcessor for VslibProcessor {
             let formant_c = ctx.extra_curves.get("formant_shift_cents");
             let breathiness_c = ctx.extra_curves.get("breathiness");
             let sample_points = [0, ctrl_pnt_num / 2, ctrl_pnt_num - 1];
+
+            let mut pitch_applied_count = 0usize;
 
             for pnt in 0..ctrl_pnt_num {
                 let at_abs = seg_start + (pnt as f64) * cp_interval_sec;
@@ -551,6 +554,26 @@ impl ClipProcessor for VslibProcessor {
                 .is_err()
                 {
                     continue;
+                }
+
+                // ── 音高编辑：将 ctx.pitch_edit（MIDI 值）转换为 vslib cent 写入 pitEdit ──
+                //  控制点处于源音频时间轴，需要考虑 playback_rate 映射回 timeline 时间，
+                //  再从 timeline 时间索引 pitch_edit 数组。
+                //  pitEdit 单位 = cent（MIDI * 100），pitFlgEdit = 1 表示有声帧。
+                //  仅当 pitch_edit 中该位置有有效值（> 0）时才覆盖，否则保留 vslib 分析结果。
+                if has_pitch {
+                    // 控制点在源音频时间轴的位置（秒）
+                    let source_sec = (pnt as f64) * cp_interval_sec;
+                    // 映射到 timeline 绝对时间
+                    let timeline_sec = seg_start + source_sec / playback_rate;
+                    let edit_idx = (timeline_sec * 1000.0 / fp).floor().max(0.0) as usize;
+                    let midi_val = ctx.pitch_edit.get(edit_idx).copied().unwrap_or(0.0);
+                    if midi_val > 0.0 {
+                        cp2.pitEdit = (midi_val * 100.0).round() as c_int;
+                        cp2.pitFlgEdit = 1; // 标记为有声帧
+                        pitch_applied_count += 1;
+                    }
+                    // midi_val == 0 → 保留 vslib 分析得到的 pitEdit 和 pitFlgEdit 不变
                 }
 
                 if let Some(v) = curve_at_abs_sec(volume_c, at_abs, fp) {
@@ -589,6 +612,13 @@ impl ClipProcessor for VslibProcessor {
                     );
                 }
             }
+
+            if has_pitch {
+                eprintln!(
+                    "[vslib] pitch_via_ctrl_pnt: clip_id={} total_ctrl_pnts={} pitch_applied={}",
+                    ctx.clip_id, ctrl_pnt_num, pitch_applied_count,
+                );
+            }
         }
 
         // ── 8. Timing 控制点（时间拉伸）──────────────────────────────────────
@@ -618,9 +648,13 @@ impl ClipProcessor for VslibProcessor {
         // ── 9. 获取输出帧数（触发 vslib 内部计算）──────────────────────────
         //  VslibGetMixSample 返回每声道帧数（frame count per channel），
         //  与 VSITEMINFO.sampleOrg 单位相同，与输出声道数无关。
-        let mix_frames = proj
-            .mix_sample()
-            .map_err(|e| format!("VslibGetMixSample: {e}"))?;
+        //  catch_unwind 防护：vslib DLL 内部可能触发 SEH 异常（如 STATUS_ACCESS_VIOLATION），
+        //  通过 catch_unwind 将其转为 Err 而非进程崩溃。
+        let mix_frames = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            proj.mix_sample()
+        }))
+        .map_err(|_| "vslib DLL 在 VslibGetMixSample 中发生内部崩溃 (caught panic)".to_string())?
+        .map_err(|e| format!("VslibGetMixSample: {e}"))?;
         if mix_frames <= 0 {
             return Err("VslibGetMixSample returned 0 frames".into());
         }
@@ -636,16 +670,21 @@ impl ClipProcessor for VslibProcessor {
         //  传 mix_frames * 2 会让 vslib 写入 (mix_frames * 2) * 2 = mix_frames * 4 个 i16
         //  → 越界写堆 → STATUS_HEAP_CORRUPTION (0xc0000374)。
         let mut buf_stereo = vec![0i16; (mix_frames as usize) * 2];
-        check(unsafe {
-            VslibGetMixData(
-                proj.0,
-                buf_stereo.as_mut_ptr() as *mut std::ffi::c_void,
-                16,          // bit depth
-                2,           // channel=2（立体声，与 sample1.c 一致）
-                0,           // start（帧索引）
-                mix_frames,  // size = 帧数（每声道），vslib 内部 × channel → 总 i16 数
-            )
-        })
+        //  catch_unwind 防护：VslibGetMixData 是 vslib 合成引擎的核心调用，
+        //  若 DLL 内部发生 ACCESS_VIOLATION 等 SEH 异常，转为安全的错误返回。
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            check(unsafe {
+                VslibGetMixData(
+                    proj.0,
+                    buf_stereo.as_mut_ptr() as *mut std::ffi::c_void,
+                    16,          // bit depth
+                    2,           // channel=2（立体声，与 sample1.c 一致）
+                    0,           // start（帧索引）
+                    mix_frames,  // size = 帧数（每声道），vslib 内部 × channel → 总 i16 数
+                )
+            })
+        }))
+        .map_err(|_| "vslib DLL 在 VslibGetMixData 中发生内部崩溃 (caught panic)".to_string())?
         .map_err(|e| format!("VslibGetMixData(stereo): {e}"))?;
 
         let (left_stats, right_stats) = stereo_channel_stats(&buf_stereo);

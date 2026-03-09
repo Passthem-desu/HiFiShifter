@@ -62,18 +62,4 @@ export const playOriginal = createAsyncThunk(
     },
 );
 
-export const playSynthesized = createAsyncThunk(
-    "session/playSynthesized",
-    async (_, { getState }) => {
-        const state = getState() as { session: SessionState };
-        const anchorBeat = state.session.playheadSec;
-        // Ensure backend transport is in sync before starting playback.
-        await webApi.setTransport({ playheadSec: anchorBeat });
-        const result = await webApi.playSynthesized(0);
-        return {
-            ...result,
-            clipId: null,
-            anchorBeat,
-        };
-    },
-);
+

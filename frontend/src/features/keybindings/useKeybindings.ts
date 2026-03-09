@@ -22,7 +22,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 /**
  * 将 KeyboardEvent 的按键信息规范化为小写 key 字符串
  */
-function normalizeEventKey(e: KeyboardEvent): string {
+export function normalizeEventKey(e: KeyboardEvent): string {
     // 对 Space 按键特殊处理
     if (e.key === " " || e.code === "Space") return "space";
     return e.key.toLowerCase();
@@ -31,7 +31,7 @@ function normalizeEventKey(e: KeyboardEvent): string {
 /**
  * 判断按下的按键是否匹配某个 Keybinding 定义
  */
-function matchesKeybinding(e: KeyboardEvent, kb: Keybinding): boolean {
+export function matchesKeybinding(e: KeyboardEvent, kb: Keybinding): boolean {
     const key = normalizeEventKey(e);
     if (key !== kb.key) return false;
 
@@ -106,15 +106,18 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
 
             // PianoRoll scroller 内的快捷键由其自身 onKeyDown 处理，不拦截
             const active = document.activeElement as HTMLElement | null;
-            if (
+            const inPianoRoll =
                 active?.hasAttribute("data-piano-roll-scroller") ||
-                active?.closest?.("[data-piano-roll-scroller]")
-            ) {
-                // 仅放行 PianoRoll 内的 Ctrl+C/V（参数帧复制粘贴）
-                const key = normalizeEventKey(e);
-                const isMod =
-                    e.ctrlKey || e.metaKey;
-                if (isMod && (key === "c" || key === "v")) {
+                active?.closest?.("[data-piano-roll-scroller]");
+            if (inPianoRoll) {
+                // 查找匹配的 actionId，如果属于 pianoRoll.* 则放行给 PianoRoll 自己处理
+                // （shiftParamUp/Down 已移至全局 handler，不需要放行）
+                const matchedAction = findMatchingAction(e, keybindingsRef.current);
+                if (
+                    matchedAction?.startsWith("pianoRoll.") &&
+                    matchedAction !== "pianoRoll.shiftParamUp" &&
+                    matchedAction !== "pianoRoll.shiftParamDown"
+                ) {
                     return;
                 }
             }

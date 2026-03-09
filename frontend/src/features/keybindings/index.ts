@@ -10,4 +10,4 @@ export {
     formatKeybinding,
     findConflicts,
 } from "./keybindingsSlice";
-export { useKeybindings, isEditableTarget } from "./useKeybindings";
+export { useKeybindings, isEditableTarget, matchesKeybinding, normalizeEventKey } from "./useKeybindings";

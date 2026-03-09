@@ -85,6 +85,12 @@ pub(super) fn process_audio(state: State<'_, AppState>, audio_path: String) -> P
 
 
 pub(super) fn synthesize(state: State<'_, AppState>) -> SynthesizePayload {
+    // 删除上一次的 synth 临时文件，避免磁盘泄漏
+    {
+        let rt = state.runtime.lock().unwrap_or_else(|e| e.into_inner());
+        crate::temp_manager::remove_old_synth_temp(rt.synthesized_wav_path.as_deref());
+    }
+
     let out_path = match new_temp_wav_path("synth") {
         Ok(p) => p,
         Err(e) => {

@@ -240,6 +240,7 @@ export const messages = {
         kb_project_save: "Save",
         kb_project_save_as: "Save As",
         kb_project_export: "Export Audio",
+        kb_track_add: "Add Track",
         kb_clip_delete: "Delete Clip",
         kb_clip_copy: "Copy Clip",
         kb_clip_paste: "Paste Clip",
@@ -248,6 +249,8 @@ export const messages = {
         kb_group_modifier: "Modifier Keys",
         kb_pianoroll_copy: "Copy Param Frames",
         kb_pianoroll_paste: "Paste Param Frames",
+        kb_pianoroll_shift_param_up: "Shift Param Up (clip range)",
+        kb_pianoroll_shift_param_down: "Shift Param Down (clip range)",
         kb_modifier_slip_edit: "Slip Edit (hold while dragging clip)",
         kb_modifier_stretch: "Time Stretch (hold while dragging edge)",
         kb_modifier_no_snap: "Disable Snap (hold while dragging)",
@@ -255,9 +258,15 @@ export const messages = {
         kb_modifier_pr_vzoom: "Vertical Zoom (hold + scroll in Piano Roll)",
         kb_group_mode: "Mode",
         kb_mode_toggle: "Toggle Select / Draw Mode",
-        kb_press_modifier: "Press modifier…",
+        kb_press_modifier: "Press modifier\u2026",
         menu_keybindings: "Keyboard Shortcuts...",
-
+        kb_group_quick_search: "Quick Search",
+        kb_quick_search_open: "Open Quick Search",
+        kb_quick_search_nav_up: "Navigate Up",
+        kb_quick_search_nav_down: "Navigate Down",
+        kb_quick_search_preview: "Preview / Audition",
+        kb_quick_search_confirm: "Place Audio",
+        kb_quick_search_close: "Close",
         vs_paste_clipboard_not_found:
             "VocalShifter clipboard data was not found.",
         vs_paste_clipboard_invalid_format:
@@ -270,6 +279,21 @@ export const messages = {
         vs_import_parse_failed: "Failed to parse VocalShifter project.",
         vs_import_skipped_header:
             "The following audio files were skipped (unsupported format or not found):",
+
+        // MIDI 导入
+        midi_import: "Import MIDI",
+        midi_import_title: "Import MIDI to Pitch",
+        midi_import_desc: "Select a MIDI track to import as pitch curve",
+        midi_select_track: "Select Track",
+        midi_all_tracks: "Merge All Tracks",
+        midi_track_notes: "{count} notes",
+        midi_track_range: "Range: {min} – {max}",
+        midi_no_tracks: "No tracks with notes found in MIDI file",
+        midi_importing: "Importing...",
+        midi_import_success: "MIDI imported: {notes} notes, {frames} frames",
+        midi_import_failed: "MIDI import failed",
+        midi_file_not_found: "MIDI file not found",
+        midi_no_notes: "No notes in selected track",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -508,6 +532,7 @@ export const messages = {
         kb_project_save: "保存",
         kb_project_save_as: "另存为",
         kb_project_export: "导出音频",
+        kb_track_add: "新建轨道",
         kb_clip_delete: "删除音频块",
         kb_clip_copy: "复制音频块",
         kb_clip_paste: "粘贴音频块",
@@ -516,6 +541,8 @@ export const messages = {
         kb_group_modifier: "修饰键",
         kb_pianoroll_copy: "复制参数帧",
         kb_pianoroll_paste: "粘贴参数帧",
+        kb_pianoroll_shift_param_up: "参数线上移（clip 范围）",
+        kb_pianoroll_shift_param_down: "参数线下移（clip 范围）",
         kb_group_mode: "模式",
         kb_mode_toggle: "切换选择 / 绘制模式",
         kb_modifier_slip_edit: "Slip 编辑（拖动音频块时按住）",
@@ -523,9 +550,15 @@ export const messages = {
         kb_modifier_no_snap: "禁用吸附（拖动时按住）",
         kb_modifier_copy_drag: "复制拖动（拖动音频块时按住）",
         kb_modifier_pr_vzoom: "垂直缩放（在钢琴卷帘中按住+滚轮）",
-        kb_press_modifier: "请按修饰键…",
+        kb_press_modifier: "请按修饰键\u2026",
         menu_keybindings: "快捷键设置...",
-
+        kb_group_quick_search: "快速搜索",
+        kb_quick_search_open: "打开快速搜索",
+        kb_quick_search_nav_up: "向上切换候选项",
+        kb_quick_search_nav_down: "向下切换候选项",
+        kb_quick_search_preview: "预览/ 试听",
+        kb_quick_search_confirm: "放置音频",
+        kb_quick_search_close: "关闭",
         vs_paste_clipboard_not_found: "未找到 VocalShifter 剪贴板数据。",
         vs_paste_clipboard_invalid_format:
             "剪贴板文件格式不正确（文件大小不是 0x80 的整数倍，或记录损坏）。",
@@ -536,6 +569,21 @@ export const messages = {
         vs_import_parse_failed: "解析 VocalShifter 工程失败。",
         vs_import_skipped_header:
             "以下音频文件因格式不支持或文件不存在而被跳过：",
+
+        // MIDI 导入
+        midi_import: "导入 MIDI",
+        midi_import_title: "导入 MIDI 到音高曲线",
+        midi_import_desc: "选择一个 MIDI 轨道导入为音高曲线",
+        midi_select_track: "选择轨道",
+        midi_all_tracks: "合并所有轨道",
+        midi_track_notes: "{count} 个音符",
+        midi_track_range: "范围：{min} – {max}",
+        midi_no_tracks: "MIDI 文件中没有包含音符的轨道",
+        midi_importing: "导入中...",
+        midi_import_success: "MIDI 已导入：{notes} 个音符，{frames} 帧",
+        midi_import_failed: "MIDI 导入失败",
+        midi_file_not_found: "MIDI 文件未找到",
+        midi_no_notes: "选中的轨道没有音符",
     },
 } as const;
 

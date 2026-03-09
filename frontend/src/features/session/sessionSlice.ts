@@ -47,7 +47,6 @@ import {
 import {
     fetchTimeline,
     playOriginal,
-    playSynthesized,
     seekPlayhead,
     stopAudioPlayback,
     syncPlaybackState,
@@ -116,6 +115,8 @@ export interface SessionState {
     clips: ClipInfo[];
     selectedTrackId: string | null;
     selectedClipId: string | null;
+    /** 多选 clip 的 id 列表（框选 / Ctrl+点击） */
+    multiSelectedClipIds: string[];
     clipAutomation: Record<string, Record<string, AutomationPoint[]>>;
     selectedPointId: string | null;
     clipWaveforms: Record<string, WaveformPreview>;
@@ -510,6 +511,7 @@ const initialState: SessionState = {
     clips: [],
     selectedTrackId: "track_main",
     selectedClipId: null,
+    multiSelectedClipIds: [],
     clipAutomation: {},
     selectedPointId: null,
     clipWaveforms: {},
@@ -574,7 +576,6 @@ export {
     updateTransportBpm,
     syncPlaybackState,
     playOriginal,
-    playSynthesized,
     stopAudioPlayback,
 } from "./thunks/transportThunks";
 
@@ -684,6 +685,9 @@ const sessionSlice = createSlice({
                     selectedClip?.trackId ?? state.selectedTrackId;
                 ensureClipAutomation(state, action.payload);
             }
+        },
+        setMultiSelectedClipIds(state, action: PayloadAction<string[]>) {
+            state.multiSelectedClipIds = action.payload;
         },
         moveClipStart(
             state,
@@ -1381,29 +1385,6 @@ const sessionSlice = createSlice({
             })
             .addCase(playOriginal.rejected, setRejected)
 
-            .addCase(playSynthesized.pending, (state) =>
-                setPending(state, "Playing synthesized..."),
-            )
-            .addCase(playSynthesized.fulfilled, (state, action) => {
-                state.busy = false;
-                state.lastResult = action.payload;
-                const payload = action.payload as {
-                    ok?: boolean;
-                    clipId?: string | null;
-                    anchorBeat?: number;
-                };
-                const ok = Boolean(payload.ok);
-                state.runtime.isPlaying = ok;
-                state.runtime.playbackTarget = ok ? "synthesized" : null;
-                state.playbackClipId = ok ? (payload.clipId ?? null) : null;
-                // Backend playback state reports an absolute clock; anchor beat is no longer needed.
-                state.playbackAnchorSec = 0;
-                state.status = ok
-                    ? "Playing synthesized"
-                    : "Play synthesized failed";
-            })
-            .addCase(playSynthesized.rejected, setRejected)
-
             .addCase(stopAudioPlayback.pending, (state) =>
                 setPending(state, "Stopping audio..."),
             )
@@ -1908,6 +1889,7 @@ export const {
     closeVocalShifterSkippedFilesDialog,
     closeReaperSkippedFilesDialog,
     setSelectedClip,
+    setMultiSelectedClipIds,
     moveClipStart,
     moveClipTrack,
     setClipLength,

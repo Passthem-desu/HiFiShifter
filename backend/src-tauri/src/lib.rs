@@ -27,11 +27,13 @@ mod project;
 #[path = "import/vocalshifter_import.rs"] mod vocalshifter_import;
 #[path = "import/reaper_parser.rs"] mod reaper_parser;
 #[path = "import/reaper_import.rs"] mod reaper_import;
+#[path = "import/midi_import.rs"] mod midi_import;
 mod state;
 #[path = "audio/time_stretch.rs"] mod time_stretch;
 #[path = "audio/waveform.rs"] mod waveform;
 #[path = "audio/waveform_disk_cache.rs"] mod waveform_disk_cache;
 mod config;
+mod temp_manager;
 #[path = "vocoder/world.rs"] mod world;
 #[path = "vocoder/streaming_world.rs"] mod streaming_world;
 #[path = "vocoder/world_vocoder.rs"] mod world_vocoder;
@@ -105,6 +107,9 @@ pub fn run() {
                 }
                 let _ = state.config_dir.set(cfg_dir);
             }
+
+            // 启动时清理上次遗留的临时文件（后台线程，不阻塞启动）
+            temp_manager::cleanup_stale_temp_files();
 
             Ok(())
         })
@@ -227,6 +232,7 @@ pub fn run() {
             commands::open_audio_dialog,
             commands::pick_output_path,
             commands::pick_directory,
+            commands::open_midi_dialog,
             commands::get_waveform_peaks_segment,
             commands::get_root_mix_waveform_peaks_segment,
             commands::get_track_mix_waveform_peaks_segment,
@@ -258,7 +264,6 @@ pub fn run() {
             commands::save_synthesized,
             commands::save_separated,
             commands::play_original,
-            commands::play_synthesized,
             commands::stop_audio,
             commands::get_playback_state,
             commands::debug_realtime_render_stats,
@@ -278,7 +283,9 @@ pub fn run() {
             commands::import_reaper_project,
             commands::paste_reaper_clipboard,
             commands::clear_cache,
-            commands::get_processor_params
+            commands::get_processor_params,
+            commands::get_midi_tracks,
+            commands::import_midi_to_pitch
             // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
             // commands::start_pitch_refresh_task,
             // commands::get_pitch_refresh_status,

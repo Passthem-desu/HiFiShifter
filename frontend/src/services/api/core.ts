@@ -32,6 +32,11 @@ export const coreApi = {
 
     closeWindow: () => invoke<{ ok: boolean }>("close_window"),
 
+    openMidiDialog: () =>
+        invoke<{ ok: boolean; canceled?: boolean; path?: string }>(
+            "open_midi_dialog",
+        ),
+
     clearWaveformCache: () =>
         invoke<{
             ok: boolean;
@@ -80,12 +85,6 @@ export const coreApi = {
     playOriginal: (startSec = 0) =>
         invoke<{ ok: boolean; playing?: string; start_sec?: number }>(
             "play_original",
-            startSec,
-        ),
-
-    playSynthesized: (startSec = 0) =>
-        invoke<{ ok: boolean; playing?: string; start_sec?: number }>(
-            "play_synthesized",
             startSec,
         ),
 

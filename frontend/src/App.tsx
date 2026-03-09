@@ -22,6 +22,8 @@ import {
     exportAudio,
     pickOutputPath,
     setToolMode,
+    checkpointHistory,
+    addTrackRemote,
 } from "./features/session/sessionSlice";
 import { useI18n } from "./i18n/I18nProvider";
 import { useClipPitchDataListener } from "./hooks/useClipPitchDataListener";
@@ -34,8 +36,13 @@ import {
     usePianoRollStatus,
 } from "./contexts/PianoRollStatusContext";
 import { FileBrowserPanel } from "./components/layout/FileBrowserPanel";
+import { QuickSearchPopup } from "./components/layout/QuickSearchPopup";
 import { useKeybindings } from "./features/keybindings/useKeybindings";
 import type { ActionId } from "./features/keybindings/types";
+import { store } from "./app/store";
+import { resolveRootTrackId } from "./features/session/trackUtils";
+import { paramsApi } from "./services/api";
+import type { ParamFramesPayload } from "./types/api";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -90,13 +97,6 @@ function AppInner() {
     const runtimeHasSynthesized = useAppSelector(
         (state) => state.session.runtime.hasSynthesized,
     );
-    const runtimeDevice = useAppSelector((state) => state.session.runtime.device);
-    const runtimeModelLoaded = useAppSelector(
-        (state) => state.session.runtime.modelLoaded,
-    );
-    const runtimeAudioLoaded = useAppSelector(
-        (state) => state.session.runtime.audioLoaded,
-    );
     const fileBrowserVisible = useAppSelector(
         (state) => state.fileBrowser.visible,
     );
@@ -119,6 +119,7 @@ function AppInner() {
     });
     const splitRatioRef = useRef(splitRatio);
     const [isDragging, setIsDragging] = useState(false);
+    const [quickSearchOpen, setQuickSearchOpen] = useState(false);
 
     const splitter = useMemo(() => {
         const minTopPx = 200;
@@ -400,6 +401,58 @@ function AppInner() {
                     ),
                 );
                 break;
+            case "quickSearch.open":
+                setQuickSearchOpen(true);
+                break;
+            case "track.add": {
+                const ss = store.getState().session;
+                const parentId = ss.selectedTrackId ?? null;
+                void dispatch(addTrackRemote({ parentTrackId: parentId }));
+                break;
+            }
+            case "pianoRoll.shiftParamUp":
+            case "pianoRoll.shiftParamDown": {
+                const isUp = actionId === "pianoRoll.shiftParamUp";
+                const ss = store.getState().session;
+                const rootTrkId = resolveRootTrackId(ss.tracks, ss.selectedTrackId);
+                if (!rootTrkId) break;
+                const editP = ss.editParam;
+                // pitch 参数需要 pitch 分析可用才能操作
+                if (editP === "pitch") {
+                    const rootTrk = ss.tracks.find((tr) => tr.id === rootTrkId);
+                    if (!rootTrk?.composeEnabled || rootTrk.pitchAnalysisAlgo === "none") break;
+                }
+                const selClipId = ss.selectedClipId;
+                // 优先使用多选 clip 列表，否则 fallback 到单选
+                const multiIds = ss.multiSelectedClipIds;
+                const clipIds =
+                    multiIds.length >= 1
+                        ? multiIds
+                        : selClipId
+                          ? [selClipId]
+                          : [];
+                if (clipIds.length === 0) break;
+                const selClips = ss.clips.filter((c) => clipIds.includes(c.id));
+                if (selClips.length === 0) break;
+                const minSec = Math.min(...selClips.map((c) => c.startSec));
+                const maxSec = Math.max(...selClips.map((c) => c.startSec + c.lengthSec));
+                // 默认 framePeriodMs = 5
+                const fp = 5;
+                const startFrame = Math.max(0, Math.floor((minSec * 1000) / fp));
+                const frameCount = Math.max(1, Math.min(200_000, Math.ceil(((maxSec - minSec) * 1000) / fp)));
+                const delta = editP === "pitch" ? (isUp ? 1 : -1) : (isUp ? 0.05 : -0.05);
+                void (async () => {
+                    const res = await paramsApi.getParamFrames(rootTrkId, editP, startFrame, frameCount, 1);
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    const editValues = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    const shifted = editValues.map((v) => v + delta);
+                    await paramsApi.setParamFrames(rootTrkId, editP, startFrame, shifted, true);
+                    // 通知 PianoRoll 刷新曲线
+                    dispatch(checkpointHistory());
+                })();
+                break;
+            }
             // clip.* 操作由 TimelinePanel 的 useKeyboardShortcuts 处理
             default:
                 break;
@@ -550,6 +603,12 @@ function AppInner() {
                 )}
             </Flex>
 
+            {/* Quick Search Popup */}
+            <QuickSearchPopup
+                open={quickSearchOpen}
+                onClose={() => setQuickSearchOpen(false)}
+            />
+
             {/* Status Bar */}
             <Flex
                 align="center"
@@ -633,12 +692,7 @@ function AppInner() {
                         {errorText}
                     </Text>
                 </Flex>
-                <Text size="1" color="gray" className="shrink-0 whitespace-nowrap">
-                    {t("status_device")}: {runtimeDevice} · {t("status_model")}:
-                    {runtimeModelLoaded ? t("status_ok") : t("status_na")} ·{" "}
-                    {t("status_audio")}: {runtimeAudioLoaded ? t("status_ok") : t("status_na")} ·{" "}
-                    {t("status_synth")}: {runtimeHasSynthesized ? t("status_ok") : t("status_na")}
-                </Text>
+
             </Flex>
         </Flex>
     );
