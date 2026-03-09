@@ -143,7 +143,8 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                         &clip_render_info.clip,
                         clip_render_info.sr,
                     ) {
-                        Ok(stereo_pcm) => {
+                        Ok(rendered) => {
+                            let stereo_pcm = rendered.rendered_stereo;
                             if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                                 let nonzero = stereo_pcm.iter().filter(|&&v| v.abs() > 1e-6).count();
                                 eprintln!(
@@ -155,6 +156,9 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                             let frames = (stereo_pcm.len() / 2) as u64;
                             let entry = crate::synth_clip_cache::RenderedClipCacheEntry {
                                 pcm_stereo: std::sync::Arc::new(stereo_pcm),
+                                breath_noise_stereo: rendered
+                                    .breath_noise_stereo
+                                    .map(std::sync::Arc::new),
                                 frames,
                                 sample_rate: clip_render_info.sr,
                             };
@@ -266,6 +270,11 @@ struct ClipRenderInfo {
     sr: u32,
 }
 
+struct RenderedClipOutput {
+    rendered_stereo: Vec<f32>,
+    breath_noise_stereo: Option<Vec<f32>>,
+}
+
 /// 收集 timeline 中所有需要预渲染的 clip。
 ///
 /// 返回值中只包含需要 pitch edit 的 clip。
@@ -294,7 +303,7 @@ fn collect_clips_needing_render(
         
         // 使用新的检测逻辑：检查clip是否需要pitch edit
         let clip_start_sec = clip.start_sec.max(0.0);
-        let needs_pitch_edit = crate::pitch_editing::does_clip_need_pitch_edit(
+        let needs_pitch_edit = crate::pitch_editing::does_clip_need_processor_render(
             timeline,
             clip,
             clip_start_sec,
@@ -370,7 +379,7 @@ fn render_single_clip(
     timeline: &crate::state::TimelineState,
     clip: &crate::state::Clip,
     out_rate: u32,
-) -> Result<Vec<f32>, String> {
+) -> Result<RenderedClipOutput, String> {
     let source_path = clip
         .source_path
         .as_deref()
@@ -466,57 +475,118 @@ fn render_single_clip(
         );
     }
 
-    // 6. Pitch edit（核心：通过 Renderer trait 应用音高编辑）
     let clip_start_sec = clip.start_sec.max(0.0);
     let seg_start_sec = clip_start_sec + pre_silence_sec;
-    let seg_frames = segment.len() / 2;
-    if seg_frames >= 16 {
-        match crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
-            timeline,
-            clip,
-            clip_start_sec,
-            seg_start_sec,
-            out_rate,
-            &mut segment,
-        ) {
-            Ok(true) => {
-                if debug {
-                    eprintln!(
-                        "render_single_clip: pitch_edit applied to clip_id={}",
-                        &clip.id
-                    );
-                }
-            }
-            Ok(false) => {}
-            Err(e) => {
-                eprintln!(
-                    "[pitch_edit] clip_id={} ERROR: {e}",
-                    &clip.id
-                );
-            }
-        }
-    }
-
-    // 7. 前置静音（负 source_start 导致的 pre-silence）
-    if pre_silence_sec > 1e-6 {
-        let pre_frames = (pre_silence_sec * out_rate as f64).round().max(0.0) as usize;
-        let mut with_silence = vec![0.0f32; pre_frames * 2];
-        with_silence.extend_from_slice(&segment);
-        segment = with_silence;
-    }
-
-    // 8. 截断到 clip 的时间线长度
     let clip_timeline_frames =
         (clip.length_sec.max(0.0) * out_rate as f64).round().max(1.0) as usize;
     let clip_stereo_len = clip_timeline_frames * 2;
-    if segment.len() > clip_stereo_len {
-        segment.truncate(clip_stereo_len);
-    } else if segment.len() < clip_stereo_len {
-        // 不够长时补零（正常情况下不应发生）
-        segment.resize(clip_stereo_len, 0.0);
+
+    let root_params = timeline
+        .resolve_root_track_id(&clip.track_id)
+        .and_then(|root| timeline.params_by_root_track.get(&root));
+    let effective_extra_params = clip
+        .extra_params
+        .as_ref()
+        .or_else(|| root_params.map(|entry| &entry.extra_params));
+    let breath_enabled = effective_extra_params
+        .map(|params| crate::pitch_editing::extra_param_enabled(params, "breath_enabled"))
+        .unwrap_or(false);
+    let frame_period_ms = root_params
+        .map(|entry| entry.frame_period_ms.max(0.1))
+        .unwrap_or(5.0);
+    let curve_len = (((clip_start_sec + clip.length_sec.max(0.0)) * 1000.0) / frame_period_ms)
+        .ceil()
+        .max(0.0) as usize
+        + 2;
+
+    let render_variant = |clip_variant: &crate::state::Clip| {
+        let mut rendered = segment.clone();
+        let seg_frames = rendered.len() / 2;
+        if seg_frames >= 16 {
+            match crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
+                timeline,
+                clip_variant,
+                clip_start_sec,
+                seg_start_sec,
+                out_rate,
+                &mut rendered,
+            ) {
+                Ok(true) => {
+                    if debug {
+                        eprintln!(
+                            "render_single_clip: pitch_edit applied to clip_id={}",
+                            &clip_variant.id
+                        );
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!("[pitch_edit] clip_id={} ERROR: {e}", &clip_variant.id);
+                }
+            }
+        }
+
+        if pre_silence_sec > 1e-6 {
+            let pre_frames = (pre_silence_sec * out_rate as f64).round().max(0.0) as usize;
+            let mut with_silence = vec![0.0f32; pre_frames * 2];
+            with_silence.extend_from_slice(&rendered);
+            rendered = with_silence;
+        }
+
+        if rendered.len() > clip_stereo_len {
+            rendered.truncate(clip_stereo_len);
+        } else if rendered.len() < clip_stereo_len {
+            rendered.resize(clip_stereo_len, 0.0);
+        }
+
+        rendered
+    };
+
+    if !breath_enabled {
+        return Ok(RenderedClipOutput {
+            rendered_stereo: render_variant(clip),
+            breath_noise_stereo: None,
+        });
     }
 
-    Ok(segment)
+    let mut merged_extra_params = root_params
+        .map(|entry| entry.extra_params.clone())
+        .unwrap_or_default();
+    if let Some(extra_params) = clip.extra_params.as_ref() {
+        merged_extra_params.extend(extra_params.clone());
+    }
+    merged_extra_params.insert("breath_enabled".to_string(), 1.0);
+
+    let mut merged_extra_curves = root_params
+        .map(|entry| entry.extra_curves.clone())
+        .unwrap_or_default();
+    if let Some(extra_curves) = clip.extra_curves.as_ref() {
+        merged_extra_curves.extend(extra_curves.clone());
+    }
+
+    let mut harmonic_only_clip = clip.clone();
+    merged_extra_curves.insert("breath_gain".to_string(), vec![0.0; curve_len]);
+    harmonic_only_clip.extra_params = Some(merged_extra_params.clone());
+    harmonic_only_clip.extra_curves = Some(merged_extra_curves.clone());
+    let mut harmonic_only = render_variant(&harmonic_only_clip);
+
+    let mut unity_breath_clip = clip.clone();
+    merged_extra_curves.insert("breath_gain".to_string(), vec![1.0; curve_len]);
+    unity_breath_clip.extra_params = Some(merged_extra_params);
+    unity_breath_clip.extra_curves = Some(merged_extra_curves);
+    let unity_mix = render_variant(&unity_breath_clip);
+
+    let out_len = harmonic_only.len().min(unity_mix.len());
+    harmonic_only.truncate(out_len);
+    let mut breath_noise_stereo = vec![0.0f32; out_len];
+    for index in 0..out_len {
+        breath_noise_stereo[index] = unity_mix[index] - harmonic_only[index];
+    }
+
+    Ok(RenderedClipOutput {
+        rendered_stereo: harmonic_only,
+        breath_noise_stereo: Some(breath_noise_stereo),
+    })
 }
 
 

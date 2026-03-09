@@ -7,6 +7,34 @@ use super::types::EngineSnapshot;
 use super::util::clamp11;
 use super::types::EngineClip;
 
+fn sample_automation_curve(
+    curve: Option<&Vec<f32>>,
+    abs_frame: u64,
+    sample_rate: u32,
+    frame_period_ms: f64,
+    default_value: f32,
+) -> f32 {
+    let Some(curve) = curve else {
+        return default_value;
+    };
+    if curve.is_empty() {
+        return default_value;
+    }
+
+    let fp = frame_period_ms.max(0.1);
+    let abs_sec = abs_frame as f64 / sample_rate.max(1) as f64;
+    let idx_f = (abs_sec * 1000.0) / fp;
+    if !idx_f.is_finite() {
+        return default_value;
+    }
+    let i0 = idx_f.floor().max(0.0) as usize;
+    let i1 = (i0 + 1).min(curve.len().saturating_sub(1));
+    let frac = (idx_f - i0 as f64).clamp(0.0, 1.0) as f32;
+    let a = curve.get(i0).copied().unwrap_or(default_value);
+    let b = curve.get(i1).copied().unwrap_or(a);
+    a + (b - a) * frac
+}
+
 /// 采样 clip 在 local 帧处的原始 PCM（不含 gain/fade）。
 /// 返回 None 表示该帧应静音（越界、leading silence 等）。
 #[inline]
@@ -15,7 +43,22 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
     if let Some(ref rendered) = clip.rendered_pcm {
         let idx = (local as usize) * 2;
         if idx + 1 < rendered.len() {
-            return Some((rendered[idx], rendered[idx + 1]));
+            let mut left = rendered[idx];
+            let mut right = rendered[idx + 1];
+            if let Some(ref breath_noise) = clip.breath_noise_pcm {
+                if idx + 1 < breath_noise.len() {
+                    let gain = sample_automation_curve(
+                        clip.breath_curve.as_deref(),
+                        clip.start_frame.saturating_add(local),
+                        clip.src.sample_rate,
+                        clip.breath_curve_frame_period_ms,
+                        1.0,
+                    );
+                    left += breath_noise[idx] * gain;
+                    right += breath_noise[idx + 1] * gain;
+                }
+            }
+            return Some((left, right));
         }
         // rendered_pcm 存在但越界时返回静音
         return None;

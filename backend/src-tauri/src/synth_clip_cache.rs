@@ -327,6 +327,8 @@ pub struct RenderedClipCacheKey {
 pub struct RenderedClipCacheEntry {
     /// Stereo interleaved PCM（从 clip local frame 0 开始），长度 = clip_frames * 2。
     pub pcm_stereo: Arc<Vec<f32>>,
+    /// 可选的独立气声 stem；存在时在播放回调中按当前 breath_gain 曲线实时混入。
+    pub breath_noise_stereo: Option<Arc<Vec<f32>>>,
     /// clip 帧数。
     pub frames: u64,
     /// 采样率（Hz）。
@@ -496,6 +498,10 @@ pub fn compute_rendered_clip_hash(
 ) -> u64 {
     let mut h: u64 = 14695981039346656037u64;
 
+    fn include_rendered_extra_curve(renderer_id: &str, param_id: &str) -> bool {
+        !(renderer_id == "nsf_hifigan_onnx" && param_id == "breath_gain")
+    }
+
     macro_rules! mix_bytes {
         ($bytes:expr) => {
             for &b in $bytes {
@@ -530,6 +536,9 @@ pub fn compute_rendered_clip_hash(
     let mut sorted_curves: Vec<(&String, &Vec<f32>)> = extra_curves.iter().collect();
     sorted_curves.sort_by_key(|(k, _)| k.as_str());
     for (k, v) in sorted_curves {
+        if !include_rendered_extra_curve(renderer_id, k.as_str()) {
+            continue;
+        }
         mix_bytes!(k.as_bytes());
         for &val in v.iter() {
             mix_bytes!(&val.to_bits().to_le_bytes());
@@ -545,4 +554,52 @@ pub fn compute_rendered_clip_hash(
     }
 
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_rendered_clip_hash;
+    use std::collections::HashMap;
+
+    #[test]
+    fn rendered_clip_hash_ignores_breath_gain_curve() {
+        let pitch_edit = vec![60.0f32; 32];
+        let mut extra_params = HashMap::new();
+        extra_params.insert("breath_enabled".to_string(), 1.0);
+
+        let mut curve_a = HashMap::new();
+        curve_a.insert("breath_gain".to_string(), vec![1.0f32; 32]);
+
+        let mut curve_b = HashMap::new();
+        curve_b.insert("breath_gain".to_string(), vec![0.25f32; 32]);
+
+        let hash_a = compute_rendered_clip_hash(
+            "clip-1",
+            "input.wav",
+            0,
+            44_100,
+            44_100,
+            "nsf_hifigan_onnx",
+            &pitch_edit,
+            5.0,
+            1.0,
+            &curve_a,
+            &extra_params,
+        );
+        let hash_b = compute_rendered_clip_hash(
+            "clip-1",
+            "input.wav",
+            0,
+            44_100,
+            44_100,
+            "nsf_hifigan_onnx",
+            &pitch_edit,
+            5.0,
+            1.0,
+            &curve_b,
+            &extra_params,
+        );
+
+        assert_eq!(hash_a, hash_b);
+    }
 }

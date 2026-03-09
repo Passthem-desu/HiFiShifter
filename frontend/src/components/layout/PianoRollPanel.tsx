@@ -204,6 +204,12 @@ export const PianoRollPanel: React.FC = () => {
         ProcessorParamDescriptor[]
     >([]);
     const processorParamsRef = useRef<ProcessorParamDescriptor[]>([]);
+    const [processorStaticParams, setProcessorStaticParams] = useState<
+        ProcessorParamDescriptor[]
+    >([]);
+    const [processorStaticValues, setProcessorStaticValues] = useState<
+        Record<string, number>
+    >({});
 
     // 当 algo 变化时，重新抓取参数描述符
     useEffect(() => {
@@ -217,8 +223,12 @@ export const PianoRollPanel: React.FC = () => {
                 const curvable = params.filter(
                     (p) => p.kind.type === "automation_curve",
                 );
+                const staticParams = params.filter(
+                    (p) => p.kind.type === "static_enum",
+                );
                 processorParamsRef.current = curvable;
                 setProcessorParams(curvable);
+                setProcessorStaticParams(staticParams);
                 // 初始化还没有视口的参数
                 setParamViews((prev) => {
                     const next = { ...prev };
@@ -235,20 +245,91 @@ export const PianoRollPanel: React.FC = () => {
                     }
                     return next;
                 });
+
+                if (!rootTrackId || staticParams.length === 0) {
+                    setProcessorStaticValues({});
+                    return;
+                }
+
+                Promise.all(
+                    staticParams.map((param) =>
+                        paramsApi.getStaticParam(rootTrackId, param.id),
+                    ),
+                )
+                    .then((values) => {
+                        if (cancelled) return;
+                        const nextValues: Record<string, number> = {};
+                        for (const item of values) {
+                            if (item.ok) {
+                                nextValues[item.param] = item.value;
+                            }
+                        }
+                        setProcessorStaticValues(nextValues);
+                    })
+                    .catch(() => {
+                        if (!cancelled) {
+                            setProcessorStaticValues({});
+                        }
+                    });
             })
             .catch(() => {
                 if (!cancelled) {
                     processorParamsRef.current = [];
                     setProcessorParams([]);
+                    setProcessorStaticParams([]);
+                    setProcessorStaticValues({});
                 }
             });
         return () => {
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [rootTrack?.pitchAnalysisAlgo]);
+    }, [rootTrack?.pitchAnalysisAlgo, rootTrackId]);
 
-    // 当 processorParams 变化时，若 editParam 不在可用集合内，自动回退到 pitch
+    const handleStaticParamChange = useCallback(
+        async (paramId: string, value: number) => {
+            if (!rootTrackId) return;
+            const result = await paramsApi.setStaticParam(
+                rootTrackId,
+                paramId,
+                value,
+                true,
+            );
+            if (result.ok) {
+                setProcessorStaticValues((prev) => ({
+                    ...prev,
+                    [paramId]: value,
+                }));
+            }
+        },
+        [rootTrackId],
+    );
+
+    const getProcessorParamLabel = useCallback(
+        (param: ProcessorParamDescriptor) => {
+            switch (param.id) {
+                case "breath_enabled":
+                    return t("breath_mode_label");
+                case "breath_gain":
+                    return t("breath_gain_label");
+                default:
+                    return param.display_name;
+            }
+        },
+        [t],
+    );
+
+    const getStaticOptionLabel = useCallback(
+        (paramId: string, label: string, value: number) => {
+            if (paramId === "breath_enabled") {
+                if (value === 0) return t("switch_off");
+                if (value === 1) return t("switch_on");
+            }
+            return label;
+        },
+        [t],
+    );
+
     useEffect(() => {
         const available = new Set([
             "pitch",
@@ -850,7 +931,7 @@ export const PianoRollPanel: React.FC = () => {
                                     onClick={() => dispatch(setEditParam(p.id))}
                                     style={{ cursor: "pointer" }}
                                 >
-                                    {p.display_name}
+                                    {getProcessorParamLabel(p)}
                                 </Button>
                                 {editParam !== p.id ? (
                                     <IconButton
@@ -928,6 +1009,52 @@ export const PianoRollPanel: React.FC = () => {
                                     </Select.Item>
                                 </Select.Content>
                             </Select.Root>
+                            {processorStaticParams.map((param) => {
+                                if (param.kind.type !== "static_enum") return null;
+                                const currentValue =
+                                    processorStaticValues[param.id] ??
+                                    param.kind.default_value;
+                                return (
+                                    <Flex key={param.id} align="center" gap="1">
+                                        <Text size="1" color="gray">
+                                            {getProcessorParamLabel(param)}
+                                        </Text>
+                                        {param.kind.options.map(
+                                            ([label, value]) => (
+                                                <Button
+                                                    key={`${param.id}-${value}`}
+                                                    size="1"
+                                                    variant={
+                                                        currentValue === value
+                                                            ? "solid"
+                                                            : "soft"
+                                                    }
+                                                    color={
+                                                        currentValue === value
+                                                            ? "blue"
+                                                            : "gray"
+                                                    }
+                                                    onClick={() => {
+                                                        void handleStaticParamChange(
+                                                            param.id,
+                                                            value,
+                                                        );
+                                                    }}
+                                                    style={{
+                                                        cursor: "pointer",
+                                                    }}
+                                                >
+                                                    {getStaticOptionLabel(
+                                                        param.id,
+                                                        label,
+                                                        value,
+                                                    )}
+                                                </Button>
+                                            ),
+                                        )}
+                                    </Flex>
+                                );
+                            })}
                             <Button
                                 size="1"
                                 variant="soft"

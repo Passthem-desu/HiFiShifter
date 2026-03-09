@@ -318,6 +318,20 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 checkpoint: args[4],
             };
 
+        case "get_static_param":
+            return {
+                trackId: args[0],
+                param: args[1],
+            };
+
+        case "set_static_param":
+            return {
+                trackId: args[0],
+                param: args[1],
+                value: args[2],
+                checkpoint: args[3],
+            };
+
         case "list_directory":
             return { dirPath: args[0] };
 

@@ -1,5 +1,6 @@
 use crate::state::{PitchAnalysisAlgo, SynthPipelineKind, TimelineState};
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 thread_local! {
     static MONO_SCRATCH: RefCell<Vec<f32>> = RefCell::new(Vec::new());
@@ -127,6 +128,20 @@ fn pitch_edit_backend_available_for_track(track: &crate::state::Track) -> bool {
         PitchEditAlgorithm::VocalShifterVslib => true,
         PitchEditAlgorithm::Bypass => true,
     }
+}
+
+pub(crate) fn extra_param_enabled(extra_params: &HashMap<String, f64>, key: &str) -> bool {
+    extra_params.get(key).copied().unwrap_or(0.0) >= 0.5
+}
+
+fn track_requests_extra_processing(
+    algo: PitchEditAlgorithm,
+    entry: &crate::state::TrackParamsState,
+    clip: &crate::state::Clip,
+) -> bool {
+    let extra_params = clip.extra_params.as_ref().unwrap_or(&entry.extra_params);
+    matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
+        && extra_param_enabled(extra_params, "breath_enabled")
 }
 
 impl PitchEditAlgorithm {
@@ -417,9 +432,11 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         return Ok(false);
     };
 
+    let extra_processing = track_requests_extra_processing(algo, entry, clip);
+
     // v2 semantics: do nothing until the user actually modified the edit curve.
     // This avoids treating auto-synced `pitch_edit` (e.g. copied from pitch_orig) as an edit.
-    if !entry.pitch_edit_user_modified {
+    if !entry.pitch_edit_user_modified && !extra_processing {
         return Ok(false);
     }
 
@@ -446,7 +463,8 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     // seg_end_sec 始终以时间轴坐标（输出帧）计，确保音高编辑范围检测与声码器上下文一致
     let seg_end_sec =
         seg_start_sec + (expected_out_frames as f64) / (sample_rate.max(1) as f64);
-    if !any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec) {
+    let has_pitch_user_edit = any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec);
+    if !has_pitch_user_edit && !extra_processing {
         return Ok(false);
     }
 
@@ -466,7 +484,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let is_vslib = false;
 
     // Get per-clip original MIDI curve (full source, source-time indexed).
-    let timeline_midi: Vec<f32> = if is_vslib {
+    let timeline_midi: Vec<f32> = if is_vslib || !has_pitch_user_edit {
         // vslib 不需要原始音高轮廓，传空切片，VslibProcessor 会忽略 clip_midi 字段。
         Vec::new()
     } else {
@@ -496,17 +514,23 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         }
 
         // Skip expensive processing if the edit curve does not actually change pitch vs clip's original MIDI.
-        if !any_effective_pitch_change_in_range(
+        let has_effective_pitch_change = any_effective_pitch_change_in_range(
             frame_period_ms,
             pitch_edit,
             clip_start_sec,
             &tm,
             seg_start_sec,
             seg_end_sec,
-        ) {
-            return Ok(false);
+        );
+        if !has_effective_pitch_change {
+            if extra_processing {
+                Vec::new()
+            } else {
+                return Ok(false);
+            }
+        } else {
+            tm
         }
-        tm
     };
 
     // stereo -> mono (we don't preserve stereo; use left channel for cheaper conversion)
@@ -673,6 +697,14 @@ pub fn does_clip_need_pitch_edit(
     clip: &crate::state::Clip,
     clip_start_sec: f64,
 ) -> bool {
+    does_clip_need_processor_render(timeline, clip, clip_start_sec)
+}
+
+pub fn does_clip_need_processor_render(
+    timeline: &TimelineState,
+    clip: &crate::state::Clip,
+    clip_start_sec: f64,
+) -> bool {
     let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
         return false;
     };
@@ -692,11 +724,17 @@ pub fn does_clip_need_pitch_edit(
         return false;
     }
 
+    let extra_processing = track_requests_extra_processing(algo, entry, clip);
+
     // v2 semantics: only treat pitch edit as active after the user modified the edit curve.
     // Otherwise `pitch_edit` may be auto-synced to `pitch_orig` and contain non-zero MIDI values,
     // which should NOT trigger synthesis / prerender.
-    if !entry.pitch_edit_user_modified {
+    if !entry.pitch_edit_user_modified && !extra_processing {
         return false;
+    }
+
+    if extra_processing {
+        return true;
     }
 
     let frame_period_ms = entry.frame_period_ms.max(0.1);
@@ -713,6 +751,7 @@ pub fn does_clip_need_pitch_edit(
 mod tests {
     use super::*;
     use crate::state::{PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
+    use std::collections::HashMap;
 
     fn make_timeline_with_pitch_edit(
         frame_period_ms: f64,
@@ -796,6 +835,8 @@ mod tests {
             fade_out_sec: 0.0,
             fade_in_curve: "sine".to_string(),
             fade_out_curve: "sine".to_string(),
+            extra_curves: None,
+            extra_params: None,
         };
 
         // Place clip into timeline so root resolution works.
@@ -846,8 +887,81 @@ mod tests {
             fade_out_sec: 0.0,
             fade_in_curve: "sine".to_string(),
             fade_out_curve: "sine".to_string(),
+            extra_curves: None,
+            extra_params: None,
         };
 
         assert!(does_clip_need_pitch_edit(&tl, &clip, 0.0));
+    }
+
+    #[test]
+    fn does_clip_need_processor_render_when_breath_enabled_without_pitch_edit() {
+        let root_id = "track_root".to_string();
+        let track = Track {
+            id: root_id.clone(),
+            name: "Root".to_string(),
+            parent_id: None,
+            order: 0,
+            muted: false,
+            solo: false,
+            volume: 1.0,
+            compose_enabled: true,
+            pitch_analysis_algo: PitchAnalysisAlgo::NsfHifiganOnnx,
+            color: String::new(),
+        };
+
+        let clip = crate::state::Clip {
+            id: "clip1".to_string(),
+            track_id: root_id.clone(),
+            name: "c".to_string(),
+            start_sec: 0.0,
+            length_sec: 2.0,
+            color: String::new(),
+            source_path: Some("dummy.wav".to_string()),
+            duration_sec: Some(2.0),
+            duration_frames: None,
+            source_sample_rate: Some(44100),
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            source_start_sec: 0.0,
+            source_end_sec: 2.0,
+            playback_rate: 1.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            fade_in_curve: "sine".to_string(),
+            fade_out_curve: "sine".to_string(),
+            extra_curves: None,
+            extra_params: None,
+        };
+
+        let mut tl = TimelineState {
+            tracks: vec![track],
+            clips: vec![clip.clone()],
+            selected_track_id: Some(root_id.clone()),
+            selected_clip_id: Some(clip.id.clone()),
+            bpm: 120.0,
+            playhead_sec: 0.0,
+            project_sec: 10.0,
+            params_by_root_track: Default::default(),
+            next_track_order: 1,
+        };
+
+        let mut extra_params = HashMap::new();
+        extra_params.insert("breath_enabled".to_string(), 1.0);
+        tl.params_by_root_track.insert(
+            root_id,
+            TrackParamsState {
+                frame_period_ms: 5.0,
+                pitch_edit: vec![0.0; 2048],
+                pitch_orig: vec![0.0; 2048],
+                pitch_edit_user_modified: false,
+                extra_params,
+                ..Default::default()
+            },
+        );
+
+        assert!(does_clip_need_processor_render(&tl, &clip, 0.0));
     }
 }

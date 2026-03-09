@@ -1,6 +1,7 @@
 import type {
     ParamFramesPayload,
     ProcessorParamDescriptor,
+    StaticParamValuePayload,
     TimelineResult,
 } from "../../types/api";
 
@@ -52,6 +53,23 @@ export const paramsApi = {
             param,
             startFrame,
             frameCount,
+            checkpoint,
+        ),
+
+    getStaticParam: (trackId: string, param: string) =>
+        invoke<StaticParamValuePayload>("get_static_param", trackId, param),
+
+    setStaticParam: (
+        trackId: string,
+        param: string,
+        value: number,
+        checkpoint?: boolean,
+    ) =>
+        invoke<{ ok: boolean }>(
+            "set_static_param",
+            trackId,
+            param,
+            value,
             checkpoint,
         ),
 

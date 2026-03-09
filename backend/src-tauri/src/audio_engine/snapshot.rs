@@ -343,12 +343,45 @@ pub(crate) fn build_snapshot(
             .round()
             .max(0.0) as u64;
 
+        let processor_params = timeline
+            .resolve_root_track_id(&clip.track_id)
+            .and_then(|root| {
+                let entry = timeline.params_by_root_track.get(&root)?;
+                let track = timeline.tracks.iter().find(|t| t.id == root)?;
+                let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+                let renderer_id = crate::renderer::get_renderer(kind).id();
+                Some((
+                    entry.pitch_edit.as_slice(),
+                    entry.frame_period_ms.max(0.1),
+                    renderer_id,
+                    &entry.extra_curves,
+                    &entry.extra_params,
+                ))
+            });
+        let (breath_curve, breath_curve_frame_period_ms) = processor_params
+            .and_then(|(_, frame_period_ms, renderer_id, extra_curves, extra_params)| {
+                if renderer_id == "nsf_hifigan_onnx"
+                    && crate::pitch_editing::extra_param_enabled(extra_params, "breath_enabled")
+                {
+                    Some((
+                        extra_curves
+                            .get("breath_gain")
+                            .cloned()
+                            .map(std::sync::Arc::new),
+                        frame_period_ms,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or((None, 5.0));
+
         // ── 查询整 Clip 渲染缓存 ───────────────────────────────────────────
         // 改法 C+D：优先从 pending_rendered_keys 查找渲染线程传递的 cache_key，
         // 消除双重 hash 计算导致的不一致问题（采样率竞态、浮点精度差异等）。
         // 若 pending_rendered_keys 中无记录，回退到自行计算 hash（兼容非预渲染路径）。
-        let (rendered_pcm, needs_synthesis) = {
-            let needs_pitch_edit = crate::pitch_editing::does_clip_need_pitch_edit(
+        let (rendered_pcm, breath_noise_pcm, needs_synthesis) = {
+            let needs_pitch_edit = crate::pitch_editing::does_clip_need_processor_render(
                 timeline,
                 clip,
                 start_sec,
@@ -367,16 +400,7 @@ pub(crate) fn build_snapshot(
                     Some(pk)
                 } else {
                     // 回退：自行计算 hash（兼容非预渲染路径，如 AudioReady rebuild）
-                    let params = timeline
-                        .resolve_root_track_id(&clip.track_id)
-                        .and_then(|root| {
-                            let entry = timeline.params_by_root_track.get(&root)?;
-                            let track = timeline.tracks.iter().find(|t| t.id == root)?;
-                            let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
-                            let renderer_id = crate::renderer::get_renderer(kind).id();
-                            Some((entry.pitch_edit.as_slice(), entry.frame_period_ms, renderer_id, &entry.extra_curves, &entry.extra_params))
-                        });
-                    if let Some((pitch_edit, frame_period_ms, renderer_id, extra_curves, extra_params)) = params {
+                    if let Some((pitch_edit, frame_period_ms, renderer_id, extra_curves, extra_params)) = processor_params {
                         let end_frame = start_frame.saturating_add(length_frames);
                         let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
                             &clip.id,
@@ -410,7 +434,10 @@ pub(crate) fn build_snapshot(
                     let mut rendered_cache = crate::synth_clip_cache::global_rendered_clip_cache()
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
-                    let pcm = rendered_cache.get(&key).map(|entry| entry.pcm_stereo.clone());
+                    let cache_entry = rendered_cache.get(&key).cloned();
+                    let pcm = cache_entry.as_ref().map(|entry| entry.pcm_stereo.clone());
+                    let breath_noise = cache_entry
+                        .and_then(|entry| entry.breath_noise_stereo.clone());
                     if debug {
                         eprintln!(
                             "[snapshot] clip_id={} hash={:#018x} rendered_cache_hit={} needs_synthesis=true",
@@ -425,14 +452,14 @@ pub(crate) fn build_snapshot(
                         );
                     }
                     // 该 clip 需要合成；若 pcm 为 None 则表示尚未完成，应静音等待
-                    (pcm, true)
+                    (pcm, breath_noise, true)
                 } else {
                     // 无法找到 pitch edit 参数，降级为不合成
-                    (None, false)
+                    (None, None, false)
                 }
             } else {
                 // 无需合成，直接回退到源 PCM
-                (None, false)
+                (None, None, false)
             }
         };
 
@@ -451,6 +478,9 @@ pub(crate) fn build_snapshot(
             fade_out_frames,
             gain,
             rendered_pcm,
+            breath_noise_pcm,
+            breath_curve,
+            breath_curve_frame_period_ms,
             needs_synthesis,
         });    }
 
@@ -524,6 +554,9 @@ pub(crate) fn build_snapshot_for_file(
             fade_out_frames: 0,
             gain: 1.0,
             rendered_pcm: None,
+            breath_noise_pcm: None,
+            breath_curve: None,
+            breath_curve_frame_period_ms: 5.0,
             needs_synthesis: false,
         }]),
     }

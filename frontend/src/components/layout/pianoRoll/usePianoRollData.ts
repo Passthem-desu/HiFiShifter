@@ -372,6 +372,7 @@ export function usePianoRollData(args: {
                             payload.start_frame ?? req.secondaryStartFrame,
                         ) || req.secondaryStartFrame,
                     stride,
+                    referenceKind: payload.reference_kind ?? "source_curve",
                     orig: [],
                     edit: (payload.edit ?? []).map((v) => Number(v) || 0),
                 });
@@ -492,6 +493,8 @@ export function usePianoRollData(args: {
                         framePeriodMs: fpRes,
                         startFrame: receivedStartFrame,
                         stride,
+                        referenceKind:
+                            payload.reference_kind ?? "source_curve",
                         orig: (payload.orig ?? []).map((v) => Number(v) || 0),
                         edit: (payload.edit ?? []).map((v) => Number(v) || 0),
                     });
@@ -585,6 +588,7 @@ export function usePianoRollData(args: {
                     startFrame:
                         Number(payload.start_frame ?? startFrame) || startFrame,
                     stride,
+                    referenceKind: payload.reference_kind ?? "source_curve",
                     orig: (payload.orig ?? []).map((v) => Number(v) || 0),
                     edit: (payload.edit ?? []).map((v) => Number(v) || 0),
                 });
@@ -620,6 +624,8 @@ export function usePianoRollData(args: {
                             secPayload.start_frame ?? req.secondaryStartFrame,
                         ) || req.secondaryStartFrame,
                     stride,
+                    referenceKind:
+                        secPayload.reference_kind ?? "source_curve",
                     orig: [],
                     edit: (secPayload.edit ?? []).map((v) => Number(v) || 0),
                 });

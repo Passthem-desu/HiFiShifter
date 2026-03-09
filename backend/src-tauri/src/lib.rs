@@ -21,6 +21,13 @@ mod renderer;
 #[cfg(not(feature = "onnx"))]
 use nsf_hifigan_onnx_stub as nsf_hifigan_onnx;
 
+#[cfg(feature = "onnx")]
+#[path = "vocoder/hnsep_onnx.rs"] mod hnsep_onnx;
+#[cfg(not(feature = "onnx"))]
+#[path = "vocoder/hnsep_onnx_stub.rs"] mod hnsep_onnx_stub;
+#[cfg(not(feature = "onnx"))]
+use hnsep_onnx_stub as hnsep_onnx;
+
 mod project;
 #[path = "audio/rubberband.rs"] mod rubberband;
 #[path = "import/vocalshifter_clipboard.rs"] mod vocalshifter_clipboard;
@@ -69,6 +76,15 @@ pub fn run() {
                         && p.join("config.json").exists()
                     {
                         std::env::set_var("HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR", &p);
+                    }
+                }
+            }
+
+            if std::env::var_os("HIFISHIFTER_HNSEP_MODEL_DIR").is_none() {
+                if let Ok(res_dir) = app.path().resource_dir() {
+                    let p = res_dir.join("models").join("hnsep");
+                    if p.join("hnsep.onnx").exists() {
+                        std::env::set_var("HIFISHIFTER_HNSEP_MODEL_DIR", &p);
                     }
                 }
             }
@@ -250,6 +266,8 @@ pub fn run() {
             commands::set_param_frames,
             commands::restore_param_frames,
             commands::add_clip,
+            commands::get_static_param,
+            commands::set_static_param,
             commands::remove_clip,
             commands::move_clip,
             commands::set_clip_state,

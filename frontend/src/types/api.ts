@@ -156,6 +156,8 @@ export interface WaveformPeaksSegmentPayload {
     max: number[];
 }
 
+export type ParamReferenceKind = "source_curve" | "default_value";
+
 export interface ParamFramesPayload {
     ok: boolean;
     root_track_id: string;
@@ -164,6 +166,7 @@ export interface ParamFramesPayload {
     start_frame: number;
     orig: number[];
     edit: number[];
+    reference_kind: ParamReferenceKind;
 
     analysis_pending?: boolean;
     analysis_progress?: number;
@@ -228,4 +231,11 @@ export interface ProcessorParamDescriptor {
     display_name: string;
     group: string;
     kind: ParamKindDto;
+}
+
+export interface StaticParamValuePayload {
+    ok: boolean;
+    root_track_id: string;
+    param: string;
+    value: number;
 }

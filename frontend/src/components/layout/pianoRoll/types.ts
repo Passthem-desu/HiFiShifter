@@ -1,3 +1,5 @@
+import type { ParamReferenceKind } from "../../../types/api";
+
 // ParamName 是一个字符串，可以是 "pitch"、"tension" 或声码器额外参数 ID。
 // 具体可用值由后端 `get_processor_params` 动态返回。
 export type ParamName = string;
@@ -22,6 +24,7 @@ export type ParamViewSegment = {
     framePeriodMs: number;
     startFrame: number;
     stride: number;
+    referenceKind: ParamReferenceKind;
     orig: number[];
     edit: number[];
 };
