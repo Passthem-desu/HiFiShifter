@@ -35,8 +35,6 @@ interface MenuBarProps {
     onNewProject: () => void;
     onOpenProject: () => void;
     onOpenRecentProject: (projectPath: string) => void;
-    onOpenVocalShifter: () => void;
-    onOpenReaper: () => void;
     onExit: () => void;
 }
 
@@ -44,8 +42,6 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     onNewProject,
     onOpenProject,
     onOpenRecentProject,
-    onOpenVocalShifter,
-    onOpenReaper,
     onExit,
 }) => {
     const { t, setLocale } = useI18n();

@@ -18,8 +18,6 @@ import {
     newProjectRemote,
     openProjectFromDialog,
     openProjectFromPath,
-    openVocalShifterFromDialog,
-    openReaperFromDialog,
     saveProjectRemote,
     saveProjectAsRemote,
     exportAudio,
@@ -453,18 +451,6 @@ function AppInner() {
         [dispatch, runOrPromptUnsavedAction],
     );
 
-    const handleOpenVocalShifter = useCallback(() => {
-        runOrPromptUnsavedAction("switch", async () => {
-            await dispatch(openVocalShifterFromDialog()).unwrap();
-        });
-    }, [dispatch, runOrPromptUnsavedAction]);
-
-    const handleOpenReaper = useCallback(() => {
-        runOrPromptUnsavedAction("switch", async () => {
-            await dispatch(openReaperFromDialog()).unwrap();
-        });
-    }, [dispatch, runOrPromptUnsavedAction]);
-
     const handleExitApp = useCallback(() => {
         runOrPromptUnsavedAction("exit", closeWindowNow);
     }, [closeWindowNow, runOrPromptUnsavedAction]);
@@ -839,8 +825,6 @@ function AppInner() {
                 onNewProject={handleNewProject}
                 onOpenProject={handleOpenProject}
                 onOpenRecentProject={handleOpenRecentProject}
-                onOpenVocalShifter={handleOpenVocalShifter}
-                onOpenReaper={handleOpenReaper}
                 onExit={handleExitApp}
             />
             <ActionBar />
