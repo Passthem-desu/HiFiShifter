@@ -344,13 +344,9 @@ pub(crate) fn build_snapshot(
             .max(0.0) as u64;
 
         // ── 查询整 Clip 渲染缓存 ───────────────────────────────────────────
-        // 使用与 collect_clips_needing_render 完全相同的逻辑判断是否需要合成：
-        //   1. 通过 does_clip_need_pitch_edit 做 per-clip 范围检查，避免将范围外clip
-        //      误判为需要合成（否则会因缓存缺失而产生静音）。
-        //   2. hash 使用原始 playback_rate 而非 playback_rate_render，确保与
-        //      render_single_clip 存入缓存时使用的 key 完全一致。
-        //      （stretch cache 命中后 playback_rate_render=1.0，若用 playback_rate_render
-        //       会导致 hash 不匹配 → rendered_pcm=None + needs_synthesis=true → 静音）
+        // 改法 C+D：优先从 pending_rendered_keys 查找渲染线程传递的 cache_key，
+        // 消除双重 hash 计算导致的不一致问题（采样率竞态、浮点精度差异等）。
+        // 若 pending_rendered_keys 中无记录，回退到自行计算 hash（兼容非预渲染路径）。
         let (rendered_pcm, needs_synthesis) = {
             let needs_pitch_edit = crate::pitch_editing::does_clip_need_pitch_edit(
                 timeline,
@@ -358,44 +354,74 @@ pub(crate) fn build_snapshot(
                 start_sec,
             );
             if needs_pitch_edit {
-                // 获取 pitch edit 参数 + renderer_id 用于 hash 计算
-                let params = timeline
-                    .resolve_root_track_id(&clip.track_id)
-                    .and_then(|root| {
-                        let entry = timeline.params_by_root_track.get(&root)?;
-                        let track = timeline.tracks.iter().find(|t| t.id == root)?;
-                        let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
-                        let renderer_id = crate::renderer::get_renderer(kind).id();
-                        Some((entry.pitch_edit.as_slice(), entry.frame_period_ms, renderer_id, &entry.extra_curves, &entry.extra_params))
-                    });
-                if let Some((pitch_edit, frame_period_ms, renderer_id, extra_curves, extra_params)) = params {
-                    let end_frame = start_frame.saturating_add(length_frames);
-                    // 关键：使用原始 playback_rate，与 render_single_clip 存入时一致
-                    let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
-                        &clip.id,
-                        source_path,
-                        start_frame,
-                        end_frame,
-                        out_rate,
-                        renderer_id,
-                        pitch_edit,
-                        frame_period_ms,
-                        playback_rate,
-                        extra_curves,
-                        extra_params,
-                    );
-                    let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
-                        clip_id: clip.id.clone(),
-                        param_hash,
-                    };
+                // 优先从 pending_rendered_keys 查找渲染线程传递的 cache_key
+                let pending_key = crate::synth_clip_cache::lookup_pending_rendered_key(&clip.id);
+
+                let cache_key = if let Some(pk) = pending_key {
+                    if debug {
+                        eprintln!(
+                            "[snapshot] clip_id={} using pending_rendered_key hash={:#018x}",
+                            clip.id, pk.param_hash
+                        );
+                    }
+                    Some(pk)
+                } else {
+                    // 回退：自行计算 hash（兼容非预渲染路径，如 AudioReady rebuild）
+                    let params = timeline
+                        .resolve_root_track_id(&clip.track_id)
+                        .and_then(|root| {
+                            let entry = timeline.params_by_root_track.get(&root)?;
+                            let track = timeline.tracks.iter().find(|t| t.id == root)?;
+                            let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+                            let renderer_id = crate::renderer::get_renderer(kind).id();
+                            Some((entry.pitch_edit.as_slice(), entry.frame_period_ms, renderer_id, &entry.extra_curves, &entry.extra_params))
+                        });
+                    if let Some((pitch_edit, frame_period_ms, renderer_id, extra_curves, extra_params)) = params {
+                        let end_frame = start_frame.saturating_add(length_frames);
+                        let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
+                            &clip.id,
+                            source_path,
+                            start_frame,
+                            end_frame,
+                            out_rate,
+                            renderer_id,
+                            pitch_edit,
+                            frame_period_ms,
+                            playback_rate,
+                            extra_curves,
+                            extra_params,
+                        );
+                        if debug {
+                            eprintln!(
+                                "[snapshot] clip_id={} fallback self-computed hash={:#018x} (no pending key)",
+                                clip.id, param_hash
+                            );
+                        }
+                        Some(crate::synth_clip_cache::RenderedClipCacheKey {
+                            clip_id: clip.id.clone(),
+                            param_hash,
+                        })
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some(key) = cache_key {
                     let mut rendered_cache = crate::synth_clip_cache::global_rendered_clip_cache()
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
-                    let pcm = rendered_cache.get(&cache_key).map(|entry| entry.pcm_stereo.clone());
+                    let pcm = rendered_cache.get(&key).map(|entry| entry.pcm_stereo.clone());
                     if debug {
                         eprintln!(
                             "[snapshot] clip_id={} hash={:#018x} rendered_cache_hit={} needs_synthesis=true",
-                            clip.id, cache_key.param_hash, pcm.is_some()
+                            clip.id, key.param_hash, pcm.is_some()
+                        );
+                    }
+                    if pcm.is_none() {
+                        // 诊断日志：cache_key 存在但缓存未命中（可能被 LRU 淘汰或尚未渲染完成）
+                        eprintln!(
+                            "[snapshot:WARN] clip_id={} hash={:#018x} cache_key found but rendered_pcm=None (LRU evicted or not yet rendered)",
+                            clip.id, key.param_hash
                         );
                     }
                     // 该 clip 需要合成；若 pcm 为 None 则表示尚未完成，应静音等待

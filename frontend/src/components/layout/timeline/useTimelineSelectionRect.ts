@@ -10,7 +10,7 @@ export function useTimelineSelectionRect(params: {
     rowHeight: number;
 
     clearContextMenu: () => void;
-    setMultiSelectedClipIds: React.Dispatch<React.SetStateAction<string[]>>;
+    setMultiSelectedClipIds: (ids: string[] | ((prev: string[]) => string[])) => void;
     onSingleSelect: (clipId: string) => void;
 }) {
     const {
@@ -78,6 +78,13 @@ export function useTimelineSelectionRect(params: {
             const drag = selectionDragRef.current;
             if (!drag || drag.pointerId !== e.pointerId) return;
             selectionDragRef.current = null;
+
+            // 计算拖拽距离，超过阈值视为"框选操作"
+            const dx = drag.curX - drag.startX;
+            const dy = drag.curY - drag.startY;
+            const dragDist = Math.sqrt(dx * dx + dy * dy);
+            const DRAG_THRESHOLD = 5; // px
+
             const rect = {
                 x1: Math.min(drag.startX, drag.curX),
                 y1: Math.min(drag.startY, drag.curY),
@@ -107,6 +114,26 @@ export function useTimelineSelectionRect(params: {
             setMultiSelectedClipIds(selected);
             if (selected.length === 1) {
                 onSingleSelect(selected[0]);
+            }
+
+            // 框选拖拽超过阈值时，抑制即将触发的右键菜单
+            if (dragDist >= DRAG_THRESHOLD) {
+                const suppressContextMenu = (ev: Event) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                };
+                window.addEventListener("contextmenu", suppressContextMenu, {
+                    capture: true,
+                    once: true,
+                });
+                // 安全回退：200ms 后自动移除，防止意外吞掉后续正常右键
+                setTimeout(() => {
+                    window.removeEventListener(
+                        "contextmenu",
+                        suppressContextMenu,
+                        { capture: true },
+                    );
+                }, 200);
             }
 
             window.removeEventListener("pointermove", onMove);

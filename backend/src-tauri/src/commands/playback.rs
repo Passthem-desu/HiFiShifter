@@ -50,9 +50,29 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
             let engine = state.audio_engine.clone();
             let tl_for_render = timeline.clone();
             let render_start_sec = start_sec;
-            let engine_sr = state.audio_engine.sample_rate_hz();
+            // 改法 D：确保 engine_sr 已被 worker 线程 store 为实际采样率。
+            // AudioEngine::new() 初始化 AtomicU32 为 44100，worker spawn 后才 store 实际值。
+            // 若 engine_sr 仍为初始值 44100 且系统实际为 48000，
+            // 则 hash 中的 frame 计算会与 build_snapshot 不一致。
+            // 这里在 spawn 内部短暂等待，确保 worker 已就绪。
+            let engine_for_sr = state.audio_engine.clone();
 
             std::thread::spawn(move || {
+                // 等待 engine worker 就绪（最多 200ms，通常 <5ms 即可）
+                let mut engine_sr = engine_for_sr.sample_rate_hz();
+                if engine_sr == 44100 {
+                    for _ in 0..40 {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        engine_sr = engine_for_sr.sample_rate_hz();
+                        if engine_sr != 44100 {
+                            break;
+                        }
+                    }
+                }
+                eprintln!(
+                    "[play_original] engine_sr={} (used for hash computation)",
+                    engine_sr
+                );
                 // 推送渲染开始
                 let _ = app.emit(
                     "playback_rendering_state",
@@ -88,6 +108,9 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     return;
                 }
                 
+                // 新一轮渲染开始，清空上次的 pending_rendered_keys
+                crate::synth_clip_cache::clear_pending_rendered_keys();
+
                 let total = clips_to_render.len().max(1);
                 let mut rendered_count = 0u32;
                 let mut any_error = false;
@@ -140,6 +163,13 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                 .lock()
                                 .unwrap_or_else(|e| e.into_inner());
                             cache.insert(clip_render_info.cache_key.clone(), entry);
+
+                            // 将 cache_key 注册到 pending_rendered_keys，
+                            // 供 build_snapshot 直接查找，避免双重 hash 计算不一致
+                            crate::synth_clip_cache::register_pending_rendered_key(
+                                &clip_render_info.clip.id,
+                                clip_render_info.cache_key.clone(),
+                            );
                             
                             // 更新clip渲染状态为已完成
                             if let Ok(mut state_mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
@@ -244,8 +274,16 @@ fn collect_clips_needing_render(
     timeline: &crate::state::TimelineState,
     engine_sr: u32,
 ) -> Vec<ClipRenderInfo> {
+    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
     let mut out = Vec::new();
     let sr = if engine_sr > 0 { engine_sr } else { 44100 };
+
+    if debug {
+        eprintln!(
+            "[collect_clips_needing_render] engine_sr={} effective_sr={} clips_count={}",
+            engine_sr, sr, timeline.clips.len()
+        );
+    }
 
     for clip in &timeline.clips {
         if clip.muted {
@@ -309,6 +347,13 @@ fn collect_clips_needing_render(
             clip_id: clip.id.clone(),
             param_hash,
         };
+
+        if debug {
+            eprintln!(
+                "[collect_clips_needing_render] clip_id={} sr={} start_frame={} end_frame={} hash={:#018x}",
+                clip.id, sr, start_frame, end_frame, param_hash
+            );
+        }
 
         out.push(ClipRenderInfo {
             clip: clip.clone(),
@@ -473,48 +518,6 @@ fn render_single_clip(
     }
 
     Ok(segment)
-}
-
-
-
-
-pub(super) fn play_synthesized(state: State<'_, AppState>, start_sec: f64) -> serde_json::Value {
-    guard_json_command("play_synthesized", || {
-        if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
-            eprintln!("play_synthesized(start_sec={})", start_sec);
-        }
-        let (bpm, playhead_sec) = {
-            let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
-            (tl.bpm, tl.playhead_sec)
-        };
-        if !(bpm.is_finite() && bpm > 0.0) {
-            return serde_json::json!({"ok": false, "error": "invalid bpm"});
-        }
-        let start_sec = playhead_sec.max(0.0) + start_sec.max(0.0);
-
-        // 每次 play_synthesized 都重新渲染，确保 pitch 编辑后立即生效。
-        // synthesize 命令（synth.rs）负责显式预渲染导出流程。
-        let out_path = match new_temp_wav_path("synth") {
-            Ok(p) => p,
-            Err(e) => return serde_json::json!({"ok": false, "error": e}),
-        };
-        if let Err(e) = render_timeline_to_wav(&state, &out_path, 0.0, None) {
-            return serde_json::json!({"ok": false, "error": e});
-        }
-        let synthesized_path = Some(out_path.display().to_string());
-        {
-            let mut rt = state.runtime.lock().unwrap_or_else(|e| e.into_inner());
-            rt.has_synthesized = true;
-            rt.synthesized_wav_path = synthesized_path.clone();
-        }
-
-        let Some(p) = synthesized_path.as_deref() else {
-            return serde_json::json!({"ok": false, "error": "synth path missing"});
-        };
-        let path = Path::new(p);
-        state.audio_engine.play_file(path, start_sec, "synthesized");
-        serde_json::json!({"ok": true, "playing": "synthesized", "start_sec": start_sec})
-    })
 }
 
 

@@ -23,6 +23,7 @@ import type {
     StrokePoint,
     ValueViewport,
 } from "./types";
+import type { MutableRefObject as MutRef } from "react";
 import { isModifierActive } from "../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../features/keybindings/types";
 
@@ -95,10 +96,14 @@ export function usePianoRollInteractions(args: {
 
     commitStroke: (points: StrokePoint[], mode: StrokeMode) => Promise<void>;
 
-    /** pointer down 期间设为 true，pointer up 后由 commitStroke 包装层重置为 false�?
-     *  用于保护 pitch_orig_updated 事件触发的曲线刷新不覆盖正在绘制的内容�?*/
-    liveEditActiveRef?: MutableRefObject<boolean>;
-    /** pianoRoll.copy 绑定 */
+    /** 用于选区拖拽 onUp 时同步更新本地 paramView state（与 commitStroke 行为一致） */
+    setParamView: (next: ParamViewSegment | null) => void;
+    /** 用于选区拖拽 onUp 时清除 live edit overlay */
+    liveEditOverrideRef: MutRef<{ key: string; edit: number[] } | null>;
+
+    /** pointer down 期间设为 true，pointer up 后由 commitStroke 包装层重置为 false。
+     *  用于保护 pitch_orig_updated 事件触发的曲线刷新不覆盖正在绘制的内容。 */
+    liveEditActiveRef?: MutableRefObject<boolean>;    /** pianoRoll.copy 绑定 */
     pianoRollCopyKb: Keybinding;
     /** pianoRoll.paste 绑定 */
     pianoRollPasteKb: Keybinding;
@@ -140,6 +145,8 @@ export function usePianoRollInteractions(args: {
         ensureLiveEditBase,
         applyDenseToLiveEdit,
         commitStroke,
+        setParamView,
+        liveEditOverrideRef,
         liveEditActiveRef,
         pianoRollCopyKb,
         pianoRollPasteKb,
@@ -216,8 +223,11 @@ export function usePianoRollInteractions(args: {
     const onScrollerKeyDown = useCallback(
         (e: KeyboardEvent<HTMLDivElement>) => {
             if (!rootTrackId) return;
-            if (!selectionRef.current) return;
             if (editParam === "pitch" && !pitchEnabled) return;
+
+            // pianoRoll.shiftParamUp / shiftParamDown 已移至全局 handleKeybindingAction 处理
+
+            if (!selectionRef.current) return;
 
             const sel = selectionRef.current;
             const aBeat = Math.min(sel.aBeat, sel.bBeat);
@@ -670,6 +680,17 @@ export function usePianoRollInteractions(args: {
                                             pv.startFrame +
                                             selStartIdx *
                                                 Math.max(1, pv.stride);
+
+                                        // 【修复】立即同步更新本地 paramView state，
+                                        // 与 commitStroke 中的 applyToParamViewDense 行为一致，
+                                        // 避免切换工具后 liveEditOverrideRef 被清除时显示旧数据。
+                                        const nextEdit = pvNow.edit.slice();
+                                        for (let i = selStartIdx; i <= selEndIdx && i < nextEdit.length; i++) {
+                                            nextEdit[i] = (origValues[i - selStartIdx] ?? 0) + lastDelta;
+                                        }
+                                        setParamView({ ...pvNow, edit: nextEdit });
+                                        liveEditOverrideRef.current = null;
+
                                         void (async () => {
                                             await paramsApi.setParamFrames(
                                                 rootTrackId,
@@ -711,6 +732,7 @@ export function usePianoRollInteractions(args: {
                         bBeat: bb,
                     };
                     setSelectionUi(selectionRef.current);
+                    invalidate(); // 实时重绘选区
                 };
                 const onUp = () => {
                     window.removeEventListener("pointermove", onMove);

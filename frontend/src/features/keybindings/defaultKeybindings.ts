@@ -22,6 +22,9 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "project.saveAs": { key: "s", ctrl: true, shift: true },
     "project.export": { key: "e", ctrl: true },
 
+    // 轨道
+    "track.add": { key: "t", ctrl: true },
+
     // Clip 操作
     "clip.delete": { key: "delete" },
     "clip.copy": { key: "c", ctrl: true },
@@ -31,6 +34,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     // PianoRoll 操作
     "pianoRoll.copy": { key: "c", ctrl: true },
     "pianoRoll.paste": { key: "v", ctrl: true },
+    "pianoRoll.shiftParamUp": { key: "=" },
+    "pianoRoll.shiftParamDown": { key: "-" },
 
     // 修饰键行为
     "modifier.clipSlipEdit": { key: "alt", modifierOnly: true, alt: true },
@@ -38,6 +43,14 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "modifier.clipNoSnap": { key: "shift", modifierOnly: true, shift: true },
     "modifier.clipCopyDrag": { key: "control", modifierOnly: true, ctrl: true },
     "modifier.pianoRollVerticalZoom": { key: "control", modifierOnly: true, ctrl: true },
+
+    // 快速搜索
+    "quickSearch.open": { key: "f", ctrl: true },
+    "quickSearch.navigate.up": { key: "arrowup" },
+    "quickSearch.navigate.down": { key: "arrowdown" },
+    "quickSearch.preview": { key: "space" },
+    "quickSearch.confirm": { key: "enter" },
+    "quickSearch.close": { key: "escape" },
 };
 
 /**
@@ -57,6 +70,9 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     "project.saveAs": { labelKey: "kb_project_save_as", group: "project" },
     "project.export": { labelKey: "kb_project_export", group: "project" },
 
+    "track.add": { labelKey: "kb_track_add", group: "project" },
+
+    "clip.delete"
     "clip.delete": { labelKey: "kb_clip_delete", group: "clip" },
     "clip.copy": { labelKey: "kb_clip_copy", group: "clip" },
     "clip.paste": { labelKey: "kb_clip_paste", group: "clip" },
@@ -64,12 +80,22 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
 
     "pianoRoll.copy": { labelKey: "kb_pianoroll_copy", group: "pianoRoll" },
     "pianoRoll.paste": { labelKey: "kb_pianoroll_paste", group: "pianoRoll" },
+    "pianoRoll.shiftParamUp": { labelKey: "kb_pianoroll_shift_param_up", group: "pianoRoll" },
+    "pianoRoll.shiftParamDown": { labelKey: "kb_pianoroll_shift_param_down", group: "pianoRoll" },
 
     "modifier.clipSlipEdit": { labelKey: "kb_modifier_slip_edit", group: "modifier" },
     "modifier.clipStretch": { labelKey: "kb_modifier_stretch", group: "modifier" },
     "modifier.clipNoSnap": { labelKey: "kb_modifier_no_snap", group: "modifier" },
     "modifier.clipCopyDrag": { labelKey: "kb_modifier_copy_drag", group: "modifier" },
     "modifier.pianoRollVerticalZoom": { labelKey: "kb_modifier_pr_vzoom", group: "modifier" },
+
+    // 快速搜索
+    "quickSearch.open": { labelKey: "kb_quick_search_open", group: "quickSearch" },
+    "quickSearch.navigate.up": { labelKey: "kb_quick_search_nav_up", group: "quickSearch" },
+    "quickSearch.navigate.down": { labelKey: "kb_quick_search_nav_down", group: "quickSearch" },
+    "quickSearch.preview": { labelKey: "kb_quick_search_preview", group: "quickSearch" },
+    "quickSearch.confirm": { labelKey: "kb_quick_search_confirm", group: "quickSearch" },
+    "quickSearch.close": { labelKey: "kb_quick_search_close", group: "quickSearch" },
 };
 
 /**
@@ -90,4 +116,5 @@ export const GROUP_LABEL_KEYS: Record<ActionMeta["group"], string> = {
     clip: "kb_group_clip",
     pianoRoll: "kb_group_pianoroll",
     modifier: "kb_group_modifier",
+    quickSearch: "kb_group_quick_search",
 };

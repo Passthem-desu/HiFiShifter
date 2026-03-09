@@ -448,11 +448,6 @@ pub fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde_json::
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn play_synthesized(state: State<'_, AppState>, start_sec: f64) -> serde_json::Value {
-    playback::play_synthesized(state, start_sec)
-}
-
-#[tauri::command(rename_all = "camelCase")]
 pub fn stop_audio(state: State<'_, AppState>) -> serde_json::Value {
     playback::stop_audio(state)
 }

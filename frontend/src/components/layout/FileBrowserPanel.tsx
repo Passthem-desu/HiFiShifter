@@ -271,12 +271,30 @@ export const FileBrowserPanel: React.FC = () => {
                         },
                     }),
                 );
+                // 异步获取音频时长，获取后通知 TimelinePanel 更新 ghost 宽度
+                import("../../services/api/fileBrowser").then(({ fileBrowserApi }) => {
+                    fileBrowserApi.getAudioFileInfo(ds.filePath).then((info) => {
+                        if (info && dragStateRef.current?.filePath === ds.filePath) {
+                            window.dispatchEvent(
+                                new CustomEvent("hifi-file-drag", {
+                                    detail: {
+                                        type: "duration",
+                                        filePath: ds.filePath,
+                                        durationSec: info.durationSec,
+                                    },
+                                }),
+                            );
+                        }
+                    }).catch(() => { /* 获取失败则保持默认宽度 */ });
+                });
             }
 
-            // 更新 ghost 位置
+            // 更新 ghost 位置（clamp 到窗口可视范围内，鼠标超出界面时 ghost 停在边缘）
             if (ghostRef.current) {
-                ghostRef.current.style.left = `${e.clientX + 12}px`;
-                ghostRef.current.style.top = `${e.clientY + 12}px`;
+                const clampedX = Math.max(0, Math.min(e.clientX + 12, window.innerWidth - 100));
+                const clampedY = Math.max(0, Math.min(e.clientY + 12, window.innerHeight - 30));
+                ghostRef.current.style.left = `${clampedX}px`;
+                ghostRef.current.style.top = `${clampedY}px`;
             }
 
             // 发送拖拽移动事件（TimelinePanel 监听）
@@ -342,7 +360,7 @@ export const FileBrowserPanel: React.FC = () => {
                         title={(t as (key: string) => string)("fb_open_folder")}
                         onClick={handleOpenFolder}
                     >
-                        <FileIcon />
+                        <FolderIcon />
                     </IconButton>
                     <IconButton
                         size="1"

@@ -32,6 +32,7 @@ mod state;
 #[path = "audio/waveform.rs"] mod waveform;
 #[path = "audio/waveform_disk_cache.rs"] mod waveform_disk_cache;
 mod config;
+mod temp_manager;
 #[path = "vocoder/world.rs"] mod world;
 #[path = "vocoder/streaming_world.rs"] mod streaming_world;
 #[path = "vocoder/world_vocoder.rs"] mod world_vocoder;
@@ -105,6 +106,9 @@ pub fn run() {
                 }
                 let _ = state.config_dir.set(cfg_dir);
             }
+
+            // 启动时清理上次遗留的临时文件（后台线程，不阻塞启动）
+            temp_manager::cleanup_stale_temp_files();
 
             Ok(())
         })
@@ -258,7 +262,6 @@ pub fn run() {
             commands::save_synthesized,
             commands::save_separated,
             commands::play_original,
-            commands::play_synthesized,
             commands::stop_audio,
             commands::get_playback_state,
             commands::debug_realtime_render_stats,

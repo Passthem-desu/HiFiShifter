@@ -21,6 +21,7 @@ import {
     glueClipsRemote,
     removeClipRemote,
     splitClipRemote,
+    setMultiSelectedClipIds as setMultiSelectedClipIdsAction,
 } from "../../features/session/sessionSlice";
 
 import type { ClipTemplate } from "../../features/session/sessionTypes";
@@ -134,6 +135,7 @@ export const TimelinePanel: React.FC = () => {
         fileName: string;
         trackId: string | null;
         startSec: number;
+        durationSec: number;
     } | null>(null);
 
     const [clipDropNewTrack, setClipDropNewTrack] = useState(false);
@@ -386,6 +388,17 @@ export const TimelinePanel: React.FC = () => {
                 detail.clientY >= bounds.top &&
                 detail.clientY <= bounds.bottom;
 
+            // 异步获取到音频时长后更新 ghost 宽度
+            if (detail.type === "duration") {
+                setDropPreview((prev) => {
+                    if (prev && prev.path === detail.filePath) {
+                        return { ...prev, durationSec: (detail as any).durationSec };
+                    }
+                    return prev;
+                });
+                return;
+            }
+
             if (detail.type === "move" || detail.type === "start") {
                 if (isOverTimeline && scroller) {
                     const beat = beatFromClientX(
@@ -394,12 +407,13 @@ export const TimelinePanel: React.FC = () => {
                         scroller.scrollLeft,
                     );
                     const trackId = trackIdFromClientY(detail.clientY);
-                    setDropPreview({
+                    setDropPreview((prev) => ({
                         path: detail.filePath,
                         fileName: detail.fileName,
                         trackId,
                         startSec: beat,
-                    });
+                        durationSec: prev?.path === detail.filePath ? prev.durationSec : 2,
+                    }));
                 } else {
                     setDropPreview(null);
                 }
@@ -433,13 +447,25 @@ export const TimelinePanel: React.FC = () => {
         };
     }, [dispatch, pxPerSec, rowHeight]);
 
-    const [multiSelectedClipIds, setMultiSelectedClipIds] = useState<string[]>(
-        [],
+    const multiSelectedClipIds = useAppSelector(
+        (state: RootState) => state.session.multiSelectedClipIds,
+    );
+    const setMultiSelectedClipIds = React.useCallback(
+        (ids: string[] | ((prev: string[]) => string[])) => {
+            if (typeof ids === "function") {
+                // 支持 callback 形式（与旧 useState dispatch 兼容）
+                const next = ids(multiSelectedClipIds);
+                dispatch(setMultiSelectedClipIdsAction(next));
+            } else {
+                dispatch(setMultiSelectedClipIdsAction(ids));
+            }
+        },
+        [dispatch, multiSelectedClipIds],
     );
     // 切换工具时清除多选
     useEffect(() => {
-        setMultiSelectedClipIds([]);
-    }, [s.toolMode]);
+        dispatch(setMultiSelectedClipIdsAction([]));
+    }, [s.toolMode, dispatch]);
     const multiSelectedSet = useMemo(
         () => new Set(multiSelectedClipIds),
         [multiSelectedClipIds],
@@ -671,6 +697,15 @@ export const TimelinePanel: React.FC = () => {
         slipEditKb,
         noSnapKb,
         copyDragKb,
+        onCtrlClick: (clipId: string) => {
+            setMultiSelectedClipIds((prev) => {
+                if (prev.includes(clipId)) {
+                    return prev.filter((id) => id !== clipId);
+                }
+                return [...prev, clipId];
+            });
+            void dispatch(selectClipRemote(clipId));
+        },
     });
 
     function startClipDrag(
@@ -1137,6 +1172,16 @@ export const TimelinePanel: React.FC = () => {
                                     clearContextMenu={() => {
                                         setContextMenu(null);
                                     }}
+                                    toggleMultiSelect={(clipId) => {
+                                        setMultiSelectedClipIds((prev) => {
+                                            if (prev.includes(clipId)) {
+                                                return prev.filter(
+                                                    (id) => id !== clipId,
+                                                );
+                                            }
+                                            return [...prev, clipId];
+                                        });
+                                    }}
                                     renamingClipId={renamingClipId}
                                     onRenameCommit={(clipId, newName) => {
                                         void dispatch(
@@ -1174,7 +1219,7 @@ export const TimelinePanel: React.FC = () => {
                                     top:
                                         rowTopForTrackId(dropPreview.trackId) +
                                         8,
-                                    width: Math.max(80, pxPerSec * 2),
+                                    width: Math.max(80, pxPerSec * dropPreview.durationSec),
                                     height: rowHeight - 16,
                                 }}
                             >

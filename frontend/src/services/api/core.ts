@@ -83,12 +83,6 @@ export const coreApi = {
             startSec,
         ),
 
-    playSynthesized: (startSec = 0) =>
-        invoke<{ ok: boolean; playing?: string; start_sec?: number }>(
-            "play_synthesized",
-            startSec,
-        ),
-
     stopAudio: () => invoke<{ ok: boolean }>("stop_audio"),
 
     // Pitch analysis progress

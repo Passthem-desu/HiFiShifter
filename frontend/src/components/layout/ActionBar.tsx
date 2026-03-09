@@ -13,12 +13,11 @@ import {
     StopIcon,
     CursorArrowIcon,
     Pencil1Icon,
-    FileIcon,
 } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
-import { PitchStatusBadge } from "./PitchStatusBadge";
+
 import {
     playOriginal,
     stopAudioPlayback,
@@ -26,7 +25,6 @@ import {
     updateTransportBpm,
     setBeats,
     setToolMode,
-    setEditParam,
     setGrid,
 } from "../../features/session/sessionSlice";
 import { toggleVisible } from "../../features/fileBrowser/fileBrowserSlice";
@@ -97,27 +95,7 @@ export function ActionBar() {
                 </IconButton>
             </Flex>
 
-            <Flex align="center" gap="1" className="shrink-0">
-                {(["pitch", "tension"] as const).map((param, i) => (
-                    <Button
-                        key={param}
-                        size="1"
-                        variant={s.editParam === param ? "solid" : "ghost"}
-                        color="gray"
-                        title={t(param as "pitch" | "tension")}
-                        onClick={() => dispatch(setEditParam(param))}
-                        style={{ minWidth: 20, padding: "0 5px" }}
-                    >
-                        {["P", "T"][i]}
-                    </Button>
-                ))}
-                <PitchStatusBadge
-                    tracks={s.tracks}
-                    selectedTrackId={s.selectedTrackId}
-                />
-            </Flex>
 
-            <Separator orientation="vertical" size="2" />
 
             {/* BPM & Time */}
             <Flex align="center" gap="2" className="shrink-0">
@@ -231,7 +209,9 @@ onClick={() => dispatch(playOriginal())}
                     title={(t as (key: string) => string)("fb_title")}
                     onClick={() => dispatch(toggleVisible())}
                 >
-                    <FileIcon />
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 3.5C2 3.22386 2.22386 3 2.5 3H5.29289L6.64645 4.35355C6.74021 4.44732 6.86739 4.5 7 4.5H12.5C12.7761 4.5 13 4.72386 13 5V11.5C13 11.7761 12.7761 12 12.5 12H2.5C2.22386 12 2 11.7761 2 11.5V3.5Z" fill="currentColor"/>
+                    </svg>
                 </IconButton>
             </Flex>
         </Flex>

@@ -545,6 +545,8 @@ fn handle_stop(s: &mut EngineWorkerState) {
     *s.target.lock().unwrap_or_else(|e| e.into_inner()) = None;
     s.base_frames.store(0, Ordering::Relaxed);
     *s.last_play_file = None;
+    // 播放停止时清空渲染线程传递的 cache_key 映射
+    crate::synth_clip_cache::clear_pending_rendered_keys();
 }
 
 fn handle_seek_sec(s: &mut EngineWorkerState, sec: f64) {

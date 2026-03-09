@@ -161,6 +161,8 @@ export const ClipItem: React.FC<{
             | "gain",
     ) => void;
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
+    /** Ctrl+左键多选切换 */
+    toggleMultiSelect: (clipId: string) => void;
 
     clearContextMenu: () => void;
 
@@ -185,6 +187,7 @@ export const ClipItem: React.FC<{
     startClipDrag,
     startEditDrag,
     toggleClipMuted,
+    toggleMultiSelect,
     clearContextMenu,
     triggerRename,
     onRenameCommit,
@@ -534,10 +537,9 @@ export const ClipItem: React.FC<{
                 {/* Body (waveform + edit handles) */}
                 <div className="absolute inset-0">
                     {/* Fade 角落 handle：始终存在，位于 body 左上�?右上角，用于�?0 开始拖拽出渐变 */}
-                    {/* left-[10px]：避开左侧 edge handle �?10px 宽度，确保两者不重叠 */}
+                    {/* left-[10px]：避开左侧 edge handle 的 10px 宽度，确保两者不重叠 */}
                     <div
-                        className="absolute left-[10px] top-0 w-[14px] h-[14px] z-[55]"
-                        style={{ cursor: "nwse-resize" }}
+                        className="absolute left-[10px] top-0 w-[20px] h-[20px] z-[55]"                        style={{ cursor: "nwse-resize" }}
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -552,10 +554,9 @@ export const ClipItem: React.FC<{
                         }}
                         title={t("fade_in")}
                     />
-                    {/* right-[10px]：避开右侧 edge handle �?10px 宽度，确保两者不重叠 */}
+                    {/* right-[10px]：避开右侧 edge handle 的 10px 宽度，确保两者不重叠 */}
                     <div
-                        className="absolute right-[10px] top-0 w-[14px] h-[14px] z-[55]"
-                        style={{ cursor: "nesw-resize" }}
+                        className="absolute right-[10px] top-0 w-[20px] h-[20px] z-[55]"                        style={{ cursor: "nesw-resize" }}
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();

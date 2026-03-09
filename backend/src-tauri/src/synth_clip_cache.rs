@@ -432,6 +432,44 @@ pub fn global_rendered_clip_cache() -> &'static Mutex<RenderedClipCache> {
     })
 }
 
+// ─── Pending Rendered Keys（渲染线程 → snapshot 的 cache_key 传递）──────────
+
+static PENDING_RENDERED_KEYS: OnceLock<Mutex<HashMap<String, RenderedClipCacheKey>>> = OnceLock::new();
+
+/// 获取进程级全局 pending_rendered_keys。
+///
+/// 渲染线程成功渲染 clip 后将 `(clip_id, cache_key)` 写入此 map，
+/// `build_snapshot` 优先从此 map 查找 cache_key（避免双重 hash 计算的不一致问题）。
+pub fn global_pending_rendered_keys() -> &'static Mutex<HashMap<String, RenderedClipCacheKey>> {
+    PENDING_RENDERED_KEYS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 渲染线程调用：注册一个 clip 的 cache_key。
+pub fn register_pending_rendered_key(clip_id: &str, key: RenderedClipCacheKey) {
+    let mut map = global_pending_rendered_keys()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    map.insert(clip_id.to_string(), key);
+}
+
+/// `build_snapshot` 调用：查找某个 clip 的渲染线程 cache_key。
+///
+/// 若找到，则使用此 key 查询 `rendered_clip_cache`，避免自行重新计算 hash。
+pub fn lookup_pending_rendered_key(clip_id: &str) -> Option<RenderedClipCacheKey> {
+    let map = global_pending_rendered_keys()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    map.get(clip_id).cloned()
+}
+
+/// 清空所有 pending rendered keys（播放停止或新一轮渲染开始时调用）。
+pub fn clear_pending_rendered_keys() {
+    let mut map = global_pending_rendered_keys()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    map.clear();
+}
+
 /// 计算整 Clip 渲染的参数哈希。
 ///
 /// 输入覆盖：
