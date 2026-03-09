@@ -654,9 +654,10 @@ export function drawPianoRoll(args: {
             orig: secondaryParamView.orig,
             edit: secondaryParamView.edit,
         });
-        const secondaryColor = secondaryParamId === "pitch"
-            ? "rgba(100, 200, 255, 0.45)"
-            : "rgba(255, 180, 60, 0.45)";
+        const secondaryColor =
+            secondaryParamId === "pitch"
+                ? "rgba(100, 200, 255, 0.45)"
+                : "rgba(255, 180, 60, 0.45)";
         ctx.save();
         ctx.strokeStyle = secondaryColor;
         ctx.lineWidth = 1.5;

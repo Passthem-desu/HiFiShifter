@@ -24,7 +24,8 @@ export function getActiveSecondaryParamId(args: {
     return (
         candidateIds.find(
             (paramId) =>
-                paramId !== editParam && secondaryParamVisible[paramId] === true,
+                paramId !== editParam &&
+                secondaryParamVisible[paramId] === true,
         ) ?? null
     );
 }

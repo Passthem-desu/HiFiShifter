@@ -346,7 +346,11 @@ export function usePianoRollData(args: {
 
         // 副参数异步加载（独立请求，不影响主参数刷新逻辑�?
         void (async () => {
-            if (!req.secondaryParam || !req.secondaryFpKey || !req.secondaryParamKey)
+            if (
+                !req.secondaryParam ||
+                !req.secondaryFpKey ||
+                !req.secondaryParamKey
+            )
                 return;
             const secReqId = ++secondaryFetchReqIdRef.current;
             // pitch 副参数需�?pitchEnabled（若 editParam �?tension，pitch 作为副参数时检查）
@@ -566,10 +570,10 @@ export function usePianoRollData(args: {
                           stride,
                       )
                     : Promise.resolve(null),
-                                secondaryParam
+                secondaryParam
                     ? paramsApi.getParamFrames(
                           trackId,
-                                                    secondaryParam,
+                          secondaryParam,
                           req.secondaryStartFrame,
                           req.secondaryFrameCount,
                           stride,
@@ -658,14 +662,20 @@ export function usePianoRollData(args: {
         const req = computeVisibleRequest();
         if (!req) return;
 
-        if (!req.secondaryParam || !req.secondaryFpKey || !req.secondaryParamKey) {
+        if (
+            !req.secondaryParam ||
+            !req.secondaryFpKey ||
+            !req.secondaryParamKey
+        ) {
             setSecondaryParamView(null);
             invalidate();
             return;
         }
 
         const secondaryPitchEnabled =
-            req.secondaryParam !== "pitch" || pitchEnabled || editParam === "pitch";
+            req.secondaryParam !== "pitch" ||
+            pitchEnabled ||
+            editParam === "pitch";
         if (!secondaryPitchEnabled && req.secondaryParam === "pitch") {
             setSecondaryParamView(null);
             invalidate();
