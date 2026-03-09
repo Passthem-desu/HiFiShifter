@@ -1,10 +1,14 @@
-// VocalShifter 剪贴板文件 (.clb) 解析模块。
+// VocalShifter 剪贴板文件解析模块。
 //
-// 临时目录候选文件：
-// - %TEMP%/vocalshifter_tmp/vocalshifter_id.clb
-// - %TEMP%/vocalshifter_tmp/vocalshifter_le_id.clb
+// 临时目录 %TEMP%/vocalshifter_tmp/ 下的候选文件（按修改时间取最晚的）：
+// - vocalshifter_tr.clb.vshp   (工程文件)
+// - vocalshifter_le_tr.clb.vshp (工程文件)
+// - vocalshifter_tr.clb.vsp    (工程文件)
+// - vocalshifter_le_tr.clb.vsp (工程文件)
+// - vocalshifter_id.clb        (音高线数据)
+// - vocalshifter_le_id.clb     (音高线数据)
 //
-// 记录格式：每条 0x80 字节（16 个 little-endian f64），仅使用前 3 个字段：
+// .clb 记录格式：每条 0x80 字节（16 个 little-endian f64），仅使用前 3 个字段：
 // - [0] time_sec
 // - [1] disabled (1.0 disabled / 0.0 enabled)
 // - [2] pitch_cents (0 = C-1, 6000 = C4)
@@ -23,15 +27,29 @@ pub struct ClipboardPitchPoint {
     pub midi_pitch: f32,
 }
 
-pub fn find_latest_clipboard_file() -> Option<PathBuf> {
+/// 剪贴板文件类型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipboardFileKind {
+    /// .clb 文件 — 纯音高线数据
+    PitchData,
+    /// .clb.vshp / .clb.vsp 文件 — VocalShifter 工程文件
+    Project,
+}
+
+/// 查找最新的 VocalShifter 剪贴板文件，返回路径及其类型。
+pub fn find_latest_clipboard_file() -> Option<(PathBuf, ClipboardFileKind)> {
     let base = std::env::temp_dir().join("vocalshifter_tmp");
     let candidates = [
-        base.join("vocalshifter_id.clb"),
-        base.join("vocalshifter_le_id.clb"),
+        (base.join("vocalshifter_tr.clb.vshp"), ClipboardFileKind::Project),
+        (base.join("vocalshifter_le_tr.clb.vshp"), ClipboardFileKind::Project),
+        (base.join("vocalshifter_tr.clb.vsp"), ClipboardFileKind::Project),
+        (base.join("vocalshifter_le_tr.clb.vsp"), ClipboardFileKind::Project),
+        (base.join("vocalshifter_id.clb"), ClipboardFileKind::PitchData),
+        (base.join("vocalshifter_le_id.clb"), ClipboardFileKind::PitchData),
     ];
 
-    let mut best: Option<(PathBuf, SystemTime)> = None;
-    for path in candidates {
+    let mut best: Option<(PathBuf, ClipboardFileKind, SystemTime)> = None;
+    for (path, kind) in candidates {
         let Ok(meta) = fs::metadata(&path) else {
             continue;
         };
@@ -40,13 +58,13 @@ pub fn find_latest_clipboard_file() -> Option<PathBuf> {
         }
         let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         match &best {
-            None => best = Some((path, modified)),
-            Some((_, t)) if modified > *t => best = Some((path, modified)),
+            None => best = Some((path, kind, modified)),
+            Some((_, _, t)) if modified > *t => best = Some((path, kind, modified)),
             _ => {}
         }
     }
 
-    best.map(|(p, _)| p)
+    best.map(|(p, k, _)| (p, k))
 }
 
 pub fn parse_clipboard_file(path: &Path) -> Result<Vec<ClipboardPitchPoint>, String> {
@@ -111,6 +129,16 @@ mod tests {
         let _ = fs::remove_file(&id_path);
         let _ = fs::remove_file(&le_id_path);
 
+        // Also clean up project file candidates that could interfere.
+        for name in &[
+            "vocalshifter_tr.clb.vshp",
+            "vocalshifter_le_tr.clb.vshp",
+            "vocalshifter_tr.clb.vsp",
+            "vocalshifter_le_tr.clb.vsp",
+        ] {
+            let _ = fs::remove_file(base.join(name));
+        }
+
         // Create first candidate file.
         fs::write(&id_path, b"first").expect("failed to write first candidate");
         // Ensure the second file has a later modification time.
@@ -118,10 +146,15 @@ mod tests {
         fs::write(&le_id_path, b"second").expect("failed to write second candidate");
 
         let latest = find_latest_clipboard_file();
+        let (latest_path, latest_kind) = latest.expect("Expected to find a clipboard file");
         assert_eq!(
-            latest.as_deref(),
-            Some(le_id_path.as_path()),
+            latest_path, le_id_path,
             "Expected latest clipboard file to be the *_le_id.clb candidate"
+        );
+        assert_eq!(
+            latest_kind,
+            ClipboardFileKind::PitchData,
+            "Expected PitchData kind for .clb file"
         );
     }
 

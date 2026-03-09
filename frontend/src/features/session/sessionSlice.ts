@@ -1322,7 +1322,11 @@ const sessionSlice = createSlice({
             )
             .addCase(pasteVocalShifterClipboard.fulfilled, (state, action) => {
                 state.busy = false;
-                state.lastResult = action.payload;
+                const payload = action.payload as any;
+                if (payload?.tracks) {
+                    applyTimelineState(state, payload);
+                }
+                state.lastResult = payload;
                 state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
                 state.status = "Pasted VocalShifter clipboard data";
             })

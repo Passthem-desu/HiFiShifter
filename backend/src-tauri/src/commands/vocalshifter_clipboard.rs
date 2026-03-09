@@ -1,11 +1,22 @@
 use crate::state::AppState;
+use crate::vocalshifter_clipboard::ClipboardFileKind;
+
+use super::core::get_timeline_state_from_ref;
 
 pub(super) fn paste_vocalshifter_clipboard(state: &AppState) -> serde_json::Value {
-    let Some(path) = crate::vocalshifter_clipboard::find_latest_clipboard_file() else {
+    let Some((path, kind)) = crate::vocalshifter_clipboard::find_latest_clipboard_file() else {
         return serde_json::json!({"ok": false, "error": "clipboard_not_found"});
     };
 
-    let points = match crate::vocalshifter_clipboard::parse_clipboard_file(&path) {
+    match kind {
+        ClipboardFileKind::PitchData => paste_clb_pitch_data(state, &path),
+        ClipboardFileKind::Project => paste_vsp_project(state, &path),
+    }
+}
+
+/// 粘贴 .clb 音高线数据到当前选中轨道的 pitch_edit。
+fn paste_clb_pitch_data(state: &AppState, path: &std::path::Path) -> serde_json::Value {
+    let points = match crate::vocalshifter_clipboard::parse_clipboard_file(path) {
         Ok(v) => v,
         Err(e) => {
             if e.starts_with("invalid_format:") {
@@ -109,4 +120,120 @@ pub(super) fn paste_vocalshifter_clipboard(state: &AppState) -> serde_json::Valu
         "updated": touched,
         "filled": filled,
     })
+}
+
+/// 粘贴 .clb.vshp / .clb.vsp 工程文件中被选中的 Item。
+fn paste_vsp_project(state: &AppState, path: &std::path::Path) -> serde_json::Value {
+    let data = match std::fs::read(path) {
+        Ok(d) => d,
+        Err(_) => {
+            return serde_json::json!({"ok": false, "error": "clipboard_io_error"});
+        }
+    };
+
+    let vsp_dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+
+    // 从当前 timeline 读取光标位置、选中轨道、轨道顺序
+    let (playhead_sec, selected_track_idx, ordered_track_ids) = {
+        let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+
+        let mut sorted_tracks: Vec<_> = tl.tracks.iter().collect();
+        sorted_tracks.sort_by_key(|t| t.order);
+        let ordered: Vec<String> = sorted_tracks.iter().map(|t| t.id.clone()).collect();
+
+        let sel_idx = tl
+            .selected_track_id
+            .as_ref()
+            .and_then(|sel| ordered.iter().position(|id| id == sel))
+            .unwrap_or(0);
+
+        (tl.playhead_sec, sel_idx, ordered)
+    };
+
+    let result = match crate::vocalshifter_import::import_vsp_clipboard(
+        &data,
+        vsp_dir,
+        playhead_sec,
+        selected_track_idx,
+        &ordered_track_ids,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            return serde_json::json!({"ok": false, "error": format!("clipboard_parse_failed: {}", e)});
+        }
+    };
+
+    // 需要开启 compose_enabled 的轨道
+    let tracks_needing_compose: Vec<String> = result
+        .timeline
+        .params_by_root_track
+        .keys()
+        .cloned()
+        .collect();
+
+    // 应用到 AppState
+    {
+        let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        state.checkpoint_timeline(&tl);
+
+        if !result.timeline.tracks.is_empty() {
+            for track in &result.timeline.tracks {
+                tl.tracks.push(track.clone());
+            }
+            tl.next_track_order = tl
+                .next_track_order
+                .max(tl.tracks.iter().map(|t| t.order).max().unwrap_or(0) + 1);
+        }
+
+        for clip in &result.timeline.clips {
+            tl.clips.push(clip.clone());
+        }
+
+        for (track_id, new_params) in &result.timeline.params_by_root_track {
+            if let Some(existing) = tl.params_by_root_track.get_mut(track_id) {
+                // 轨道已有 pitch 数据 → 合并非零区域
+                if new_params.pitch_edit_user_modified {
+                    let len = existing.pitch_edit.len().max(new_params.pitch_edit.len());
+                    if existing.pitch_edit.len() < len {
+                        existing.pitch_edit.resize(len, 0.0);
+                        existing.pitch_orig.resize(len, 0.0);
+                    }
+                    for (i, &v) in new_params.pitch_edit.iter().enumerate() {
+                        if v > 0.0 && i < existing.pitch_edit.len() {
+                            existing.pitch_edit[i] = v;
+                        }
+                    }
+                    existing.pitch_edit_user_modified = true;
+                }
+            } else {
+                tl.params_by_root_track
+                    .insert(track_id.clone(), new_params.clone());
+            }
+        }
+
+        // 为含音高数据的轨道开启 compose_enabled
+        for track in &mut tl.tracks {
+            if tracks_needing_compose.contains(&track.id) && !track.compose_enabled {
+                track.compose_enabled = true;
+            }
+        }
+
+        let max_end = tl
+            .clips
+            .iter()
+            .map(|c| c.start_sec + c.length_sec)
+            .fold(tl.project_sec, f64::max);
+        tl.project_sec = max_end;
+
+        state.audio_engine.update_timeline(tl.clone());
+    }
+
+    let payload = get_timeline_state_from_ref(state);
+    let mut json = serde_json::to_value(&payload).unwrap_or_default();
+
+    if !result.skipped_files.is_empty() {
+        json["skipped_files"] = serde_json::json!(result.skipped_files);
+    }
+
+    json
 }

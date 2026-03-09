@@ -60,6 +60,7 @@ struct VspTrack {
     pan: f64,
     muted: bool,
     solo: bool,
+    selected: bool,
     _inverted: bool,
 }
 
@@ -67,6 +68,7 @@ struct VspTrack {
 struct VspItemBase {
     audio_path: String,
     track_index: i32,
+    selected: bool,
     start_sample: f64,
 }
 
@@ -345,6 +347,7 @@ fn parse_trkp(data: &[u8]) -> VspTrack {
         pan: read_f64_at(data, 72).unwrap_or(0.0),
         muted: read_i32_at(data, 80).unwrap_or(0) != 0,
         solo: read_i32_at(data, 84).unwrap_or(0) != 0,
+        selected: read_i32_at(data, 0x58).unwrap_or(0) == 1,
         _inverted: read_i32_at(data, 96).unwrap_or(0) != 0,
     }
 }
@@ -357,6 +360,7 @@ fn parse_itmp(data: &[u8]) -> VspItemBase {
     VspItemBase {
         audio_path,
         track_index: read_i32_at(data, 0x108).unwrap_or(0),
+        selected: read_i32_at(data, 0x104).unwrap_or(0) == 1,
         start_sample: read_f64_at(data, 0x110).unwrap_or(0.0),
     }
 }
@@ -455,12 +459,12 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
             // 需要拆分：为 World 和 非-World 各建一条轨道
             for &is_world in &[true, false] {
                 if algos.map(|s| s.contains(&is_world)).unwrap_or(false) {
-                    let suffix = if is_world { " (World)" } else { " (NSF-HiFiGAN)" };
+                    let suffix = if is_world { " (World)" } else { " (VsLib)" };
                     let id = new_track_id();
                     let algo = if is_world {
                         PitchAnalysisAlgo::WorldDll
                     } else {
-                        PitchAnalysisAlgo::NsfHifiganOnnx
+                        PitchAnalysisAlgo::VocalShifterVslib
                     };
                     hs_tracks.push(Track {
                         id: id.clone(),
@@ -486,7 +490,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
             let algo = if is_world {
                 PitchAnalysisAlgo::WorldDll
             } else {
-                PitchAnalysisAlgo::NsfHifiganOnnx
+                PitchAnalysisAlgo::VocalShifterVslib
             };
             let id = new_track_id();
             let has_items = algos.is_some();
@@ -906,6 +910,728 @@ fn write_pitch_data_for_segment(
             acc.weight += weight;
         }
     }
+}
+
+/// 从 VocalShifter 剪贴板工程文件 (.clb.vshp / .clb.vsp) 导入选中的 Item。
+///
+/// - 只导入被标记为 `selected` 的 Item
+/// - 所有 Item 中最早的起始位置对齐到 `playhead_sec`
+/// - 轨道映射参考 Reaper 剪贴板逻辑：从 `selected_track_idx` 开始，按原轨道偏移分配
+pub fn import_vsp_clipboard(
+    data: &[u8],
+    vsp_file_dir: &Path,
+    playhead_sec: f64,
+    selected_track_idx: usize,
+    ordered_track_ids: &[String],
+) -> Result<VspImportResult, String> {
+    let (project, vsp_tracks, item_bases, item_exts) = parse_vsp_file(data)?;
+
+    let sample_rate = project.sample_rate.max(1) as f64;
+
+    // 筛选被选中的 Item 索引
+    let selected_indices: Vec<usize> = item_bases
+        .iter()
+        .enumerate()
+        .filter(|(_, base)| base.selected)
+        .map(|(i, _)| i)
+        .collect();
+
+    // 若没有选中的 Item，则回退到导入选中的轨道
+    if selected_indices.is_empty() {
+        return import_vsp_clipboard_selected_tracks(
+            &project, &vsp_tracks, &item_bases, &item_exts, vsp_file_dir,
+            ordered_track_ids,
+        );
+    }
+
+    // 计算选中 Item 中最小的起始时间，用于对齐到 playhead
+    let min_start_sec = selected_indices
+        .iter()
+        .map(|&i| item_bases[i].start_sample / sample_rate)
+        .fold(f64::MAX, f64::min);
+    let time_offset = if min_start_sec.is_finite() {
+        playhead_sec - min_start_sec
+    } else {
+        0.0
+    };
+
+    // 收集选中 Item 使用的原始轨道索引（去重、排序）
+    let mut unique_track_indices: Vec<i32> = selected_indices
+        .iter()
+        .map(|&i| item_bases[i].track_index)
+        .collect();
+    unique_track_indices.sort();
+    unique_track_indices.dedup();
+
+    // 原始轨道索引 → 目标轨道偏移（从 0 开始递增）
+    let track_idx_to_offset: std::collections::HashMap<i32, usize> = unique_track_indices
+        .iter()
+        .enumerate()
+        .map(|(offset, &idx)| (idx, offset))
+        .collect();
+
+    let mut skipped_files: Vec<String> = Vec::new();
+    let mut hs_clips: Vec<Clip> = Vec::new();
+    let mut new_tracks: Vec<Track> = Vec::new();
+    let mut created_track_ids: std::collections::HashMap<usize, String> =
+        std::collections::HashMap::new();
+    let mut pitch_data_by_track: std::collections::HashMap<
+        String,
+        std::collections::HashMap<usize, PitchFrameAccumulator>,
+    > = std::collections::HashMap::new();
+
+    let mut next_order = ordered_track_ids.len() as i32;
+
+    for &item_idx in &selected_indices {
+        let base = &item_bases[item_idx];
+        let ext = item_exts.get(item_idx);
+
+        // 确定目标轨道
+        let track_offset = track_idx_to_offset
+            .get(&base.track_index)
+            .copied()
+            .unwrap_or(0);
+        let target_track_idx = selected_track_idx + track_offset;
+        let target_track_id = if target_track_idx < ordered_track_ids.len() {
+            ordered_track_ids[target_track_idx].clone()
+        } else if let Some(id) = created_track_ids.get(&target_track_idx) {
+            id.clone()
+        } else {
+            // 需要创建新轨道
+            let tid = new_track_id();
+            let is_world = ext.map(|e| e.algo_type == 8).unwrap_or(false);
+            let algo = if is_world {
+                PitchAnalysisAlgo::WorldDll
+            } else {
+                PitchAnalysisAlgo::VocalShifterVslib
+            };
+            let vsp_track = vsp_tracks.get(base.track_index as usize);
+            let track_name = vsp_track
+                .map(|t| t.name.clone())
+                .unwrap_or_else(|| format!("Track {}", next_order + 1));
+            let color_idx =
+                (ordered_track_ids.len() + new_tracks.len()) % TRACK_COLORS.len();
+            new_tracks.push(Track {
+                id: tid.clone(),
+                name: track_name,
+                parent_id: None,
+                order: next_order,
+                muted: false,
+                solo: false,
+                volume: 0.9,
+                compose_enabled: false,
+                pitch_analysis_algo: algo,
+                color: TRACK_COLORS[color_idx].to_string(),
+            });
+            created_track_ids.insert(target_track_idx, tid.clone());
+            next_order += 1;
+            tid
+        };
+
+        // 解析音频路径
+        let audio_path = resolve_audio_path(&base.audio_path, vsp_file_dir);
+
+        if !is_audio_supported(&audio_path) {
+            skipped_files.push(base.audio_path.clone());
+            continue;
+        }
+        if !Path::new(&audio_path).exists() {
+            skipped_files.push(base.audio_path.clone());
+            continue;
+        }
+
+        let item_start_sec = base.start_sample / sample_rate + time_offset;
+
+        // 读取音频文件信息
+        let audio_info = try_read_wav_info(Path::new(&audio_path), 4096);
+        let (duration_sec, duration_frames, source_sr, waveform_preview) = match &audio_info {
+            Some(info) => (
+                Some(info.duration_sec),
+                Some(info.total_frames),
+                Some(info.sample_rate),
+                Some(info.waveform_preview.clone()),
+            ),
+            None => (None, None, None, None),
+        };
+
+        let source_duration_sec = duration_sec.unwrap_or(0.0);
+        let time_markers = ext.map(|e| &e.time_markers[..]).unwrap_or(&[]);
+        let pitch_points = ext.map(|e| &e.pitch_points[..]).unwrap_or(&[]);
+
+        if time_markers.len() >= 3 {
+            // 非线性拉伸：拆分为多个子剪辑
+            let seg_count = time_markers.len() - 1;
+            for seg_idx in 0..seg_count {
+                let m_start = &time_markers[seg_idx];
+                let m_end = &time_markers[seg_idx + 1];
+
+                let src_start = m_start.original_pos / sample_rate;
+                let src_end = m_end.original_pos / sample_rate;
+                let src_dur = (src_end - src_start).max(0.001);
+
+                let new_start = m_start.new_pos / sample_rate;
+                let new_end = m_end.new_pos / sample_rate;
+                let new_dur = (new_end - new_start).max(0.001);
+
+                let rate = (src_dur / new_dur) as f32;
+
+                let want_pre_tl = if seg_idx > 0 { SEGMENT_OVERLAP_SEC } else { 0.0 };
+                let want_post_tl = if seg_idx + 1 < seg_count {
+                    SEGMENT_OVERLAP_SEC
+                } else {
+                    0.0
+                };
+                let rate64 = (rate as f64).max(0.0001);
+                let want_pre_src = want_pre_tl * rate64;
+                let want_post_src = want_post_tl * rate64;
+
+                let seg_src_start = (src_start - want_pre_src).max(0.0);
+                let seg_src_end =
+                    (src_end + want_post_src).min(source_duration_sec.max(src_end));
+                let actual_pre_tl = (src_start - seg_src_start) / rate64;
+                let actual_post_tl = (seg_src_end - src_end).max(0.0) / rate64;
+
+                let clip_start = item_start_sec + new_start - actual_pre_tl;
+                let clip_length = (new_dur + actual_pre_tl + actual_post_tl).max(0.001);
+                let fade_in = if seg_idx > 0 {
+                    actual_pre_tl.min(SEGMENT_OVERLAP_SEC)
+                } else {
+                    0.0
+                };
+                let fade_out = if seg_idx + 1 < seg_count {
+                    actual_post_tl.min(SEGMENT_OVERLAP_SEC)
+                } else {
+                    0.0
+                };
+
+                let clip_id = new_clip_id();
+                let clip_name = Path::new(&audio_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Audio")
+                    .to_string();
+
+                hs_clips.push(Clip {
+                    id: clip_id.clone(),
+                    track_id: target_track_id.clone(),
+                    name: format!("{} ({})", clip_name, seg_idx + 1),
+                    start_sec: clip_start,
+                    length_sec: clip_length,
+                    color: clip_color(),
+                    source_path: Some(audio_path.clone()),
+                    duration_sec,
+                    duration_frames,
+                    source_sample_rate: source_sr,
+                    waveform_preview: waveform_preview.clone(),
+                    pitch_range: Some(PitchRange {
+                        min: -24.0,
+                        max: 24.0,
+                    }),
+                    gain: 1.0,
+                    muted: false,
+                    source_start_sec: seg_src_start,
+                    source_end_sec: seg_src_end,
+                    playback_rate: rate.clamp(0.1, 10.0),
+                    fade_in_sec: fade_in,
+                    fade_out_sec: fade_out,
+                    fade_in_curve: String::new(),
+                    fade_out_curve: String::new(),
+                    extra_curves: None,
+                    extra_params: None,
+                });
+
+                write_pitch_data_for_segment(
+                    &target_track_id,
+                    pitch_points,
+                    seg_src_start,
+                    seg_src_end,
+                    clip_start,
+                    rate64,
+                    fade_in,
+                    fade_out,
+                    &mut pitch_data_by_track,
+                );
+            }
+        } else {
+            // 线性拉伸或无拉伸
+            let (rate, clip_length) = if time_markers.len() == 2 {
+                let m0 = &time_markers[0];
+                let m1 = &time_markers[1];
+                let src_dur =
+                    ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
+                let new_dur = ((m1.new_pos - m0.new_pos) / sample_rate).max(0.001);
+                let r = src_dur / new_dur;
+                (r as f32, new_dur)
+            } else {
+                (1.0f32, source_duration_sec)
+            };
+
+            let clip_id = new_clip_id();
+            let clip_name = Path::new(&audio_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Audio")
+                .to_string();
+
+            hs_clips.push(Clip {
+                id: clip_id.clone(),
+                track_id: target_track_id.clone(),
+                name: clip_name,
+                start_sec: item_start_sec,
+                length_sec: clip_length,
+                color: clip_color(),
+                source_path: Some(audio_path.clone()),
+                duration_sec,
+                duration_frames,
+                source_sample_rate: source_sr,
+                waveform_preview,
+                pitch_range: Some(PitchRange {
+                    min: -24.0,
+                    max: 24.0,
+                }),
+                gain: 1.0,
+                muted: false,
+                source_start_sec: 0.0,
+                source_end_sec: source_duration_sec,
+                playback_rate: rate.clamp(0.1, 10.0),
+                fade_in_sec: 0.0,
+                fade_out_sec: 0.0,
+                fade_in_curve: String::new(),
+                fade_out_curve: String::new(),
+                extra_curves: None,
+                extra_params: None,
+            });
+
+            write_pitch_data_for_segment(
+                &target_track_id,
+                pitch_points,
+                0.0,
+                source_duration_sec,
+                item_start_sec,
+                rate as f64,
+                0.0,
+                0.0,
+                &mut pitch_data_by_track,
+            );
+        }
+    }
+
+    // 构建 pitch 参数
+    let project_end = hs_clips
+        .iter()
+        .map(|c| c.start_sec + c.length_sec)
+        .fold(32.0_f64, f64::max);
+    let frame_period_ms = CTRP_FRAME_PERIOD * 1000.0;
+
+    let mut params_by_root_track: BTreeMap<String, TrackParamsState> = BTreeMap::new();
+
+    for track_id in created_track_ids
+        .values()
+        .chain(ordered_track_ids.iter())
+    {
+        if let Some(points) = pitch_data_by_track.get(track_id) {
+            if points.is_empty() {
+                continue;
+            }
+            let total_frames =
+                ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
+            let mut pitch_edit = vec![0.0f32; total_frames];
+
+            for (&frame_idx, acc) in points {
+                if frame_idx < total_frames {
+                    if acc.weight > 0.0 {
+                        pitch_edit[frame_idx] = (acc.sum / acc.weight) as f32;
+                    }
+                }
+            }
+
+            params_by_root_track.insert(
+                track_id.clone(),
+                TrackParamsState {
+                    frame_period_ms,
+                    pitch_orig: pitch_edit.clone(),
+                    pitch_edit,
+                    pitch_edit_user_modified: true,
+                    tension_orig: Vec::new(),
+                    tension_edit: Vec::new(),
+                    pitch_orig_key: None,
+                    pending_pitch_offset: None,
+                    extra_curves: Default::default(),
+                    extra_params: Default::default(),
+                },
+            );
+        }
+    }
+
+    // 为有 pitch 数据的新轨道开启合成
+    for track in &mut new_tracks {
+        if params_by_root_track.contains_key(&track.id) {
+            track.compose_enabled = true;
+        }
+    }
+
+    let timeline = TimelineState {
+        tracks: new_tracks,
+        clips: hs_clips,
+        selected_track_id: None,
+        selected_clip_id: None,
+        bpm: project.bpm.max(1.0),
+        playhead_sec: 0.0,
+        project_sec: project_end,
+        params_by_root_track,
+        next_track_order: next_order,
+    };
+
+    Ok(VspImportResult {
+        timeline,
+        skipped_files,
+    })
+}
+
+/// 剪贴板工程文件中没有选中的 Item 时，导入被标记为选中的轨道。
+/// 导入的目标轨道始终是新建的轨道，起始位置保持原样（不对齐光标）。
+fn import_vsp_clipboard_selected_tracks(
+    project: &VspProject,
+    vsp_tracks: &[VspTrack],
+    item_bases: &[VspItemBase],
+    item_exts: &[VspItemExt],
+    vsp_file_dir: &Path,
+    ordered_track_ids: &[String],
+) -> Result<VspImportResult, String> {
+    let sample_rate = project.sample_rate.max(1) as f64;
+
+    // 找出被选中的轨道索引
+    let selected_track_indices: Vec<usize> = vsp_tracks
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.selected)
+        .map(|(i, _)| i)
+        .collect();
+
+    if selected_track_indices.is_empty() {
+        return Err("no_selected_items".into());
+    }
+
+    let selected_set: std::collections::HashSet<usize> =
+        selected_track_indices.iter().copied().collect();
+
+    let mut skipped_files: Vec<String> = Vec::new();
+    let mut hs_tracks: Vec<Track> = Vec::new();
+    let mut hs_clips: Vec<Clip> = Vec::new();
+    let mut pitch_data_by_track: std::collections::HashMap<
+        String,
+        std::collections::HashMap<usize, PitchFrameAccumulator>,
+    > = std::collections::HashMap::new();
+
+    let mut track_order = ordered_track_ids.len() as i32;
+
+    // 原始轨道索引 → 新建的 HiFiShifter 轨道 ID
+    let mut vsp_to_hs_track: std::collections::HashMap<i32, String> =
+        std::collections::HashMap::new();
+
+    // 为每个选中的轨道创建新轨道
+    for &vsp_idx in &selected_track_indices {
+        let vsp_track = &vsp_tracks[vsp_idx];
+
+        // 检测该轨道内的算法类型
+        let mut has_world = false;
+        let mut has_other = false;
+        for (i, base) in item_bases.iter().enumerate() {
+            if base.track_index as usize == vsp_idx {
+                let is_world = item_exts.get(i).map(|e| e.algo_type == 8).unwrap_or(false);
+                if is_world {
+                    has_world = true;
+                } else {
+                    has_other = true;
+                }
+            }
+        }
+
+        let algo = if has_world && !has_other {
+            PitchAnalysisAlgo::WorldDll
+        } else {
+            PitchAnalysisAlgo::VocalShifterVslib
+        };
+
+        let id = new_track_id();
+        let color_idx = (ordered_track_ids.len() + hs_tracks.len()) % TRACK_COLORS.len();
+        hs_tracks.push(Track {
+            id: id.clone(),
+            name: vsp_track.name.clone(),
+            parent_id: None,
+            order: track_order,
+            muted: vsp_track.muted,
+            solo: vsp_track.solo,
+            volume: convert_volume(vsp_track.volume),
+            compose_enabled: false,
+            pitch_analysis_algo: algo,
+            color: TRACK_COLORS[color_idx].to_string(),
+        });
+        vsp_to_hs_track.insert(vsp_idx as i32, id);
+        track_order += 1;
+    }
+
+    // 导入选中轨道上的所有 Item（保持原始起始位置）
+    for (i, base) in item_bases.iter().enumerate() {
+        if !selected_set.contains(&(base.track_index as usize)) {
+            continue;
+        }
+
+        let ext = item_exts.get(i);
+
+        let Some(track_id) = vsp_to_hs_track.get(&base.track_index).cloned() else {
+            continue;
+        };
+
+        let audio_path = resolve_audio_path(&base.audio_path, vsp_file_dir);
+
+        if !is_audio_supported(&audio_path) {
+            skipped_files.push(base.audio_path.clone());
+            continue;
+        }
+        if !Path::new(&audio_path).exists() {
+            skipped_files.push(base.audio_path.clone());
+            continue;
+        }
+
+        let item_start_sec = base.start_sample / sample_rate;
+
+        let audio_info = try_read_wav_info(Path::new(&audio_path), 4096);
+        let (duration_sec, duration_frames, source_sr, waveform_preview) = match &audio_info {
+            Some(info) => (
+                Some(info.duration_sec),
+                Some(info.total_frames),
+                Some(info.sample_rate),
+                Some(info.waveform_preview.clone()),
+            ),
+            None => (None, None, None, None),
+        };
+
+        let source_duration_sec = duration_sec.unwrap_or(0.0);
+        let time_markers = ext.map(|e| &e.time_markers[..]).unwrap_or(&[]);
+        let pitch_points = ext.map(|e| &e.pitch_points[..]).unwrap_or(&[]);
+
+        if time_markers.len() >= 3 {
+            let seg_count = time_markers.len() - 1;
+            for seg_idx in 0..seg_count {
+                let m_start = &time_markers[seg_idx];
+                let m_end = &time_markers[seg_idx + 1];
+
+                let src_start = m_start.original_pos / sample_rate;
+                let src_end = m_end.original_pos / sample_rate;
+                let src_dur = (src_end - src_start).max(0.001);
+
+                let new_start = m_start.new_pos / sample_rate;
+                let new_end = m_end.new_pos / sample_rate;
+                let new_dur = (new_end - new_start).max(0.001);
+
+                let rate = (src_dur / new_dur) as f32;
+                let rate64 = (rate as f64).max(0.0001);
+
+                let want_pre_tl = if seg_idx > 0 { SEGMENT_OVERLAP_SEC } else { 0.0 };
+                let want_post_tl = if seg_idx + 1 < seg_count {
+                    SEGMENT_OVERLAP_SEC
+                } else {
+                    0.0
+                };
+                let want_pre_src = want_pre_tl * rate64;
+                let want_post_src = want_post_tl * rate64;
+
+                let seg_src_start = (src_start - want_pre_src).max(0.0);
+                let seg_src_end =
+                    (src_end + want_post_src).min(source_duration_sec.max(src_end));
+                let actual_pre_tl = (src_start - seg_src_start) / rate64;
+                let actual_post_tl = (seg_src_end - src_end).max(0.0) / rate64;
+
+                let clip_start = item_start_sec + new_start - actual_pre_tl;
+                let clip_length = (new_dur + actual_pre_tl + actual_post_tl).max(0.001);
+                let fade_in = if seg_idx > 0 {
+                    actual_pre_tl.min(SEGMENT_OVERLAP_SEC)
+                } else {
+                    0.0
+                };
+                let fade_out = if seg_idx + 1 < seg_count {
+                    actual_post_tl.min(SEGMENT_OVERLAP_SEC)
+                } else {
+                    0.0
+                };
+
+                let clip_id = new_clip_id();
+                let clip_name = Path::new(&audio_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Audio")
+                    .to_string();
+
+                hs_clips.push(Clip {
+                    id: clip_id.clone(),
+                    track_id: track_id.clone(),
+                    name: format!("{} ({})", clip_name, seg_idx + 1),
+                    start_sec: clip_start,
+                    length_sec: clip_length,
+                    color: clip_color(),
+                    source_path: Some(audio_path.clone()),
+                    duration_sec,
+                    duration_frames,
+                    source_sample_rate: source_sr,
+                    waveform_preview: waveform_preview.clone(),
+                    pitch_range: Some(PitchRange {
+                        min: -24.0,
+                        max: 24.0,
+                    }),
+                    gain: 1.0,
+                    muted: false,
+                    source_start_sec: seg_src_start,
+                    source_end_sec: seg_src_end,
+                    playback_rate: rate.clamp(0.1, 10.0),
+                    fade_in_sec: fade_in,
+                    fade_out_sec: fade_out,
+                    fade_in_curve: String::new(),
+                    fade_out_curve: String::new(),
+                    extra_curves: None,
+                    extra_params: None,
+                });
+
+                write_pitch_data_for_segment(
+                    &track_id,
+                    pitch_points,
+                    seg_src_start,
+                    seg_src_end,
+                    clip_start,
+                    rate64,
+                    fade_in,
+                    fade_out,
+                    &mut pitch_data_by_track,
+                );
+            }
+        } else {
+            let (rate, clip_length) = if time_markers.len() == 2 {
+                let m0 = &time_markers[0];
+                let m1 = &time_markers[1];
+                let src_dur =
+                    ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
+                let new_dur = ((m1.new_pos - m0.new_pos) / sample_rate).max(0.001);
+                let r = src_dur / new_dur;
+                (r as f32, new_dur)
+            } else {
+                (1.0f32, source_duration_sec)
+            };
+
+            let clip_id = new_clip_id();
+            let clip_name = Path::new(&audio_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Audio")
+                .to_string();
+
+            hs_clips.push(Clip {
+                id: clip_id.clone(),
+                track_id: track_id.clone(),
+                name: clip_name,
+                start_sec: item_start_sec,
+                length_sec: clip_length,
+                color: clip_color(),
+                source_path: Some(audio_path.clone()),
+                duration_sec,
+                duration_frames,
+                source_sample_rate: source_sr,
+                waveform_preview,
+                pitch_range: Some(PitchRange {
+                    min: -24.0,
+                    max: 24.0,
+                }),
+                gain: 1.0,
+                muted: false,
+                source_start_sec: 0.0,
+                source_end_sec: source_duration_sec,
+                playback_rate: rate.clamp(0.1, 10.0),
+                fade_in_sec: 0.0,
+                fade_out_sec: 0.0,
+                fade_in_curve: String::new(),
+                fade_out_curve: String::new(),
+                extra_curves: None,
+                extra_params: None,
+            });
+
+            write_pitch_data_for_segment(
+                &track_id,
+                pitch_points,
+                0.0,
+                source_duration_sec,
+                item_start_sec,
+                rate as f64,
+                0.0,
+                0.0,
+                &mut pitch_data_by_track,
+            );
+        }
+    }
+
+    // 构建 pitch 参数
+    let project_end = hs_clips
+        .iter()
+        .map(|c| c.start_sec + c.length_sec)
+        .fold(32.0_f64, f64::max);
+    let frame_period_ms = CTRP_FRAME_PERIOD * 1000.0;
+
+    let mut params_by_root_track: BTreeMap<String, TrackParamsState> = BTreeMap::new();
+
+    for track in &hs_tracks {
+        if let Some(points) = pitch_data_by_track.get(&track.id) {
+            if points.is_empty() {
+                continue;
+            }
+            let total_frames =
+                ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
+            let mut pitch_edit = vec![0.0f32; total_frames];
+
+            for (&frame_idx, acc) in points {
+                if frame_idx < total_frames && acc.weight > 0.0 {
+                    pitch_edit[frame_idx] = (acc.sum / acc.weight) as f32;
+                }
+            }
+
+            params_by_root_track.insert(
+                track.id.clone(),
+                TrackParamsState {
+                    frame_period_ms,
+                    pitch_orig: pitch_edit.clone(),
+                    pitch_edit,
+                    pitch_edit_user_modified: true,
+                    tension_orig: Vec::new(),
+                    tension_edit: Vec::new(),
+                    pitch_orig_key: None,
+                    pending_pitch_offset: None,
+                    extra_curves: Default::default(),
+                    extra_params: Default::default(),
+                },
+            );
+        }
+    }
+
+    // 为有 pitch 数据的轨道开启合成
+    for track in &mut hs_tracks {
+        if params_by_root_track.contains_key(&track.id) {
+            track.compose_enabled = true;
+        }
+    }
+
+    let timeline = TimelineState {
+        tracks: hs_tracks,
+        clips: hs_clips,
+        selected_track_id: None,
+        selected_clip_id: None,
+        bpm: project.bpm.max(1.0),
+        playhead_sec: 0.0,
+        project_sec: project_end,
+        params_by_root_track,
+        next_track_order: track_order,
+    };
+
+    Ok(VspImportResult {
+        timeline,
+        skipped_files,
+    })
 }
 
 /// 将相对路径解析为绝对路径。

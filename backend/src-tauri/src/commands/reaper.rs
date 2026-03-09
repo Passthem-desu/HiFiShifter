@@ -51,25 +51,47 @@ pub(super) fn import_reaper_project(
         }
     };
 
-    // 应用到 AppState
+    // 应用到 AppState —— 合并到现有工程（不替换）
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
-        *tl = result.timeline.clone();
+        state.checkpoint_timeline(&tl);
+
+        // 计算现有轨道的最大 order
+        let max_existing_order = tl.tracks.iter().map(|t| t.order).max().unwrap_or(-1);
+        let mut order_offset = max_existing_order + 1;
+
+        // 合并轨道（调整 order 使其排在现有轨道之后）
+        for mut track in result.timeline.tracks {
+            track.order = order_offset;
+            order_offset += 1;
+            tl.tracks.push(track);
+        }
+        tl.next_track_order = order_offset;
+
+        // 合并 clips
+        for clip in result.timeline.clips {
+            tl.clips.push(clip);
+        }
+
+        // 合并 pitch params
+        for (track_id, params) in result.timeline.params_by_root_track {
+            tl.params_by_root_track.insert(track_id, params);
+        }
+
+        // 更新工程时长
+        let max_end = tl
+            .clips
+            .iter()
+            .map(|c| c.start_sec + c.length_sec)
+            .fold(tl.project_sec, f64::max);
+        tl.project_sec = max_end;
+
         state.audio_engine.update_timeline(tl.clone());
     }
-    state.clear_history();
 
     // 更新工程元信息
-    let project_name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("Imported")
-        .to_string();
     {
         let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-        p.name = project_name.clone();
-        p.path = None; // Reaper 工程不设为已保存路径
-        p.dirty = true; // 标记为未保存（需要另存为 .hshp）
         update_window_title(window, &p.name, p.dirty);
     }
 

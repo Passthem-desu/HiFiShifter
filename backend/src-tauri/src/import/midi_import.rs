@@ -47,7 +47,19 @@ pub struct MidiParseResult {
 /// 解析 MIDI 文件，返回轨道信息和音符事件。
 pub fn parse_midi_file(path: &Path) -> Result<MidiParseResult, String> {
     let data = fs::read(path).map_err(|e| format!("io_error: {}", e))?;
-    let smf = Smf::parse(&data).map_err(|e| format!("midi_parse_error: {}", e))?;
+    parse_midi_data(&data, None)
+}
+
+/// 从字节数据解析 MIDI，返回轨道信息和音符事件。
+///
+/// `fallback_bpm`：当 MIDI 数据本身不包含 Tempo 事件时，使用此值作为
+/// 默认 BPM（而非硬编码 120）。传 `None` 则沿用 120 BPM 默认值。
+pub fn parse_midi_bytes(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseResult, String> {
+    parse_midi_data(data, fallback_bpm)
+}
+
+fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseResult, String> {
+    let smf = Smf::parse(data).map_err(|e| format!("midi_parse_error: {}", e))?;
 
     // 解析 tempo map（用于将 tick 转换为秒）
     let ticks_per_beat = match smf.header.timing {
@@ -80,9 +92,13 @@ pub fn parse_midi_file(path: &Path) -> Result<MidiParseResult, String> {
         }
     }
 
-    // 如果没有 tempo 事件，默认 120 BPM
+    // 如果没有 tempo 事件，使用 fallback_bpm 或默认 120 BPM
     if tempo_events.is_empty() {
-        tempo_events.push((0, 500_000.0)); // 500000 µs/beat = 120 BPM
+        let us_per_beat = match fallback_bpm {
+            Some(bpm) if bpm > 0.0 && bpm.is_finite() => 60_000_000.0 / bpm,
+            _ => 500_000.0, // 120 BPM
+        };
+        tempo_events.push((0, us_per_beat));
     }
     tempo_events.sort_by_key(|&(tick, _)| tick);
 
