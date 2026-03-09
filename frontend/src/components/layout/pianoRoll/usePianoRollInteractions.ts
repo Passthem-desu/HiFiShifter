@@ -613,12 +613,6 @@ export function usePianoRollInteractions(args: {
                                     selStartIdx,
                                     selEndIdx + 1,
                                 );
-                                // 保存选区范围对应的 orig 曲线值，用于边界还原
-                                const origCurveValues = pv.orig.slice(
-                                    selStartIdx,
-                                    selEndIdx + 1,
-                                );
-
                                 ensureLiveEditBase(pv);
                                 if (liveEditActiveRef)
                                     liveEditActiveRef.current = true;
