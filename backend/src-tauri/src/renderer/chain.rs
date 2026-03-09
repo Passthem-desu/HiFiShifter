@@ -17,7 +17,7 @@ use super::traits::{
 
 static HIFIGAN_BREATH_OPTIONS: [(&str, i32); 2] = [("Off", 0), ("On", 1)];
 
-static HIFIGAN_PARAM_DESCRIPTORS: [ParamDescriptor; 2] = [
+static HIFIGAN_PARAM_DESCRIPTORS: [ParamDescriptor; 3] = [
     ParamDescriptor {
         id: "breath_enabled",
         display_name: "Breath",
@@ -36,6 +36,17 @@ static HIFIGAN_PARAM_DESCRIPTORS: [ParamDescriptor; 2] = [
             default_value: 1.0,
             min_value: 0.0,
             max_value: 2.0,
+        },
+    },
+    ParamDescriptor {
+        id: "hifigan_tension",
+        display_name: "Tension",
+        group: "NSF-HiFiGAN",
+        kind: super::traits::ParamKind::AutomationCurve {
+            unit: "%",
+            default_value: 0.0,
+            min_value: -100.0,
+            max_value: 100.0,
         },
     },
 ];

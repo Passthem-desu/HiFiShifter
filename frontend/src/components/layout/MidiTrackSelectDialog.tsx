@@ -214,9 +214,7 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                                                 {tAny("midi_all_tracks")}
                                             </Text>
                                             <Text size="1" color="gray">
-                                                {tAny(
-                                                    "midi_track_notes",
-                                                ).replace(
+                                                {tAny("midi_track_notes").replace(
                                                     "{count}",
                                                     String(
                                                         tracks.reduce(
@@ -266,7 +264,9 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                                                     )}
                                                 </Text>
                                                 <Text size="1" color="gray">
-                                                    {tAny("midi_track_range")
+                                                    {tAny(
+                                                        "midi_track_range",
+                                                    )
                                                         .replace(
                                                             "{min}",
                                                             noteToName(

@@ -351,15 +351,17 @@ pub(crate) fn build_snapshot(
                 let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
                 let renderer_id = crate::renderer::get_renderer(kind).id();
                 Some((
+                    entry.pitch_orig.as_slice(),
                     entry.pitch_edit.as_slice(),
                     entry.frame_period_ms.max(0.1),
                     renderer_id,
+                    entry,
                     &entry.extra_curves,
                     &entry.extra_params,
                 ))
             });
         let (breath_curve, breath_curve_frame_period_ms) = processor_params
-            .and_then(|(_, frame_period_ms, renderer_id, extra_curves, extra_params)| {
+            .and_then(|(_, _, frame_period_ms, renderer_id, _, extra_curves, extra_params)| {
                 if renderer_id == "nsf_hifigan_onnx"
                     && crate::pitch_editing::extra_param_enabled(extra_params, "breath_enabled")
                 {
@@ -400,7 +402,7 @@ pub(crate) fn build_snapshot(
                     Some(pk)
                 } else {
                     // 回退：自行计算 hash（兼容非预渲染路径，如 AudioReady rebuild）
-                    if let Some((pitch_edit, frame_period_ms, renderer_id, extra_curves, extra_params)) = processor_params {
+                    if let Some((_, pitch_edit, frame_period_ms, renderer_id, _, extra_curves, extra_params)) = processor_params {
                         let end_frame = start_frame.saturating_add(length_frames);
                         let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
                             &clip.id,
@@ -435,9 +437,49 @@ pub(crate) fn build_snapshot(
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
                     let cache_entry = rendered_cache.get(&key).cloned();
-                    let pcm = cache_entry.as_ref().map(|entry| entry.pcm_stereo.clone());
+                    let mut pcm = cache_entry.as_ref().map(|entry| entry.pcm_stereo.clone());
                     let breath_noise = cache_entry
                         .and_then(|entry| entry.breath_noise_stereo.clone());
+
+                    if let Some((pitch_orig, pitch_edit, frame_period_ms, renderer_id, entry, _, _)) = processor_params {
+                        if renderer_id == "nsf_hifigan_onnx"
+                            && crate::pitch_editing::hifigan_tension_active_for_clip(entry, clip, start_sec)
+                        {
+                            let tension_curve = crate::pitch_editing::hifigan_tension_curve_for_clip(entry, clip);
+                            let tension_hash = crate::synth_clip_cache::compute_hifigan_tension_hash(
+                                &clip.id,
+                                key.param_hash,
+                                start_frame,
+                                start_frame.saturating_add(length_frames),
+                                out_rate,
+                                frame_period_ms,
+                                pitch_orig,
+                                tension_curve,
+                            );
+                            let tension_key = crate::synth_clip_cache::TensionRenderedClipCacheKey {
+                                clip_id: clip.id.clone(),
+                                base_param_hash: key.param_hash,
+                                tension_hash,
+                            };
+                            let mut tension_cache = crate::synth_clip_cache::global_tension_rendered_clip_cache()
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner());
+                            pcm = tension_cache
+                                .get(&tension_key)
+                                .map(|entry| entry.pcm_stereo.clone());
+                            if debug {
+                                eprintln!(
+                                    "[snapshot] clip_id={} tension_hash={:#018x} tension_cache_hit={}",
+                                    clip.id,
+                                    tension_hash,
+                                    pcm.is_some()
+                                );
+                            }
+                        } else {
+                            let _ = pitch_edit;
+                        }
+                    }
+
                     if debug {
                         eprintln!(
                             "[snapshot] clip_id={} hash={:#018x} rendered_cache_hit={} needs_synthesis=true",

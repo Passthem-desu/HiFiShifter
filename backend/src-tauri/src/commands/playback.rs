@@ -1,11 +1,10 @@
 use crate::models::PlaybackStatePayload;
 use crate::state::AppState;
-use std::path::Path;
 use tauri::Emitter;
 use tauri::State;
 
 use super::common::{
-    guard_json_command, new_temp_wav_path, ok_bool, render_timeline_to_wav, PlaybackRenderingStateEvent,
+    guard_json_command, ok_bool, PlaybackRenderingStateEvent,
 };
 
 // ===================== playback clock =====================
@@ -116,89 +115,105 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
 
                 // 逐 clip 预渲染，全部完成后再开始播放
                 for clip_render_info in &clips_to_render {
-                    // 检查缓存是否已命中
-                    {
+                    let mut base_entry = {
                         let mut cache = crate::synth_clip_cache::global_rendered_clip_cache()
                             .lock()
                             .unwrap_or_else(|e| e.into_inner());
-                        if cache.get(&clip_render_info.cache_key).is_some() {
-                            rendered_count += 1;
-                            let progress = rendered_count as f64 / total as f64;
-                            let _ = app.emit(
-                                "playback_rendering_state",
-                                PlaybackRenderingStateEvent {
-                                    active: true,
-                                    progress: Some(progress),
-                                    target: Some("original".to_string()),
-                                },
-                            );
-                            
-                            continue;
+                        cache.get(&clip_render_info.cache_key).cloned()
+                    };
+
+                    if base_entry.is_some() {
+                        crate::synth_clip_cache::register_pending_rendered_key(
+                            &clip_render_info.clip.id,
+                            clip_render_info.cache_key.clone(),
+                        );
+                    }
+
+                    if base_entry.is_none() {
+                        match render_single_clip(
+                            &tl_for_render,
+                            &clip_render_info.clip,
+                            clip_render_info.sr,
+                        ) {
+                            Ok(rendered) => {
+                                let stereo_pcm = rendered.rendered_stereo;
+                                if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                                    let nonzero = stereo_pcm.iter().filter(|&&v| v.abs() > 1e-6).count();
+                                    eprintln!(
+                                        "[play_original] clip rendered: id={} pcm_len={} nonzero={} hash={:#018x}",
+                                        clip_render_info.clip.id, stereo_pcm.len(), nonzero,
+                                        clip_render_info.cache_key.param_hash
+                                    );
+                                }
+                                let frames = (stereo_pcm.len() / 2) as u64;
+                                let entry = crate::synth_clip_cache::RenderedClipCacheEntry {
+                                    pcm_stereo: std::sync::Arc::new(stereo_pcm),
+                                    breath_noise_stereo: rendered
+                                        .breath_noise_stereo
+                                        .map(std::sync::Arc::new),
+                                    frames,
+                                    sample_rate: clip_render_info.sr,
+                                };
+                                let mut cache = crate::synth_clip_cache::global_rendered_clip_cache()
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner());
+                                cache.insert(clip_render_info.cache_key.clone(), entry.clone());
+                                crate::synth_clip_cache::register_pending_rendered_key(
+                                    &clip_render_info.clip.id,
+                                    clip_render_info.cache_key.clone(),
+                                );
+                                base_entry = Some(entry);
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "play_original: clip render failed: clip_id={} err={}",
+                                    clip_render_info.clip.id, e
+                                );
+                                any_error = true;
+                                if let Ok(mut state_mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
+                                    state_mgr.set_state(
+                                        &clip_render_info.clip.id,
+                                        crate::clip_rendering_state::ClipRenderingState::Failed,
+                                        0.0,
+                                        Some(e.clone())
+                                    );
+                                }
+                            }
                         }
                     }
 
-                    // 缓存未命中：调用渲染器
-                    match render_single_clip(
-                        &tl_for_render,
-                        &clip_render_info.clip,
-                        clip_render_info.sr,
-                    ) {
-                        Ok(rendered) => {
-                            let stereo_pcm = rendered.rendered_stereo;
-                            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
-                                let nonzero = stereo_pcm.iter().filter(|&&v| v.abs() > 1e-6).count();
+                    if let Some(base_entry) = base_entry.as_ref() {
+                        match ensure_hifigan_tension_cache(
+                            &tl_for_render,
+                            &clip_render_info.clip,
+                            clip_render_info.sr,
+                            clip_render_info.cache_key.param_hash,
+                            base_entry.pcm_stereo.as_slice(),
+                        ) {
+                            Ok(_) => {
+                                if let Ok(mut state_mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
+                                    state_mgr.set_state(
+                                        &clip_render_info.clip.id,
+                                        crate::clip_rendering_state::ClipRenderingState::Ready,
+                                        1.0,
+                                        None
+                                    );
+                                }
+                            }
+                            Err(e) => {
                                 eprintln!(
-                                    "[play_original] clip rendered: id={} pcm_len={} nonzero={} hash={:#018x}",
-                                    clip_render_info.clip.id, stereo_pcm.len(), nonzero,
-                                    clip_render_info.cache_key.param_hash
+                                    "play_original: tension render failed: clip_id={} err={}",
+                                    clip_render_info.clip.id, e
                                 );
-                            }
-                            let frames = (stereo_pcm.len() / 2) as u64;
-                            let entry = crate::synth_clip_cache::RenderedClipCacheEntry {
-                                pcm_stereo: std::sync::Arc::new(stereo_pcm),
-                                breath_noise_stereo: rendered
-                                    .breath_noise_stereo
-                                    .map(std::sync::Arc::new),
-                                frames,
-                                sample_rate: clip_render_info.sr,
-                            };
-                            let mut cache = crate::synth_clip_cache::global_rendered_clip_cache()
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner());
-                            cache.insert(clip_render_info.cache_key.clone(), entry);
-
-                            // 将 cache_key 注册到 pending_rendered_keys，
-                            // 供 build_snapshot 直接查找，避免双重 hash 计算不一致
-                            crate::synth_clip_cache::register_pending_rendered_key(
-                                &clip_render_info.clip.id,
-                                clip_render_info.cache_key.clone(),
-                            );
-                            
-                            // 更新clip渲染状态为已完成
-                            if let Ok(mut state_mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
-                                state_mgr.set_state(
-                                    &clip_render_info.clip.id,
-                                    crate::clip_rendering_state::ClipRenderingState::Ready,
-                                    1.0,
-                                    None
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "play_original: clip render failed: clip_id={} err={}",
-                                clip_render_info.clip.id, e
-                            );
-                            any_error = true;
-                            
-                            // 标记clip渲染失败
-                            if let Ok(mut state_mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
-                                state_mgr.set_state(
-                                    &clip_render_info.clip.id,
-                                    crate::clip_rendering_state::ClipRenderingState::Failed,
-                                    0.0,
-                                    Some(e.clone())
-                                );
+                                any_error = true;
+                                if let Ok(mut state_mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
+                                    state_mgr.set_state(
+                                        &clip_render_info.clip.id,
+                                        crate::clip_rendering_state::ClipRenderingState::Failed,
+                                        0.0,
+                                        Some(e.clone())
+                                    );
+                                }
                             }
                         }
                     }
@@ -273,6 +288,84 @@ struct ClipRenderInfo {
 struct RenderedClipOutput {
     rendered_stereo: Vec<f32>,
     breath_noise_stereo: Option<Vec<f32>>,
+}
+
+fn ensure_hifigan_tension_cache(
+    timeline: &crate::state::TimelineState,
+    clip: &crate::state::Clip,
+    out_rate: u32,
+    base_param_hash: u64,
+    base_pcm_stereo: &[f32],
+) -> Result<Option<crate::synth_clip_cache::TensionRenderedClipCacheKey>, String> {
+    let Some(root) = timeline.resolve_root_track_id(&clip.track_id) else {
+        return Ok(None);
+    };
+    let Some(entry) = timeline.params_by_root_track.get(&root) else {
+        return Ok(None);
+    };
+    let Some(track) = timeline.tracks.iter().find(|track| track.id == root) else {
+        return Ok(None);
+    };
+
+    let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+    if !matches!(kind, crate::state::SynthPipelineKind::NsfHifiganOnnx) {
+        return Ok(None);
+    }
+    let clip_start_sec = clip.start_sec.max(0.0);
+    if !crate::pitch_editing::hifigan_tension_active_for_clip(entry, clip, clip_start_sec) {
+        return Ok(None);
+    }
+
+    let start_frame = (clip_start_sec * out_rate as f64).round().max(0.0) as u64;
+    let end_frame = start_frame
+        + (clip.length_sec.max(0.0) * out_rate as f64).round().max(1.0) as u64;
+    let frame_period_ms = entry.frame_period_ms.max(0.1);
+    let tension_curve = crate::pitch_editing::hifigan_tension_curve_for_clip(entry, clip);
+    let tension_hash = crate::synth_clip_cache::compute_hifigan_tension_hash(
+        &clip.id,
+        base_param_hash,
+        start_frame,
+        end_frame,
+        out_rate,
+        frame_period_ms,
+        &entry.pitch_orig,
+        tension_curve,
+    );
+    let cache_key = crate::synth_clip_cache::TensionRenderedClipCacheKey {
+        clip_id: clip.id.clone(),
+        base_param_hash,
+        tension_hash,
+    };
+
+    {
+        let mut cache = crate::synth_clip_cache::global_tension_rendered_clip_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if cache.get(&cache_key).is_some() {
+            return Ok(Some(cache_key));
+        }
+    }
+
+    let tensioned = crate::hifigan_tension::apply_tension_to_stereo(
+        base_pcm_stereo,
+        out_rate,
+        clip_start_sec,
+        frame_period_ms,
+        &entry.pitch_orig,
+        &entry.pitch_edit,
+        tension_curve,
+    )?;
+    let frames = (tensioned.len() / 2) as u64;
+    let entry = crate::synth_clip_cache::TensionRenderedClipCacheEntry {
+        pcm_stereo: std::sync::Arc::new(tensioned),
+        frames,
+        sample_rate: out_rate,
+    };
+    let mut cache = crate::synth_clip_cache::global_tension_rendered_clip_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    cache.insert(cache_key.clone(), entry);
+    Ok(Some(cache_key))
 }
 
 /// 收集 timeline 中所有需要预渲染的 clip。
@@ -372,7 +465,7 @@ fn collect_clips_needing_render(
     out
 }
 
-/// 渲染单个 clip 的完整 stereo PCM（从源文件解码 → resample → pitch edit → stereo）。
+/// 渲染单个 clip 的完整 stereo PCM（从源文件解码 -> resample -> pitch edit -> stereo）。
 ///
 /// 复用 mixdown.rs 中的解码和 resample 逻辑，通过 Renderer trait 调用 pitch edit。
 fn render_single_clip(
@@ -425,24 +518,28 @@ fn render_single_clip(
     }
 
     let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
-    let segment =
-        crate::mixdown::linear_resample_interleaved(segment, in_channels_usize, in_rate, out_rate);
+    let segment = crate::mixdown::linear_resample_interleaved(
+        segment,
+        in_channels_usize,
+        in_rate,
+        out_rate,
+    );
 
     // 4. 转 stereo
     let segment = if in_channels == 1 {
         let frames = segment.len();
         let mut stereo = Vec::with_capacity(frames * 2);
-        for s in segment {
-            stereo.push(s);
-            stereo.push(s);
+        for sample in segment {
+            stereo.push(sample);
+            stereo.push(sample);
         }
         stereo
     } else if in_channels >= 2 {
         let frames = segment.len() / in_channels_usize;
         let mut stereo = Vec::with_capacity(frames * 2);
-        for f in 0..frames {
-            stereo.push(segment[f * in_channels_usize]);
-            stereo.push(segment[f * in_channels_usize + 1]);
+        for frame in 0..frames {
+            stereo.push(segment[frame * in_channels_usize]);
+            stereo.push(segment[frame * in_channels_usize + 1]);
         }
         stereo
     } else {
@@ -450,7 +547,7 @@ fn render_single_clip(
     };
 
     // 5. 时间拉伸（playback_rate != 1）
-    // 若合成处理器声明自己处理时间拉伸（handles_time_stretch = true，如 vslib），
+    // 若合成处理器声明自己处理时间拉伸（handles_time_stretch = true），
     // 则跳过此处的 RubberBand，由处理器在 pitch edit 阶段通过 ClipProcessContext.playback_rate 内部完成。
     let processor_handles_stretch = {
         let clip_root = timeline.resolve_root_track_id(&clip.track_id);

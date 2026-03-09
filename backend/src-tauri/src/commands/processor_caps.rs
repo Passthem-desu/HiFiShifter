@@ -94,7 +94,7 @@ mod tests {
     use super::{get_processor_params, ParamKindDto};
 
     #[test]
-    fn nsf_hifigan_exposes_breath_params() {
+    fn nsf_hifigan_exposes_breath_and_tension_params() {
         let params = get_processor_params("nsf_hifigan_onnx".to_string());
 
         let breath_enabled = params
@@ -129,6 +129,24 @@ mod tests {
                 assert!((*max_value - 2.0).abs() < 1e-6);
             }
             _ => panic!("breath_gain should be an automation curve"),
+        }
+
+        let tension = params
+            .iter()
+            .find(|param| param.id == "hifigan_tension")
+            .expect("expected hifigan_tension automation curve");
+        match &tension.kind {
+            ParamKindDto::AutomationCurve {
+                default_value,
+                min_value,
+                max_value,
+                ..
+            } => {
+                assert!(default_value.abs() < 1e-6);
+                assert!((*min_value + 100.0).abs() < 1e-6);
+                assert!((*max_value - 100.0).abs() < 1e-6);
+            }
+            _ => panic!("hifigan_tension should be an automation curve"),
         }
     }
 }

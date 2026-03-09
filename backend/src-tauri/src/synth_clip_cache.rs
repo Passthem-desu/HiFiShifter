@@ -499,7 +499,8 @@ pub fn compute_rendered_clip_hash(
     let mut h: u64 = 14695981039346656037u64;
 
     fn include_rendered_extra_curve(renderer_id: &str, param_id: &str) -> bool {
-        !(renderer_id == "nsf_hifigan_onnx" && param_id == "breath_gain")
+        !(renderer_id == "nsf_hifigan_onnx"
+            && matches!(param_id, "breath_gain" | "hifigan_tension"))
     }
 
     macro_rules! mix_bytes {
@@ -556,9 +557,164 @@ pub fn compute_rendered_clip_hash(
     h
 }
 
+fn curve_slice_bounds(
+    start_frame: u64,
+    end_frame: u64,
+    sr: u32,
+    frame_period_ms: f64,
+    len: usize,
+) -> (usize, usize) {
+    let fp = frame_period_ms.max(0.1);
+    let start_sec = start_frame as f64 / sr.max(1) as f64;
+    let end_sec = end_frame as f64 / sr.max(1) as f64;
+    let start_idx = ((start_sec * 1000.0) / fp).floor().max(0.0) as usize;
+    let end_idx = ((end_sec * 1000.0) / fp).ceil().max(0.0) as usize;
+    (start_idx.min(len), end_idx.min(len))
+}
+
+pub fn compute_hifigan_tension_hash(
+    clip_id: &str,
+    base_param_hash: u64,
+    start_frame: u64,
+    end_frame: u64,
+    sr: u32,
+    frame_period_ms: f64,
+    pitch_orig: &[f32],
+    tension_curve: Option<&Vec<f32>>,
+) -> u64 {
+    let mut h: u64 = 14695981039346656037u64;
+
+    macro_rules! mix_bytes {
+        ($bytes:expr) => {
+            for &b in $bytes {
+                h ^= b as u64;
+                h = h.wrapping_mul(1099511628211u64);
+            }
+        };
+    }
+
+    mix_bytes!(clip_id.as_bytes());
+    mix_bytes!(b"hifigan_tension");
+    mix_bytes!(&base_param_hash.to_le_bytes());
+    mix_bytes!(&start_frame.to_le_bytes());
+    mix_bytes!(&end_frame.to_le_bytes());
+    mix_bytes!(&sr.to_le_bytes());
+
+    let (pitch_lo, pitch_hi) =
+        curve_slice_bounds(start_frame, end_frame, sr, frame_period_ms, pitch_orig.len());
+    for &value in &pitch_orig[pitch_lo..pitch_hi] {
+        mix_bytes!(&value.to_bits().to_le_bytes());
+    }
+
+    if let Some(curve) = tension_curve {
+        let (curve_lo, curve_hi) =
+            curve_slice_bounds(start_frame, end_frame, sr, frame_period_ms, curve.len());
+        for &value in &curve[curve_lo..curve_hi] {
+            mix_bytes!(&value.to_bits().to_le_bytes());
+        }
+    }
+
+    h
+}
+
+/// HiFiGAN tension 后处理缓存 key。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TensionRenderedClipCacheKey {
+    pub clip_id: String,
+    pub base_param_hash: u64,
+    pub tension_hash: u64,
+}
+
+/// HiFiGAN tension 后处理缓存 entry。
+#[derive(Debug, Clone)]
+pub struct TensionRenderedClipCacheEntry {
+    pub pcm_stereo: Arc<Vec<f32>>,
+    pub frames: u64,
+    pub sample_rate: u32,
+}
+
+pub struct TensionRenderedClipCache {
+    inner: HashMap<TensionRenderedClipCacheKey, TensionRenderedClipCacheEntry>,
+    order: VecDeque<TensionRenderedClipCacheKey>,
+    capacity: usize,
+}
+
+impl TensionRenderedClipCache {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            inner: HashMap::with_capacity(capacity),
+            order: VecDeque::with_capacity(capacity),
+            capacity: capacity.max(1),
+        }
+    }
+
+    pub fn get(
+        &mut self,
+        key: &TensionRenderedClipCacheKey,
+    ) -> Option<&TensionRenderedClipCacheEntry> {
+        if !self.inner.contains_key(key) {
+            return None;
+        }
+        if let Some(pos) = self.order.iter().position(|k| k == key) {
+            let hit = self.order.remove(pos).unwrap();
+            self.order.push_front(hit);
+        }
+        self.inner.get(key)
+    }
+
+    pub fn insert(
+        &mut self,
+        key: TensionRenderedClipCacheKey,
+        entry: TensionRenderedClipCacheEntry,
+    ) {
+        if self.inner.contains_key(&key) {
+            self.inner.insert(key.clone(), entry);
+            if let Some(pos) = self.order.iter().position(|k| k == &key) {
+                let hit = self.order.remove(pos).unwrap();
+                self.order.push_front(hit);
+            }
+            return;
+        }
+
+        while self.inner.len() >= self.capacity {
+            if let Some(evict_key) = self.order.pop_back() {
+                self.inner.remove(&evict_key);
+            } else {
+                break;
+            }
+        }
+
+        self.order.push_front(key.clone());
+        self.inner.insert(key, entry);
+    }
+
+    pub fn invalidate(&mut self, clip_id: &str) {
+        let keys_to_remove: Vec<TensionRenderedClipCacheKey> = self
+            .inner
+            .keys()
+            .filter(|key| key.clip_id == clip_id)
+            .cloned()
+            .collect();
+        for key in &keys_to_remove {
+            self.inner.remove(key);
+            if let Some(pos) = self.order.iter().position(|item| item == key) {
+                self.order.remove(pos);
+            }
+        }
+    }
+}
+
+static GLOBAL_TENSION_RENDERED_CLIP_CACHE: OnceLock<Mutex<TensionRenderedClipCache>> =
+    OnceLock::new();
+
+pub fn global_tension_rendered_clip_cache() -> &'static Mutex<TensionRenderedClipCache> {
+    GLOBAL_TENSION_RENDERED_CLIP_CACHE
+        .get_or_init(|| Mutex::new(TensionRenderedClipCache::new(RENDERED_CLIP_CAPACITY)))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::compute_rendered_clip_hash;
+    use super::{compute_hifigan_tension_hash, compute_rendered_clip_hash};
     use std::collections::HashMap;
 
     #[test]
@@ -572,6 +728,7 @@ mod tests {
 
         let mut curve_b = HashMap::new();
         curve_b.insert("breath_gain".to_string(), vec![0.25f32; 32]);
+        curve_b.insert("hifigan_tension".to_string(), vec![18.0f32; 32]);
 
         let hash_a = compute_rendered_clip_hash(
             "clip-1",
@@ -601,5 +758,35 @@ mod tests {
         );
 
         assert_eq!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn hifigan_tension_hash_changes_with_curve() {
+        let pitch_orig = vec![60.0f32; 64];
+        let curve_a = vec![0.0f32; 64];
+        let curve_b = vec![35.0f32; 64];
+
+        let hash_a = compute_hifigan_tension_hash(
+            "clip-1",
+            11,
+            0,
+            44_100,
+            44_100,
+            5.0,
+            &pitch_orig,
+            Some(&curve_a),
+        );
+        let hash_b = compute_hifigan_tension_hash(
+            "clip-1",
+            11,
+            0,
+            44_100,
+            44_100,
+            5.0,
+            &pitch_orig,
+            Some(&curve_b),
+        );
+
+        assert_ne!(hash_a, hash_b);
     }
 }

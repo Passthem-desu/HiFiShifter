@@ -7,6 +7,15 @@ use super::types::EngineSnapshot;
 use super::util::clamp11;
 use super::types::EngineClip;
 
+const SNAPSHOT_XFADE_FRAMES: usize = 256;
+
+#[derive(Default)]
+pub(crate) struct SnapshotTransitionState {
+    current_snapshot: Option<Arc<EngineSnapshot>>,
+    fade_from_snapshot: Option<Arc<EngineSnapshot>>,
+    fade_remaining_frames: usize,
+}
+
 fn sample_automation_curve(
     curve: Option<&Vec<f32>>,
     abs_frame: u64,
@@ -157,6 +166,73 @@ pub(crate) fn mix_snapshot_clips_into_scratch(
 }
 
 
+fn snapshot_has_pending_clip(snap: &EngineSnapshot, pos0: u64, pos1: u64) -> bool {
+    snap.clips.iter().any(|clip| {
+        if !clip.needs_synthesis || clip.rendered_pcm.is_some() {
+            return false;
+        }
+        let clip_end = clip.start_frame.saturating_add(clip.length_frames);
+        clip.start_frame < pos1 && clip_end > pos0
+    })
+}
+
+fn render_snapshot_window(
+    frames: usize,
+    snap: &EngineSnapshot,
+    pos0: u64,
+    pos1: u64,
+    scratch: &mut Vec<f32>,
+) -> bool {
+    scratch.resize(frames * 2, 0.0);
+    scratch.fill(0.0);
+
+    if snapshot_has_pending_clip(snap, pos0, pos1) {
+        return false;
+    }
+
+    mix_snapshot_clips_into_scratch(frames, snap, pos0, pos1, scratch.as_mut_slice());
+    true
+}
+
+fn blend_snapshot_windows(
+    out: &mut [f32],
+    from: &[f32],
+    to: &[f32],
+    fade_remaining_frames: usize,
+) {
+    let total = SNAPSHOT_XFADE_FRAMES.max(1);
+    let already_blended = total.saturating_sub(fade_remaining_frames);
+    let frames = (out.len() / 2)
+        .min(from.len() / 2)
+        .min(to.len() / 2);
+
+    for frame in 0..frames {
+        let t = ((already_blended + frame + 1).min(total) as f32) / total as f32;
+        let from_gain = 1.0 - t;
+        let to_gain = t;
+        let base = frame * 2;
+        out[base] = from[base] * from_gain + to[base] * to_gain;
+        out[base + 1] = from[base + 1] * from_gain + to[base + 1] * to_gain;
+    }
+}
+
+fn advance_playback_position(
+    frames: usize,
+    is_playing: &AtomicBool,
+    position_frames: &AtomicU64,
+    duration_frames: &AtomicU64,
+) {
+    let pos0 = position_frames.load(Ordering::Relaxed);
+    let new_pos = pos0.saturating_add(frames as u64);
+    position_frames.store(new_pos, Ordering::Relaxed);
+
+    let dur = duration_frames.load(Ordering::Relaxed);
+    if dur > 0 && new_pos >= dur {
+        is_playing.store(false, Ordering::Relaxed);
+    }
+}
+
+
 
 fn mix_into_scratch_stereo(
     frames: usize,
@@ -165,6 +241,8 @@ fn mix_into_scratch_stereo(
     position_frames: &AtomicU64,
     duration_frames: &AtomicU64,
     scratch: &mut Vec<f32>,
+    scratch_fade_from: &mut Vec<f32>,
+    transition: &mut SnapshotTransitionState,
 ) {
     scratch.resize(frames * 2, 0.0);
     scratch.fill(0.0);
@@ -173,22 +251,25 @@ fn mix_into_scratch_stereo(
         return;
     }
 
-    let snap = snapshot.load();
+    let snap = snapshot.load_full();
     let pos0 = position_frames.load(Ordering::Relaxed);
     let pos1 = pos0.saturating_add(frames as u64);
 
-    // 检查当前播放窗口内是否有需要合成但尚未渲染完成的 clip，
-    // 如果有则 cursor 暂停（不推进 position），输出静音等待渲染完成。
-    let has_pending_clip = snap.clips.iter().any(|clip| {
-        if !clip.needs_synthesis || clip.rendered_pcm.is_some() {
-            return false; // 不需要合成 或 已经渲染好
-        }
-        // 该 clip 需要合成但还没好，检查是否与当前播放窗口重叠
-        let clip_end = clip.start_frame.saturating_add(clip.length_frames);
-        clip.start_frame < pos1 && clip_end > pos0
-    });
+    let snap_ptr = Arc::as_ptr(&snap) as usize;
+    let current_ptr = transition
+        .current_snapshot
+        .as_ref()
+        .map(|current| Arc::as_ptr(current) as usize)
+        .unwrap_or(0);
+    if current_ptr != 0 && current_ptr != snap_ptr {
+        transition.fade_from_snapshot = transition.current_snapshot.take();
+        transition.fade_remaining_frames = SNAPSHOT_XFADE_FRAMES;
+    }
+    transition.current_snapshot = Some(snap.clone());
 
-    if has_pending_clip {
+    let current_ready = render_snapshot_window(frames, &snap, pos0, pos1, scratch);
+
+    if !current_ready && transition.fade_from_snapshot.is_none() {
         // cursor 暂停，不推进 position，输出静音等待
         // 调试：每隔约 1s 打印一次（避免刷屏）
         if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
@@ -213,15 +294,44 @@ fn mix_into_scratch_stereo(
         return;
     }
 
-    // Legacy mixing: 直接在 audio callback 中混合所有 clip
-    mix_snapshot_clips_into_scratch(frames, &snap, pos0, pos1, scratch.as_mut_slice());
+    if let Some(from_snapshot) = transition.fade_from_snapshot.as_ref() {
+        let from_ready = render_snapshot_window(
+            frames,
+            from_snapshot,
+            pos0,
+            pos1,
+            scratch_fade_from,
+        );
 
-    let new_pos = pos0.saturating_add(frames as u64);
-    position_frames.store(new_pos, Ordering::Relaxed);
+        if from_ready && !current_ready {
+            scratch.resize(scratch_fade_from.len(), 0.0);
+            scratch.copy_from_slice(scratch_fade_from.as_slice());
+            advance_playback_position(frames, is_playing, position_frames, duration_frames);
+            return;
+        }
 
-    let dur = duration_frames.load(Ordering::Relaxed);
-    if dur > 0 && new_pos >= dur {
-        is_playing.store(false, Ordering::Relaxed);
+        if from_ready && current_ready && transition.fade_remaining_frames > 0 {
+            let current_window = scratch.clone();
+            blend_snapshot_windows(
+                scratch.as_mut_slice(),
+                scratch_fade_from.as_slice(),
+                current_window.as_slice(),
+                transition.fade_remaining_frames,
+            );
+            transition.fade_remaining_frames = transition
+                .fade_remaining_frames
+                .saturating_sub(frames);
+            if transition.fade_remaining_frames == 0 {
+                transition.fade_from_snapshot = None;
+            }
+        } else if current_ready {
+            transition.fade_from_snapshot = None;
+            transition.fade_remaining_frames = 0;
+        }
+    }
+
+    if current_ready || transition.fade_from_snapshot.is_some() {
+        advance_playback_position(frames, is_playing, position_frames, duration_frames);
     }
 }
 
@@ -233,6 +343,8 @@ pub(crate) fn render_callback_f32(
     position_frames: &AtomicU64,
     duration_frames: &AtomicU64,
     scratch: &mut Vec<f32>,
+    scratch_fade_from: &mut Vec<f32>,
+    transition: &mut SnapshotTransitionState,
 ) {
     let frames = if out_channels == 0 {
         0
@@ -256,6 +368,8 @@ pub(crate) fn render_callback_f32(
         position_frames,
         duration_frames,
         scratch,
+        scratch_fade_from,
+        transition,
     );
 
     for f in 0..frames {
@@ -282,6 +396,8 @@ pub(crate) fn render_callback_i16(
     position_frames: &AtomicU64,
     duration_frames: &AtomicU64,
     scratch: &mut Vec<f32>,
+    scratch_fade_from: &mut Vec<f32>,
+    transition: &mut SnapshotTransitionState,
 ) {
     let frames = if out_channels == 0 {
         0
@@ -304,6 +420,8 @@ pub(crate) fn render_callback_i16(
         position_frames,
         duration_frames,
         scratch,
+        scratch_fade_from,
+        transition,
     );
 
     for f in 0..frames {
@@ -331,6 +449,8 @@ pub(crate) fn render_callback_u16(
     position_frames: &AtomicU64,
     duration_frames: &AtomicU64,
     scratch: &mut Vec<f32>,
+    scratch_fade_from: &mut Vec<f32>,
+    transition: &mut SnapshotTransitionState,
 ) {
     let frames = if out_channels == 0 {
         0
@@ -353,6 +473,8 @@ pub(crate) fn render_callback_u16(
         position_frames,
         duration_frames,
         scratch,
+        scratch_fade_from,
+        transition,
     );
 
     for f in 0..frames {

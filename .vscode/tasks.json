@@ -1,0 +1,29 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "cargo-check-backend-lib",
+			"type": "shell",
+			"command": "cargo",
+			"args": [
+				"check",
+				"--lib",
+				"-q"
+			],
+			"isBackground": false,
+			"group": "build"
+		},
+		{
+			"label": "cargo-check-backend-lib-tauri",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"Set-Location 'e:\\Code\\HifiShifter\\backend\\src-tauri'; cargo check --lib -q"
+			],
+			"isBackground": false,
+			"group": "build"
+		}
+	]
+}

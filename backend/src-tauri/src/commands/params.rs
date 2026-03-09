@@ -25,6 +25,18 @@ fn resolve_param_reference_kind(param: &str) -> crate::models::ParamReferenceKin
     }
 }
 
+fn resolve_extra_curve_frame_pair(
+    curve: Option<&Vec<f32>>,
+    default_value: f32,
+    idx: usize,
+) -> (f32, f32) {
+    let edit_value = curve
+        .and_then(|values| values.get(idx))
+        .copied()
+        .unwrap_or(default_value);
+    (default_value, edit_value)
+}
+
 fn resolve_static_param_default_value(
     kind: crate::state::SynthPipelineKind,
     param: &str,
@@ -171,17 +183,14 @@ pub(super) fn get_param_frames(
             }
         }
         _ => {
-            // Extra automation curve — edit is stored in extra_curves; no separate orig.
+            // Extra automation curve: dashed orig should stay at the processor default,
+            // while solid edit reflects the user-authored curve.
             let curve = entry.extra_curves.get(&param);
             let default_value = resolve_param_reference_value(kind, &param);
             for i in 0..count {
                 let idx = start.saturating_add(i.saturating_mul(step));
-                let e = curve
-                    .and_then(|v| v.get(idx))
-                    .copied()
-                    .unwrap_or(default_value);
-                // orig == edit for extra curves (no separate original)
-                orig.push(e);
+                let (o, e) = resolve_extra_curve_frame_pair(curve, default_value, idx);
+                orig.push(o);
                 edit.push(e);
             }
         }
@@ -492,7 +501,10 @@ pub(super) fn set_static_param(
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_extra_curve_default_value, resolve_param_reference_value};
+    use super::{
+        resolve_extra_curve_default_value, resolve_extra_curve_frame_pair,
+        resolve_param_reference_value,
+    };
     use crate::state::SynthPipelineKind;
 
     #[test]
@@ -521,5 +533,23 @@ mod tests {
 
         assert!(tension.abs() < 1e-6);
         assert!((breath_gain - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extra_curve_orig_stays_at_default_when_edit_exists() {
+        let curve = vec![1.25, 1.5, 0.75];
+
+        let (orig, edit) = resolve_extra_curve_frame_pair(Some(&curve), 1.0, 1);
+
+        assert!((orig - 1.0).abs() < 1e-6);
+        assert!((edit - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn extra_curve_orig_and_edit_fall_back_to_default_when_missing() {
+        let (orig, edit) = resolve_extra_curve_frame_pair(None, 1.0, 12);
+
+        assert!((orig - 1.0).abs() < 1e-6);
+        assert!((edit - 1.0).abs() < 1e-6);
     }
 }

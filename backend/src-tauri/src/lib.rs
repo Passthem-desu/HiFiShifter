@@ -2,6 +2,7 @@ mod audio_engine;
 #[path = "audio/audio_utils.rs"] mod audio_utils;
 mod commands;
 #[path = "audio/mixdown.rs"] mod mixdown;
+#[path = "audio/hifigan_tension.rs"] mod hifigan_tension;
 mod models;
 mod pitch_analysis;
 #[path = "pitch/pitch_clip.rs"] mod pitch_clip;
