@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Flex, Box, Text, Dialog, Button } from "@radix-ui/themes";
 import { MenuBar } from "./components/layout/MenuBar";
 import { ActionBar } from "./components/layout/ActionBar";
@@ -17,6 +17,9 @@ import {
     redoRemote,
     newProjectRemote,
     openProjectFromDialog,
+    openProjectFromPath,
+    openVocalShifterFromDialog,
+    openReaperFromDialog,
     saveProjectRemote,
     saveProjectAsRemote,
     exportAudio,
@@ -41,8 +44,10 @@ import { useKeybindings } from "./features/keybindings/useKeybindings";
 import type { ActionId } from "./features/keybindings/types";
 import { store } from "./app/store";
 import { resolveRootTrackId } from "./features/session/trackUtils";
+import { getParamShiftStep } from "./components/layout/pianoRoll/paramShiftStep";
 import { paramsApi } from "./services/api";
-import type { ParamFramesPayload } from "./types/api";
+import { coreApi } from "./services/api/core";
+import type { ParamFramesPayload, ProcessorParamDescriptor } from "./types/api";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -102,6 +107,8 @@ function AppInner() {
     );
     const toolMode = useAppSelector((state) => state.session.toolMode);
     const outputPath = useAppSelector((state) => state.session.outputPath);
+    const projectDirty = useAppSelector((state) => state.session.project.dirty);
+    const projectPath = useAppSelector((state) => state.session.project.path);
     const vocalShifterSkippedFilesDialog = useAppSelector(
         (state) => state.session.vocalShifterSkippedFilesDialog,
     );
@@ -120,6 +127,15 @@ function AppInner() {
     const splitRatioRef = useRef(splitRatio);
     const [isDragging, setIsDragging] = useState(false);
     const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+    const [unsavedDialog, setUnsavedDialog] = useState<{
+        open: boolean;
+        mode: "switch" | "exit";
+    }>({ open: false, mode: "switch" });
+    const pendingUnsavedActionRef = useRef<null | (() => Promise<void>)>(null);
+    const allowWindowCloseRef = useRef(false);
+    const processorParamCacheRef = useRef(
+        new Map<string, ProcessorParamDescriptor[]>(),
+    );
 
     const splitter = useMemo(() => {
         const minTopPx = 200;
@@ -336,6 +352,106 @@ function AppInner() {
     const playbackSyncInFlightRef = useRef(false);
     const renderingWasActiveRef = useRef(false);
 
+    const closeWindowNow = useCallback(async () => {
+        allowWindowCloseRef.current = true;
+        try {
+            await coreApi.closeWindow();
+        } catch (error) {
+            allowWindowCloseRef.current = false;
+            throw error;
+        }
+    }, []);
+
+    const promptUnsavedAction = useCallback(
+        (mode: "switch" | "exit", action: () => Promise<void>) => {
+            pendingUnsavedActionRef.current = action;
+            setUnsavedDialog({ open: true, mode });
+        },
+        [],
+    );
+
+    const runOrPromptUnsavedAction = useCallback(
+        (mode: "switch" | "exit", action: () => Promise<void>) => {
+            if (!projectDirty) {
+                void action();
+                return;
+            }
+            promptUnsavedAction(mode, action);
+        },
+        [projectDirty, promptUnsavedAction],
+    );
+
+    const executePendingUnsavedAction = useCallback(async () => {
+        const action = pendingUnsavedActionRef.current;
+        pendingUnsavedActionRef.current = null;
+        setUnsavedDialog((current) => ({ ...current, open: false }));
+        if (action) {
+            await action();
+        }
+    }, []);
+
+    const cancelUnsavedAction = useCallback(() => {
+        pendingUnsavedActionRef.current = null;
+        setUnsavedDialog((current) => ({ ...current, open: false }));
+    }, []);
+
+    const discardUnsavedAndContinue = useCallback(() => {
+        void executePendingUnsavedAction();
+    }, [executePendingUnsavedAction]);
+
+    const saveUnsavedAndContinue = useCallback(() => {
+        void (async () => {
+            try {
+                const result = await dispatch(
+                    projectPath ? saveProjectRemote() : saveProjectAsRemote(),
+                ).unwrap();
+                if ((result as { canceled?: boolean } | undefined)?.canceled) {
+                    return;
+                }
+                await executePendingUnsavedAction();
+            } catch {
+                // Keep the dialog open so the user can retry or cancel.
+            }
+        })();
+    }, [dispatch, executePendingUnsavedAction, projectPath]);
+
+    const handleNewProject = useCallback(() => {
+        runOrPromptUnsavedAction("switch", async () => {
+            await dispatch(newProjectRemote()).unwrap();
+        });
+    }, [dispatch, runOrPromptUnsavedAction]);
+
+    const handleOpenProject = useCallback(() => {
+        runOrPromptUnsavedAction("switch", async () => {
+            await dispatch(openProjectFromDialog()).unwrap();
+        });
+    }, [dispatch, runOrPromptUnsavedAction]);
+
+    const handleOpenRecentProject = useCallback(
+        (path: string) => {
+            runOrPromptUnsavedAction("switch", async () => {
+                await dispatch(openProjectFromPath(path)).unwrap();
+            });
+        },
+        [dispatch, runOrPromptUnsavedAction],
+    );
+
+    const handleOpenVocalShifter = useCallback(() => {
+        runOrPromptUnsavedAction("switch", async () => {
+            await dispatch(openVocalShifterFromDialog()).unwrap();
+        });
+    }, [dispatch, runOrPromptUnsavedAction]);
+
+    const handleOpenReaper = useCallback(() => {
+        runOrPromptUnsavedAction("switch", async () => {
+            await dispatch(openReaperFromDialog()).unwrap();
+        });
+    }, [dispatch, runOrPromptUnsavedAction]);
+
+    const handleExitApp = useCallback(() => {
+        runOrPromptUnsavedAction("exit", closeWindowNow);
+    }, [closeWindowNow, runOrPromptUnsavedAction]);
+
     useEffect(() => {
         void dispatch(fetchTimeline());
         void dispatch(refreshRuntime());
@@ -353,8 +469,41 @@ function AppInner() {
         outputPathRef.current = outputPath;
     }, [outputPath]);
 
+    useEffect(() => {
+        let disposed = false;
+        let unlisten: null | (() => void) = null;
+
+        async function setup() {
+            try {
+                const mod = await import("@tauri-apps/api/window");
+                const currentWindow = mod.getCurrentWindow();
+                unlisten = await currentWindow.onCloseRequested((event: any) => {
+                    if (allowWindowCloseRef.current) {
+                        allowWindowCloseRef.current = false;
+                        return;
+                    }
+                    if (!projectDirty) {
+                        return;
+                    }
+                    event.preventDefault();
+                    if (!disposed) {
+                        promptUnsavedAction("exit", closeWindowNow);
+                    }
+                });
+            } catch {
+                // Safe no-op for non-Tauri builds.
+            }
+        }
+
+        void setup();
+        return () => {
+            disposed = true;
+            if (unlisten) unlisten();
+        };
+    }, [closeWindowNow, projectDirty, promptUnsavedAction]);
+
     // 统一快捷键处理（通过 keybindings 模块管理，用户可自定义）
-    const handleKeybindingAction = useRef((actionId: ActionId) => {
+    const handleKeybindingAction = useCallback((actionId: ActionId) => {
         switch (actionId) {
             case "playback.toggle":
                 if (runtimeRef.current.isPlaying) {
@@ -370,10 +519,10 @@ function AppInner() {
                 void dispatch(redoRemote());
                 break;
             case "project.new":
-                void dispatch(newProjectRemote());
+                handleNewProject();
                 break;
             case "project.open":
-                void dispatch(openProjectFromDialog());
+                handleOpenProject();
                 break;
             case "project.save":
                 void dispatch(saveProjectRemote());
@@ -417,9 +566,9 @@ function AppInner() {
                 const rootTrkId = resolveRootTrackId(ss.tracks, ss.selectedTrackId);
                 if (!rootTrkId) break;
                 const editP = ss.editParam;
+                const rootTrk = ss.tracks.find((tr) => tr.id === rootTrkId);
                 // pitch 参数需要 pitch 分析可用才能操作
                 if (editP === "pitch") {
-                    const rootTrk = ss.tracks.find((tr) => tr.id === rootTrkId);
                     if (!rootTrk?.composeEnabled || rootTrk.pitchAnalysisAlgo === "none") break;
                 }
                 const selClipId = ss.selectedClipId;
@@ -440,8 +589,23 @@ function AppInner() {
                 const fp = 5;
                 const startFrame = Math.max(0, Math.floor((minSec * 1000) / fp));
                 const frameCount = Math.max(1, Math.min(200_000, Math.ceil(((maxSec - minSec) * 1000) / fp)));
-                const delta = editP === "pitch" ? (isUp ? 1 : -1) : (isUp ? 0.05 : -0.05);
                 void (async () => {
+                    let descriptor: ProcessorParamDescriptor | undefined;
+                    if (editP !== "pitch" && rootTrk?.pitchAnalysisAlgo) {
+                        const algo = rootTrk.pitchAnalysisAlgo;
+                        let descriptors = processorParamCacheRef.current.get(algo);
+                        if (!descriptors) {
+                            try {
+                                descriptors = await paramsApi.getProcessorParams(algo);
+                                processorParamCacheRef.current.set(algo, descriptors);
+                            } catch {
+                                descriptors = undefined;
+                            }
+                        }
+                        descriptor = descriptors?.find((param) => param.id === editP);
+                    }
+                    const step = getParamShiftStep(editP, descriptor);
+                    const delta = isUp ? step : -step;
                     const res = await paramsApi.getParamFrames(rootTrkId, editP, startFrame, frameCount, 1);
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
@@ -457,9 +621,9 @@ function AppInner() {
             default:
                 break;
         }
-    });
+    }, [dispatch, handleNewProject, handleOpenProject]);
 
-    useKeybindings(handleKeybindingAction.current);
+    useKeybindings(handleKeybindingAction);
 
     useEffect(() => {
         if (!runtimeIsPlaying) return;
@@ -562,7 +726,45 @@ function AppInner() {
                 </Dialog.Content>
             </Dialog.Root>
 
-            <MenuBar />
+            <Dialog.Root
+                open={unsavedDialog.open}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        cancelUnsavedAction();
+                    }
+                }}
+            >
+                <Dialog.Content maxWidth="460px">
+                    <Dialog.Title>{t("unsaved_changes_title")}</Dialog.Title>
+                    <Dialog.Description>
+                        {t(
+                            unsavedDialog.mode === "exit"
+                                ? "unsaved_changes_exit_desc"
+                                : "unsaved_changes_switch_desc",
+                        )}
+                    </Dialog.Description>
+                    <Flex justify="end" gap="2" mt="4">
+                        <Button variant="soft" color="gray" onClick={cancelUnsavedAction}>
+                            {t("progress_cancel")}
+                        </Button>
+                        <Button variant="soft" color="gray" onClick={discardUnsavedAndContinue}>
+                            {t("unsaved_changes_discard")}
+                        </Button>
+                        <Button onClick={saveUnsavedAndContinue}>
+                            {t("menu_save_project")}
+                        </Button>
+                    </Flex>
+                </Dialog.Content>
+            </Dialog.Root>
+
+            <MenuBar
+                onNewProject={handleNewProject}
+                onOpenProject={handleOpenProject}
+                onOpenRecentProject={handleOpenRecentProject}
+                onOpenVocalShifter={handleOpenVocalShifter}
+                onOpenReaper={handleOpenReaper}
+                onExit={handleExitApp}
+            />
             <ActionBar />
 
             {/* Main Content Area: Splitter + optional File Browser */}

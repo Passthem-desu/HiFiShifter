@@ -141,6 +141,12 @@ export const messages = {
         status_export_failed: "Export failed",
         status_export_separated_done: "Separated export completed",
         status_export_separated_failed: "Separated export failed",
+        unsaved_changes_title: "Unsaved Changes",
+        unsaved_changes_switch_desc:
+            "The current project has unsaved changes. Save before switching projects?",
+        unsaved_changes_exit_desc:
+            "The current project has unsaved changes. Save before closing the application?",
+        unsaved_changes_discard: "Don't Save",
 
         menu_export_separated: "Export Separated Tracks",
 
@@ -442,6 +448,10 @@ export const messages = {
         status_export_failed: "导出失败",
         status_export_separated_done: "分轨导出完成",
         status_export_separated_failed: "分轨导出失败",
+        unsaved_changes_title: "未保存更改",
+        unsaved_changes_switch_desc: "当前工程有未保存的更改。切换工程前是否先保存？",
+        unsaved_changes_exit_desc: "当前工程有未保存的更改。关闭应用前是否先保存？",
+        unsaved_changes_discard: "不保存",
 
         menu_export_separated: "导出分轨音频",
 

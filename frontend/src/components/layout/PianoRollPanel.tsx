@@ -1,4 +1,5 @@
 ﻿import React, {
+    type CSSProperties,
     useCallback,
     useEffect,
     useLayoutEffect,
@@ -605,6 +606,9 @@ export const PianoRollPanel: React.FC = () => {
         aBeat: number;
         bBeat: number;
     } | null>(null);
+    const [canvasCursor, setCanvasCursor] = useState<CSSProperties["cursor"]>(
+        s.toolMode === "select" ? "default" : "crosshair",
+    );
 
     const strokeRef = useRef<{
         mode: StrokeMode;
@@ -845,6 +849,7 @@ export const PianoRollPanel: React.FC = () => {
         viewSizeRef,
         selectionRef,
         setSelectionUi,
+        setCanvasCursor,
         strokeRef,
         panRef,
         clipboardRef,
@@ -888,6 +893,10 @@ export const PianoRollPanel: React.FC = () => {
 
     // Silence unused state warnings; selectionUi is future UI.
     void selectionUi;
+
+    useEffect(() => {
+        setCanvasCursor(s.toolMode === "select" ? "default" : "crosshair");
+    }, [s.toolMode]);
 
     // 切换工具时清除选区
     useEffect(() => {
@@ -1280,6 +1289,13 @@ export const PianoRollPanel: React.FC = () => {
                                 <canvas
                                     ref={canvasRef}
                                     className="absolute inset-0"
+                                    style={{ cursor: canvasCursor }}
+                                    onPointerMove={
+                                        interactions.onCanvasPointerMove
+                                    }
+                                    onPointerLeave={
+                                        interactions.onCanvasPointerLeave
+                                    }
                                     onPointerDown={
                                         interactions.onCanvasPointerDown
                                     }

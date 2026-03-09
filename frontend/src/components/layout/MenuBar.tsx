@@ -14,17 +14,11 @@ import {
     clearWaveformCacheRemote,
     undoRemote,
     redoRemote,
-    newProjectRemote,
-    openProjectFromDialog,
-    openProjectFromPath,
-    openVocalShifterFromDialog,
-    openReaperFromDialog,
     pasteVocalShifterClipboard,
     pasteReaperClipboard,
     saveProjectRemote,
     saveProjectAsRemote,
 } from "../../features/session/sessionSlice";
-import { coreApi } from "../../services/api";
 import { fileBrowserApi } from "../../services/api/fileBrowser";
 import { useAppTheme } from "../../theme/AppThemeProvider";
 import { GlobeIcon } from "@radix-ui/react-icons";
@@ -32,7 +26,23 @@ import { selectMergedKeybindings, formatKeybinding } from "../../features/keybin
 import type { ActionId } from "../../features/keybindings/types";
 import { KeybindingsDialog } from "./KeybindingsDialog";
 
-export const MenuBar: React.FC = () => {
+interface MenuBarProps {
+    onNewProject: () => void;
+    onOpenProject: () => void;
+    onOpenRecentProject: (projectPath: string) => void;
+    onOpenVocalShifter: () => void;
+    onOpenReaper: () => void;
+    onExit: () => void;
+}
+
+export const MenuBar: React.FC<MenuBarProps> = ({
+    onNewProject,
+    onOpenProject,
+    onOpenRecentProject,
+    onOpenVocalShifter,
+    onOpenReaper,
+    onExit,
+}) => {
     const { t, setLocale } = useI18n();
     const dispatch = useAppDispatch();
     const s = useAppSelector((state: RootState) => state.session);
@@ -80,7 +90,7 @@ export const MenuBar: React.FC = () => {
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
                     <DropdownMenu.Item
-                        onSelect={() => void dispatch(newProjectRemote())}
+                        onSelect={onNewProject}
                     >
                         {t("menu_new_project")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
@@ -88,7 +98,7 @@ export const MenuBar: React.FC = () => {
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
-                        onSelect={() => void dispatch(openProjectFromDialog())}
+                        onSelect={onOpenProject}
                     >
                         {t("menu_open_project")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
@@ -105,11 +115,7 @@ export const MenuBar: React.FC = () => {
                                 s.project.recent.slice(0, 12).map((p) => (
                                     <DropdownMenu.Item
                                         key={p}
-                                        onSelect={() =>
-                                            void dispatch(
-                                                openProjectFromPath(p),
-                                            )
-                                        }
+                                        onSelect={() => onOpenRecentProject(p)}
                                     >
                                         {p}
                                     </DropdownMenu.Item>
@@ -149,12 +155,12 @@ export const MenuBar: React.FC = () => {
                         {t("menu_import_audio")}{" "}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
-                        onSelect={() => void dispatch(openReaperFromDialog())}
+                        onSelect={onOpenReaper}
                     >
                         {t("menu_open_reaper")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
-                        onSelect={() => void dispatch(openVocalShifterFromDialog())}
+                        onSelect={onOpenVocalShifter}
                     >
                         {t("menu_open_vocalshifter")}
                     </DropdownMenu.Item>
@@ -175,7 +181,7 @@ export const MenuBar: React.FC = () => {
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item
-                        onSelect={() => coreApi.closeWindow()}
+                        onSelect={onExit}
                         color="red"
                     >
                         {t("menu_exit")}
