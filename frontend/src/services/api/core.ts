@@ -32,6 +32,11 @@ export const coreApi = {
 
     closeWindow: () => invoke<{ ok: boolean }>("close_window"),
 
+    openMidiDialog: () =>
+        invoke<{ ok: boolean; canceled?: boolean; path?: string }>(
+            "open_midi_dialog",
+        ),
+
     clearWaveformCache: () =>
         invoke<{
             ok: boolean;

@@ -71,4 +71,29 @@ export const paramsApi = {
 
     getProcessorParams: (algo: string) =>
         invoke<ProcessorParamDescriptor[]>("get_processor_params", algo),
+
+    getMidiTracks: (midiPath: string) =>
+        invoke<{
+            ok: boolean;
+            error?: string;
+            tracks?: Array<{
+                index: number;
+                name: string;
+                note_count: number;
+                min_note: number;
+                max_note: number;
+            }>;
+        }>("get_midi_tracks", midiPath),
+
+    importMidiToPitch: (
+        midiPath: string,
+        trackIndex?: number,
+        offsetSec?: number,
+    ) =>
+        invoke<{
+            ok: boolean;
+            error?: string;
+            notes_imported?: number;
+            frames_touched?: number;
+        }>("import_midi_to_pitch", midiPath, trackIndex, offsetSec),
 };

@@ -27,6 +27,7 @@ mod project;
 #[path = "import/vocalshifter_import.rs"] mod vocalshifter_import;
 #[path = "import/reaper_parser.rs"] mod reaper_parser;
 #[path = "import/reaper_import.rs"] mod reaper_import;
+#[path = "import/midi_import.rs"] mod midi_import;
 mod state;
 #[path = "audio/time_stretch.rs"] mod time_stretch;
 #[path = "audio/waveform.rs"] mod waveform;
@@ -231,6 +232,7 @@ pub fn run() {
             commands::open_audio_dialog,
             commands::pick_output_path,
             commands::pick_directory,
+            commands::open_midi_dialog,
             commands::get_waveform_peaks_segment,
             commands::get_root_mix_waveform_peaks_segment,
             commands::get_track_mix_waveform_peaks_segment,
@@ -281,7 +283,9 @@ pub fn run() {
             commands::import_reaper_project,
             commands::paste_reaper_clipboard,
             commands::clear_cache,
-            commands::get_processor_params
+            commands::get_processor_params,
+            commands::get_midi_tracks,
+            commands::import_midi_to_pitch
             // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
             // commands::start_pitch_refresh_task,
             // commands::get_pitch_refresh_status,

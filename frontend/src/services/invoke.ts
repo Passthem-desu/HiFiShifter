@@ -271,6 +271,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "paste_vocalshifter_clipboard":
             return {};
 
+        case "open_midi_dialog":
+            return {};
+
         case "get_waveform_peaks_segment":
             return {
                 sourcePath: args[0],
@@ -332,6 +335,16 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
 
         case "get_processor_params":
             return { algo: args[0] };
+
+        case "get_midi_tracks":
+            return { midiPath: args[0] };
+
+        case "import_midi_to_pitch":
+            return {
+                midiPath: args[0],
+                ...(args[1] !== undefined ? { trackIndex: args[1] } : {}),
+                ...(args[2] !== undefined ? { offsetSec: args[2] } : {}),
+            };
 
         default:
             return { __unwired: true };

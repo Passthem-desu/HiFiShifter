@@ -279,6 +279,21 @@ export const messages = {
         vs_import_parse_failed: "Failed to parse VocalShifter project.",
         vs_import_skipped_header:
             "The following audio files were skipped (unsupported format or not found):",
+
+        // MIDI 导入
+        midi_import: "Import MIDI",
+        midi_import_title: "Import MIDI to Pitch",
+        midi_import_desc: "Select a MIDI track to import as pitch curve",
+        midi_select_track: "Select Track",
+        midi_all_tracks: "Merge All Tracks",
+        midi_track_notes: "{count} notes",
+        midi_track_range: "Range: {min} – {max}",
+        midi_no_tracks: "No tracks with notes found in MIDI file",
+        midi_importing: "Importing...",
+        midi_import_success: "MIDI imported: {notes} notes, {frames} frames",
+        midi_import_failed: "MIDI import failed",
+        midi_file_not_found: "MIDI file not found",
+        midi_no_notes: "No notes in selected track",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -554,6 +569,21 @@ export const messages = {
         vs_import_parse_failed: "解析 VocalShifter 工程失败。",
         vs_import_skipped_header:
             "以下音频文件因格式不支持或文件不存在而被跳过：",
+
+        // MIDI 导入
+        midi_import: "导入 MIDI",
+        midi_import_title: "导入 MIDI 到音高曲线",
+        midi_import_desc: "选择一个 MIDI 轨道导入为音高曲线",
+        midi_select_track: "选择轨道",
+        midi_all_tracks: "合并所有轨道",
+        midi_track_notes: "{count} 个音符",
+        midi_track_range: "范围：{min} – {max}",
+        midi_no_tracks: "MIDI 文件中没有包含音符的轨道",
+        midi_importing: "导入中...",
+        midi_import_success: "MIDI 已导入：{notes} 个音符，{frames} 帧",
+        midi_import_failed: "MIDI 导入失败",
+        midi_file_not_found: "MIDI 文件未找到",
+        midi_no_notes: "选中的轨道没有音符",
     },
 } as const;
 

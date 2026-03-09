@@ -52,6 +52,8 @@ import { ProgressBar } from "../ProgressBar";
 
 
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
+import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
+import { coreApi } from "../../services/api/core";
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -76,6 +78,30 @@ export const PianoRollPanel: React.FC = () => {
     // Task 6.3: 集成 useAsyncPitchRefresh Hook
     const asyncRefresh = useAsyncPitchRefresh();
     const [showSuccessMessage] = useState(false);
+
+    // MIDI 导入弹窗状态
+    const [midiDialogOpen, setMidiDialogOpen] = useState(false);
+    const [midiPath, setMidiPath] = useState<string | null>(null);
+
+    const handleOpenMidiDialog = useCallback(async () => {
+        try {
+            const res = await coreApi.openMidiDialog();
+            if (res.ok && !res.canceled && res.path) {
+                setMidiPath(res.path);
+                setMidiDialogOpen(true);
+            }
+        } catch {
+            // 静默忽略
+        }
+    }, []);
+
+    const handleMidiImported = useCallback(
+        (_result: { notes_imported: number; frames_touched: number }) => {
+            // 导入完成后刷新参数面板
+            refreshNow();
+        },
+        [refreshNow],
+    );
 
     const effectiveSelectedTrackId = useMemo(() => {
         if (s.selectedTrackId) return s.selectedTrackId;
@@ -901,6 +927,15 @@ export const PianoRollPanel: React.FC = () => {
                                     </Select.Item>
                                 </Select.Content>
                             </Select.Root>
+                            <Button
+                                size="1"
+                                variant="soft"
+                                color="blue"
+                                onClick={handleOpenMidiDialog}
+                                style={{ cursor: "pointer" }}
+                            >
+                                {(t as (key: string) => string)("midi_import")}
+                            </Button>
                         </Flex>
                     ) : null}
                 </Flex>
@@ -1071,6 +1106,12 @@ export const PianoRollPanel: React.FC = () => {
                     </div>
                 </Flex>
             </Flex>
+            <MidiTrackSelectDialog
+                open={midiDialogOpen}
+                onOpenChange={setMidiDialogOpen}
+                midiPath={midiPath}
+                onImported={handleMidiImported}
+            />
         </Flex>
     );
 };
