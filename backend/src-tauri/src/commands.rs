@@ -47,6 +47,8 @@ mod cache;
 mod processor_caps;
 #[path = "commands/midi.rs"]
 mod midi;
+#[path = "commands/ui_settings.rs"]
+mod ui_settings;
 // TODO: 异步音高刷新功能未完成，缺少必要的状态管理和依赖
 // #[path = "commands/pitch_refresh_async.rs"]
 // mod pitch_refresh_async;
@@ -571,8 +573,16 @@ pub fn import_vocalshifter_project(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn paste_vocalshifter_clipboard(state: State<'_, AppState>) -> serde_json::Value {
-    vocalshifter_clipboard::paste_vocalshifter_clipboard(state.inner())
+pub fn paste_vocalshifter_clipboard(
+    state: State<'_, AppState>,
+    selection_start_frame: Option<usize>,
+    selection_max_frames: Option<usize>,
+) -> serde_json::Value {
+    vocalshifter_clipboard::paste_vocalshifter_clipboard(
+        state.inner(),
+        selection_start_frame,
+        selection_max_frames,
+    )
 }
 
 // ===================== reaper =====================
@@ -592,8 +602,16 @@ pub fn import_reaper_project(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn paste_reaper_clipboard(state: State<'_, AppState>) -> serde_json::Value {
-    reaper_clipboard::paste_reaper_clipboard(state.inner())
+pub fn paste_reaper_clipboard(
+    state: State<'_, AppState>,
+    selection_start_frame: Option<usize>,
+    selection_max_frames: Option<usize>,
+) -> serde_json::Value {
+    reaper_clipboard::paste_reaper_clipboard(
+        state.inner(),
+        selection_start_frame,
+        selection_max_frames,
+    )
 }
 
 // ===================== cache =====================
@@ -625,6 +643,21 @@ pub fn import_midi_to_pitch(
     offset_sec: Option<f64>,
 ) -> serde_json::Value {
     midi::import_midi_to_pitch(state.inner(), midi_path, track_index, offset_sec)
+}
+
+// ===================== ui_settings =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_ui_settings(state: State<'_, AppState>) -> crate::config::UiSettings {
+    ui_settings::get_ui_settings(state)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn save_ui_settings(
+    state: State<'_, AppState>,
+    settings: crate::config::UiSettings,
+) -> serde_json::Value {
+    ui_settings::save_ui_settings(state, settings)
 }
 
 // ===================== pitch_refresh_async (暂时禁用) =====================

@@ -436,6 +436,14 @@ export const ClipItem: React.FC<{
                 width,
                 top: 0,
                 height: rowHeight - CLIP_BODY_PADDING_Y,
+                // 选中或 hover 时提升 z-index，确保 fade 手柄不被相邻 clip 遮挡
+                zIndex: selected ? 2 : undefined,
+            }}
+            onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.zIndex = "2";
+            }}
+            onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.zIndex = selected ? "2" : "";
             }}
             onContextMenu={(e) => {
                 e.preventDefault();

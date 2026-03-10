@@ -765,7 +765,13 @@ export function usePianoRollData(args: {
         paramView,
         setParamView,
         secondaryParamView,
-        bumpRefreshToken: () => setRefreshToken((x) => x + 1),
+        bumpRefreshToken: () => {
+            setRefreshToken((x) => x + 1);
+            // Also bump forceParamFetchToken so refreshVisible() bypasses the
+            // "paramCoversVisible" cache check and actually re-fetches data
+            // from the backend after edit operations.
+            setForceParamFetchToken((x) => x + 1);
+        },
         refreshNow,
         refreshSecondaryNow,
         notifyLiveEditEnded,

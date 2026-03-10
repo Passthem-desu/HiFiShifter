@@ -3,17 +3,37 @@ import type { ActionId, ActionMeta, KeybindingMap } from "./types";
 /**
  * 默认快捷键映射表
  * 收录了项目中所有硬编码快捷键的默认值
+ * key 为 "__none__" 表示无绑定
  */
 export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     // 模式切换
     "mode.toggle": { key: "tab" },
+    "mode.selectTool": { key: "f7" },
+    "mode.drawTool": { key: "f8" },
+    "mode.lineTool": { key: "f9" },
+    "mode.cycleTool": { key: "d" },
+    "mode.cycleToolReverse": { key: "d", ctrl: true },
 
     // 播放控制
     "playback.toggle": { key: "space" },
+    "playback.stop": { key: "enter" },  // Play/Stop: 播放/停止（停止时回到起始位置）
 
     // 编辑
     "edit.undo": { key: "z", ctrl: true },
     "edit.redo": { key: "y", ctrl: true },
+    "edit.selectAll": { key: "a", ctrl: true },
+    "edit.deselect": { key: "r", ctrl: true },
+    "edit.initialize": { key: "delete" },
+    "edit.transposeCents": { key: "f", ctrl: true },
+    "edit.transposeDegrees": { key: "i", ctrl: true },
+    "edit.setPitch": { key: "t", ctrl: true },
+    "edit.average": { key: "e", ctrl: true },
+    "edit.smooth": { key: "m", ctrl: true },
+    "edit.addVibrato": { key: "b", ctrl: true },
+    "edit.quantize": { key: "p", ctrl: true },
+    "edit.meanQuantize": { key: "q", ctrl: true },
+    "edit.pasteReaper": { key: "v", ctrl: true, shift: true },
+    "edit.pasteVocalShifter": { key: "v", shift: true },
 
     // 工程
     "project.new": { key: "n", ctrl: true },
@@ -43,6 +63,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "modifier.clipNoSnap": { key: "shift", modifierOnly: true, shift: true },
     "modifier.clipCopyDrag": { key: "control", modifierOnly: true, ctrl: true },
     "modifier.pianoRollVerticalZoom": { key: "control", modifierOnly: true, ctrl: true },
+    "modifier.scrollHorizontal": { key: "shift", modifierOnly: true, shift: true },
+    "modifier.scrollVertical": { key: "alt", modifierOnly: true, alt: true },
 
     // 快速搜索
     "quickSearch.open": { key: "f", ctrl: true },
@@ -58,11 +80,30 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
  */
 export const ACTION_META: Record<ActionId, ActionMeta> = {
     "mode.toggle": { labelKey: "kb_mode_toggle", group: "mode" },
+    "mode.selectTool": { labelKey: "kb_mode_select_tool", group: "mode" },
+    "mode.drawTool": { labelKey: "kb_mode_draw_tool", group: "mode" },
+    "mode.lineTool": { labelKey: "kb_mode_line_tool", group: "mode" },
+    "mode.cycleTool": { labelKey: "kb_mode_cycle_tool", group: "mode" },
+    "mode.cycleToolReverse": { labelKey: "kb_mode_cycle_tool_reverse", group: "mode" },
 
     "playback.toggle": { labelKey: "kb_playback_toggle", group: "playback" },
+    "playback.stop": { labelKey: "kb_playback_stop", group: "playback" },
 
     "edit.undo": { labelKey: "kb_edit_undo", group: "edit" },
     "edit.redo": { labelKey: "kb_edit_redo", group: "edit" },
+    "edit.selectAll": { labelKey: "kb_edit_select_all", group: "edit" },
+    "edit.deselect": { labelKey: "kb_edit_deselect", group: "edit" },
+    "edit.initialize": { labelKey: "kb_edit_initialize", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.transposeCents": { labelKey: "kb_edit_transpose_cents", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.transposeDegrees": { labelKey: "kb_edit_transpose_degrees", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.setPitch": { labelKey: "kb_edit_set_pitch", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.average": { labelKey: "kb_edit_average", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.smooth": { labelKey: "kb_edit_smooth", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.addVibrato": { labelKey: "kb_edit_add_vibrato", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.quantize": { labelKey: "kb_edit_quantize", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.meanQuantize": { labelKey: "kb_edit_mean_quantize", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.pasteReaper": { labelKey: "kb_edit_paste_reaper", group: "edit" },
+    "edit.pasteVocalShifter": { labelKey: "kb_edit_paste_vocalshifter", group: "edit" },
 
     "project.new": { labelKey: "kb_project_new", group: "project" },
     "project.open": { labelKey: "kb_project_open", group: "project" },
@@ -82,19 +123,21 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     "pianoRoll.shiftParamUp": { labelKey: "kb_pianoroll_shift_param_up", group: "pianoRoll" },
     "pianoRoll.shiftParamDown": { labelKey: "kb_pianoroll_shift_param_down", group: "pianoRoll" },
 
-    "modifier.clipSlipEdit": { labelKey: "kb_modifier_slip_edit", group: "modifier" },
-    "modifier.clipStretch": { labelKey: "kb_modifier_stretch", group: "modifier" },
-    "modifier.clipNoSnap": { labelKey: "kb_modifier_no_snap", group: "modifier" },
-    "modifier.clipCopyDrag": { labelKey: "kb_modifier_copy_drag", group: "modifier" },
-    "modifier.pianoRollVerticalZoom": { labelKey: "kb_modifier_pr_vzoom", group: "modifier" },
+    "modifier.clipSlipEdit": { labelKey: "kb_modifier_slip_edit", group: "modifier", modifierOperationType: "drag" },
+    "modifier.clipStretch": { labelKey: "kb_modifier_stretch", group: "modifier", modifierOperationType: "drag" },
+    "modifier.clipNoSnap": { labelKey: "kb_modifier_no_snap", group: "modifier", modifierOperationType: "drag" },
+    "modifier.clipCopyDrag": { labelKey: "kb_modifier_copy_drag", group: "modifier", modifierOperationType: "drag" },
+    "modifier.pianoRollVerticalZoom": { labelKey: "kb_modifier_pr_vzoom", group: "modifier", modifierOperationType: "wheel" },
+    "modifier.scrollHorizontal": { labelKey: "kb_modifier_scroll_h", group: "modifier", modifierOperationType: "wheel" },
+    "modifier.scrollVertical": { labelKey: "kb_modifier_scroll_v", group: "modifier", modifierOperationType: "wheel" },
 
     // 快速搜索
     "quickSearch.open": { labelKey: "kb_quick_search_open", group: "quickSearch" },
-    "quickSearch.navigate.up": { labelKey: "kb_quick_search_nav_up", group: "quickSearch" },
-    "quickSearch.navigate.down": { labelKey: "kb_quick_search_nav_down", group: "quickSearch" },
-    "quickSearch.preview": { labelKey: "kb_quick_search_preview", group: "quickSearch" },
-    "quickSearch.confirm": { labelKey: "kb_quick_search_confirm", group: "quickSearch" },
-    "quickSearch.close": { labelKey: "kb_quick_search_close", group: "quickSearch" },
+    "quickSearch.navigate.up": { labelKey: "kb_quick_search_nav_up", group: "quickSearch", scopedContext: "quickSearch" },
+    "quickSearch.navigate.down": { labelKey: "kb_quick_search_nav_down", group: "quickSearch", scopedContext: "quickSearch" },
+    "quickSearch.preview": { labelKey: "kb_quick_search_preview", group: "quickSearch", scopedContext: "quickSearch" },
+    "quickSearch.confirm": { labelKey: "kb_quick_search_confirm", group: "quickSearch", scopedContext: "quickSearch" },
+    "quickSearch.close": { labelKey: "kb_quick_search_close", group: "quickSearch", scopedContext: "quickSearch" },
 };
 
 /**

@@ -48,8 +48,10 @@ export function useEditDrag(deps: {
     beatFromClientX: (clientX: number, bounds: DOMRect, xScroll: number) => number;
     /** modifier.clipNoSnap 绑定 */
     noSnapKb: Keybinding;
+    /** 网格吸附全局开关 */
+    gridSnapEnabled: boolean;
 }) {
-    const { scrollRef, sessionRef, dispatch, snapBeat, beatFromClientX, noSnapKb } = deps;
+    const { scrollRef, sessionRef, dispatch, snapBeat, beatFromClientX, noSnapKb, gridSnapEnabled } = deps;
 
     const editDragRef = useRef<EditDragState | null>(null);
 
@@ -96,7 +98,7 @@ export function useEditDrag(deps: {
                 drag.type === "trim_right" ||
                 drag.type === "stretch_left" ||
                 drag.type === "stretch_right";
-            if (shouldSnap && !isModifierActive(noSnapKb, ev)) beat = snapBeat(beat);
+            if (shouldSnap && (gridSnapEnabled !== isModifierActive(noSnapKb, ev))) beat = snapBeat(beat);
 
             const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
             if (!clipNow) return;

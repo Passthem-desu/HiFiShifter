@@ -126,11 +126,13 @@ cargo tauri dev
 | 纵向缩放（轨道高度，时间轴） | Ctrl + 鼠标滚轮                 |
 | 纵向缩放（参数轴，参数面板） | Ctrl + 鼠标滚轮（参数面板内）   |
 | 播放/暂停                    | Space（空格）                   |
+| 播放/停止 | Enter                          |
 | 撤销 / 重做                  | Ctrl + Z / Ctrl + Y             |
 | 新建工程                     | Ctrl + N                        |
 | 打开工程                     | Ctrl + Shift + O                |
 | 保存                         | Ctrl + S                        |
 | 另存为                       | Ctrl + Shift + S                |
+| 导出音频                     | Ctrl + E                        |
 | 切换模式（编辑/选区）        | Tab                             |
 | 删除选中剪辑                 | Delete / Backspace              |
 | 复制选中剪辑（应用内剪贴板） | Ctrl + C                        |
@@ -138,6 +140,8 @@ cargo tauri dev
 | 参数面板复制选区曲线         | Ctrl + C（Select 模式）         |
 | 参数面板粘贴到选区起点       | Ctrl + V（Select 模式）         |
 | 分割剪辑                     | S（在播放头位置分割选中的剪辑） |
+| 新建轨道                     | Ctrl + T                        |
+| 快速搜索                     | Ctrl + F                        |
 
 补充：
 - 支持将音频文件直接拖拽到时间轴轨道区域进行导入。

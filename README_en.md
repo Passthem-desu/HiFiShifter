@@ -149,11 +149,13 @@ This mechanism is abstracted: when adding new parameters, only need to implement
 | Vertical zoom (track height, timeline) | Ctrl + mouse wheel |
 | Vertical zoom (parameter axis, parameter panel) | Ctrl + mouse wheel (inside parameter panel) |
 | Play/pause | Space |
+| Play/stop | Enter |
 | Undo / Redo | Ctrl + Z / Ctrl + Y |
 | New project | Ctrl + N |
 | Open project | Ctrl + Shift + O |
 | Save | Ctrl + S |
 | Save As | Ctrl + Shift + S |
+| Export audio | Ctrl + E |
 | Switch mode (Edit/Select) | Tab |
 | Delete selected clips | Delete / Backspace |
 | Copy selected clips (internal clipboard) | Ctrl + C |
@@ -161,6 +163,8 @@ This mechanism is abstracted: when adding new parameters, only need to implement
 | Parameter panel copy selection curves | Ctrl + C (Select mode) |
 | Parameter panel paste to selection start | Ctrl + V (Select mode) |
 | Split clip | S (split selected clip at playhead position) |
+| Add track | Ctrl + T |
+| Quick search | Ctrl + F |
 
 Additional notes:
 - Supports dragging audio files directly to timeline track area for import.

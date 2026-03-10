@@ -4,7 +4,6 @@ import {
     Flex,
     Text,
     Button,
-    IconButton,
     ScrollArea,
     Separator,
 } from "@radix-ui/themes";
@@ -18,9 +17,13 @@ import {
     resetAllKeybindings,
     formatKeybinding,
     findConflicts,
+    // isNoneBinding, // 已删除未使用变量
 } from "../../features/keybindings/keybindingsSlice";
 import { DEFAULT_KEYBINDINGS, ACTION_META, ALL_ACTION_IDS, GROUP_LABEL_KEYS } from "../../features/keybindings/defaultKeybindings";
 import type { ActionId, Keybinding } from "../../features/keybindings/types";
+
+/** "无" 绑定常量 */
+const NONE_BINDING: Keybinding = { key: "__none__" };
 
 interface KeybindingsDialogProps {
     open: boolean;
@@ -29,6 +32,7 @@ interface KeybindingsDialogProps {
 
 /**
  * 快捷键设置面板
+ * 打开时阻塞所有下层交互（通过 Dialog overlay）
  */
 export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({
     open,
@@ -38,6 +42,18 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({
     const { t } = useI18n();
     const keybindings = useAppSelector(selectMergedKeybindings);
     const overrides = useAppSelector((s) => s.keybindings.overrides);
+
+    // 打开时在 body 上标记，阻塞全局快捷键和工程编辑
+    useEffect(() => {
+        if (open) {
+            document.body.setAttribute("data-keybindings-dialog-open", "true");
+        } else {
+            document.body.removeAttribute("data-keybindings-dialog-open");
+        }
+        return () => {
+            document.body.removeAttribute("data-keybindings-dialog-open");
+        };
+    }, [open]);
 
     // 当前处于"录入模式"的 actionId
     const [recordingId, setRecordingId] = useState<ActionId | null>(null);
@@ -160,13 +176,15 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({
 
     // 按分组组织操作
     const groups = React.useMemo(() => {
-        const groupOrder: Array<"playback" | "edit" | "project" | "clip" | "pianoRoll" | "modifier"> = [
+        const groupOrder: Array<"playback" | "edit" | "project" | "clip" | "pianoRoll" | "mode" | "modifier" | "quickSearch"> = [
             "playback",
             "edit",
             "project",
             "clip",
             "pianoRoll",
+            "mode",
             "modifier",
+            "quickSearch",
         ];
         return groupOrder.map((group) => ({
             group,
@@ -180,11 +198,31 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
+            {/* Overlay 阻塞下层所有交互 */}
+            {open && (
+                <div
+                    style={{
+                        position: "fixed",
+                        inset: 0,
+                        zIndex: 9998,
+                        background: "rgba(0,0,0,0.4)",
+                    }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                        if (!recordingId) return;
+                        e.stopPropagation();
+                    }}
+                />
+            )}
             <Dialog.Content
-                style={{ maxWidth: 560, maxHeight: "80vh" }}
+                style={{ maxWidth: 560, maxHeight: "80vh", zIndex: 9999 }}
                 onPointerDownOutside={(e) => {
                     // 如果正在录入，阻止点击外部关闭
                     if (recordingId) e.preventDefault();
+                }}
+                onKeyDown={(e) => {
+                    // 阻止按键穿透到工程
+                    e.stopPropagation();
                 }}
             >
                 <Dialog.Title>
@@ -193,6 +231,9 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({
                 <Dialog.Description size="2" color="gray">
                     {tAny("kb_dialog_desc")}
                 </Dialog.Description>
+                <Text size="1" color="gray" style={{ marginTop: 4, display: "block" }}>
+                    {tAny("kb_dialog_hint_click")}
+                </Text>
 
                 <ScrollArea
                     style={{ maxHeight: "calc(80vh - 160px)" }}
@@ -255,7 +296,9 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({
                                                     color={
                                                         isRecording
                                                             ? "blue"
-                                                            : "gray"
+                                                            : !isDefault
+                                                              ? "green"
+                                                              : "gray"
                                                     }
                                                     size="1"
                                                     style={{
@@ -264,12 +307,22 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({
                                                             "monospace",
                                                     }}
                                                     onClick={() => {
+                                                        if (isRecording) {
+                                                            // 录入中左键点击 → 设为"无"
+                                                            dispatch(setKeybinding({ actionId, binding: NONE_BINDING }));
+                                                            setRecordingId(null);
+                                                            setConflict(null);
+                                                        } else {
+                                                            setConflict(null);
+                                                            setRecordingId(actionId);
+                                                        }
+                                                    }}
+                                                    onContextMenu={(e) => {
+                                                        e.preventDefault();
+                                                        // 右键点击 → 直接重置为默认
+                                                        dispatch(resetKeybinding(actionId));
+                                                        setRecordingId(null);
                                                         setConflict(null);
-                                                        setRecordingId(
-                                                            isRecording
-                                                                ? null
-                                                                : actionId,
-                                                        );
                                                     }}
                                                 >
                                                     {isRecording
@@ -280,28 +333,9 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({
                                                           )
                                                         : formatKeybinding(
                                                               currentKb,
+                                                              tAny("kb_none"),
                                                           )}
                                                 </Button>
-                                                {/* 重置按钮（仅当非默认时显示） */}
-                                                {!isDefault && (
-                                                    <IconButton
-                                                        size="1"
-                                                        variant="ghost"
-                                                        color="gray"
-                                                        title={tAny(
-                                                            "kb_reset_default",
-                                                        )}
-                                                        onClick={() =>
-                                                            dispatch(
-                                                                resetKeybinding(
-                                                                    actionId,
-                                                                ),
-                                                            )
-                                                        }
-                                                    >
-                                                        <ResetIcon />
-                                                    </IconButton>
-                                                )}
                                             </Flex>
                                         </Flex>
                                     );

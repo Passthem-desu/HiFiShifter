@@ -9,6 +9,7 @@ pub struct FileEntry {
     pub is_dir: bool,
     pub size: Option<u64>,
     pub extension: Option<String>,
+    pub modified_time: Option<f64>,
 }
 
 /// 音频文件元信息
@@ -70,6 +71,9 @@ pub(crate) fn list_directory(dir_path: String) -> Result<Vec<FileEntry>, String>
                 .and_then(|e| e.to_str())
                 .map(|e| e.to_lowercase())
         };
+        let modified_time = metadata.modified().ok().and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs_f64())
+        });
 
         entries.push(FileEntry {
             name,
@@ -77,6 +81,7 @@ pub(crate) fn list_directory(dir_path: String) -> Result<Vec<FileEntry>, String>
             is_dir,
             size,
             extension,
+            modified_time,
         });
     }
 
@@ -130,23 +135,24 @@ fn collect_matching_files(dir: &Path, query: &str, results: &mut Vec<FileEntry>,
         if metadata.is_dir() {
             collect_matching_files(&entry.path(), query, results, max);
         } else {
-            // 只匹配文件名的 stem 部分（去掉扩展名），不匹配后缀名
+            // 匹配完整文件名（含扩展名），同时也匹配 stem
             let path = entry.path();
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(&name);
-            if stem.to_lowercase().contains(query) {
+            let name_lower = name.to_lowercase();
+            if name_lower.contains(query) {
                 let extension = path
                     .extension()
                     .and_then(|e| e.to_str())
                     .map(|e| e.to_lowercase());
+                let modified_time = metadata.modified().ok().and_then(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs_f64())
+                });
                 results.push(FileEntry {
                     name,
                     path: path.to_string_lossy().into_owned(),
                     is_dir: false,
                     size: Some(metadata.len()),
                     extension,
+                    modified_time,
                 });
             }
         }

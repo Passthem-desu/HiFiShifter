@@ -12,6 +12,7 @@ import {
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { selectMergedKeybindings } from "../../../../features/keybindings/keybindingsSlice";
 import type { ActionId, Keybinding, KeybindingMap } from "../../../../features/keybindings/types";
+import { applyAutoCrossfade } from "./autoCrossfade";
 
 /**
  * 判断 KeyboardEvent 是否匹配某个 Keybinding
@@ -70,6 +71,7 @@ export function useKeyboardShortcuts(deps: {
     setMultiSelectedClipIds: (ids: string[]) => void;
     clipClipboardRef: React.RefObject<ClipTemplate[] | null>;
     isEditableTarget: (target: EventTarget | null) => boolean;
+    autoCrossfadeEnabled: boolean;
 }) {
     const {
         sessionRef,
@@ -78,6 +80,7 @@ export function useKeyboardShortcuts(deps: {
         setMultiSelectedClipIds,
         clipClipboardRef,
         isEditableTarget,
+        autoCrossfadeEnabled,
     } = deps;
 
     const keybindings = useAppSelector(selectMergedKeybindings);
@@ -90,6 +93,9 @@ export function useKeyboardShortcuts(deps: {
                 isEditableTarget(e.target)
             )
                 return;
+
+            // 快捷键设置对话框打开时，阻塞所有快捷键
+            if (document.body.hasAttribute("data-keybindings-dialog-open")) return;
 
             const s = sessionRef.current;
             const selectedIds =
@@ -185,6 +191,14 @@ export function useKeyboardShortcuts(deps: {
                             if (!Array.isArray(created) || created.length === 0) return;
                             setMultiSelectedClipIds(created);
                             void dispatch(selectClipRemote(created[0]));
+                            if (autoCrossfadeEnabled) {
+                                const latestSession = sessionRef.current;
+                                if (latestSession) {
+                                    setTimeout(() => {
+                                        applyAutoCrossfade(latestSession, created, dispatch);
+                                    }, 0);
+                                }
+                            }
                         })
                         .catch(() => undefined);
                     return;

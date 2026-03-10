@@ -199,11 +199,19 @@ fn read_midi_clipboard() -> Result<Vec<u8>, String> {
 /// 将 MIDI 剪贴板数据写入当前选中轨道的 pitch_edit。
 ///
 /// 使用工程 BPM 作为 Tempo 回退，导入起始点为当前光标位置。
-fn paste_midi_clipboard_inner(state: &AppState, midi_data: &[u8]) -> serde_json::Value {
+/// 若提供了 selection_start_frame / selection_max_frames，则以选区起始帧作为偏移起点，
+/// 超出选区范围的音符不写入。
+fn paste_midi_clipboard_inner(
+    state: &AppState,
+    midi_data: &[u8],
+    selection_start_frame: Option<usize>,
+    selection_max_frames: Option<usize>,
+) -> serde_json::Value {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
 
     let bpm = tl.bpm;
     let playhead_sec = tl.playhead_sec;
+    let frame_period_ms_raw = tl.frame_period_ms().max(0.1);
 
     // 解析 MIDI 数据，使用工程 BPM 作为 fallback tempo
     let parse_result = match midi_import::parse_midi_bytes(midi_data, Some(bpm)) {
@@ -247,13 +255,28 @@ fn paste_midi_clipboard_inner(state: &AppState, midi_data: &[u8]) -> serde_json:
         return serde_json::json!({"ok": false, "error": "params_missing"});
     };
 
-    // 以光标位置作为偏移写入 pitch_edit
-    let touched = midi_import::write_notes_to_pitch_edit(
-        &all_notes,
-        frame_period_ms,
-        &mut entry.pitch_edit,
-        playhead_sec,
-    );
+    // 根据是否有选区约束决定偏移和写入范围
+    let touched = if let Some(sel_start) = selection_start_frame {
+        // 以选区起始帧对应秒作为偏移
+        let offset_sec = (sel_start as f64 * frame_period_ms_raw) / 1000.0;
+        let max_frame = sel_start + selection_max_frames.unwrap_or(usize::MAX - sel_start);
+        // 限制 pitch_edit 的写入范围
+        let clamp_len = max_frame.min(entry.pitch_edit.len());
+        midi_import::write_notes_to_pitch_edit(
+            &all_notes,
+            frame_period_ms,
+            &mut entry.pitch_edit[..clamp_len],
+            offset_sec,
+        )
+    } else {
+        // 默认以光标位置作为偏移写入 pitch_edit
+        midi_import::write_notes_to_pitch_edit(
+            &all_notes,
+            frame_period_ms,
+            &mut entry.pitch_edit,
+            playhead_sec,
+        )
+    };
 
     if touched > 0 {
         entry.pitch_edit_user_modified = true;
@@ -273,10 +296,19 @@ fn paste_midi_clipboard_inner(state: &AppState, midi_data: &[u8]) -> serde_json:
 
 /// 粘贴 Reaper 剪贴板数据到当前选中的轨道。
 /// 优先检测 "Standard MIDI File" 格式，若存在则作为 MIDI 导入到当前轨道的 pitch_edit。
-pub(super) fn paste_reaper_clipboard(state: &AppState) -> serde_json::Value {
+pub(super) fn paste_reaper_clipboard(
+    state: &AppState,
+    selection_start_frame: Option<usize>,
+    selection_max_frames: Option<usize>,
+) -> serde_json::Value {
     // 优先尝试 MIDI 剪贴板
     if let Ok(midi_data) = read_midi_clipboard() {
-        return paste_midi_clipboard_inner(state, &midi_data);
+        return paste_midi_clipboard_inner(
+            state,
+            &midi_data,
+            selection_start_frame,
+            selection_max_frames,
+        );
     }
 
     // 回退到 REAPERMedia 剪贴板

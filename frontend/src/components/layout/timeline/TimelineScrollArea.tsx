@@ -7,6 +7,8 @@ import {
     MIN_ROW_HEIGHT,
 } from "./constants";
 import { clamp } from "./math";
+import { isModifierActive } from "../../../features/keybindings/keybindingsSlice";
+import type { Keybinding } from "../../../features/keybindings/types";
 
 export const TimelineScrollArea: React.FC<
     Omit<React.HTMLAttributes<HTMLDivElement>, "ref"> & {
@@ -18,6 +20,10 @@ export const TimelineScrollArea: React.FC<
         rowHeight: number;
         setRowHeight: React.Dispatch<React.SetStateAction<number>>;
         setScrollLeft: React.Dispatch<React.SetStateAction<number>>;
+        scrollHorizontalKb?: Keybinding;
+        scrollVerticalKb?: Keybinding;
+        playheadSec?: number;
+        playheadZoomEnabled?: boolean;
     }
 > = ({
     scrollRef,
@@ -30,6 +36,10 @@ export const TimelineScrollArea: React.FC<
     setScrollLeft,
     onScroll,
     onWheel,
+    scrollHorizontalKb,
+    scrollVerticalKb,
+    playheadSec,
+    playheadZoomEnabled,
     ...divProps
 }) => {
     const lastScrollLeftRef = useRef<number | null>(null);
@@ -72,12 +82,11 @@ export const TimelineScrollArea: React.FC<
 
         pendingZoomRef.current = null;
         const { secAtPointer, pointerX } = pending;
-        const secPerBeat = 60 / Math.max(1, bpm);
-        const pxPerBeat = pxPerSec * secPerBeat;
-        const totalBeats = Math.max(8, Math.ceil(projectSec));
+        // Use the scroller's actual scrollable range so the anchor
+        // clamp matches the real content width rendered by TimelinePanel.
         const maxScroll = Math.max(
             0,
-            Math.ceil(totalBeats * pxPerBeat) - scroller.clientWidth,
+            scroller.scrollWidth - scroller.clientWidth,
         );
         const nextScrollLeft = Math.min(
             maxScroll,
@@ -102,6 +111,21 @@ export const TimelineScrollArea: React.FC<
         const handler: EventListener = (evt) => {
             const e = evt as globalThis.WheelEvent;
 
+            // Scroll modifier: convert wheel to horizontal scroll
+            if (scrollHorizontalKb && isModifierActive(scrollHorizontalKb, e)) {
+                e.preventDefault();
+                scroller.scrollLeft += e.deltaY;
+                syncScrollLeft(scroller);
+                return;
+            }
+
+            // Scroll modifier: convert wheel to vertical scroll
+            if (scrollVerticalKb && isModifierActive(scrollVerticalKb, e)) {
+                e.preventDefault();
+                scroller.scrollTop += e.deltaY;
+                return;
+            }
+
             // Ctrl + wheel: vertical zoom (track height)
             if (e.ctrlKey) {
                 e.preventDefault();
@@ -120,7 +144,24 @@ export const TimelineScrollArea: React.FC<
             const dir = e.deltaY < 0 ? 1 : -1;
             const factor = dir > 0 ? 1.1 : 0.9;
             const bounds = scroller.getBoundingClientRect();
-            const pointerX = e.clientX - bounds.left;
+
+            // Playhead-based zoom: use playhead as anchor instead of pointer
+            let anchorX: number;
+            let anchorSec: number;
+            if (playheadZoomEnabled && playheadSec != null) {
+                anchorSec = playheadSec;
+                anchorX = anchorSec * pxPerSec - scroller.scrollLeft;
+                // 如果 playhead 在可视区域外，先将其居中，再以其为锚点缩放
+                if (anchorX < 0 || anchorX > bounds.width) {
+                    const centeredScrollLeft = anchorSec * pxPerSec - bounds.width / 2;
+                    scroller.scrollLeft = Math.max(0, centeredScrollLeft);
+                    anchorX = anchorSec * pxPerSec - scroller.scrollLeft;
+                }
+            } else {
+                anchorX = e.clientX - bounds.left;
+                anchorSec =
+                    (anchorX + scroller.scrollLeft) / Math.max(1e-9, pxPerSec);
+            }
 
             const next = clamp(
                 pxPerSec * factor,
@@ -129,12 +170,9 @@ export const TimelineScrollArea: React.FC<
             );
             if (Math.abs(next - pxPerSec) < 1e-9) return;
 
-            // 以秒为基准计算光标下的时间点
-            const secAtPointer =
-                (pointerX + scroller.scrollLeft) / Math.max(1e-9, pxPerSec);
             pendingZoomRef.current = {
-                pointerX,
-                secAtPointer,
+                pointerX: anchorX,
+                secAtPointer: anchorSec,
                 nextPxPerSec: next,
             };
             setPxPerSec(next);
@@ -146,7 +184,7 @@ export const TimelineScrollArea: React.FC<
         return () => {
             scroller.removeEventListener("wheel", handler);
         };
-    }, [pxPerSec, scrollRef, setPxPerSec, setRowHeight]);
+    }, [pxPerSec, scrollRef, setPxPerSec, setRowHeight, scrollHorizontalKb, scrollVerticalKb, playheadSec, playheadZoomEnabled]);
 
     return (
         <div

@@ -73,19 +73,27 @@ export const paramsApi = {
             checkpoint,
         ),
 
-    pasteVocalShifterClipboard: () =>
+    pasteVocalShifterClipboard: (
+        selectionStartFrame?: number,
+        selectionMaxFrames?: number,
+    ) =>
         invoke<{ ok: boolean; error?: string; updated?: number }>(
             "paste_vocalshifter_clipboard",
+            selectionStartFrame,
+            selectionMaxFrames,
         ),
 
-    pasteReaperClipboard: () =>
+    pasteReaperClipboard: (
+        selectionStartFrame?: number,
+        selectionMaxFrames?: number,
+    ) =>
         invoke<
             TimelineResult & {
                 ok: boolean;
                 error?: string;
                 skipped_files?: string[];
             }
-        >("paste_reaper_clipboard"),
+        >("paste_reaper_clipboard", selectionStartFrame, selectionMaxFrames),
 
     getProcessorParams: (algo: string) =>
         invoke<ProcessorParamDescriptor[]>("get_processor_params", algo),

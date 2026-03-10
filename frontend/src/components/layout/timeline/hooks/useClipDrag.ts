@@ -11,9 +11,11 @@ import {
     moveClipTrack,
     selectClipRemote,
 } from "../../../../features/session/sessionSlice";
+// 已移除未使用的 setClipStateRemote 导入
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
+import { applyAutoCrossfade } from "./autoCrossfade";
 
 const NEW_TRACK_SENTINEL = "__hs_new_track__";
 
@@ -65,8 +67,12 @@ export function useClipDrag(deps: {
     slipEditKb: Keybinding;
     /** modifier.clipNoSnap 绑定 */
     noSnapKb: Keybinding;
+    /** 网格吸附全局开关 */
+    gridSnapEnabled: boolean;
     /** modifier.clipCopyDrag 绑定 */
     copyDragKb: Keybinding;
+    /** 自动交叉淡入淡出 */
+    autoCrossfadeEnabled: boolean;
     /** Ctrl+点击（未拖动）时的多选切换回调 */
     onCtrlClick?: (clipId: string) => void;
 }) {
@@ -83,7 +89,9 @@ export function useClipDrag(deps: {
         setMultiSelectedClipIds,
         slipEditKb,
         noSnapKb,
+        gridSnapEnabled,
         copyDragKb,
+        autoCrossfadeEnabled,
         onCtrlClick,
     } = deps;
 
@@ -182,7 +190,9 @@ export function useClipDrag(deps: {
             const b = el.getBoundingClientRect();
             const beatNow = beatFromClientX(ev.clientX, b, el.scrollLeft);
             let nextStart = Math.max(0, beatNow - drag.offsetBeat);
-            if (!isModifierActive(noSnapKb, ev)) nextStart = snapBeat(nextStart);
+            // gridSnapEnabled XOR modifier → snap when exactly one is true
+            const modActive = isModifierActive(noSnapKb, ev);
+            if (gridSnapEnabled !== modActive) nextStart = snapBeat(nextStart);
 
             let deltaBeat = nextStart - drag.initialAnchorstartSec;
             deltaBeat = Math.max(deltaBeat, -drag.minstartSec);
@@ -317,6 +327,14 @@ export function useClipDrag(deps: {
                         if (!Array.isArray(created) || created.length === 0) return;
                         setMultiSelectedClipIds(created);
                         void dispatch(selectClipRemote(created[0]));
+                        // 复制拖动后，尝试对新创建的 clip 应用自动交叉淡化
+                        if (autoCrossfadeEnabled) {
+                            // 使用 setTimeout 确保 Redux store 已经更新
+                            setTimeout(() => {
+                                const latestSession = sessionRef.current;
+                                applyAutoCrossfade(latestSession, created, dispatch);
+                            }, 0);
+                        }
                     })().catch(() => undefined);
                 }
             } else {
@@ -351,6 +369,8 @@ export function useClipDrag(deps: {
                     return;
                 }
 
+                // 收集移动 promise，等待后端确认后再应用交叉淡入淡出
+                const movePromises: Promise<unknown>[] = [];
                 for (const id of drag.clipIds) {
                     const initial = drag.initialById[id];
                     const now = session.clips.find((c) => c.id === id);
@@ -359,14 +379,27 @@ export function useClipDrag(deps: {
                         Math.abs(Number(now.startSec) - initial.startSec) > 1e-6;
                     const changedTrack = String(now.trackId) !== initial.trackId;
                     if (changedBeat || changedTrack) {
-                        void dispatch(
-                            moveClipRemote({
-                                clipId: id,
-                                startSec: Number(now.startSec),
-                                trackId: String(now.trackId),
-                            }),
+                        movePromises.push(
+                            dispatch(
+                                moveClipRemote({
+                                    clipId: id,
+                                    startSec: Number(now.startSec),
+                                    trackId: String(now.trackId),
+                                }),
+                            ).unwrap(),
                         );
                     }
+                }
+
+                // Auto crossfade: 等所有 move 完成后再计算并持久化交叉淡化
+                if (autoCrossfadeEnabled && movePromises.length > 0) {
+                    const movedIds = drag.clipIds;
+                    void Promise.allSettled(movePromises).then(() => {
+                        const latestSession = sessionRef.current;
+                        applyAutoCrossfade(latestSession, movedIds, dispatch);
+                    });
+                } else if (autoCrossfadeEnabled) {
+                    applyAutoCrossfade(session, drag.clipIds, dispatch);
                 }
             }
             window.removeEventListener("pointermove", onMove);

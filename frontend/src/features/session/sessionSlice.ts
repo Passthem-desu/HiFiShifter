@@ -11,6 +11,7 @@ import type {
     EditParam,
     FadeCurveType,
     GridSize,
+    PitchSnapUnit,
     ToolMode,
     TrackInfo,
 } from "./sessionTypes";
@@ -55,6 +56,7 @@ import {
 
 import {
     clearWaveformCacheRemote,
+    loadUiSettings,
     refreshRuntime,
 } from "./thunks/runtimeThunks";
 
@@ -105,6 +107,22 @@ export interface SessionState {
     beats: number;
     projectSec: number;
     grid: GridSize;
+
+    /** 自动交叉淡入淡出 */
+    autoCrossfadeEnabled: boolean;
+    /** 网格吸附 */
+    gridSnapEnabled: boolean;
+    /** 音高吸附 */
+    pitchSnapEnabled: boolean;
+    pitchSnapUnit: PitchSnapUnit;
+    /** 基准音阶键名，如 "C" "Db" 等 */
+    pitchSnapScale: import("../../utils/musicalScales").ScaleKey;
+    /** 播放头缩放 */
+    playheadZoomEnabled: boolean;
+    /** 自动滚动（播放时跟随播放头） */
+    autoScrollEnabled: boolean;
+    /** 剪贴板预览（在参数编辑器选区内显示剪贴板曲线预览） */
+    showClipboardPreview: boolean;
 
     // Monotonic bump token for invalidating parameter curve caches.
     // - Not included in undo/redo snapshots.
@@ -495,6 +513,15 @@ const initialState: SessionState = {
     projectSec: 30, // 默认 30 秒工程边界
     grid: "1/4",
 
+    autoCrossfadeEnabled: true,
+    gridSnapEnabled: true,
+    pitchSnapEnabled: false,
+    pitchSnapUnit: "semitone",
+    pitchSnapScale: "C",
+    playheadZoomEnabled: false,
+    autoScrollEnabled: false,
+    showClipboardPreview: false,
+
     paramsEpoch: 0,
 
     playheadSec: 0,
@@ -606,6 +633,8 @@ export {
 export {
     refreshRuntime,
     clearWaveformCacheRemote,
+    loadUiSettings,
+    persistUiSettings,
 } from "./thunks/runtimeThunks";
 
 export { loadModel, loadDefaultModel } from "./thunks/modelThunks";
@@ -654,6 +683,30 @@ const sessionSlice = createSlice({
         },
         setGrid(state, action: PayloadAction<GridSize>) {
             state.grid = action.payload;
+        },
+        toggleAutoCrossfade(state) {
+            state.autoCrossfadeEnabled = !state.autoCrossfadeEnabled;
+        },
+        toggleGridSnap(state) {
+            state.gridSnapEnabled = !state.gridSnapEnabled;
+        },
+        togglePitchSnap(state) {
+            state.pitchSnapEnabled = !state.pitchSnapEnabled;
+        },
+        setPitchSnapUnit(state, action: PayloadAction<PitchSnapUnit>) {
+            state.pitchSnapUnit = action.payload;
+        },
+        setPitchSnapScale(state, action: PayloadAction<import("../../utils/musicalScales").ScaleKey>) {
+            state.pitchSnapScale = action.payload;
+        },
+        togglePlayheadZoom(state) {
+            state.playheadZoomEnabled = !state.playheadZoomEnabled;
+        },
+        toggleAutoScroll(state) {
+            state.autoScrollEnabled = !state.autoScrollEnabled;
+        },
+        toggleClipboardPreview(state) {
+            state.showClipboardPreview = !state.showClipboardPreview;
         },
         setplayheadSec(state, action: PayloadAction<number>) {
             state.playheadSec = Math.max(0, action.payload);
@@ -1081,6 +1134,19 @@ const sessionSlice = createSlice({
             })
             .addCase(clearWaveformCacheRemote.rejected, setRejected)
 
+            .addCase(loadUiSettings.fulfilled, (state, action) => {
+                const s = action.payload;
+                state.autoCrossfadeEnabled = s.autoCrossfade;
+                state.gridSnapEnabled = s.gridSnap;
+                if (s.gridSize) state.grid = s.gridSize as GridSize;
+                state.pitchSnapEnabled = s.pitchSnap;
+                state.pitchSnapUnit = s.pitchSnapUnit as PitchSnapUnit;
+                state.pitchSnapScale = s.pitchSnapScale as import("../../utils/musicalScales").ScaleKey;
+                state.playheadZoomEnabled = s.playheadZoom;
+                if (s.autoScroll != null) state.autoScrollEnabled = s.autoScroll;
+                if (s.showClipboardPreview != null) state.showClipboardPreview = s.showClipboardPreview;
+            })
+
             .addCase(loadDefaultModel.pending, (state) =>
                 setPending(state, "Loading default model..."),
             )
@@ -1381,8 +1447,9 @@ const sessionSlice = createSlice({
                 state.runtime.isPlaying = ok;
                 state.runtime.playbackTarget = ok ? "original" : null;
                 state.playbackClipId = ok ? (payload.clipId ?? null) : null;
-                // Backend playback state reports an absolute clock; anchor beat is no longer needed.
-                state.playbackAnchorSec = 0;
+                // Store the playhead position at which playback started,
+                // so Play/Stop can restore it.
+                state.playbackAnchorSec = ok ? (payload.anchorBeat ?? 0) : 0;
                 state.status = ok ? "Playing original" : "Play original failed";
             })
             .addCase(playOriginal.rejected, setRejected)
@@ -1393,13 +1460,18 @@ const sessionSlice = createSlice({
             .addCase(stopAudioPlayback.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
+                const payload = action.payload as { ok?: boolean; restoreAnchor?: boolean };
+                // If restoreAnchor is set (Play/Stop action), restore playhead to anchor position
+                if (payload.restoreAnchor && state.playbackAnchorSec > 0) {
+                    state.playheadSec = state.playbackAnchorSec;
+                }
                 state.runtime.isPlaying = false;
                 state.runtime.playbackTarget = null;
                 state.runtime.playbackPositionSec = 0;
                 state.runtime.playbackDurationSec = 0;
                 state.playbackClipId = null;
                 state.playbackAnchorSec = 0;
-                state.status = (action.payload as { ok?: boolean }).ok
+                state.status = payload.ok
                     ? "Audio stopped"
                     : "Stop audio failed";
             })
@@ -1883,6 +1955,14 @@ export const {
     setBpm,
     setBeats,
     setGrid,
+    toggleAutoCrossfade,
+    toggleGridSnap,
+    togglePitchSnap,
+    setPitchSnapUnit,
+    setPitchSnapScale,
+    togglePlayheadZoom,
+    toggleAutoScroll,
+    toggleClipboardPreview,
     setplayheadSec,
     setModelDir,
     setAudioPath,

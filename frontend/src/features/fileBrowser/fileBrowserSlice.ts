@@ -5,6 +5,8 @@ import {
 } from "@reduxjs/toolkit";
 import { fileBrowserApi, type FileEntry } from "../../services/api/fileBrowser";
 
+export type SortMode = "name" | "date" | "size";
+
 interface FileBrowserState {
     visible: boolean;
     currentPath: string;
@@ -16,6 +18,8 @@ interface FileBrowserState {
     searchQuery: string; // 搜索过滤关键词
     searchResults: FileEntry[] | null; // null = 非搜索模式
     searchLoading: boolean;
+    regexEnabled: boolean;
+    sortMode: SortMode;
 }
 
 const STORAGE_KEY = "hifishifter.fileBrowser.lastPath";
@@ -35,6 +39,8 @@ const initialState: FileBrowserState = {
     searchQuery: "",
     searchResults: null,
     searchLoading: false,
+    regexEnabled: false,
+    sortMode: "name" as SortMode,
 };
 
 export const loadDirectory = createAsyncThunk(
@@ -94,6 +100,12 @@ const fileBrowserSlice = createSlice({
                 state.searchLoading = false;
             }
         },
+        toggleRegex(state) {
+            state.regexEnabled = !state.regexEnabled;
+        },
+        setSortMode(state, action: PayloadAction<SortMode>) {
+            state.sortMode = action.payload;
+        },
     },
     extraReducers: (builder) => {
         builder
@@ -131,6 +143,8 @@ export const {
     setPreviewVolume,
     setPreviewingFile,
     setSearchQuery,
+    toggleRegex,
+    setSortMode,
 } = fileBrowserSlice.actions;
 
 export default fileBrowserSlice.reducer;

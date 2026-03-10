@@ -25,7 +25,11 @@ import type {
 } from "./types";
 import type { MutableRefObject as MutRef } from "react";
 import { isModifierActive } from "../../../features/keybindings/keybindingsSlice";
+import { matchesKeybinding } from "../../../features/keybindings/useKeybindings";
+import { ACTION_META } from "../../../features/keybindings/defaultKeybindings";
 import type { Keybinding } from "../../../features/keybindings/types";
+import type { KeybindingMap, ActionId } from "../../../features/keybindings/types";
+import { snapToScale, snapToSemitone } from "../../../utils/musicalScales";
 
 type CanvasCursor = "default" | "crosshair" | "grab" | "grabbing";
 
@@ -112,6 +116,26 @@ export function usePianoRollInteractions(args: {
     pianoRollPasteKb: Keybinding;
     /** modifier.pianoRollVerticalZoom 绑定 */
     prVerticalZoomKb: Keybinding;
+    /** modifier.scrollHorizontal 绑定 */
+    scrollHorizontalKb: Keybinding;
+    /** modifier.scrollVertical 绑定 */
+    scrollVerticalKb: Keybinding;
+    /** 右键菜单回调 */
+    onContextMenu?: (x: number, y: number) => void;
+    /** 播放头位置（秒）用于以播放头为中心缩放 */
+    playheadSec?: number;
+    /** 是否以播放头为中心缩放 */
+    playheadZoomEnabled?: boolean;
+    /** 是否启用绘制时音高吸附 */
+    pitchSnapEnabled?: boolean;
+    /** 音高吸附方式 */
+    pitchSnapUnit?: "semitone" | "scale";
+    /** 音高吸附调式 */
+    pitchSnapScale?: import("../../../utils/musicalScales").ScaleKey;
+    /** 快捷键映射表 */
+    keybindingMap?: KeybindingMap;
+    /** 参数编辑操作回调 (op: selectAll, deselect, initialize, ...) */
+    onEditAction?: (op: string) => void;
 }) {
     const {
         dispatch,
@@ -155,7 +179,27 @@ export function usePianoRollInteractions(args: {
         pianoRollCopyKb,
         pianoRollPasteKb,
         prVerticalZoomKb,
+        scrollHorizontalKb,
+        scrollVerticalKb,
+        playheadSec,
+        playheadZoomEnabled,
     } = args;
+
+    const { pitchSnapEnabled, pitchSnapUnit, pitchSnapScale, keybindingMap, onEditAction } = args;
+
+    /** Apply pitch snap to a drawn value when editParam is "pitch" and snap is enabled.
+     *  When shiftHeld=true, the snap state is toggled (XOR with pitchSnapEnabled). */
+    const snapDrawValue = useCallback(
+        (v: number, shiftHeld = false): number => {
+            const effective = shiftHeld ? !pitchSnapEnabled : pitchSnapEnabled;
+            if (!effective || editParam !== "pitch") return v;
+            if (pitchSnapUnit === "scale" && pitchSnapScale) {
+                return snapToScale(v, pitchSnapScale);
+            }
+            return snapToSemitone(v);
+        },
+        [pitchSnapEnabled, pitchSnapUnit, pitchSnapScale, editParam],
+    );
 
     const pointerBeat = useCallback(
         (clientX: number): number => {
@@ -220,9 +264,15 @@ export function usePianoRollInteractions(args: {
         [syncScrollLeft],
     );
 
-    const onScrollerContextMenu = useCallback((e: MouseEvent) => {
-        e.preventDefault();
-    }, []);
+    const onScrollerContextMenu = useCallback(
+        (e: MouseEvent) => {
+            e.preventDefault();
+            if (args.onContextMenu) {
+                args.onContextMenu(e.clientX, e.clientY);
+            }
+        },
+        [args.onContextMenu],
+    );
 
     const onScrollerKeyDown = useCallback(
         (e: KeyboardEvent<HTMLDivElement>) => {
@@ -230,6 +280,41 @@ export function usePianoRollInteractions(args: {
             if (editParam === "pitch" && !pitchEnabled) return;
 
             // pianoRoll.shiftParamUp / shiftParamDown 已移至全局 handleKeybindingAction 处理
+
+            // Handle edit.* keybindings passed through from useKeybindings global handler
+            // (must be before the selectionRef guard since selectAll/deselect work without selection)
+            if (keybindingMap && onEditAction) {
+                const editActionEntries = (Object.entries(keybindingMap) as [ActionId, Keybinding][])
+                    .filter(([id]) => id.startsWith("edit."));
+                // 需要弹出对话框的操作列表
+                const dialogOps = new Set([
+                    "transposeCents", "transposeDegrees", "setPitch",
+                    "smooth", "addVibrato", "quantize", "meanQuantize",
+                ]);
+                for (const [actionId, kb] of editActionEntries) {
+                    if (kb.modifierOnly) continue;
+                    if (matchesKeybinding(e.nativeEvent, kb)) {
+                        const meta = ACTION_META[actionId];
+                        // paramEditorSelect-scoped actions only work with "select" tool
+                        if (meta?.scopedContext === "paramEditorSelect" && toolMode !== "select") {
+                            continue;
+                        }
+                        const op = actionId.replace("edit.", "");
+                        // undo/redo handled globally, skip here
+                        if (op === "undo" || op === "redo") continue;
+                        e.preventDefault();
+                        // 需要弹窗的操作 → 派发 openEditDialog 事件打开对话框
+                        if (dialogOps.has(op)) {
+                            window.dispatchEvent(
+                                new CustomEvent("hifi:openEditDialog", { detail: { dialog: op } }),
+                            );
+                        } else {
+                            onEditAction(op);
+                        }
+                        return;
+                    }
+                }
+            }
 
             if (!selectionRef.current) return;
 
@@ -287,6 +372,8 @@ export function usePianoRollInteractions(args: {
                                 (v) => Number(v) || 0,
                             ),
                         };
+                        // 刷新剪贴板预览
+                        invalidate();
                     })();
                     return;
                 }
@@ -318,12 +405,16 @@ export function usePianoRollInteractions(args: {
                     const clip = clipboardRef.current;
                     if (!clip) return;
                     if (clip.param !== editParam) return;
+                    // 将剪贴板数据截断到选区帧数范围内
+                    const pasteValues = clip.values.length > frameCount
+                        ? clip.values.slice(0, frameCount)
+                        : clip.values;
                     void (async () => {
                         await paramsApi.setParamFrames(
                             rootTrackId,
                             editParam,
                             startFrame,
-                            clip.values,
+                            pasteValues,
                             true,
                         );
                         bumpRefreshToken();
@@ -342,6 +433,9 @@ export function usePianoRollInteractions(args: {
             bumpRefreshToken,
             pianoRollCopyKb,
             pianoRollPasteKb,
+            keybindingMap,
+            onEditAction,
+            toolMode,
         ],
     );
 
@@ -349,6 +443,21 @@ export function usePianoRollInteractions(args: {
         (e: globalThis.WheelEvent) => {
             const el = scrollerRef.current;
             if (!el) return;
+
+            // Scroll modifier: convert wheel to horizontal scroll
+            if (isModifierActive(scrollHorizontalKb, e)) {
+                e.preventDefault();
+                el.scrollLeft += e.deltaY;
+                syncScrollLeft(el);
+                return;
+            }
+
+            // Scroll modifier: convert wheel to vertical scroll
+            if (isModifierActive(scrollVerticalKb, e)) {
+                e.preventDefault();
+                // PianoRoll has no vertical scroll, so no-op
+                return;
+            }
 
             // Anchor zoom to the actual drawable viewport (canvas), not the scroller.
             // The scroller may include rulers/padding, which makes zoom feel off-center.
@@ -404,13 +513,29 @@ export function usePianoRollInteractions(args: {
             // Wheel: horizontal zoom (time axis)
             const dir = e.deltaY < 0 ? 1 : -1;
             const factor = dir > 0 ? 1.1 : 0.9;
-            const pointerX = clamp(pointerXRaw, 0, Math.max(1, bounds.width));
             const curPxPerBeat = pxPerBeatRef.current;
-            const beatAtPointer =
-                (pointerX + el.scrollLeft) / Math.max(1e-9, curPxPerBeat);
 
-            // 动态计�?pxPerBeat 的合法范围（基于 pxPerSec 的范围和当前 BPM�?
+            // Playhead-based zoom: use playhead position as anchor instead of pointer
             const secPerBeatLocal = 60 / Math.max(1, bpm);
+            let anchorX: number;
+            let anchorBeat: number;
+            if (playheadZoomEnabled && playheadSec != null) {
+                anchorBeat = playheadSec / secPerBeatLocal;
+                anchorX = anchorBeat * curPxPerBeat - el.scrollLeft;
+                // 如果 playhead 在可视区域外，先将其居中，再以其为锚点缩放
+                if (anchorX < 0 || anchorX > bounds.width) {
+                    const centeredScrollLeft = anchorBeat * curPxPerBeat - bounds.width / 2;
+                    el.scrollLeft = Math.max(0, centeredScrollLeft);
+                    syncScrollLeft(el);
+                    anchorX = anchorBeat * curPxPerBeat - el.scrollLeft;
+                }
+                anchorX = clamp(anchorX, 0, Math.max(1, bounds.width));
+            } else {
+                anchorX = clamp(pointerXRaw, 0, Math.max(1, bounds.width));
+                anchorBeat =
+                    (anchorX + el.scrollLeft) / Math.max(1e-9, curPxPerBeat);
+            }
+
             const minPxPerBeat = MIN_PX_PER_SEC * secPerBeatLocal;
             const maxPxPerBeat = MAX_PX_PER_SEC * secPerBeatLocal;
 
@@ -422,7 +547,7 @@ export function usePianoRollInteractions(args: {
             if (Math.abs(next - curPxPerBeat) < 1e-9) return;
 
             setPxPerBeat(next);
-            const nextScrollLeft = beatAtPointer * next - pointerX;
+            const nextScrollLeft = anchorBeat * next - anchorX;
             el.scrollLeft = Math.max(0, nextScrollLeft);
             syncScrollLeft(el);
         },
@@ -441,6 +566,11 @@ export function usePianoRollInteractions(args: {
             pxPerBeatRef,
             setPxPerBeat,
             syncScrollLeft,
+            scrollHorizontalKb,
+            scrollVerticalKb,
+            bpm,
+            playheadSec,
+            playheadZoomEnabled,
         ],
     );
 
@@ -592,12 +722,8 @@ export function usePianoRollInteractions(args: {
             }
 
             if (toolMode === "select") {
-                // 右键：取消选区
+                // 右键：显示上下文菜单，不清除选区
                 if (e.button === 2) {
-                    e.preventDefault();
-                    selectionRef.current = null;
-                    setSelectionUi(null);
-                    invalidate();
                     return;
                 }
                 if (e.button !== 0) return;
@@ -706,6 +832,14 @@ export function usePianoRollInteractions(args: {
                                     const currentVal = pointerValue(ev.clientY);
                                     lastValueDelta = currentVal - startMouseVal;
 
+                                    // 音高吸附：当启用 pitch snap 且编辑 pitch 参数时，量化 Y 轴偏移
+                                    if (pitchSnapEnabled && editParam === "pitch") {
+                                        if (pitchSnapUnit === "semitone") {
+                                            lastValueDelta = Math.round(lastValueDelta);
+                                        }
+                                        // scale 模式下不对 delta 量化，因为需要对每个值单独 snap
+                                    }
+
                                     // 计算 X 方向帧偏移
                                     const currentBeat = pointerBeat(ev.clientX);
                                     const beatDelta = currentBeat - startBeat;
@@ -717,6 +851,9 @@ export function usePianoRollInteractions(args: {
                                     const pvNow = paramViewRef.current;
                                     if (!pvNow) return;
 
+                                    // Reset live overlay before each move to prevent stale values
+                                    // from the previous drag position lingering outside the current range
+                                    liveEditOverrideRef.current = null;
                                     ensureLiveEditBase(pvNow);
 
                                     // 构造覆盖原选区 + 新位置的完整 dense 数组
@@ -991,7 +1128,11 @@ export function usePianoRollInteractions(args: {
             const beat = pointerBeat(e.clientX);
             const sec = beat * secPerBeat;
             const frame = Math.max(0, Math.floor((sec * 1000) / fp));
-            const value = pointerValue(e.clientY);
+            const rawValue = pointerValue(e.clientY);
+            const isDrawMode = mode === "draw";
+            const value = isDrawMode ? snapDrawValue(rawValue, e.shiftKey) : rawValue;
+
+            const isLineTool = toolMode === "line";
 
             strokeRef.current = {
                 mode,
@@ -999,9 +1140,10 @@ export function usePianoRollInteractions(args: {
                 param: editParam,
                 points: [{ frame, value }],
             };
-            // 标记 live 编辑开始，阻止 pitch_orig_updated 事件立即刷新曲线�?
+            // 标记 live 编辑开始，阻止 pitch_orig_updated 事件立即刷新曲线
             if (liveEditActiveRef) liveEditActiveRef.current = true;
 
+            // For line tool, only show the start point initially
             const pv0 = paramViewRef.current;
             if (pv0) {
                 applyDenseToLiveEdit(
@@ -1018,76 +1160,134 @@ export function usePianoRollInteractions(args: {
             );
             invalidate();
 
-            const onMove = (ev: globalThis.PointerEvent) => {
-                const st = strokeRef.current;
-                if (!st || st.pointerId !== e.pointerId) return;
-                const b2 = pointerBeat(ev.clientX);
-                const sec2 = b2 * secPerBeat;
-                const f2 = Math.max(0, Math.floor((sec2 * 1000) / fp));
-                const v2 = pointerValue(ev.clientY);
+            if (isLineTool) {
+                // Line tool: draw a straight line from start to current pointer
+                const startFrame = frame;
+                const startValue = value;
 
-                const pv2 = paramViewRef.current;
-                const last = st.points[st.points.length - 1];
-                if (last && last.frame === f2) {
-                    last.value = v2;
+                const onMove = (ev: globalThis.PointerEvent) => {
+                    const st = strokeRef.current;
+                    if (!st || st.pointerId !== e.pointerId) return;
+                    const b2 = pointerBeat(ev.clientX);
+                    const sec2 = b2 * secPerBeat;
+                    const f2 = Math.max(0, Math.floor((sec2 * 1000) / fp));
+                    const rawV2 = pointerValue(ev.clientY);
+                    const v2 = isDrawMode ? snapDrawValue(rawV2, ev.shiftKey) : rawV2;
+
+                    // Update stroke to only have start and current end
+                    st.points = [{ frame: startFrame, value: startValue }, { frame: f2, value: v2 }];
+
+                    const pv2 = paramViewRef.current;
                     if (pv2) {
-                        applyDenseToLiveEdit(
-                            pv2,
-                            f2,
-                            mode === "restore" ? null : [v2],
-                            f2,
-                            f2,
-                            mode,
-                        );
-                    }
-                } else if (last) {
-                    const a = { frame: last.frame, value: last.value };
-                    const b = { frame: f2, value: v2 };
-                    st.points.push(b);
-
-                    const minF = Math.min(a.frame, b.frame);
-                    const maxF = Math.max(a.frame, b.frame);
-
-                    let dense: number[] | null = null;
-                    if (mode !== "restore") {
-                        const len = maxF - minF + 1;
-                        dense = new Array<number>(len);
-                        const denom = b.frame - a.frame;
-                        for (let f = minF; f <= maxF; f += 1) {
-                            const t = denom === 0 ? 1 : (f - a.frame) / denom;
-                            dense[f - minF] = a.value + (b.value - a.value) * t;
+                        // Reset live overlay so the previous line preview doesn't leave artifacts
+                        liveEditOverrideRef.current = null;
+                        ensureLiveEditBase(pv2);
+                        const minF = Math.min(startFrame, f2);
+                        const maxF = Math.max(startFrame, f2);
+                        if (mode === "restore") {
+                            applyDenseToLiveEdit(pv2, minF, null, minF, maxF, mode);
+                        } else {
+                            const len = maxF - minF + 1;
+                            const dense = new Array<number>(len);
+                            const denom = f2 - startFrame;
+                            for (let f = minF; f <= maxF; f++) {
+                                const t = denom === 0 ? 1 : (f - startFrame) / denom;
+                                const raw = startValue + (v2 - startValue) * t;
+                                dense[f - minF] = isDrawMode ? snapDrawValue(raw, ev.shiftKey) : raw;
+                            }
+                            applyDenseToLiveEdit(pv2, minF, dense, minF, maxF, mode);
                         }
                     }
+                    invalidate();
+                };
 
-                    if (pv2) {
-                        applyDenseToLiveEdit(
-                            pv2,
-                            minF,
-                            dense,
-                            minF,
-                            maxF,
-                            mode,
-                        );
+                const onUp = () => {
+                    const st = strokeRef.current;
+                    if (!st || st.pointerId !== e.pointerId) return;
+                    strokeRef.current = null;
+                    window.removeEventListener("pointermove", onMove);
+                    window.removeEventListener("pointerup", onUp);
+                    window.removeEventListener("pointercancel", onUp);
+                    invalidate();
+                    void commitStroke(st.points, st.mode);
+                };
+
+                window.addEventListener("pointermove", onMove);
+                window.addEventListener("pointerup", onUp);
+                window.addEventListener("pointercancel", onUp);
+            } else {
+                // Draw tool: freehand drawing with interpolation between points
+                const onMove = (ev: globalThis.PointerEvent) => {
+                    const st = strokeRef.current;
+                    if (!st || st.pointerId !== e.pointerId) return;
+                    const b2 = pointerBeat(ev.clientX);
+                    const sec2 = b2 * secPerBeat;
+                    const f2 = Math.max(0, Math.floor((sec2 * 1000) / fp));
+                    const rawV2 = pointerValue(ev.clientY);
+                    const v2 = isDrawMode ? snapDrawValue(rawV2, ev.shiftKey) : rawV2;
+
+                    const pv2 = paramViewRef.current;
+                    const last = st.points[st.points.length - 1];
+                    if (last && last.frame === f2) {
+                        last.value = v2;
+                        if (pv2) {
+                            applyDenseToLiveEdit(
+                                pv2,
+                                f2,
+                                mode === "restore" ? null : [v2],
+                                f2,
+                                f2,
+                                mode,
+                            );
+                        }
+                    } else if (last) {
+                        const a = { frame: last.frame, value: last.value };
+                        const b = { frame: f2, value: v2 };
+                        st.points.push(b);
+
+                        const minF = Math.min(a.frame, b.frame);
+                        const maxF = Math.max(a.frame, b.frame);
+
+                        let dense: number[] | null = null;
+                        if (mode !== "restore") {
+                            const len = maxF - minF + 1;
+                            dense = new Array<number>(len);
+                            const denom = b.frame - a.frame;
+                            for (let f = minF; f <= maxF; f += 1) {
+                                const t = denom === 0 ? 1 : (f - a.frame) / denom;
+                                dense[f - minF] = a.value + (b.value - a.value) * t;
+                            }
+                        }
+
+                        if (pv2) {
+                            applyDenseToLiveEdit(
+                                pv2,
+                                minF,
+                                dense,
+                                minF,
+                                maxF,
+                                mode,
+                            );
+                        }
                     }
-                }
-                invalidate();
-            };
+                    invalidate();
+                };
 
-            const onUp = () => {
-                const st = strokeRef.current;
-                if (!st || st.pointerId !== e.pointerId) return;
-                strokeRef.current = null;
-                window.removeEventListener("pointermove", onMove);
-                window.removeEventListener("pointerup", onUp);
-                window.removeEventListener("pointercancel", onUp);
-                invalidate();
-                // commitStroke 包装层会在完成后重置 liveEditActiveRef 并触发延迟刷新�?
-                void commitStroke(st.points, st.mode);
-            };
+                const onUp = () => {
+                    const st = strokeRef.current;
+                    if (!st || st.pointerId !== e.pointerId) return;
+                    strokeRef.current = null;
+                    window.removeEventListener("pointermove", onMove);
+                    window.removeEventListener("pointerup", onUp);
+                    window.removeEventListener("pointercancel", onUp);
+                    invalidate();
+                    void commitStroke(st.points, st.mode);
+                };
 
-            window.addEventListener("pointermove", onMove);
-            window.addEventListener("pointerup", onUp);
-            window.addEventListener("pointercancel", onUp);
+                window.addEventListener("pointermove", onMove);
+                window.addEventListener("pointerup", onUp);
+                window.addEventListener("pointercancel", onUp);
+            }
         },
         [
             rootTrackId,

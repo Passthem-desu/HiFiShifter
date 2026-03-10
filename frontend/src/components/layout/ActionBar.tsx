@@ -17,6 +17,7 @@ import {
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
+import { PitchSnapSettingsDialog } from "./PitchSnapSettingsDialog";
 
 import {
     playOriginal,
@@ -26,6 +27,13 @@ import {
     setBeats,
     setToolMode,
     setGrid,
+    toggleAutoCrossfade,
+    toggleGridSnap,
+    togglePitchSnap,
+    togglePlayheadZoom,
+    toggleAutoScroll,
+    toggleClipboardPreview,
+    persistUiSettings,
 } from "../../features/session/sessionSlice";
 import { toggleVisible } from "../../features/fileBrowser/fileBrowserSlice";
 
@@ -36,6 +44,10 @@ export function ActionBar() {
         (state: RootState) => state.fileBrowser.visible,
     );
     const { t } = useI18n();
+    const tAny = t as (key: string) => string;
+
+    const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
+    const [gridSnapMenuPos, setGridSnapMenuPos] = useState<{ x: number; y: number } | null>(null);
 
     const [bpmText, setBpmText] = useState(() =>
         String(Math.round(s.bpm || 120)),
@@ -92,6 +104,18 @@ export function ActionBar() {
                     onClick={() => dispatch(setToolMode("draw"))}
                 >
                     <Pencil1Icon />
+                </IconButton>
+                <IconButton
+                    size="1"
+                    variant={s.toolMode === "line" ? "solid" : "ghost"}
+                    color="gray"
+                    title={tAny("line")}
+                    tabIndex={-1}
+                    onClick={() => dispatch(setToolMode("line"))}
+                >
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <line x1="2" y1="13" x2="13" y2="2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
                 </IconButton>
             </Flex>
 
@@ -167,10 +191,36 @@ export function ActionBar() {
                         style={{ backgroundColor: "var(--qt-base)" }}
                     />
                     <Select.Content>
-                        <Select.Item value="1/4">1/4</Select.Item>
-                        <Select.Item value="1/8">1/8</Select.Item>
-                        <Select.Item value="1/16">1/16</Select.Item>
-                        <Select.Item value="1/32">1/32</Select.Item>
+                        <Select.Group>
+                            <Select.Label>{tAny("grid_note_normal")}</Select.Label>
+                            <Select.Item value="1/1">1/1</Select.Item>
+                            <Select.Item value="1/2">1/2</Select.Item>
+                            <Select.Item value="1/4">1/4</Select.Item>
+                            <Select.Item value="1/8">1/8</Select.Item>
+                            <Select.Item value="1/16">1/16</Select.Item>
+                            <Select.Item value="1/32">1/32</Select.Item>
+                            <Select.Item value="1/64">1/64</Select.Item>
+                        </Select.Group>
+                        <Select.Separator />
+                        <Select.Group>
+                            <Select.Label>{tAny("grid_note_dotted")}</Select.Label>
+                            <Select.Item value="1/2d">1/2.</Select.Item>
+                            <Select.Item value="1/4d">1/4.</Select.Item>
+                            <Select.Item value="1/8d">1/8.</Select.Item>
+                            <Select.Item value="1/16d">1/16.</Select.Item>
+                            <Select.Item value="1/32d">1/32.</Select.Item>
+                            <Select.Item value="1/64d">1/64.</Select.Item>
+                        </Select.Group>
+                        <Select.Separator />
+                        <Select.Group>
+                            <Select.Label>{tAny("grid_note_triplet")}</Select.Label>
+                            <Select.Item value="1/2t">1/2t</Select.Item>
+                            <Select.Item value="1/4t">1/4t</Select.Item>
+                            <Select.Item value="1/8t">1/8t</Select.Item>
+                            <Select.Item value="1/16t">1/16t</Select.Item>
+                            <Select.Item value="1/32t">1/32t</Select.Item>
+                            <Select.Item value="1/64t">1/64t</Select.Item>
+                        </Select.Group>
                     </Select.Content>
                 </Select.Root>
             </Flex>
@@ -206,7 +256,7 @@ onClick={() => dispatch(playOriginal())}
                     size="1"
                     variant={fileBrowserVisible ? "solid" : "ghost"}
                     color="gray"
-                    title={(t as (key: string) => string)("fb_title")}
+                    title={tAny("fb_title")}
                     onClick={() => dispatch(toggleVisible())}
                 >
                     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -214,6 +264,246 @@ onClick={() => dispatch(playOriginal())}
                     </svg>
                 </IconButton>
             </Flex>
+
+            <Separator orientation="vertical" size="2" />
+
+            {/* Toolbar Toggles */}
+            <Flex align="center" gap="1" className="shrink-0">
+                {/* Auto Crossfade */}
+                <IconButton
+                    size="1"
+                    variant={s.autoCrossfadeEnabled ? "solid" : "ghost"}
+                    color="gray"
+                    title={tAny("auto_crossfade")}
+                    tabIndex={-1}
+                    onClick={() => { dispatch(toggleAutoCrossfade()); void dispatch(persistUiSettings()); }}
+                >
+                    {/* X icon for crossfade */}
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 12L7.5 3L13 12" stroke="currentColor" strokeWidth="1.2" fill="none"/>
+                        <path d="M2 3L7.5 12L13 3" stroke="currentColor" strokeWidth="1.2" fill="none" opacity="0.5"/>
+                    </svg>
+                </IconButton>
+
+                {/* Grid Snap */}
+                <IconButton
+                    size="1"
+                    variant={s.gridSnapEnabled ? "solid" : "ghost"}
+                    color="gray"
+                    title={tAny("grid_snap")}
+                    tabIndex={-1}
+                    onClick={() => { dispatch(toggleGridSnap()); void dispatch(persistUiSettings()); }}
+                    onContextMenu={(e) => {
+                        e.preventDefault();
+                        setGridSnapMenuPos({ x: e.clientX, y: e.clientY });
+                    }}
+                >
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 2V13M5.5 2V13M9 2V13M12.5 2V13" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
+                        <path d="M7.5 4L7.5 11" stroke="currentColor" strokeWidth="1.5"/>
+                        <path d="M5.5 6L7.5 4L9.5 6" stroke="currentColor" strokeWidth="1"/>
+                        <path d="M5.5 9L7.5 11L9.5 9" stroke="currentColor" strokeWidth="1"/>
+                    </svg>
+                </IconButton>
+
+                {/* Pitch Snap */}
+                <IconButton
+                    size="1"
+                    variant={s.pitchSnapEnabled ? "solid" : "ghost"}
+                    color="gray"
+                    title={tAny("pitch_snap")}
+                    tabIndex={-1}
+                    onClick={() => { dispatch(togglePitchSnap()); void dispatch(persistUiSettings()); }}
+                    onContextMenu={(e) => {
+                        e.preventDefault();
+                        setPitchSnapOpen(true);
+                    }}
+                >
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M10 2V10.5C10 11.88 8.88 13 7.5 13C6.12 13 5 11.88 5 10.5C5 9.12 6.12 8 7.5 8C8.16 8 8.77 8.26 9.22 8.68" stroke="currentColor" strokeWidth="1.2" fill="none"/>
+                        <path d="M3 4.5H7M3 7.5H6" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
+                    </svg>
+                </IconButton>
+
+                {/* Playhead Zoom */}
+                <IconButton
+                    size="1"
+                    variant={s.playheadZoomEnabled ? "solid" : "ghost"}
+                    color="gray"
+                    title={tAny("playhead_zoom")}
+                    tabIndex={-1}
+                    onClick={() => { dispatch(togglePlayheadZoom()); void dispatch(persistUiSettings()); }}
+                >
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M7.5 2V13" stroke="currentColor" strokeWidth="1.2"/>
+                        <path d="M6 3L7.5 1.5L9 3" stroke="currentColor" strokeWidth="1"/>
+                        <path d="M4 7.5H2M13 7.5H11" stroke="currentColor" strokeWidth="1"/>
+                        <path d="M3.5 5L2 7.5L3.5 10" stroke="currentColor" strokeWidth="0.8"/>
+                        <path d="M11.5 5L13 7.5L11.5 10" stroke="currentColor" strokeWidth="0.8"/>
+                    </svg>
+                </IconButton>
+
+                {/* Auto Scroll */}
+                <IconButton
+                    size="1"
+                    variant={s.autoScrollEnabled ? "solid" : "ghost"}
+                    color="gray"
+                    title={tAny("auto_scroll")}
+                    tabIndex={-1}
+                    onClick={() => { dispatch(toggleAutoScroll()); void dispatch(persistUiSettings()); }}
+                >
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M7.5 2V11" stroke="currentColor" strokeWidth="1.2"/>
+                        <path d="M6 3L7.5 1.5L9 3" stroke="currentColor" strokeWidth="1"/>
+                        <path d="M5 9L7.5 12L10 9" stroke="currentColor" strokeWidth="1"/>
+                        <path d="M2 13H13" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
+                    </svg>
+                </IconButton>
+
+                {/* Clipboard Preview */}
+                <IconButton
+                    size="1"
+                    variant={s.showClipboardPreview ? "solid" : "ghost"}
+                    color="gray"
+                    title={tAny("clipboard_preview")}
+                    tabIndex={-1}
+                    onClick={() => { dispatch(toggleClipboardPreview()); void dispatch(persistUiSettings()); }}
+                >
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="3" y="1" width="9" height="13" rx="1" stroke="currentColor" strokeWidth="1" fill="none"/>
+                        <path d="M5.5 1V2.5H9.5V1" stroke="currentColor" strokeWidth="0.8"/>
+                        <path d="M5 6L7 8L10 5" stroke="currentColor" strokeWidth="1.2" opacity="0.7"/>
+                    </svg>
+                </IconButton>
+            </Flex>
+
+            {/* Pitch Snap Settings Dialog */}
+            {pitchSnapOpen && (
+                <PitchSnapSettingsDialog
+                    open={pitchSnapOpen}
+                    onOpenChange={setPitchSnapOpen}
+                />
+            )}
+
+            {/* Grid Snap Context Menu */}
+            {gridSnapMenuPos && (
+                <GridSnapContextMenu
+                    x={gridSnapMenuPos.x}
+                    y={gridSnapMenuPos.y}
+                    currentGrid={s.grid}
+                    onSelect={(grid) => {
+                        dispatch(setGrid(grid as typeof s.grid));
+                        void dispatch(persistUiSettings());
+                        setGridSnapMenuPos(null);
+                    }}
+                    onClose={() => setGridSnapMenuPos(null)}
+                    t={tAny}
+                />
+            )}
         </Flex>
+    );
+}
+
+/** Grid snap note type definitions for the context menu */
+const GRID_SNAP_ITEMS: Array<{ value: string; labelKey: string } | "separator"> = [
+    { value: "1/1", labelKey: "grid_snap_whole" },
+    { value: "1/2", labelKey: "grid_snap_half" },
+    { value: "1/4", labelKey: "grid_snap_quarter" },
+    { value: "1/8", labelKey: "grid_snap_8th" },
+    { value: "1/16", labelKey: "grid_snap_16th" },
+    { value: "1/32", labelKey: "grid_snap_32nd" },
+    { value: "1/64", labelKey: "grid_snap_64th" },
+    "separator",
+    { value: "1/2d", labelKey: "grid_snap_dotted_half" },
+    { value: "1/4d", labelKey: "grid_snap_dotted_quarter" },
+    { value: "1/8d", labelKey: "grid_snap_dotted_8th" },
+    { value: "1/16d", labelKey: "grid_snap_dotted_16th" },
+    { value: "1/32d", labelKey: "grid_snap_dotted_32nd" },
+    { value: "1/64d", labelKey: "grid_snap_dotted_64th" },
+    "separator",
+    { value: "1/2t", labelKey: "grid_snap_triplet_half" },
+    { value: "1/4t", labelKey: "grid_snap_triplet_quarter" },
+    { value: "1/8t", labelKey: "grid_snap_triplet_8th" },
+    { value: "1/16t", labelKey: "grid_snap_triplet_16th" },
+    { value: "1/32t", labelKey: "grid_snap_triplet_32nd" },
+    { value: "1/64t", labelKey: "grid_snap_triplet_64th" },
+];
+
+function GridSnapContextMenu({
+    x, y, currentGrid, onSelect, onClose, t,
+}: {
+    x: number; y: number; currentGrid: string;
+    onSelect: (grid: string) => void; onClose: () => void;
+    t: (key: string) => string;
+}) {
+    const menuRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClick = (e: globalThis.MouseEvent) => {
+            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+                onClose();
+            }
+        };
+        const handleKey = (e: globalThis.KeyboardEvent) => {
+            if (e.key === "Escape") onClose();
+        };
+        window.addEventListener("mousedown", handleClick, true);
+        window.addEventListener("keydown", handleKey, true);
+        return () => {
+            window.removeEventListener("mousedown", handleClick, true);
+            window.removeEventListener("keydown", handleKey, true);
+        };
+    }, [onClose]);
+
+    // Adjust position to fit within viewport
+    const style: React.CSSProperties = {
+        position: "fixed",
+        left: x,
+        top: y,
+        zIndex: 10000,
+        minWidth: 180,
+        maxHeight: "70vh",
+        overflowY: "auto",
+        background: "var(--color-panel-solid)",
+        border: "1px solid var(--gray-6)",
+        borderRadius: 6,
+        padding: "4px 0",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+    };
+
+    return (
+        <div ref={menuRef} style={style}>
+            {GRID_SNAP_ITEMS.map((item, i) => {
+                if (item === "separator") {
+                    return <div key={`sep-${i}`} style={{ height: 1, background: "var(--gray-6)", margin: "4px 0" }} />;
+                }
+                const isActive = item.value === currentGrid;
+                return (
+                    <div
+                        key={item.value}
+                        onClick={() => onSelect(item.value)}
+                        style={{
+                            padding: "5px 12px",
+                            cursor: "pointer",
+                            fontSize: 13,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            background: isActive ? "var(--accent-3)" : "transparent",
+                            color: isActive ? "var(--accent-11)" : "inherit",
+                        }}
+                        onMouseEnter={(e) => {
+                            if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "var(--gray-3)";
+                        }}
+                        onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLDivElement).style.background = isActive ? "var(--accent-3)" : "transparent";
+                        }}
+                    >
+                        <span>{t(item.labelKey)}</span>
+                        {isActive && <span style={{ marginLeft: 8 }}>✓</span>}
+                    </div>
+                );
+            })}
+        </div>
     );
 }
