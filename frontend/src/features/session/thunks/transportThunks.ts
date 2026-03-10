@@ -13,7 +13,7 @@ export const fetchTimeline = createAsyncThunk(
 export const stopAudioPlayback = createAsyncThunk(
     "session/stopAudioPlayback",
     async (options: { restoreAnchor?: boolean } | void, { getState }) => {
-        const restoreAnchor = Boolean((options as any)?.restoreAnchor);
+        const restoreAnchor = Boolean((options as { restoreAnchor?: boolean } | undefined)?.restoreAnchor);
         const state = getState() as { session: SessionState };
         const anchorSec = state.session.playbackAnchorSec;
         const result = await webApi.stopAudio();

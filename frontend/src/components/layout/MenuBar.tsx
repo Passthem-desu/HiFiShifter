@@ -67,6 +67,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const [setPitchOpen, setSetPitchOpen] = useState(false);
     const [smoothOpen, setSmoothOpen] = useState(false);
     const [vibratoOpen, setVibratoOpen] = useState(false);
+    const [vibratoParamRange, setVibratoParamRange] = useState<{ min: number; max: number } | undefined>(undefined);
     const [quantizeOpen, setQuantizeOpen] = useState(false);
     const [meanQuantizeOpen, setMeanQuantizeOpen] = useState(false);
 
@@ -81,7 +82,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 case "transposeDegrees": setTransposeDegreesOpen(true); break;
                 case "setPitch": setSetPitchOpen(true); break;
                 case "smooth": setSmoothOpen(true); break;
-                case "addVibrato": setVibratoOpen(true); break;
+                case "addVibrato": setVibratoParamRange((e as CustomEvent).detail?.paramRange); setVibratoOpen(true); break;
                 case "quantize": setQuantizeOpen(true); break;
                 case "meanQuantize": setMeanQuantizeOpen(true); break;
             }
@@ -256,6 +257,12 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         {tAny("menu_copy")}{" "}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("pianoRoll.copy")}
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("cut")}>
+                        {tAny("menu_cut")}{" "}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("clip.cut")}
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={() => dispatchEditOp("paste")}>
@@ -479,7 +486,8 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 open={vibratoOpen}
                 onOpenChange={setVibratoOpen}
                 editParam={s.editParam}
-                onConfirm={(amplitude, rate) => dispatchEditOp("addVibrato", { amplitude, rate })}
+                paramRange={vibratoParamRange}
+                onConfirm={(amplitude, rate, attack, release, phase) => dispatchEditOp("addVibrato", { amplitude, rate, attack, release, phase })}
             />
             <QuantizeDialog
                 open={quantizeOpen}

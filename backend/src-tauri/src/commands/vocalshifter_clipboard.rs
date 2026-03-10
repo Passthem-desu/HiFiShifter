@@ -92,7 +92,10 @@ fn paste_clb_pitch_data(
             continue;
         }
         let raw_idx = idx_f.round() as isize;
-        let idx = (raw_idx + offset_frames) as usize;
+        let idx = match raw_idx.checked_add(offset_frames).and_then(|i| if i >= 0 { Some(i as usize) } else { None }) {
+            Some(v) => v,
+            None => continue,
+        };
         // 超出选区范围的帧不粘贴
         if let Some(bound) = max_frame_bound {
             if idx >= bound {

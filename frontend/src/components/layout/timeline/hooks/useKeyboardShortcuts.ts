@@ -45,6 +45,7 @@ function matchClipAction(
     const clipActions: ActionId[] = [
         "clip.delete",
         "clip.copy",
+        "clip.cut",
         "clip.paste",
         "clip.split",
     ];
@@ -119,6 +120,18 @@ export function useKeyboardShortcuts(deps: {
                 }
             }
 
+            // clip.delete: 当焦点在 PianoRoll 且工具为 select 时，Delete 应触发
+            // edit.initialize 而非删除音频块，此处跳过以让 PianoRoll 处理
+            if (actionId === "clip.delete") {
+                const active = document.activeElement as HTMLElement | null;
+                const inPianoRoll =
+                    active?.hasAttribute("data-piano-roll-scroller") ||
+                    active?.closest?.("[data-piano-roll-scroller]");
+                if (inPianoRoll && s.toolMode === "select") {
+                    return;
+                }
+            }
+
             switch (actionId) {
                 case "clip.delete": {
                     if (selectedIds.length === 0) return;
@@ -162,6 +175,47 @@ export function useKeyboardShortcuts(deps: {
                         );
                     } catch {
                         // ignore
+                    }
+                    return;
+                }
+
+                case "clip.cut": {
+                    if (selectedIds.length === 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // 先复制到剪贴板
+                    const cutClips = s.clips.filter((c) => selectedIds.includes(c.id));
+                    if (cutClips.length === 0) return;
+                    const cutTemplates = cutClips.map((c) => ({
+                        trackId: c.trackId,
+                        name: c.name,
+                        startSec: c.startSec,
+                        lengthSec: c.lengthSec,
+                        sourcePath: c.sourcePath,
+                        durationSec: c.durationSec,
+                        gain: c.gain,
+                        muted: c.muted,
+                        sourceStartSec: c.sourceStartSec,
+                        sourceEndSec: c.sourceEndSec,
+                        playbackRate: c.playbackRate,
+                        fadeInSec: c.fadeInSec,
+                        fadeOutSec: c.fadeOutSec,
+                    }));
+                    (clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>).current = cutTemplates;
+                    try {
+                        void navigator.clipboard?.writeText(
+                            JSON.stringify({
+                                type: "hifishifter.clipTemplates.v1",
+                                templates: cutTemplates,
+                            }),
+                        );
+                    } catch {
+                        // ignore
+                    }
+                    // 再删除原音频块
+                    setMultiSelectedClipIds([]);
+                    for (const id of selectedIds) {
+                        void dispatch(removeClipRemote(id));
                     }
                     return;
                 }

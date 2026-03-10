@@ -172,12 +172,12 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
         [doSearch],
     );
 
-    // 当 regexEnabled 或 sortMode 变化时重新搜索
+    // 当 regexEnabled 变化时根据当前查询重新搜索
     useEffect(() => {
         if (query.trim()) {
             doSearch(query);
         }
-    }, [regexEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [regexEnabled, query, doSearch]);
 
     // 排序后的结果
     const sortedResults = useMemo(() => {

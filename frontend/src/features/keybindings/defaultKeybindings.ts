@@ -17,6 +17,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     // 播放控制
     "playback.toggle": { key: "space" },
     "playback.stop": { key: "enter" },  // Play/Stop: 播放/停止（停止时回到起始位置）
+    "playback.focusCursor": { key: "\\" },  // 聚焦播放光标
 
     // 编辑
     "edit.undo": { key: "z", ctrl: true },
@@ -48,6 +49,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     // Clip 操作
     "clip.delete": { key: "delete" },
     "clip.copy": { key: "c", ctrl: true },
+    "clip.cut": { key: "x", ctrl: true },
     "clip.paste": { key: "v", ctrl: true },
     "clip.split": { key: "s" },
 
@@ -88,6 +90,7 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
 
     "playback.toggle": { labelKey: "kb_playback_toggle", group: "playback" },
     "playback.stop": { labelKey: "kb_playback_stop", group: "playback" },
+    "playback.focusCursor": { labelKey: "kb_playback_focus_cursor", group: "playback" },
 
     "edit.undo": { labelKey: "kb_edit_undo", group: "edit" },
     "edit.redo": { labelKey: "kb_edit_redo", group: "edit" },
@@ -115,6 +118,7 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
 
     "clip.delete": { labelKey: "kb_clip_delete", group: "clip" },
     "clip.copy": { labelKey: "kb_clip_copy", group: "clip" },
+    "clip.cut": { labelKey: "kb_clip_cut", group: "clip" },
     "clip.paste": { labelKey: "kb_clip_paste", group: "clip" },
     "clip.split": { labelKey: "kb_clip_split", group: "clip" },
 

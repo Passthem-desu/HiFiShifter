@@ -220,8 +220,17 @@ function AppInner() {
             if (mod && e.key.toLowerCase() === "f") {
                 e.preventDefault();
             }
+            // 禁用 Ctrl+P 浏览器打印
+            if (mod && e.key.toLowerCase() === "p") {
+                e.preventDefault();
+            }
         }
         function preventContextMenu(e: MouseEvent) {
+            const target = e.target as HTMLElement | null;
+            // Allow native context menu on text inputs and textareas
+            if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+            // Allow elements that opt-in to custom context menus
+            if (target?.closest?.("[data-hs-context-menu]")) return;
             e.preventDefault();
         }
         window.addEventListener("keydown", preventBrowserFind, true);
@@ -548,6 +557,9 @@ function AppInner() {
                     } else {
                         void dispatch(playOriginal());
                     }
+                    break;
+                case "playback.focusCursor":
+                    window.dispatchEvent(new CustomEvent("hifi:focusCursor"));
                     break;
                 case "edit.undo":
                     void dispatch(undoRemote());

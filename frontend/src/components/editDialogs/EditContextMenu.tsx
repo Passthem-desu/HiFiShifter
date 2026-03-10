@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useI18n } from "../../i18n/I18nProvider";
 
 interface EditContextMenuProps {
@@ -60,6 +60,21 @@ export function EditContextMenu({
             document.removeEventListener("keydown", handleEsc);
         };
     }, [onClose]);
+
+    // Clamp menu position to viewport edges
+    useLayoutEffect(() => {
+        const el = menuRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        let clampedX = x;
+        let clampedY = y;
+        if (rect.right > vw) clampedX = Math.max(0, vw - rect.width);
+        if (rect.bottom > vh) clampedY = Math.max(0, vh - rect.height);
+        el.style.left = `${clampedX}px`;
+        el.style.top = `${clampedY}px`;
+    }, [x, y]);
 
     const itemClass =
         "px-3 py-1 text-xs cursor-pointer hover:bg-[var(--accent-a4)] rounded select-none text-[var(--gray-12)]";

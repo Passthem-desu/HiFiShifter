@@ -199,10 +199,12 @@ export const messages = {
         ctx_unmute_all: "Unmute All",
         ctx_mute_all: "Mute All",
         ctx_copy_all: "Copy All",
+        ctx_cut_all: "Cut All",
         ctx_normalize_all: "Normalize All",
         ctx_delete: "Delete",
         ctx_rename: "Rename",
         ctx_copy: "Copy",
+        ctx_cut: "Cut",
         ctx_split_at_playhead: "Split at Playhead",
         ctx_normalize: "Normalize",
 
@@ -248,6 +250,7 @@ export const messages = {
         kb_group_clip: "Clip",
         kb_playback_toggle: "Play / Pause",
         kb_playback_stop: "Play / Stop",
+        kb_playback_focus_cursor: "Focus Playback Cursor",
         kb_edit_undo: "Undo",
         kb_edit_redo: "Redo",
         kb_project_new: "New Project",
@@ -258,6 +261,7 @@ export const messages = {
         kb_track_add: "Add Track",
         kb_clip_delete: "Delete Clip",
         kb_clip_copy: "Copy Clip",
+        kb_clip_cut: "Cut Clip",
         kb_clip_paste: "Paste Clip",
         kb_clip_split: "Split Clip",
         kb_group_pianoroll: "Piano Roll",
@@ -423,10 +427,6 @@ export const messages = {
         // Mean quantize dialog
         mean_quantize_title: "Mean Quantize",
 
-        // Common dialog buttons
-        dialog_ok: "OK",
-        dialog_cancel: "Cancel",
-
         // Keybinding labels for new edit actions
         kb_edit_select_all: "Select All",
         kb_edit_deselect: "Deselect",
@@ -467,8 +467,9 @@ export const messages = {
         dlg_release_ms: "Release (ms)",
         dlg_phase_deg: "Phase (°)",
 
-        // Copy / Paste in edit menu
+        // Copy / Cut / Paste in edit menu
         menu_copy: "Copy",
+        menu_cut: "Cut",
         menu_paste: "Paste",
 
         // Pitch snap settings (short key)
@@ -677,10 +678,12 @@ export const messages = {
         ctx_unmute_all: "取消静音所有",
         ctx_mute_all: "静音所有",
         ctx_copy_all: "复制所有",
+        ctx_cut_all: "剪切所有",
         ctx_normalize_all: "规格化所有",
         ctx_delete: "删除",
         ctx_rename: "重命名",
         ctx_copy: "复制",
+        ctx_cut: "剪切",
         ctx_split_at_playhead: "在播放头处分割",
         ctx_normalize: "规格化",
 
@@ -724,6 +727,7 @@ export const messages = {
         kb_group_clip: "音频块",
         kb_playback_toggle: "播放 / 暂停",
         kb_playback_stop: "播放 / 停止",
+        kb_playback_focus_cursor: "聚焦播放光标",
         kb_edit_undo: "撤销",
         kb_edit_redo: "重做",
         kb_project_new: "新建工程",
@@ -734,6 +738,7 @@ export const messages = {
         kb_track_add: "新建轨道",
         kb_clip_delete: "删除音频块",
         kb_clip_copy: "复制音频块",
+        kb_clip_cut: "剪切音频块",
         kb_clip_paste: "粘贴音频块",
         kb_clip_split: "分割音频块",
         kb_group_pianoroll: "钢琴卷帘",
@@ -897,10 +902,6 @@ export const messages = {
         // Mean quantize dialog
         mean_quantize_title: "均值量化",
 
-        // Common dialog buttons
-        dialog_ok: "确定",
-        dialog_cancel: "取消",
-
         // Keybinding labels for new edit actions
         kb_edit_select_all: "全选",
         kb_edit_deselect: "取消选择",
@@ -941,8 +942,9 @@ export const messages = {
         dlg_release_ms: "释放时间（ms）",
         dlg_phase_deg: "相位（°）",
 
-        // Copy / Paste in edit menu
+        // Copy / Cut / Paste in edit menu
         menu_copy: "复制",
+        menu_cut: "剪切",
         menu_paste: "粘贴",
 
         // Pitch snap settings (short key)

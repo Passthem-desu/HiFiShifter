@@ -1,6 +1,7 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { webApi } from "../../../services/webviewApi";
 import { settingsApi } from "../../../services/api";
+import type { SessionState } from "../sessionSlice";
 
 export const refreshRuntime = createAsyncThunk(
     "session/refreshRuntime",
@@ -27,7 +28,7 @@ export const loadUiSettings = createAsyncThunk(
 export const persistUiSettings = createAsyncThunk(
     "session/persistUiSettings",
     async (_, { getState }) => {
-        const s = (getState() as { session: { autoCrossfadeEnabled: boolean; gridSnapEnabled: boolean; grid: string; pitchSnapEnabled: boolean; pitchSnapUnit: string; pitchSnapScale: string; playheadZoomEnabled: boolean; autoScrollEnabled: boolean; showClipboardPreview: boolean } }).session;
+        const s = (getState() as { session: SessionState }).session;
         return settingsApi.saveUiSettings({
             autoCrossfade: s.autoCrossfadeEnabled,
             gridSnap: s.gridSnapEnabled,

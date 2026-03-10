@@ -7,6 +7,7 @@ export type ActionId =
     // 播放控制
     | "playback.toggle" // 播放/暂停
     | "playback.stop" // 停止播放
+    | "playback.focusCursor" // 聚焦播放光标
     // 编辑
     | "edit.undo" // 撤销
     | "edit.redo" // 重做
@@ -34,6 +35,7 @@ export type ActionId =
     // Clip 操作
     | "clip.delete" // 删除选中 clip
     | "clip.copy" // 复制 clip
+    | "clip.cut" // 剪切 clip
     | "clip.paste" // 粘贴 clip
     | "clip.split" // 分割 clip
     // PianoRoll 操作

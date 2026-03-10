@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
     Flex,
     Select,
@@ -454,6 +454,17 @@ function GridSnapContextMenu({
             window.removeEventListener("keydown", handleKey, true);
         };
     }, [onClose]);
+
+    // Clamp menu position to viewport edges
+    useLayoutEffect(() => {
+        const el = menuRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (rect.right > vw) el.style.left = `${Math.max(0, vw - rect.width)}px`;
+        if (rect.bottom > vh) el.style.top = `${Math.max(0, vh - rect.height)}px`;
+    }, [x, y]);
 
     // Adjust position to fit within viewport
     const style: React.CSSProperties = {

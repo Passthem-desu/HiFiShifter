@@ -1038,6 +1038,25 @@ export const PianoRollPanel: React.FC = () => {
                     invalidate();
                     break;
                 }
+                case "cut": {
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    clipboardRef.current = {
+                        param: editParam,
+                        framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
+                        values: (payload.edit ?? []).map((v) => Number(v) || 0),
+                    };
+                    invalidate();
+                    // 初始化（恢复原始值）
+                    await paramsApi.restoreParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
                 case "paste": {
                     const clip = clipboardRef.current;
                     if (!clip || clip.param !== editParam) return;
@@ -1256,10 +1275,18 @@ export const PianoRollPanel: React.FC = () => {
 
     // Dispatch helper: context menu dialog ops → open MenuBar dialogs
     const openEditDialog = useCallback((dialog: string) => {
+        // 为颤音对话框附带当前参数范围信息
+        let paramRange: { min: number; max: number } | undefined;
+        if (dialog === "addVibrato") {
+            const desc = processorParamsRef.current.find((d) => d.id === editParam);
+            if (desc?.kind.type === "automation_curve") {
+                paramRange = { min: desc.kind.min_value, max: desc.kind.max_value };
+            }
+        }
         window.dispatchEvent(
-            new CustomEvent("hifi:openEditDialog", { detail: { dialog } }),
+            new CustomEvent("hifi:openEditDialog", { detail: { dialog, paramRange } }),
         );
-    }, []);
+    }, [editParam]);
 
     return (
         <Flex

@@ -770,6 +770,20 @@ export const TimelinePanel: React.FC = () => {
         }
     }, [s.autoScrollEnabled, s.runtime.isPlaying, s.playheadSec, pxPerSec]);
 
+    // Focus cursor: scroll to center the playhead in the viewport
+    useEffect(() => {
+        function handler() {
+            const scroller = scrollRef.current;
+            if (!scroller) return;
+            const playheadX = s.playheadSec * pxPerSec;
+            const next = Math.max(0, playheadX - scroller.clientWidth / 2);
+            scroller.scrollLeft = next;
+            syncScrollLeft(next);
+        }
+        window.addEventListener("hifi:focusCursor", handler);
+        return () => window.removeEventListener("hifi:focusCursor", handler);
+    }, [s.playheadSec, pxPerSec]);
+
     return (
         <Flex className="h-full w-full bg-qt-graph-bg overflow-hidden">
             <TrackList
@@ -1405,6 +1419,19 @@ export const TimelinePanel: React.FC = () => {
                                           .map((c) => ({ ...c }));
                                       if (templates.length > 0) {
                                           clipClipboardRef.current = templates;
+                                      }
+                                  }}
+                                  onCut={(ids) => {
+                                      const templates = sessionRef.current.clips
+                                          .filter((c) => ids.includes(c.id))
+                                          .map((c) => ({ ...c }));
+                                      if (templates.length > 0) {
+                                          clipClipboardRef.current = templates;
+                                      }
+                                      setContextMenu(null);
+                                      setMultiSelectedClipIds([]);
+                                      for (const id of ids) {
+                                          void dispatch(removeClipRemote(id));
                                       }
                                   }}
                                   onSplit={(clipId) => {

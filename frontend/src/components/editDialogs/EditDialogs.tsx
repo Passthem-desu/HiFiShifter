@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, Flex, Text, TextField, Button, Select } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
 import { SCALE_KEYS, SCALE_LABELS, type ScaleKey } from "../../utils/musicalScales";
@@ -52,7 +52,7 @@ interface TransposeDegreesProps {
 export function TransposeDegreesDialog({ open, onOpenChange, onConfirm }: TransposeDegreesProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
-    const [degrees, setDegrees] = useState("0");
+    const [degrees, setDegrees] = useState("3");
     const [scale, setScale] = useState<ScaleKey>("C");
 
     return (
@@ -61,8 +61,7 @@ export function TransposeDegreesDialog({ open, onOpenChange, onConfirm }: Transp
                 <Dialog.Title>{tAny("menu_transpose_degrees")}</Dialog.Title>
                 <Flex direction="column" gap="3" mt="3">
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 80 }}>{tAny("dlg_degrees")}</Text>
-                        <TextField.Root
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("transpose_degrees_amount")}</Text>                        <TextField.Root
                             size="2"
                             type="number"
                             value={degrees}
@@ -180,24 +179,44 @@ interface VibratoProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     editParam?: string;
-    onConfirm?: (amplitude: number, rate: number) => void;
+    /** 当前参数的值域（用于自动钳制振幅默认值） */
+    paramRange?: { min: number; max: number };
+    onConfirm?: (amplitude: number, rate: number, attack: number, release: number, phase: number) => void;
 }
 
-export function VibratoDialog({ open, onOpenChange, onConfirm, editParam }: VibratoProps) {
+export function VibratoDialog({ open, onOpenChange, onConfirm, editParam, paramRange }: VibratoProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
-    const [amplitude, setAmplitude] = useState("30");
-    const [rate, setRate] = useState("5.5");
 
     const isPitch = editParam === "pitch";
+    // nsf-hifigan 气声音量参数范围为 0~2，此时默认振幅钳制为 1
+    const isBreathGain = !isPitch && paramRange != null && paramRange.min === 0 && paramRange.max === 2;
+    const defaultAmplitude = isPitch ? "30" : isBreathGain ? "1" : "30";
+
+    const [amplitude, setAmplitude] = useState(defaultAmplitude);
+    const [rate, setRate] = useState("5.5");
+    const [attack, setAttack] = useState("50");
+    const [release, setRelease] = useState("50");
+    const [phase, setPhase] = useState("0");
+
+    // 当弹窗打开时重置为默认值
+    useEffect(() => {
+        if (open) {
+            setAmplitude(defaultAmplitude);
+            setRate("5.5");
+            setAttack("50");
+            setRelease("50");
+            setPhase("0");
+        }
+    }, [open, defaultAmplitude]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
-            <Dialog.Content style={{ maxWidth: 360 }} onKeyDown={(e) => e.stopPropagation()}>
+            <Dialog.Content style={{ maxWidth: 380 }} onKeyDown={(e) => e.stopPropagation()}>
                 <Dialog.Title>{tAny("menu_add_vibrato")}</Dialog.Title>
                 <Flex direction="column" gap="3" mt="3">
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 100 }}>{isPitch ? tAny("dlg_amplitude_cents") : tAny("dlg_amplitude")}</Text>
+                        <Text size="2" style={{ minWidth: 120 }}>{isPitch ? tAny("dlg_amplitude_cents") : tAny("dlg_amplitude")}</Text>
                         <TextField.Root
                             size="2"
                             type="number"
@@ -207,7 +226,7 @@ export function VibratoDialog({ open, onOpenChange, onConfirm, editParam }: Vibr
                         />
                     </Flex>
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 100 }}>{tAny("dlg_rate_hz")}</Text>
+                        <Text size="2" style={{ minWidth: 120 }}>{tAny("dlg_rate_hz")}</Text>
                         <TextField.Root
                             size="2"
                             type="number"
@@ -216,12 +235,51 @@ export function VibratoDialog({ open, onOpenChange, onConfirm, editParam }: Vibr
                             style={{ flex: 1 }}
                         />
                     </Flex>
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 120 }}>{tAny("dlg_attack_ms")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            value={attack}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAttack(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                    </Flex>
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 120 }}>{tAny("dlg_release_ms")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            value={release}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setRelease(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                    </Flex>
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 120 }}>{tAny("dlg_phase_deg")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            value={phase}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPhase(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(Number(amplitude) || 30, Number(rate) || 5.5); onOpenChange(false); }}>
+                    <Button onClick={() => {
+                        onConfirm?.(
+                            Number(amplitude) || 30,
+                            Number(rate) || 5.5,
+                            Number(attack) || 50,
+                            Number(release) || 50,
+                            Number(phase) || 0,
+                        );
+                        onOpenChange(false);
+                    }}>
                         {tAny("ok")}
                     </Button>
                 </Flex>

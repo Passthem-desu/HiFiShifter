@@ -73,6 +73,9 @@ import {
     synthesizeAudio,
 } from "./thunks/audioThunks";
 
+
+
+import { SCALE_KEYS } from "../../utils/musicalScales";
 import {
     importAudioAtPosition,
     importAudioFileAtPosition,
@@ -1140,8 +1143,15 @@ const sessionSlice = createSlice({
                 state.gridSnapEnabled = s.gridSnap;
                 if (s.gridSize) state.grid = s.gridSize as GridSize;
                 state.pitchSnapEnabled = s.pitchSnap;
-                state.pitchSnapUnit = s.pitchSnapUnit as PitchSnapUnit;
-                state.pitchSnapScale = s.pitchSnapScale as import("../../utils/musicalScales").ScaleKey;
+                                // Validate pitchSnapUnit
+                                const validUnits: PitchSnapUnit[] = ["semitone", "scale"];
+                                state.pitchSnapUnit = validUnits.includes(s.pitchSnapUnit as PitchSnapUnit)
+                                    ? (s.pitchSnapUnit as PitchSnapUnit)
+                                    : "semitone";
+                                // Validate pitchSnapScale
+                                state.pitchSnapScale = (SCALE_KEYS as readonly string[]).includes(s.pitchSnapScale)
+                                    ? s.pitchSnapScale as typeof state.pitchSnapScale
+                                    : "C";
                 state.playheadZoomEnabled = s.playheadZoom;
                 if (s.autoScroll != null) state.autoScrollEnabled = s.autoScroll;
                 if (s.showClipboardPreview != null) state.showClipboardPreview = s.showClipboardPreview;
