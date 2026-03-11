@@ -269,7 +269,16 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return { rppPath: args[0] };
 
         case "paste_vocalshifter_clipboard":
-            return {};
+            return {
+                ...(args[0] !== undefined ? { selectionStartFrame: args[0] } : {}),
+                ...(args[1] !== undefined ? { selectionMaxFrames: args[1] } : {}),
+            };
+
+        case "paste_reaper_clipboard":
+            return {
+                ...(args[0] !== undefined ? { selectionStartFrame: args[0] } : {}),
+                ...(args[1] !== undefined ? { selectionMaxFrames: args[1] } : {}),
+            };
 
         case "open_midi_dialog":
             return {};
@@ -357,8 +366,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return {
                 midiPath: args[0],
                 ...(args[1] !== undefined ? { trackIndex: args[1] } : {}),
-                ...(args[2] !== undefined ? { offsetSec: args[2] } : {}),
+                ...(args[2] !== undefined ? { selectionStartFrame: args[2] } : {}),
+                ...(args[3] !== undefined ? { selectionMaxFrames: args[3] } : {}),
             };
+
+        case "save_ui_settings":
+            return args[0] as Record<string, unknown>;
 
         default:
             return { __unwired: true };

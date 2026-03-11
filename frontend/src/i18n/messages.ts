@@ -19,9 +19,9 @@ export const messages = {
         menu_exit: "Exit",
         shortcut_ctrl_o: "Ctrl+O",
         shortcut_ctrl_e: "Ctrl+E",
-        menu_import_audio: "Import Audio",
-        menu_import_reaper: "Import Reaper Project",
-        menu_import_vocalshifter: "Import VocalShifter Project",
+        menu_import_audio: "Import Audio...",
+        menu_import_reaper: "Import Reaper Project...",
+        menu_import_vocalshifter: "Import VocalShifter Project...",
         menu_paste_reaper_clipboard: "Paste Reaper Clipboard Data",
         menu_paste_vocalshifter_clipboard: "Paste VocalShifter Clipboard Data",
         reaper_import_skipped_header:
@@ -70,7 +70,7 @@ export const messages = {
         output_path: "Output Path",
         hints: "Hints",
         hint_drag_clip:
-            "Drag clips on timeline to move start (snap to grid; hold Shift to disable snap)",
+            "Drag clips on timeline to move start (snap depends on Grid Snap; hold modifier to toggle)",
         hint_add_point: "Double click in parameter panel to add points",
         hint_drag_point: "Drag points to edit the curve",
         hint_drop_audio: "Drop audio file onto app to import and analyze",
@@ -199,10 +199,12 @@ export const messages = {
         ctx_unmute_all: "Unmute All",
         ctx_mute_all: "Mute All",
         ctx_copy_all: "Copy All",
+        ctx_cut_all: "Cut All",
         ctx_normalize_all: "Normalize All",
         ctx_delete: "Delete",
         ctx_rename: "Rename",
         ctx_copy: "Copy",
+        ctx_cut: "Cut",
         ctx_split_at_playhead: "Split at Playhead",
         ctx_normalize: "Normalize",
 
@@ -240,11 +242,15 @@ export const messages = {
         kb_conflict_msg: "This shortcut conflicts with:",
         kb_conflict_override: "Override",
         kb_conflict_cancel: "Cancel",
+        kb_dialog_hint_click:
+            "Left-click to set to None. Right-click to restore default.",
         kb_group_playback: "Playback",
         kb_group_edit: "Edit",
         kb_group_project: "Project",
         kb_group_clip: "Clip",
         kb_playback_toggle: "Play / Pause",
+        kb_playback_stop: "Play / Stop",
+        kb_playback_focus_cursor: "Focus Playback Cursor",
         kb_edit_undo: "Undo",
         kb_edit_redo: "Redo",
         kb_project_new: "New Project",
@@ -255,6 +261,7 @@ export const messages = {
         kb_track_add: "Add Track",
         kb_clip_delete: "Delete Clip",
         kb_clip_copy: "Copy Clip",
+        kb_clip_cut: "Cut Clip",
         kb_clip_paste: "Paste Clip",
         kb_clip_split: "Split Clip",
         kb_group_pianoroll: "Piano Roll",
@@ -265,11 +272,16 @@ export const messages = {
         kb_pianoroll_shift_param_down: "Shift Param Down (clip range)",
         kb_modifier_slip_edit: "Slip Edit (hold while dragging clip)",
         kb_modifier_stretch: "Time Stretch (hold while dragging edge)",
-        kb_modifier_no_snap: "Disable Snap (hold while dragging)",
+        kb_modifier_no_snap: "Toggle Snap (hold while dragging)",
         kb_modifier_copy_drag: "Copy Drag (hold while dragging clip)",
-        kb_modifier_pr_vzoom: "Vertical Zoom (hold + scroll in Piano Roll)",
+        kb_modifier_pr_vzoom: "Vertical Zoom (hold + scroll)",
         kb_group_mode: "Mode",
         kb_mode_toggle: "Toggle Select / Draw Mode",
+        kb_mode_select_tool: "Switch to Select Tool",
+        kb_mode_draw_tool: "Switch to Draw Tool",
+        kb_mode_line_tool: "Switch to Line Tool",
+        kb_mode_cycle_tool: "Cycle Tool (Forward)",
+        kb_mode_cycle_tool_reverse: "Cycle Tool (Backward)",
         kb_press_modifier: "Press modifier\u2026",
         menu_keybindings: "Keyboard Shortcuts...",
         kb_group_quick_search: "Quick Search",
@@ -308,6 +320,166 @@ export const messages = {
         midi_no_notes: "No notes in selected track",
         midi_no_frames_touched:
             "MIDI import did not write any frames. Check the playhead position and project length.",
+
+        // Toolbar toggle buttons
+        auto_crossfade: "Auto Crossfade",
+        grid_snap: "Grid Snap",
+        pitch_snap: "Pitch Snap",
+        playhead_zoom: "Zoom at Playhead",
+        auto_scroll: "Auto Scroll",
+        clipboard_preview: "Clipboard Preview",
+
+        // Grid note type labels
+        grid_note_normal: "Normal",
+        grid_note_dotted: "Dotted",
+        grid_note_triplet: "Triplet",
+
+        // Grid snap note names (context menu)
+        grid_snap_whole: "Whole Note",
+        grid_snap_half: "Half Note",
+        grid_snap_quarter: "Quarter Note",
+        grid_snap_8th: "8th Note",
+        grid_snap_16th: "16th Note",
+        grid_snap_32nd: "32nd Note",
+        grid_snap_64th: "64th Note",
+        grid_snap_dotted_half: "Dotted Half Note",
+        grid_snap_dotted_quarter: "Dotted Quarter Note",
+        grid_snap_dotted_8th: "Dotted 8th Note",
+        grid_snap_dotted_16th: "Dotted 16th Note",
+        grid_snap_dotted_32nd: "Dotted 32nd Note",
+        grid_snap_dotted_64th: "Dotted 64th Note",
+        grid_snap_triplet_half: "Triplet Half Note",
+        grid_snap_triplet_quarter: "Triplet Quarter Note",
+        grid_snap_triplet_8th: "Triplet 8th Note",
+        grid_snap_triplet_16th: "Triplet 16th Note",
+        grid_snap_triplet_32nd: "Triplet 32nd Note",
+        grid_snap_triplet_64th: "Triplet 64th Note",
+
+        // Tool modes
+        line: "Line",
+
+        // Pitch snap settings
+        pitch_snap_settings_title: "Pitch Snap Settings",
+        quantize_unit: "Quantize Unit",
+        quantize_semitone: "Semitone",
+        quantize_scale: "Scale",
+        base_scale: "Base Scale",
+
+        // Modifier key rename
+        kb_modifier_toggle_snap: "Toggle Snap (hold while dragging)",
+        hint_toggle_snap:
+            "Hold modifier to toggle snap behavior (snap/free depending on Grid Snap setting)",
+
+        // File browser enhancements
+        fb_regex: "Regex",
+        fb_sort_name: "Name",
+        fb_sort_date: "Date Modified",
+        fb_sort_size: "Size",
+        fb_sort_label: "Sort",
+        fb_regex_error: "Invalid regex",
+
+        // Edit menu new items
+        menu_deselect: "Deselect",
+        menu_initialize: "Initialize",
+        menu_transpose_cents: "Transpose by Cents...",
+        menu_transpose_degrees: "Transpose by Degrees...",
+        menu_set_pitch: "Set Pitch...",
+        menu_average: "Average",
+        menu_smooth: "Smooth...",
+        menu_add_vibrato: "Add Vibrato...",
+        menu_quantize: "Quantize...",
+        menu_mean_quantize: "Mean Quantize...",
+
+        // Transpose by cents dialog
+        transpose_cents_title: "Transpose by Cents",
+        transpose_cents_amount: "Amount",
+        transpose_cents_unit: "cents",
+
+        // Transpose by degrees dialog
+        transpose_degrees_title: "Transpose by Degrees",
+        transpose_degrees_scale: "Scale",
+        transpose_degrees_amount: "Amount",
+        transpose_degrees_unit: "degrees",
+
+        // Set pitch dialog
+        set_pitch_title: "Set Pitch",
+        set_pitch_note: "Note",
+        set_pitch_octave: "Octave",
+        set_pitch_cents: "cents",
+
+        // Smooth dialog
+        smooth_title: "Smooth",
+        smooth_strength: "Strength",
+
+        // Add vibrato dialog
+        vibrato_title: "Add Vibrato",
+        vibrato_amplitude: "Amplitude",
+        vibrato_period: "Period",
+        vibrato_attack: "Attack Time",
+        vibrato_release: "Release Time",
+        vibrato_phase: "Phase",
+        vibrato_unit_cents: "cents",
+        vibrato_unit_ms: "ms",
+
+        // Quantize dialog
+        quantize_title: "Quantize",
+
+        // Mean quantize dialog
+        mean_quantize_title: "Mean Quantize",
+
+        // Keybinding labels for new edit actions
+        kb_edit_select_all: "Select All",
+        kb_edit_deselect: "Deselect",
+        kb_edit_initialize: "Initialize",
+        kb_edit_transpose_cents: "Transpose by Cents",
+        kb_edit_transpose_degrees: "Transpose by Degrees",
+        kb_edit_set_pitch: "Set Pitch",
+        kb_edit_average: "Average",
+        kb_edit_smooth: "Smooth",
+        kb_edit_add_vibrato: "Add Vibrato",
+        kb_edit_quantize: "Quantize",
+        kb_edit_mean_quantize: "Mean Quantize",
+        kb_edit_paste_reaper: "Paste Reaper Clipboard",
+        kb_edit_paste_vocalshifter: "Paste VocalShifter Clipboard",
+
+        // Scroll modifier keybindings
+        kb_modifier_scroll_h: "Horizontal Scroll (hold + scroll)",
+        kb_modifier_scroll_v: "Vertical Scroll (hold + scroll)",
+
+        // Common short keys for dialogs
+        ok: "OK",
+        cancel: "Cancel",
+        close: "Close",
+
+        // Dialog field labels
+        dlg_midi_note: "MIDI Note",
+        dlg_strength: "Strength",
+        dlg_depth_cents: "Amplitude (cents)",
+        dlg_amplitude_cents: "Amplitude (cents)",
+        dlg_amplitude: "Amplitude",
+        dlg_rate_hz: "Rate (Hz)",
+        dlg_note_name: "Note Name",
+        dlg_octave: "Octave",
+        dlg_cents: "Cents",
+        dlg_cents_offset: "Cents Offset",
+        dlg_period_ms: "Period (ms)",
+        dlg_attack_ms: "Attack (ms)",
+        dlg_release_ms: "Release (ms)",
+        dlg_phase_deg: "Phase (°)",
+
+        // Copy / Cut / Paste in edit menu
+        menu_copy: "Copy",
+        menu_cut: "Cut",
+        menu_paste: "Paste",
+
+        // Pitch snap settings (short key)
+        pitch_snap_settings: "Pitch Snap Settings",
+
+        // Keybinding hint
+        kb_hint_recording: "Left-click a binding to set it to None. Right-click to reset to default.",
+
+        // Keybinding None
+        kb_none: "None",
     },
     "zh-CN": {
         menu_file: "文件",
@@ -329,9 +501,9 @@ export const messages = {
         menu_exit: "退出",
         shortcut_ctrl_o: "Ctrl+O",
         shortcut_ctrl_e: "Ctrl+E",
-        menu_import_audio: "导入音频",
-        menu_import_reaper: "导入 Reaper 工程",
-        menu_import_vocalshifter: "导入 VocalShifter 工程",
+        menu_import_audio: "导入音频...",
+        menu_import_reaper: "导入 Reaper 工程...",
+        menu_import_vocalshifter: "导入 VocalShifter 工程...",
         menu_paste_reaper_clipboard: "粘贴 Reaper 剪贴板数据",
         menu_paste_vocalshifter_clipboard: "粘贴 VocalShifter 剪贴板数据",
         reaper_import_skipped_header:
@@ -380,7 +552,7 @@ export const messages = {
         output_path: "导出路径",
         hints: "提示",
         hint_drag_clip:
-            "拖拽时间轴中的块可移动起始位置（默认网格吸附；按住 Shift 临时关闭吸附）",
+            "拖拽时间轴中的块可移动起始位置（吸附取决于网格吸附设置；按住修饰键可切换）",
         hint_add_point: "参数区双击可新增控制点",
         hint_drag_point: "拖动控制点可编辑曲线",
         hint_drop_audio: "把音频文件拖到界面中可直接导入并分析",
@@ -506,10 +678,12 @@ export const messages = {
         ctx_unmute_all: "取消静音所有",
         ctx_mute_all: "静音所有",
         ctx_copy_all: "复制所有",
+        ctx_cut_all: "剪切所有",
         ctx_normalize_all: "规格化所有",
         ctx_delete: "删除",
         ctx_rename: "重命名",
         ctx_copy: "复制",
+        ctx_cut: "剪切",
         ctx_split_at_playhead: "在播放头处分割",
         ctx_normalize: "规格化",
 
@@ -546,11 +720,14 @@ export const messages = {
         kb_conflict_msg: "此快捷键与以下操作冲突：",
         kb_conflict_override: "覆盖",
         kb_conflict_cancel: "取消",
+        kb_dialog_hint_click: "左键点击设为无，右键点击恢复默认。",
         kb_group_playback: "播放",
         kb_group_edit: "编辑",
         kb_group_project: "工程",
         kb_group_clip: "音频块",
         kb_playback_toggle: "播放 / 暂停",
+        kb_playback_stop: "播放 / 停止",
+        kb_playback_focus_cursor: "聚焦播放光标",
         kb_edit_undo: "撤销",
         kb_edit_redo: "重做",
         kb_project_new: "新建工程",
@@ -561,6 +738,7 @@ export const messages = {
         kb_track_add: "新建轨道",
         kb_clip_delete: "删除音频块",
         kb_clip_copy: "复制音频块",
+        kb_clip_cut: "剪切音频块",
         kb_clip_paste: "粘贴音频块",
         kb_clip_split: "分割音频块",
         kb_group_pianoroll: "钢琴卷帘",
@@ -571,11 +749,16 @@ export const messages = {
         kb_pianoroll_shift_param_down: "参数线下移（clip 范围）",
         kb_group_mode: "模式",
         kb_mode_toggle: "切换选择 / 绘制模式",
+        kb_mode_select_tool: "切换到选择工具",
+        kb_mode_draw_tool: "切换到绘制工具",
+        kb_mode_line_tool: "切换到直线工具",
+        kb_mode_cycle_tool: "正顺序切换工具",
+        kb_mode_cycle_tool_reverse: "逆顺序切换工具",
         kb_modifier_slip_edit: "Slip 编辑（拖动音频块时按住）",
         kb_modifier_stretch: "拉伸（拖动边缘时按住）",
-        kb_modifier_no_snap: "禁用吸附（拖动时按住）",
+        kb_modifier_no_snap: "切换吸附（拖动时按住）",
         kb_modifier_copy_drag: "复制拖动（拖动音频块时按住）",
-        kb_modifier_pr_vzoom: "垂直缩放（在钢琴卷帘中按住+滚轮）",
+        kb_modifier_pr_vzoom: "垂直缩放（按住+滚轮）",
         kb_press_modifier: "请按修饰键\u2026",
         menu_keybindings: "快捷键设置...",
         kb_group_quick_search: "快速搜索",
@@ -612,6 +795,166 @@ export const messages = {
         midi_no_notes: "选中的轨道没有音符",
         midi_no_frames_touched:
             "MIDI 导入没有写入任何帧，请检查播放头位置和工程长度",
+
+        // Toolbar toggle buttons
+        auto_crossfade: "自动交叉淡化",
+        grid_snap: "网格吸附",
+        pitch_snap: "音高吸附",
+        playhead_zoom: "基于播放光标缩放",
+        auto_scroll: "自动滚屏",
+        clipboard_preview: "剪贴板预览",
+
+        // Grid note type labels
+        grid_note_normal: "标准",
+        grid_note_dotted: "附点",
+        grid_note_triplet: "三连音",
+
+        // Grid snap note names (context menu)
+        grid_snap_whole: "全音符",
+        grid_snap_half: "2分音符",
+        grid_snap_quarter: "4分音符",
+        grid_snap_8th: "8分音符",
+        grid_snap_16th: "16分音符",
+        grid_snap_32nd: "32分音符",
+        grid_snap_64th: "64分音符",
+        grid_snap_dotted_half: "附点2分音符",
+        grid_snap_dotted_quarter: "附点4分音符",
+        grid_snap_dotted_8th: "附点8分音符",
+        grid_snap_dotted_16th: "附点16分音符",
+        grid_snap_dotted_32nd: "附点32分音符",
+        grid_snap_dotted_64th: "附点64分音符",
+        grid_snap_triplet_half: "3连2分音符",
+        grid_snap_triplet_quarter: "3连4分音符",
+        grid_snap_triplet_8th: "3连8分音符",
+        grid_snap_triplet_16th: "3连16分音符",
+        grid_snap_triplet_32nd: "3连32分音符",
+        grid_snap_triplet_64th: "3连64分音符",
+
+        // Tool modes
+        line: "直线",
+
+        // Pitch snap settings
+        pitch_snap_settings_title: "音高吸附设置",
+        quantize_unit: "量化单位",
+        quantize_semitone: "半音",
+        quantize_scale: "音阶",
+        base_scale: "基准音阶",
+
+        // Modifier key rename
+        kb_modifier_toggle_snap: "切换吸附（拖动时按住）",
+        hint_toggle_snap:
+            "按住修饰键可切换吸附行为（根据网格吸附设置决定吸附/自由）",
+
+        // File browser enhancements
+        fb_regex: "正则",
+        fb_sort_name: "名称",
+        fb_sort_date: "修改日期",
+        fb_sort_size: "大小",
+        fb_sort_label: "排序",
+        fb_regex_error: "无效的正则表达式",
+
+        // Edit menu new items
+        menu_deselect: "取消选择",
+        menu_initialize: "初始化",
+        menu_transpose_cents: "按指定音分移调...",
+        menu_transpose_degrees: "按指定度数移调...",
+        menu_set_pitch: "音高设置...",
+        menu_average: "平均化",
+        menu_smooth: "平滑化...",
+        menu_add_vibrato: "添加颤音...",
+        menu_quantize: "量化...",
+        menu_mean_quantize: "均值量化...",
+
+        // Transpose by cents dialog
+        transpose_cents_title: "按指定音分移调",
+        transpose_cents_amount: "移调量",
+        transpose_cents_unit: "音分",
+
+        // Transpose by degrees dialog
+        transpose_degrees_title: "按指定度数移调",
+        transpose_degrees_scale: "音阶",
+        transpose_degrees_amount: "移调量",
+        transpose_degrees_unit: "度",
+
+        // Set pitch dialog
+        set_pitch_title: "音高设置",
+        set_pitch_note: "音名",
+        set_pitch_octave: "八度",
+        set_pitch_cents: "音分",
+
+        // Smooth dialog
+        smooth_title: "平滑化",
+        smooth_strength: "强度",
+
+        // Add vibrato dialog
+        vibrato_title: "添加颤音",
+        vibrato_amplitude: "振幅",
+        vibrato_period: "周期",
+        vibrato_attack: "收紧时间",
+        vibrato_release: "放松时间",
+        vibrato_phase: "相位",
+        vibrato_unit_cents: "音分",
+        vibrato_unit_ms: "ms",
+
+        // Quantize dialog
+        quantize_title: "量化",
+
+        // Mean quantize dialog
+        mean_quantize_title: "均值量化",
+
+        // Keybinding labels for new edit actions
+        kb_edit_select_all: "全选",
+        kb_edit_deselect: "取消选择",
+        kb_edit_initialize: "初始化",
+        kb_edit_transpose_cents: "按指定音分移调",
+        kb_edit_transpose_degrees: "按指定度数移调",
+        kb_edit_set_pitch: "音高设置",
+        kb_edit_average: "平均化",
+        kb_edit_smooth: "平滑化",
+        kb_edit_add_vibrato: "添加颤音",
+        kb_edit_quantize: "量化",
+        kb_edit_mean_quantize: "均值量化",
+        kb_edit_paste_reaper: "粘贴 Reaper 剪贴板数据",
+        kb_edit_paste_vocalshifter: "粘贴 VocalShifter 剪贴板数据",
+
+        // Scroll modifier keybindings
+        kb_modifier_scroll_h: "水平滚动（按住+滚轮）",
+        kb_modifier_scroll_v: "竖直滚动（按住+滚轮）",
+
+        // Common short keys for dialogs
+        ok: "确定",
+        cancel: "取消",
+        close: "关闭",
+
+        // Dialog field labels
+        dlg_midi_note: "MIDI 音符",
+        dlg_strength: "强度",
+        dlg_depth_cents: "振幅（音分）",
+        dlg_amplitude_cents: "振幅（音分）",
+        dlg_amplitude: "振幅",
+        dlg_rate_hz: "频率（Hz）",
+        dlg_note_name: "音名",
+        dlg_octave: "八度",
+        dlg_cents: "音分",
+        dlg_cents_offset: "音分偏移",
+        dlg_period_ms: "周期（ms）",
+        dlg_attack_ms: "起始时间（ms）",
+        dlg_release_ms: "释放时间（ms）",
+        dlg_phase_deg: "相位（°）",
+
+        // Copy / Cut / Paste in edit menu
+        menu_copy: "复制",
+        menu_cut: "剪切",
+        menu_paste: "粘贴",
+
+        // Pitch snap settings (short key)
+        pitch_snap_settings: "音高吸附设置",
+
+        // Keybinding hint
+        kb_hint_recording: "左键点击可设为无，右键点击可恢复默认。",
+
+        // Keybinding None
+        kb_none: "无",
     },
 } as const;
 

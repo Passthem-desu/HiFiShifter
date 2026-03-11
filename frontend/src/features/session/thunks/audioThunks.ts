@@ -49,8 +49,14 @@ export const exportSeparated = createAsyncThunk(
 
 export const pasteVocalShifterClipboard = createAsyncThunk(
     "session/pasteVocalShifterClipboard",
-    async (_, { rejectWithValue }) => {
-        const result = await webApi.pasteVocalShifterClipboard();
+    async (
+        arg: { selectionStartFrame?: number; selectionMaxFrames?: number } | undefined,
+        { rejectWithValue },
+    ) => {
+        const result = await webApi.pasteVocalShifterClipboard(
+            arg?.selectionStartFrame,
+            arg?.selectionMaxFrames,
+        );
         if (!result?.ok) {
             return rejectWithValue(result?.error ?? "paste_vocalshifter_clipboard_failed");
         }
@@ -60,8 +66,14 @@ export const pasteVocalShifterClipboard = createAsyncThunk(
 
 export const pasteReaperClipboard = createAsyncThunk(
     "session/pasteReaperClipboard",
-    async (_, { rejectWithValue }) => {
-        const result = await webApi.pasteReaperClipboard();
+    async (
+        arg: { selectionStartFrame?: number; selectionMaxFrames?: number } | undefined,
+        { rejectWithValue },
+    ) => {
+        const result = await webApi.pasteReaperClipboard(
+            arg?.selectionStartFrame,
+            arg?.selectionMaxFrames,
+        );
         if (!result?.ok) {
             return rejectWithValue(result?.error ?? "paste_reaper_clipboard_failed");
         }

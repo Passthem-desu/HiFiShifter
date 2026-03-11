@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Flex, DropdownMenu } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
@@ -16,8 +16,6 @@ import {
     clearWaveformCacheRemote,
     undoRemote,
     redoRemote,
-    pasteVocalShifterClipboard,
-    pasteReaperClipboard,
     saveProjectRemote,
     saveProjectAsRemote,
 } from "../../features/session/sessionSlice";
@@ -27,9 +25,20 @@ import { GlobeIcon } from "@radix-ui/react-icons";
 import {
     selectMergedKeybindings,
     formatKeybinding,
+    isNoneBinding,
 } from "../../features/keybindings/keybindingsSlice";
 import type { ActionId } from "../../features/keybindings/types";
 import { KeybindingsDialog } from "./KeybindingsDialog";
+import {
+    TransposeCentsDialog,
+    TransposeDegreesDialog,
+    SetPitchDialog,
+    SmoothDialog,
+    VibratoDialog,
+    QuantizeDialog,
+    MeanQuantizeDialog,
+} from "../editDialogs/EditDialogs";
+// import type { VibratoParams } from "../editDialogs/EditDialogs"; // 已移除无效导入
 
 interface MenuBarProps {
     onNewProject: () => void;
@@ -45,16 +54,54 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     onExit,
 }) => {
     const { t, setLocale } = useI18n();
+    const tAny = t as (key: string) => string;
     const dispatch = useAppDispatch();
     const s = useAppSelector((state: RootState) => state.session);
     const theme = useAppTheme();
     const keybindings = useAppSelector(selectMergedKeybindings);
     const [kbDialogOpen, setKbDialogOpen] = useState(false);
 
-    /** 获取某个操作的快捷键显示文本 */
+    // Edit dialog states
+    const [transposeCentsOpen, setTransposeCentsOpen] = useState(false);
+    const [transposeDegreesOpen, setTransposeDegreesOpen] = useState(false);
+    const [setPitchOpen, setSetPitchOpen] = useState(false);
+    const [smoothOpen, setSmoothOpen] = useState(false);
+    const [vibratoOpen, setVibratoOpen] = useState(false);
+    const [vibratoParamRange, setVibratoParamRange] = useState<{ min: number; max: number } | undefined>(undefined);
+    const [quantizeOpen, setQuantizeOpen] = useState(false);
+    const [meanQuantizeOpen, setMeanQuantizeOpen] = useState(false);
+
+    const isPitchParam = s.editParam === "pitch";
+
+    // Listen for context menu → open dialog requests
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const dialog = (e as CustomEvent).detail?.dialog as string;
+            switch (dialog) {
+                case "transposeCents": setTransposeCentsOpen(true); break;
+                case "transposeDegrees": setTransposeDegreesOpen(true); break;
+                case "setPitch": setSetPitchOpen(true); break;
+                case "smooth": setSmoothOpen(true); break;
+                case "addVibrato": setVibratoParamRange((e as CustomEvent).detail?.paramRange); setVibratoOpen(true); break;
+                case "quantize": setQuantizeOpen(true); break;
+                case "meanQuantize": setMeanQuantizeOpen(true); break;
+            }
+        };
+        window.addEventListener("hifi:openEditDialog", handler);
+        return () => window.removeEventListener("hifi:openEditDialog", handler);
+    }, []);
+
+    /** 获取某个操作的快捷键显示文本（"None" 绑定时返回空字符串，不显示） */
     function shortcutLabel(actionId: ActionId): string {
-        return formatKeybinding(keybindings[actionId]);
+        const kb = keybindings[actionId];
+        if (!kb || isNoneBinding(kb)) return "";
+        return formatKeybinding(kb, "");
     }
+
+    /** 派发编辑操作事件给 PianoRollPanel */
+    const dispatchEditOp = useCallback((op: string, data?: Record<string, unknown>) => {
+        window.dispatchEvent(new CustomEvent("hifi:editOp", { detail: { op, ...data } }));
+    }, []);
 
     async function handleExport() {
         const outputPath = s.outputPath?.trim();
@@ -206,24 +253,120 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
-                    <DropdownMenu.Item>
-                        {t("menu_select_all")}{" "}
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("copy")}>
+                        {tAny("menu_copy")}{" "}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                            Ctrl+A
+                            {shortcutLabel("pianoRoll.copy")}
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("cut")}>
+                        {tAny("menu_cut")}{" "}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("clip.cut")}
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("paste")}>
+                        {tAny("menu_paste")}{" "}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("pianoRoll.paste")}
                         </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("selectAll")}>
+                        {tAny("menu_select_all")}{" "}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.selectAll")}
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("deselect")}>
+                        {tAny("menu_deselect")}{" "}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.deselect")}
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("initialize")}>
+                        {tAny("menu_initialize")}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.initialize")}
+                        </div>
+                    </DropdownMenu.Item>
+
+                    {isPitchParam && (
+                        <>
+                            <DropdownMenu.Separator />
+                            <DropdownMenu.Item onSelect={() => setTransposeCentsOpen(true)}>
+                                {tAny("menu_transpose_cents")}
+                                <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                                    {shortcutLabel("edit.transposeCents")}
+                                </div>
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item onSelect={() => setTransposeDegreesOpen(true)}>
+                                {tAny("menu_transpose_degrees")}
+                                <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                                    {shortcutLabel("edit.transposeDegrees")}
+                                </div>
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item onSelect={() => setSetPitchOpen(true)}>
+                                {tAny("menu_set_pitch")}
+                                <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                                    {shortcutLabel("edit.setPitch")}
+                                </div>
+                            </DropdownMenu.Item>
+                        </>
+                    )}
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("average")}>
+                        {tAny("menu_average")}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.average")}
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => setSmoothOpen(true)}>
+                        {tAny("menu_smooth")}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.smooth")}
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => setVibratoOpen(true)}>
+                        {tAny("menu_add_vibrato")}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.addVibrato")}
+                        </div>
+                    </DropdownMenu.Item>
+                    {isPitchParam && (
+                        <>
+                            <DropdownMenu.Item onSelect={() => setQuantizeOpen(true)}>
+                                {tAny("menu_quantize")}
+                                <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                                    {shortcutLabel("edit.quantize")}
+                                </div>
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item onSelect={() => setMeanQuantizeOpen(true)}>
+                                {tAny("menu_mean_quantize")}
+                                <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                                    {shortcutLabel("edit.meanQuantize")}
+                                </div>
+                            </DropdownMenu.Item>
+                        </>
+                    )}
+
+                    <DropdownMenu.Separator />
                     <DropdownMenu.Item
-                        onSelect={() => void dispatch(pasteReaperClipboard())}
+                        onSelect={() => dispatchEditOp("pasteReaper")}
                     >
                         {t("menu_paste_reaper_clipboard")}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.pasteReaper")}
+                        </div>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
-                        onSelect={() =>
-                            void dispatch(pasteVocalShifterClipboard())
-                        }
+                        onSelect={() => dispatchEditOp("pasteVocalShifter")}
                     >
                         {t("menu_paste_vocalshifter_clipboard")}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.pasteVocalShifter")}
+                        </div>
                     </DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Root>
@@ -316,6 +459,45 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <KeybindingsDialog
                 open={kbDialogOpen}
                 onOpenChange={setKbDialogOpen}
+            />
+
+            {/* Edit operation dialogs */}
+            <TransposeCentsDialog
+                open={transposeCentsOpen}
+                onOpenChange={setTransposeCentsOpen}
+                onConfirm={(cents) => dispatchEditOp("transposeCents", { cents })}
+            />
+            <TransposeDegreesDialog
+                open={transposeDegreesOpen}
+                onOpenChange={setTransposeDegreesOpen}
+                onConfirm={(degrees, scale) => dispatchEditOp("transposeDegrees", { degrees, scale })}
+            />
+            <SetPitchDialog
+                open={setPitchOpen}
+                onOpenChange={setSetPitchOpen}
+                onConfirm={(midiNote) => dispatchEditOp("setPitch", { midiNote })}
+            />
+            <SmoothDialog
+                open={smoothOpen}
+                onOpenChange={setSmoothOpen}
+                onConfirm={(strength) => dispatchEditOp("smooth", { strength })}
+            />
+            <VibratoDialog
+                open={vibratoOpen}
+                onOpenChange={setVibratoOpen}
+                editParam={s.editParam}
+                paramRange={vibratoParamRange}
+                onConfirm={(amplitude, rate, attack, release, phase) => dispatchEditOp("addVibrato", { amplitude, rate, attack, release, phase })}
+            />
+            <QuantizeDialog
+                open={quantizeOpen}
+                onOpenChange={setQuantizeOpen}
+                onConfirm={(unit, scale) => dispatchEditOp("quantize", { unit, scale })}
+            />
+            <MeanQuantizeDialog
+                open={meanQuantizeOpen}
+                onOpenChange={setMeanQuantizeOpen}
+                onConfirm={(unit, scale) => dispatchEditOp("meanQuantize", { unit, scale })}
             />
         </Flex>
     );

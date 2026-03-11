@@ -3,19 +3,32 @@ use crate::vocalshifter_clipboard::ClipboardFileKind;
 
 use super::core::get_timeline_state_from_ref;
 
-pub(super) fn paste_vocalshifter_clipboard(state: &AppState) -> serde_json::Value {
+pub(super) fn paste_vocalshifter_clipboard(
+    state: &AppState,
+    selection_start_frame: Option<usize>,
+    selection_max_frames: Option<usize>,
+) -> serde_json::Value {
     let Some((path, kind)) = crate::vocalshifter_clipboard::find_latest_clipboard_file() else {
         return serde_json::json!({"ok": false, "error": "clipboard_not_found"});
     };
 
     match kind {
-        ClipboardFileKind::PitchData => paste_clb_pitch_data(state, &path),
+        ClipboardFileKind::PitchData => {
+            paste_clb_pitch_data(state, &path, selection_start_frame, selection_max_frames)
+        }
         ClipboardFileKind::Project => paste_vsp_project(state, &path),
     }
 }
 
 /// 粘贴 .clb 音高线数据到当前选中轨道的 pitch_edit。
-fn paste_clb_pitch_data(state: &AppState, path: &std::path::Path) -> serde_json::Value {
+/// 若提供了 selection_start_frame / selection_max_frames，则将剪贴板数据对齐到选区起始帧，
+/// 超出选区范围的数据不粘贴。
+fn paste_clb_pitch_data(
+    state: &AppState,
+    path: &std::path::Path,
+    selection_start_frame: Option<usize>,
+    selection_max_frames: Option<usize>,
+) -> serde_json::Value {
     let points = match crate::vocalshifter_clipboard::parse_clipboard_file(path) {
         Ok(v) => v,
         Err(e) => {
@@ -49,6 +62,27 @@ fn paste_clb_pitch_data(state: &AppState, path: &std::path::Path) -> serde_json:
     let mut frame_points: std::collections::BTreeMap<usize, (bool, f32)> =
         std::collections::BTreeMap::new();
 
+    // 若有选区约束，计算剪贴板数据中最小时间作为偏移基准
+    let (offset_frames, max_frame_bound) = if let Some(sel_start) = selection_start_frame {
+        // 找到剪贴板中最小的 time_sec 作为基准
+        let min_time = points
+            .iter()
+            .filter(|p| p.time_sec.is_finite() && p.time_sec >= 0.0)
+            .map(|p| p.time_sec)
+            .fold(f64::MAX, f64::min);
+        let min_frame = if min_time < f64::MAX {
+            ((min_time * 1000.0) / frame_period_ms).round() as isize
+        } else {
+            0
+        };
+        // 偏移量 = 选区起始帧 - 剪贴板最小帧
+        let offset = sel_start as isize - min_frame;
+        let bound = selection_max_frames.map(|n| sel_start + n);
+        (offset, bound)
+    } else {
+        (0isize, None)
+    };
+
     for point in points {
         if !(point.time_sec.is_finite() && point.time_sec >= 0.0) {
             continue;
@@ -57,7 +91,17 @@ fn paste_clb_pitch_data(state: &AppState, path: &std::path::Path) -> serde_json:
         if !(idx_f.is_finite() && idx_f >= 0.0) {
             continue;
         }
-        let idx = idx_f.round() as usize;
+        let raw_idx = idx_f.round() as isize;
+        let idx = match raw_idx.checked_add(offset_frames).and_then(|i| if i >= 0 { Some(i as usize) } else { None }) {
+            Some(v) => v,
+            None => continue,
+        };
+        // 超出选区范围的帧不粘贴
+        if let Some(bound) = max_frame_bound {
+            if idx >= bound {
+                continue;
+            }
+        }
         if idx >= entry.pitch_edit.len() {
             continue;
         }

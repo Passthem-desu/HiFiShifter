@@ -203,7 +203,9 @@ pub fn run() {
             commands::clear_cache,
             commands::get_processor_params,
             commands::get_midi_tracks,
-            commands::import_midi_to_pitch
+            commands::import_midi_to_pitch,
+            commands::get_ui_settings,
+            commands::save_ui_settings
             // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
             // commands::start_pitch_refresh_task,
             // commands::get_pitch_refresh_status,

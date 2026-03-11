@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     Flex,
     Text,
     IconButton,
+    Select,
     Slider,
     TextField,
     ScrollArea,
@@ -27,6 +28,9 @@ import {
     setSearchQuery,
     setVisible,
     searchFilesRecursive,
+    toggleRegex,
+    setSortMode,
+    type SortMode,
 } from "../../features/fileBrowser/fileBrowserSlice";
 import { audioPreview } from "../../features/fileBrowser/audioPreview";
 import type { FileEntry } from "../../services/api/fileBrowser";
@@ -100,6 +104,7 @@ function AudioIcon({ className }: { className?: string }) {
 export const FileBrowserPanel: React.FC = () => {
     const dispatch = useAppDispatch();
     const { t } = useI18n();
+    const tAny = t as (key: string) => string;
     const fb = useAppSelector((state: RootState) => state.fileBrowser);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -126,7 +131,53 @@ export const FileBrowserPanel: React.FC = () => {
 
     // 根据搜索模式决定展示配表
     const isSearchMode = fb.searchQuery.trim().length > 0;
-    const displayEntries = isSearchMode ? (fb.searchResults ?? []) : fb.entries;
+    const rawEntries = isSearchMode ? (fb.searchResults ?? []) : fb.entries;
+    const trimmedSearchQuery = fb.searchQuery.trim();
+
+    const hasRegexError = useMemo(() => {
+        if (!isSearchMode || !fb.regexEnabled || !trimmedSearchQuery) {
+            return false;
+        }
+        try {
+            // Validate regex and let UI display an explicit error.
+            void new RegExp(trimmedSearchQuery, "i");
+            return false;
+        } catch {
+            return true;
+        }
+    }, [isSearchMode, fb.regexEnabled, trimmedSearchQuery]);
+
+    // 客户端正则过滤（仅在搜索模式且 regexEnabled 时）
+    const regexFilteredEntries = useMemo(() => {
+        if (!isSearchMode || !fb.regexEnabled || !trimmedSearchQuery) {
+            return rawEntries;
+        }
+        try {
+            const re = new RegExp(trimmedSearchQuery, "i");
+            return rawEntries.filter((e) => re.test(e.name));
+        } catch {
+            return [];
+        }
+    }, [rawEntries, fb.regexEnabled, trimmedSearchQuery, isSearchMode]);
+
+    // 排序
+    const displayEntries = useMemo(() => {
+        const sorted = [...regexFilteredEntries];
+        switch (fb.sortMode) {
+            case "name":
+                sorted.sort((a, b) => a.name.localeCompare(b.name));
+                break;
+            case "date":
+                sorted.sort((a, b) => (b.modifiedTime ?? 0) - (a.modifiedTime ?? 0));
+                break;
+            case "size":
+                sorted.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+                break;
+        }
+        // 目录始终排在前面
+        sorted.sort((a, b) => (a.isDir === b.isDir ? 0 : a.isDir ? -1 : 1));
+        return sorted;
+    }, [regexFilteredEntries, fb.sortMode]);
 
     // 计算展示相对路径（搜索模式下显示文件所在目录）
     function getRelativeDirHint(fullPath: string): string {
@@ -398,11 +449,14 @@ export const FileBrowserPanel: React.FC = () => {
                         if (debounceRef.current)
                             clearTimeout(debounceRef.current);
                         if (q.trim() && fb.currentPath) {
+                            const backendQuery = fb.regexEnabled
+                                ? ""
+                                : q.trim();
                             debounceRef.current = setTimeout(() => {
                                 void dispatch(
                                     searchFilesRecursive({
                                         dirPath: fb.currentPath,
-                                        query: q.trim(),
+                                        query: backendQuery,
                                     }),
                                 );
                             }, 300);
@@ -427,6 +481,58 @@ export const FileBrowserPanel: React.FC = () => {
                         </TextField.Slot>
                     )}
                 </TextField.Root>
+
+                {/* 正则切换 + 排序 */}
+                <Flex align="center" gap="1" mt="1">
+                    <IconButton
+                        size="1"
+                        variant={fb.regexEnabled ? "solid" : "ghost"}
+                        color="gray"
+                        title={tAny("fb_regex")}
+                        onClick={() => {
+                            const nextRegexEnabled = !fb.regexEnabled;
+                            dispatch(toggleRegex());
+
+                            if (debounceRef.current) {
+                                clearTimeout(debounceRef.current);
+                            }
+
+                            if (trimmedSearchQuery && fb.currentPath) {
+                                void dispatch(
+                                    searchFilesRecursive({
+                                        dirPath: fb.currentPath,
+                                        query: nextRegexEnabled
+                                            ? ""
+                                            : trimmedSearchQuery,
+                                    }),
+                                );
+                            }
+                        }}
+                        style={{ fontFamily: "monospace", fontSize: 10, width: 22, height: 22 }}
+                    >
+                        .*
+                    </IconButton>
+                    <Select.Root
+                        value={fb.sortMode}
+                        size="1"
+                        onValueChange={(v) => dispatch(setSortMode(v as SortMode))}
+                    >
+                        <Select.Trigger
+                            style={{ fontSize: 11, height: 22, flex: 1 }}
+                        />
+                        <Select.Content>
+                            <Select.Item value="name">{tAny("fb_sort_name")}</Select.Item>
+                            <Select.Item value="date">{tAny("fb_sort_date")}</Select.Item>
+                            <Select.Item value="size">{tAny("fb_sort_size")}</Select.Item>
+                        </Select.Content>
+                    </Select.Root>
+                </Flex>
+
+                {hasRegexError && (
+                    <Text size="1" color="red" mt="1">
+                        {tAny("fb_regex_error")}
+                    </Text>
+                )}
             </div>
 
             {/* 路径栏 */}

@@ -10,6 +10,7 @@ import {
     closeReaperSkippedFilesDialog,
     fetchTimeline,
     refreshRuntime,
+    loadUiSettings,
     syncPlaybackState,
     stopAudioPlayback,
     playOriginal,
@@ -211,6 +212,35 @@ function AppInner() {
     // 监听后端 clip_pitch_data 事件，将 per-clip MIDI 曲线存入 store。
     useClipPitchDataListener();
 
+    // 阻止浏览器默认的 Ctrl+F 搜索和右键菜单
+    useEffect(() => {
+        function preventBrowserFind(e: KeyboardEvent) {
+            const isMac = navigator.platform?.toLowerCase().includes("mac");
+            const mod = isMac ? e.metaKey : e.ctrlKey;
+            if (mod && e.key.toLowerCase() === "f") {
+                e.preventDefault();
+            }
+            // 禁用 Ctrl+P 浏览器打印
+            if (mod && e.key.toLowerCase() === "p") {
+                e.preventDefault();
+            }
+        }
+        function preventContextMenu(e: MouseEvent) {
+            const target = e.target as HTMLElement | null;
+            // Allow native context menu on text inputs and textareas
+            if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+            // Allow elements that opt-in to custom context menus
+            if (target?.closest?.("[data-hs-context-menu]")) return;
+            e.preventDefault();
+        }
+        window.addEventListener("keydown", preventBrowserFind, true);
+        document.addEventListener("contextmenu", preventContextMenu, true);
+        return () => {
+            window.removeEventListener("keydown", preventBrowserFind, true);
+            document.removeEventListener("contextmenu", preventContextMenu, true);
+        };
+    }, []);
+
     const errorText = error
         ? `${t("status_error_prefix")}：${errorCodeKey[error] ? t(errorCodeKey[error] as any) : error}`
         : statusText;
@@ -342,7 +372,7 @@ function AppInner() {
     const runtimeRef = useRef({
         isPlaying: false,
         hasSynthesized: false,
-        toolMode: "draw" as "draw" | "select",
+        toolMode: "draw" as import("./features/session/sessionTypes").ToolMode,
     });
     const outputPathRef = useRef(outputPath);
 
@@ -458,6 +488,7 @@ function AppInner() {
     useEffect(() => {
         void dispatch(fetchTimeline());
         void dispatch(refreshRuntime());
+        void dispatch(loadUiSettings());
     }, [dispatch]);
 
     useEffect(() => {
@@ -518,6 +549,18 @@ function AppInner() {
                         void dispatch(playOriginal());
                     }
                     break;
+                case "playback.stop":
+                    // Play/Stop: if playing → stop and return cursor to start position;
+                    // if not playing → start playback
+                    if (runtimeRef.current.isPlaying) {
+                        void dispatch(stopAudioPlayback({ restoreAnchor: true }));
+                    } else {
+                        void dispatch(playOriginal());
+                    }
+                    break;
+                case "playback.focusCursor":
+                    window.dispatchEvent(new CustomEvent("hifi:focusCursor"));
+                    break;
                 case "edit.undo":
                     void dispatch(undoRemote());
                     break;
@@ -559,6 +602,29 @@ function AppInner() {
                         ),
                     );
                     break;
+                case "mode.selectTool":
+                    dispatch(setToolMode("select"));
+                    break;
+                case "mode.drawTool":
+                    dispatch(setToolMode("draw"));
+                    break;
+                case "mode.lineTool":
+                    dispatch(setToolMode("line"));
+                    break;
+                case "mode.cycleTool": {
+                    const cur = runtimeRef.current.toolMode;
+                    const order: Array<"select" | "draw" | "line"> = ["select", "draw", "line"];
+                    const idx = order.indexOf(cur as "select" | "draw" | "line");
+                    dispatch(setToolMode(order[(idx + 1) % order.length]));
+                    break;
+                }
+                case "mode.cycleToolReverse": {
+                    const cur2 = runtimeRef.current.toolMode;
+                    const order2: Array<"select" | "draw" | "line"> = ["select", "draw", "line"];
+                    const idx2 = order2.indexOf(cur2 as "select" | "draw" | "line");
+                    dispatch(setToolMode(order2[(idx2 - 1 + order2.length) % order2.length]));
+                    break;
+                }
                 case "quickSearch.open":
                     setQuickSearchOpen(true);
                     break;
@@ -669,6 +735,12 @@ function AppInner() {
                     })();
                     break;
                 }
+                case "edit.pasteReaper":
+                    window.dispatchEvent(new CustomEvent("hifi:editOp", { detail: { op: "pasteReaper" } }));
+                    break;
+                case "edit.pasteVocalShifter":
+                    window.dispatchEvent(new CustomEvent("hifi:editOp", { detail: { op: "pasteVocalShifter" } }));
+                    break;
                 // clip.* 操作由 TimelinePanel 的 useKeyboardShortcuts 处理
                 default:
                     break;

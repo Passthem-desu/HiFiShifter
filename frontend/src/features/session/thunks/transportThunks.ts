@@ -12,8 +12,16 @@ export const fetchTimeline = createAsyncThunk(
 
 export const stopAudioPlayback = createAsyncThunk(
     "session/stopAudioPlayback",
-    async () => {
-        return webApi.stopAudio();
+    async (options: { restoreAnchor?: boolean } | void, { getState }) => {
+        const restoreAnchor = Boolean((options as { restoreAnchor?: boolean } | undefined)?.restoreAnchor);
+        const state = getState() as { session: SessionState };
+        const anchorSec = state.session.playbackAnchorSec;
+        const result = await webApi.stopAudio();
+        // If restoreAnchor, sync backend transport to the anchor position
+        if (restoreAnchor && anchorSec !== undefined && anchorSec !== null) {
+            await webApi.setTransport({ playheadSec: anchorSec });
+        }
+        return { ...result, restoreAnchor };
     },
 );
 

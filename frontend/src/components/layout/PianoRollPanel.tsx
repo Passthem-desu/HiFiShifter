@@ -22,6 +22,13 @@ import { useAppTheme } from "../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../theme/waveformColors";
 import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
+import type { ParamFramesPayload } from "../../types/api";
+import { snapToScale, snapToSemitone, SCALE_NOTES } from "../../utils/musicalScales";
+import type { ScaleKey } from "../../utils/musicalScales";
+import {
+    pasteReaperClipboard,
+    pasteVocalShifterClipboard,
+} from "../../features/session/thunks/audioThunks";
 
 import {
     BackgroundGrid,
@@ -50,7 +57,7 @@ import type {
     StrokePoint,
     ValueViewport,
 } from "./pianoRoll/types";
-import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
+import { selectKeybinding, selectMergedKeybindings } from "../../features/keybindings/keybindingsSlice";
 
 import { useAsyncPitchRefresh } from "../../hooks/useAsyncPitchRefresh";
 import { ProgressBar } from "../ProgressBar";
@@ -58,6 +65,7 @@ import { ProgressBar } from "../ProgressBar";
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 import { coreApi } from "../../services/api/core";
+import { EditContextMenu } from "../editDialogs/EditContextMenu";
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -73,6 +81,13 @@ export const PianoRollPanel: React.FC = () => {
     const prVerticalZoomKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.pianoRollVerticalZoom"),
     );
+    const scrollHorizontalKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.scrollHorizontal"),
+    );
+    const scrollVerticalKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.scrollVertical"),
+    );
+    const mergedKeybindings = useAppSelector(selectMergedKeybindings);
     const { mode: themeMode } = useAppTheme();
     const waveformColors = useMemo(
         () => getWaveformColors(themeMode),
@@ -86,11 +101,22 @@ export const PianoRollPanel: React.FC = () => {
     // MIDI 导入弹窗状态
     const [midiDialogOpen, setMidiDialogOpen] = useState(false);
     const [midiPath, setMidiPath] = useState<string | null>(null);
+    // 记录打开弹窗时的选区（拍数），用于后续计算帧偏移
+    const [midiDialogSelection, setMidiDialogSelection] = useState<{
+        aBeat: number;
+        bBeat: number;
+    } | null>(null);
+
+    // 右键编辑菜单状态
+    const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
     const handleOpenMidiDialog = useCallback(async () => {
         try {
             const res = await coreApi.openMidiDialog();
             if (res.ok && !res.canceled && res.path) {
+                // 快照当前选区（拍为单位）
+                const sel = selectionRef.current;
+                setMidiDialogSelection(sel ? { ...sel } : null);
                 setMidiPath(res.path);
                 setMidiDialogOpen(true);
             }
@@ -701,6 +727,17 @@ export const PianoRollPanel: React.FC = () => {
         [refreshNow],
     );
 
+    // 计算 MIDI 导入的选区帧约束（与 pasteReaper 逻辑一致）
+    const midiSelArgs = useMemo(() => {
+        if (!midiDialogSelection) return {};
+        const fp = paramView?.framePeriodMs ?? 5;
+        const a = Math.min(midiDialogSelection.aBeat, midiDialogSelection.bBeat);
+        const b = Math.max(midiDialogSelection.aBeat, midiDialogSelection.bBeat);
+        const sf = Math.max(0, Math.floor((a * secPerBeat * 1000) / fp));
+        const fc = Math.max(1, Math.ceil(((b - a) * secPerBeat * 1000) / fp));
+        return { selectionStartFrame: sf, selectionMaxFrames: fc };
+    }, [midiDialogSelection, paramView?.framePeriodMs, secPerBeat]);
+
     // 获取当前 track 下的所�?clips，用�?per-clip 波形叠加绘制
     // 获取轨道组内所有 clips（包含 root 轨道及所有子轨道的 clip）
     const trackClips = useMemo(
@@ -793,10 +830,16 @@ export const PianoRollPanel: React.FC = () => {
             }));
     }, [editParam, rootTrack, s.clipPitchCurves, s.clips, groupTrackIds]);
 
+
     // 检测音高曲线更新时触发重绘
     useEffect(() => {
         invalidate();
     }, [detectedPitchCurves, invalidate]);
+
+    // 剪贴板预览开关变化时立即重绘
+    useEffect(() => {
+        invalidate();
+    }, [s.showClipboardPreview, invalidate]);
 
     // Keep draw function always up-to-date (invalidate() is stable and calls drawRef.current()).
     drawRef.current = () => {
@@ -826,8 +869,17 @@ export const PianoRollPanel: React.FC = () => {
             waveformColors,
             detectedPitchCurves,
             isDark: themeMode === "dark",
+            clipboardPreview: s.showClipboardPreview
+                ? clipboardRef.current
+                : null,
         });
     };
+
+    const handleEditActionRef = useRef<(op: string) => void>(() => {});
+    // Stable callback that delegates to the latest handleEditOp via ref
+    const stableEditAction = useCallback((op: string) => {
+        handleEditActionRef.current(op);
+    }, []);
 
     const interactions = usePianoRollInteractions({
         dispatch,
@@ -871,6 +923,18 @@ export const PianoRollPanel: React.FC = () => {
         pianoRollCopyKb,
         pianoRollPasteKb,
         prVerticalZoomKb,
+        scrollHorizontalKb,
+        scrollVerticalKb,
+        onContextMenu: useCallback((x: number, y: number) => {
+            setCtxMenu({ x, y });
+        }, []),
+        playheadSec: s.playheadSec,
+        playheadZoomEnabled: s.playheadZoomEnabled,
+        pitchSnapEnabled: s.pitchSnapEnabled,
+        pitchSnapUnit: s.pitchSnapUnit,
+        pitchSnapScale: s.pitchSnapScale,
+        keybindingMap: mergedKeybindings,
+        onEditAction: stableEditAction,
     });
 
     const onScrollerWheelNative = interactions.onScrollerWheelNative;
@@ -922,6 +986,356 @@ export const PianoRollPanel: React.FC = () => {
         asyncRefresh.error,
         updatePianoRollStatus,
     ]);
+
+    // ── Edit operation handler (shared by context menu + MenuBar events) ──
+    const handleEditOp = useCallback(
+        async (op: string, data?: Record<string, unknown>) => {
+            if (!rootTrackId) return;
+            const fp = paramView?.framePeriodMs ?? 5;
+
+            if (op === "selectAll") {
+                const totalBeats = s.projectSec / secPerBeat;
+                selectionRef.current = { aBeat: 0, bBeat: totalBeats };
+                setSelectionUi({ aBeat: 0, bBeat: totalBeats });
+                invalidate();
+                return;
+            }
+            if (op === "deselect") {
+                selectionRef.current = null;
+                setSelectionUi(null);
+                invalidate();
+                return;
+            }
+
+            // External clipboard paste ops – work with or without selection
+            if (op === "pasteReaper" || op === "pasteVocalShifter") {
+                const sel2 = selectionRef.current;
+                let selArgs: { selectionStartFrame?: number; selectionMaxFrames?: number } | undefined;
+                if (sel2) {
+                    const a = Math.min(sel2.aBeat, sel2.bBeat);
+                    const b = Math.max(sel2.aBeat, sel2.bBeat);
+                    const sf = Math.max(0, Math.floor((a * secPerBeat * 1000) / fp));
+                    const fc = Math.max(1, Math.ceil(((b - a) * secPerBeat * 1000) / fp));
+                    selArgs = { selectionStartFrame: sf, selectionMaxFrames: fc };
+                }
+                if (op === "pasteReaper") {
+                    void dispatch(pasteReaperClipboard(selArgs));
+                } else {
+                    void dispatch(pasteVocalShifterClipboard(selArgs));
+                }
+                bumpRefreshToken();
+                return;
+            }
+
+            const sel = selectionRef.current;
+            if (!sel) return;
+
+            const aBeat = Math.min(sel.aBeat, sel.bBeat);
+            const bBeat = Math.max(sel.aBeat, sel.bBeat);
+            const startSec = aBeat * secPerBeat;
+            const durSec = Math.max(0, (bBeat - aBeat) * secPerBeat);
+            const startFrame = Math.max(0, Math.floor((startSec * 1000) / fp));
+            const frameCount = clamp(
+                Math.ceil((durSec * 1000) / fp),
+                1,
+                200_000,
+            );
+
+            switch (op) {
+                case "copy": {
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    clipboardRef.current = {
+                        param: editParam,
+                        framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
+                        values: (payload.edit ?? []).map((v) => Number(v) || 0),
+                    };
+                    // 刷新剪贴板预览
+                    invalidate();
+                    break;
+                }
+                case "cut": {
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    clipboardRef.current = {
+                        param: editParam,
+                        framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
+                        values: (payload.edit ?? []).map((v) => Number(v) || 0),
+                    };
+                    invalidate();
+                    // 初始化（恢复原始值）
+                    await paramsApi.restoreParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "paste": {
+                    const clip = clipboardRef.current;
+                    if (!clip || clip.param !== editParam) return;
+                    // 将剪贴板数据截断到选区帧数范围内
+                    const pasteValues = clip.values.length > frameCount
+                        ? clip.values.slice(0, frameCount)
+                        : clip.values;
+                    await paramsApi.setParamFrames(
+                        rootTrackId, editParam, startFrame, pasteValues, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "initialize": {
+                    await paramsApi.restoreParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "average": {
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    if (vals.length === 0) return;
+                    // pitch=0 视为未编辑，保持为0
+                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                    const result = editParam === "pitch"
+                        ? vals.map((v) => v === 0 ? 0 : avg)
+                        : vals.map(() => avg);
+                    await paramsApi.setParamFrames(
+                        rootTrackId, editParam, startFrame, result, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "transposeCents": {
+                    const cents = Number(data?.cents ?? 0);
+                    if (cents === 0) return;
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    const delta = cents / 100;
+                    const result = editParam === "pitch"
+                        ? vals.map((v) => v === 0 ? 0 : v + delta)
+                        : vals.map((v) => v + delta);
+                    await paramsApi.setParamFrames(
+                        rootTrackId, editParam, startFrame, result, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "transposeDegrees": {
+                    const degrees = Number(data?.degrees ?? 0);
+                    const scale = (data?.scale as string) ?? "chromatic";
+                    if (degrees === 0) return;
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    const scaleNotes = SCALE_NOTES[scale as ScaleKey] ?? SCALE_NOTES["C"];
+                    const transposed = editParam === "pitch"
+                        ? vals.map((midi) => {
+                            if (midi === 0) return 0;
+                            const semitone = Math.round(midi) % 12;
+                            const idx = scaleNotes.indexOf(semitone);
+                            if (idx >= 0) {
+                                const newIdx = idx + degrees;
+                                const octShift = Math.floor(newIdx / scaleNotes.length);
+                                const noteIdx = ((newIdx % scaleNotes.length) + scaleNotes.length) % scaleNotes.length;
+                                return Math.floor(midi / 12) * 12 + scaleNotes[noteIdx] + octShift * 12 + (midi - Math.round(midi));
+                            }
+                            return midi + degrees;
+                        })
+                        : vals.map((midi) => {
+                            const semitone = Math.round(midi) % 12;
+                            const idx = scaleNotes.indexOf(semitone);
+                            if (idx >= 0) {
+                                const newIdx = idx + degrees;
+                                const octShift = Math.floor(newIdx / scaleNotes.length);
+                                const noteIdx = ((newIdx % scaleNotes.length) + scaleNotes.length) % scaleNotes.length;
+                                return Math.floor(midi / 12) * 12 + scaleNotes[noteIdx] + octShift * 12 + (midi - Math.round(midi));
+                            }
+                            return midi + degrees;
+                        });
+                    await paramsApi.setParamFrames(
+                        rootTrackId, editParam, startFrame, transposed, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "setPitch": {
+                    const midiNote = Number(data?.midiNote ?? 60);
+                    await paramsApi.setParamFrames(
+                        rootTrackId, editParam, startFrame,
+                        Array.from({ length: frameCount }, () => midiNote), true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "smooth": {
+                    const strength = Number(data?.strength ?? 50) / 100;
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    const vals = (payload.edit ?? []).map((v) => Number(v));
+                    // Use absolute radius: strength 0→1 maps to ~1..50 frames
+                    const radius = Math.max(1, Math.round(strength * 50));
+                    // Multi-pass Gaussian-like smoothing via iterated box filter
+                    const passes = Math.max(1, Math.round(strength * 3));
+                    let buf = vals.slice();
+                    for (let p = 0; p < passes; p++) {
+                        const next = new Array<number>(buf.length);
+                        for (let i = 0; i < buf.length; i++) {
+                            const lo = Math.max(0, i - radius);
+                            const hi = Math.min(buf.length - 1, i + radius);
+                            let sum = 0;
+                            let count = 0;
+                            for (let j = lo; j <= hi; j++) {
+                                // pitch=0 视为未编辑，不参与平滑
+                                if (editParam === "pitch" && vals[j] === 0) continue;
+                                sum += buf[j];
+                                count++;
+                            }
+                            next[i] = (editParam === "pitch" && vals[i] === 0) ? 0 : (count > 0 ? sum / count : buf[i]);
+                        }
+                        buf = next;
+                    }
+                    const result = vals.map((v, i) => (editParam === "pitch" && v === 0) ? 0 : v + (buf[i] - v) * strength);
+                    await paramsApi.setParamFrames(
+                        rootTrackId, editParam, startFrame, result, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "addVibrato": {
+                    const amplitude = Number(data?.amplitude ?? 30);
+                    const rateHz = Number(data?.rate ?? 5.5);
+                    const period = rateHz > 0 ? 1000 / rateHz : 200;
+                    const attack = Number(data?.attack ?? 50);
+                    const release = Number(data?.release ?? 50);
+                    const phase = Number(data?.phase ?? 0);
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    const fpMs = Number(payload.frame_period_ms ?? fp) || fp;
+                    const totalMs = vals.length * fpMs;
+                    const attackMs = Math.min(attack, totalMs / 2);
+                    const releaseMs = Math.min(release, totalMs / 2);
+                    // For pitch: amplitude in cents → divide by 100 to get semitones
+                    // For other params: amplitude is a raw value used directly as max deviation
+                    const isPitchVib = editParam === "pitch";
+                    const ampFactor = isPitchVib ? amplitude / 100 : amplitude;
+                    const result = vals.map((v, i) => {
+                        const tMs = i * fpMs;
+                        let env = 1;
+                        if (tMs < attackMs) env = tMs / Math.max(1, attackMs);
+                        else if (tMs > totalMs - releaseMs) env = (totalMs - tMs) / Math.max(1, releaseMs);
+                        const phaseRad = (phase * Math.PI) / 180;
+                        const vib = Math.sin(2 * Math.PI * tMs / Math.max(1, period) + phaseRad);
+                        return v + ampFactor * env * vib;
+                    });
+                    await paramsApi.setParamFrames(
+                        rootTrackId, editParam, startFrame, result, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "quantize": {
+                    const unit = (data?.unit as string) ?? "semitone";
+                    const scale = (data?.scale as string) ?? "chromatic";
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    const quantized = unit === "semitone"
+                        ? vals.map((v) => (editParam === "pitch" && v === 0) ? 0 : snapToSemitone(v))
+                        : vals.map((v) => (editParam === "pitch" && v === 0) ? 0 : snapToScale(v, scale as ScaleKey));
+                    await paramsApi.setParamFrames(
+                        rootTrackId, editParam, startFrame, quantized, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+                case "meanQuantize": {
+                    const unit = (data?.unit as string) ?? "semitone";
+                    const scale = (data?.scale as string) ?? "chromatic";
+                    const res = await paramsApi.getParamFrames(
+                        rootTrackId, editParam, startFrame, frameCount, 1,
+                    );
+                    if (!res?.ok) return;
+                    const payload = res as ParamFramesPayload;
+                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    if (vals.length === 0) return;
+                    // pitch=0 视为未编辑，不参与均值
+                    const nonZero = editParam === "pitch" ? vals.filter((v) => v !== 0) : vals;
+                    if (nonZero.length === 0) return;
+                    const avg = nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
+                    const quantizedAvg = unit === "semitone"
+                        ? snapToSemitone(avg)
+                        : snapToScale(avg, scale as ScaleKey);
+                    const delta = quantizedAvg - avg;
+                    const result = editParam === "pitch"
+                        ? vals.map((v) => v === 0 ? 0 : v + delta)
+                        : vals.map((v) => v + delta);
+                    await paramsApi.setParamFrames(
+                        rootTrackId, editParam, startFrame, result, true,
+                    );
+                    bumpRefreshToken();
+                    break;
+                }
+            }
+        },
+        [rootTrackId, editParam, paramView?.framePeriodMs, secPerBeat, s.projectSec, bumpRefreshToken, invalidate],
+    );
+
+    // Keep the ref in sync so usePianoRollInteractions can dispatch edit ops
+    handleEditActionRef.current = (op: string) => void handleEditOp(op);
+
+    // Listen for edit operations dispatched from MenuBar
+    useEffect(() => {
+        const handler = (e: Event) => {
+            const detail = (e as CustomEvent).detail;
+            if (!detail?.op) return;
+            const { op, ...data } = detail;
+            void handleEditOp(op, data);
+        };
+        window.addEventListener("hifi:editOp", handler);
+        return () => window.removeEventListener("hifi:editOp", handler);
+    }, [handleEditOp]);
+
+    // Dispatch helper: context menu dialog ops → open MenuBar dialogs
+    const openEditDialog = useCallback((dialog: string) => {
+        // 为颤音对话框附带当前参数范围信息
+        let paramRange: { min: number; max: number } | undefined;
+        if (dialog === "addVibrato") {
+            const desc = processorParamsRef.current.find((d) => d.id === editParam);
+            if (desc?.kind.type === "automation_curve") {
+                paramRange = { min: desc.kind.min_value, max: desc.kind.max_value };
+            }
+        }
+        window.dispatchEvent(
+            new CustomEvent("hifi:openEditDialog", { detail: { dialog, paramRange } }),
+        );
+    }, [editParam]);
 
     return (
         <Flex
@@ -1309,9 +1723,31 @@ export const PianoRollPanel: React.FC = () => {
                 open={midiDialogOpen}
                 onOpenChange={setMidiDialogOpen}
                 midiPath={midiPath}
-                offsetSec={s.playheadSec}
+                selectionStartFrame={midiSelArgs.selectionStartFrame}
+                selectionMaxFrames={midiSelArgs.selectionMaxFrames}
                 onImported={handleMidiImported}
             />
+            {ctxMenu && s.toolMode === "select" && (
+                <EditContextMenu
+                    x={ctxMenu.x}
+                    y={ctxMenu.y}
+                    isPitchParam={editParam === "pitch"}
+                    onClose={() => setCtxMenu(null)}
+                    onCopy={() => void handleEditOp("copy")}
+                    onPaste={() => void handleEditOp("paste")}
+                    onSelectAll={() => void handleEditOp("selectAll")}
+                    onDeselect={() => void handleEditOp("deselect")}
+                    onInitialize={() => void handleEditOp("initialize")}
+                    onTransposeCents={() => openEditDialog("transposeCents")}
+                    onTransposeDegrees={() => openEditDialog("transposeDegrees")}
+                    onSetPitch={() => openEditDialog("setPitch")}
+                    onAverage={() => void handleEditOp("average")}
+                    onSmooth={() => openEditDialog("smooth")}
+                    onAddVibrato={() => openEditDialog("addVibrato")}
+                    onQuantize={() => openEditDialog("quantize")}
+                    onMeanQuantize={() => openEditDialog("meanQuantize")}
+                />
+            )}
         </Flex>
     );
 };

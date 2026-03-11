@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useLayoutEffect, useRef } from "react";
 import type {
     ClipInfo,
     FadeCurveType,
@@ -93,6 +93,7 @@ export const ClipContextMenu: React.FC<{
     onMute: (ids: string[], muted: boolean) => void;
     onRename: (clipId: string) => void;
     onCopy: (ids: string[]) => void;
+    onCut: (ids: string[]) => void;
     onSplit: (clipId: string) => void;
     onGlue: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
@@ -112,12 +113,14 @@ export const ClipContextMenu: React.FC<{
     onMute,
     onRename,
     onCopy,
+    onCut,
     onSplit,
     onGlue,
     onNormalize,
     onFadeCurveChange,
 }) => {
     const { t } = useI18n();
+    const menuRef = useRef<HTMLDivElement>(null);
     const isMulti = selectedClips.length >= 2;
     const ids = isMulti ? selectedClips.map((c) => c.id) : [clip.id];
 
@@ -136,8 +139,20 @@ export const ClipContextMenu: React.FC<{
         onClose();
     }
 
+    // Clamp menu position to viewport edges
+    useLayoutEffect(() => {
+        const el = menuRef.current;
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (rect.right > vw) el.style.left = `${Math.max(0, vw - rect.width)}px`;
+        if (rect.bottom > vh) el.style.top = `${Math.max(0, vh - rect.height)}px`;
+    }, [x, y]);
+
     return (
         <div
+            ref={menuRef}
             data-hs-context-menu="1"
             className="fixed z-50 min-w-[140px] rounded border border-qt-border bg-qt-window text-qt-text shadow-lg py-1"
             style={{ left: x, top: y }}
@@ -169,6 +184,13 @@ export const ClipContextMenu: React.FC<{
                         label={t("ctx_copy_all")}
                         onClick={() => {
                             onCopy(ids);
+                            close();
+                        }}
+                    />
+                    <MenuItem
+                        label={t("ctx_cut_all")}
+                        onClick={() => {
+                            onCut(ids);
                             close();
                         }}
                     />
@@ -218,6 +240,13 @@ export const ClipContextMenu: React.FC<{
                         label={t("ctx_copy")}
                         onClick={() => {
                             onCopy([clip.id]);
+                            close();
+                        }}
+                    />
+                    <MenuItem
+                        label={t("ctx_cut")}
+                        onClick={() => {
+                            onCut([clip.id]);
                             close();
                         }}
                     />

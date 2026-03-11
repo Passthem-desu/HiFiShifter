@@ -155,6 +155,12 @@ export const TimelinePanel: React.FC = () => {
     const copyDragKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.clipCopyDrag"),
     );
+    const scrollHorizontalKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.scrollHorizontal"),
+    );
+    const scrollVerticalKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.scrollVertical"),
+    );
     const stretchKbRef = useRef<Keybinding>(stretchKb);
     useEffect(() => {
         stretchKbRef.current = stretchKb;
@@ -668,6 +674,7 @@ export const TimelinePanel: React.FC = () => {
         snapBeat,
         beatFromClientX,
         noSnapKb,
+        gridSnapEnabled: s.gridSnapEnabled,
     });
 
     const { slipDragRef: _slipDragRef, startSlipDrag } = useSlipDrag({
@@ -697,7 +704,9 @@ export const TimelinePanel: React.FC = () => {
         setMultiSelectedClipIds,
         slipEditKb,
         noSnapKb,
+        gridSnapEnabled: s.gridSnapEnabled,
         copyDragKb,
+        autoCrossfadeEnabled: s.autoCrossfadeEnabled,
         onCtrlClick: (clipId: string) => {
             setMultiSelectedClipIds((prev) => {
                 if (prev.includes(clipId)) {
@@ -732,6 +741,7 @@ export const TimelinePanel: React.FC = () => {
         setMultiSelectedClipIds,
         clipClipboardRef,
         isEditableTarget,
+        autoCrossfadeEnabled: s.autoCrossfadeEnabled,
     });
     useEffect(() => {
         if (!contextMenu) return;
@@ -744,6 +754,35 @@ export const TimelinePanel: React.FC = () => {
         return () =>
             window.removeEventListener("pointerdown", onAnyPointerDown, true);
     }, [contextMenu]);
+
+    // Auto-scroll: keep playhead visible during playback
+    useEffect(() => {
+        if (!s.autoScrollEnabled || !s.runtime.isPlaying) return;
+        const scroller = scrollRef.current;
+        if (!scroller) return;
+        const playheadX = s.playheadSec * pxPerSec;
+        const viewLeft = scroller.scrollLeft;
+        const viewRight = viewLeft + scroller.clientWidth;
+        if (playheadX < viewLeft || playheadX > viewRight) {
+            const next = Math.max(0, playheadX - scroller.clientWidth / 2);
+            scroller.scrollLeft = next;
+            syncScrollLeft(next);
+        }
+    }, [s.autoScrollEnabled, s.runtime.isPlaying, s.playheadSec, pxPerSec]);
+
+    // Focus cursor: scroll to center the playhead in the viewport
+    useEffect(() => {
+        function handler() {
+            const scroller = scrollRef.current;
+            if (!scroller) return;
+            const playheadX = s.playheadSec * pxPerSec;
+            const next = Math.max(0, playheadX - scroller.clientWidth / 2);
+            scroller.scrollLeft = next;
+            syncScrollLeft(next);
+        }
+        window.addEventListener("hifi:focusCursor", handler);
+        return () => window.removeEventListener("hifi:focusCursor", handler);
+    }, [s.playheadSec, pxPerSec]);
 
     return (
         <Flex className="h-full w-full bg-qt-graph-bg overflow-hidden">
@@ -865,6 +904,10 @@ export const TimelinePanel: React.FC = () => {
                     rowHeight={rowHeight}
                     setRowHeight={setRowHeight}
                     setScrollLeft={setScrollLeftAction}
+                    scrollHorizontalKb={scrollHorizontalKb}
+                    scrollVerticalKb={scrollVerticalKb}
+                    playheadSec={s.playheadSec}
+                    playheadZoomEnabled={s.playheadZoomEnabled}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"
                     onScroll={(e) => {
                         const el = e.currentTarget as HTMLDivElement;
@@ -1039,6 +1082,9 @@ export const TimelinePanel: React.FC = () => {
                         const scroller = scrollRef.current;
                         if (!scroller) return;
                         const bounds = scroller.getBoundingClientRect();
+                        // Ignore clicks on the native scrollbar region
+                        if (e.clientY > bounds.bottom - (scroller.offsetHeight - scroller.clientHeight)) return;
+                        if (e.clientX > bounds.right - (scroller.offsetWidth - scroller.clientWidth)) return;
                         setPlayheadFromClientX(
                             e.clientX,
                             bounds,
@@ -1373,6 +1419,19 @@ export const TimelinePanel: React.FC = () => {
                                           .map((c) => ({ ...c }));
                                       if (templates.length > 0) {
                                           clipClipboardRef.current = templates;
+                                      }
+                                  }}
+                                  onCut={(ids) => {
+                                      const templates = sessionRef.current.clips
+                                          .filter((c) => ids.includes(c.id))
+                                          .map((c) => ({ ...c }));
+                                      if (templates.length > 0) {
+                                          clipClipboardRef.current = templates;
+                                      }
+                                      setContextMenu(null);
+                                      setMultiSelectedClipIds([]);
+                                      for (const id of ids) {
+                                          void dispatch(removeClipRemote(id));
                                       }
                                   }}
                                   onSplit={(clipId) => {

@@ -12,6 +12,7 @@ import {
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { selectMergedKeybindings } from "../../../../features/keybindings/keybindingsSlice";
 import type { ActionId, Keybinding, KeybindingMap } from "../../../../features/keybindings/types";
+import { applyAutoCrossfade } from "./autoCrossfade";
 
 /**
  * 判断 KeyboardEvent 是否匹配某个 Keybinding
@@ -44,6 +45,7 @@ function matchClipAction(
     const clipActions: ActionId[] = [
         "clip.delete",
         "clip.copy",
+        "clip.cut",
         "clip.paste",
         "clip.split",
     ];
@@ -70,6 +72,7 @@ export function useKeyboardShortcuts(deps: {
     setMultiSelectedClipIds: (ids: string[]) => void;
     clipClipboardRef: React.RefObject<ClipTemplate[] | null>;
     isEditableTarget: (target: EventTarget | null) => boolean;
+    autoCrossfadeEnabled: boolean;
 }) {
     const {
         sessionRef,
@@ -78,6 +81,7 @@ export function useKeyboardShortcuts(deps: {
         setMultiSelectedClipIds,
         clipClipboardRef,
         isEditableTarget,
+        autoCrossfadeEnabled,
     } = deps;
 
     const keybindings = useAppSelector(selectMergedKeybindings);
@@ -90,6 +94,9 @@ export function useKeyboardShortcuts(deps: {
                 isEditableTarget(e.target)
             )
                 return;
+
+            // 快捷键设置对话框打开时，阻塞所有快捷键
+            if (document.body.hasAttribute("data-keybindings-dialog-open")) return;
 
             const s = sessionRef.current;
             const selectedIds =
@@ -109,6 +116,18 @@ export function useKeyboardShortcuts(deps: {
                     active?.hasAttribute("data-piano-roll-scroller") ||
                     active?.closest?.("[data-piano-roll-scroller]")
                 ) {
+                    return;
+                }
+            }
+
+            // clip.delete: 当焦点在 PianoRoll 且工具为 select 时，Delete 应触发
+            // edit.initialize 而非删除音频块，此处跳过以让 PianoRoll 处理
+            if (actionId === "clip.delete") {
+                const active = document.activeElement as HTMLElement | null;
+                const inPianoRoll =
+                    active?.hasAttribute("data-piano-roll-scroller") ||
+                    active?.closest?.("[data-piano-roll-scroller]");
+                if (inPianoRoll && s.toolMode === "select") {
                     return;
                 }
             }
@@ -160,6 +179,47 @@ export function useKeyboardShortcuts(deps: {
                     return;
                 }
 
+                case "clip.cut": {
+                    if (selectedIds.length === 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // 先复制到剪贴板
+                    const cutClips = s.clips.filter((c) => selectedIds.includes(c.id));
+                    if (cutClips.length === 0) return;
+                    const cutTemplates = cutClips.map((c) => ({
+                        trackId: c.trackId,
+                        name: c.name,
+                        startSec: c.startSec,
+                        lengthSec: c.lengthSec,
+                        sourcePath: c.sourcePath,
+                        durationSec: c.durationSec,
+                        gain: c.gain,
+                        muted: c.muted,
+                        sourceStartSec: c.sourceStartSec,
+                        sourceEndSec: c.sourceEndSec,
+                        playbackRate: c.playbackRate,
+                        fadeInSec: c.fadeInSec,
+                        fadeOutSec: c.fadeOutSec,
+                    }));
+                    (clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>).current = cutTemplates;
+                    try {
+                        void navigator.clipboard?.writeText(
+                            JSON.stringify({
+                                type: "hifishifter.clipTemplates.v1",
+                                templates: cutTemplates,
+                            }),
+                        );
+                    } catch {
+                        // ignore
+                    }
+                    // 再删除原音频块
+                    setMultiSelectedClipIds([]);
+                    for (const id of selectedIds) {
+                        void dispatch(removeClipRemote(id));
+                    }
+                    return;
+                }
+
                 case "clip.paste": {
                     const tpl = clipClipboardRef.current;
                     if (!tpl || tpl.length === 0) return;
@@ -185,6 +245,14 @@ export function useKeyboardShortcuts(deps: {
                             if (!Array.isArray(created) || created.length === 0) return;
                             setMultiSelectedClipIds(created);
                             void dispatch(selectClipRemote(created[0]));
+                            if (autoCrossfadeEnabled) {
+                                const latestSession = sessionRef.current;
+                                if (latestSession) {
+                                    setTimeout(() => {
+                                        applyAutoCrossfade(latestSession, created, dispatch);
+                                    }, 0);
+                                }
+                            }
                         })
                         .catch(() => undefined);
                     return;

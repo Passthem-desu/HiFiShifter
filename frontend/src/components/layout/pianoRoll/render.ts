@@ -230,6 +230,12 @@ export function drawPianoRoll(args: {
     detectedPitchCurves?: DetectedPitchCurve[];
     /** 是否为深色主题（默认 true） */
     isDark?: boolean;
+    /** 剪贴板预览数据（选区内渲染半透明预览曲线） */
+    clipboardPreview?: {
+        param: ParamName;
+        framePeriodMs: number;
+        values: number[];
+    } | null;
 }) {
     const {
         axisCanvas,
@@ -258,6 +264,7 @@ export function drawPianoRoll(args: {
         },
         detectedPitchCurves,
         isDark = true,
+        clipboardPreview,
     } = args;
 
     // 主题颜色查找表
@@ -753,6 +760,59 @@ export function drawPianoRoll(args: {
                 visibleDurSec,
                 valueToY,
             });
+            ctx.restore();
+        }
+
+        // 剪贴板预览曲线：在选区范围内渲染半透明虚线预览
+        // 起始点与选区起始点对齐，超出选区的部分直接裁掉（不压缩）
+        if (
+            clipboardPreview &&
+            selection &&
+            clipboardPreview.param === editParam &&
+            clipboardPreview.values.length > 0
+        ) {
+            const selMinBeat = Math.min(selection.aBeat, selection.bBeat);
+            const selMaxBeat = Math.max(selection.aBeat, selection.bBeat);
+            const selStartSec = selMinBeat * secPerBeat;
+            const selEndSec = selMaxBeat * secPerBeat;
+
+            const cbFp = Math.max(1e-6, clipboardPreview.framePeriodMs);
+
+            const selX0 = selMinBeat * pxPerBeat - scrollLeft;
+            const selX1 = selMaxBeat * pxPerBeat - scrollLeft;
+
+            ctx.save();
+            // 裁剪到选区范围
+            ctx.beginPath();
+            ctx.rect(selX0, 0, selX1 - selX0, h);
+            ctx.clip();
+
+            ctx.strokeStyle = isDark
+                ? "rgba(255, 180, 60, 0.65)"
+                : "rgba(220, 140, 20, 0.65)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+
+            let started = false;
+            for (let i = 0; i < clipboardPreview.values.length; i++) {
+                // 不缩放，直接按原始帧间距排列
+                const tSec = selStartSec + (i * cbFp) / 1000;
+                // 超出选区结束点则停止
+                if (tSec > selEndSec) break;
+                const x = timeToPixel(tSec, visibleStartSec, visibleDurSec, w);
+                const rawValue = clipboardPreview.values[i] ?? 0;
+                const mappedValue =
+                    editParam === "pitch" ? rawValue + 0.5 : rawValue;
+                const y = valueToY(editParam, mappedValue, h);
+                if (!started) {
+                    ctx.moveTo(x, y);
+                    started = true;
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
             ctx.restore();
         }
     }

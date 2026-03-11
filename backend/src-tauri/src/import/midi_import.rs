@@ -45,9 +45,12 @@ pub struct MidiParseResult {
 }
 
 /// 解析 MIDI 文件，返回轨道信息和音符事件。
-pub fn parse_midi_file(path: &Path) -> Result<MidiParseResult, String> {
+///
+/// `fallback_bpm`：当 MIDI 文件不包含 Tempo 事件时，使用此值作为
+/// 默认 BPM。传 `None` 则沿用 120 BPM 默认值。
+pub fn parse_midi_file(path: &Path, fallback_bpm: Option<f64>) -> Result<MidiParseResult, String> {
     let data = fs::read(path).map_err(|e| format!("io_error: {}", e))?;
-    parse_midi_data(&data, None)
+    parse_midi_data(&data, fallback_bpm)
 }
 
 /// 从字节数据解析 MIDI，返回轨道信息和音符事件。
