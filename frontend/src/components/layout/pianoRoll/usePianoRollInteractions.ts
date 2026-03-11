@@ -455,7 +455,25 @@ export function usePianoRollInteractions(args: {
             // Scroll modifier: convert wheel to vertical scroll
             if (isModifierActive(scrollVerticalKb, e)) {
                 e.preventDefault();
-                // PianoRoll has no vertical scroll, so no-op
+                // 实现参数值轴的平移（center 上下移动）
+                const h = Math.max(1, el.clientHeight);
+                const delta = (e.deltaY / h) * 0.5; // 平移幅度可调
+                if (editParam === "pitch") {
+                    const cur = pitchViewRef.current;
+                    const next = clampViewport("pitch", {
+                        span: cur.span,
+                        center: cur.center + delta * cur.span,
+                    });
+                    setPitchView(next);
+                } else {
+                    const cur = paramViewsRef.current[editParam] ?? { center: 0.5, span: 1 };
+                    const next = clampViewport(editParam, {
+                        span: cur.span,
+                        center: cur.center + delta * cur.span,
+                    });
+                    setParamViewport(editParam, next);
+                }
+                invalidate();
                 return;
             }
 
