@@ -17,7 +17,7 @@ use super::traits::{
 
 static HIFIGAN_BREATH_OPTIONS: [(&str, i32); 2] = [("Off", 0), ("On", 1)];
 
-static HIFIGAN_PARAM_DESCRIPTORS: [ParamDescriptor; 3] = [
+static HIFIGAN_PARAM_DESCRIPTORS: [ParamDescriptor; 4] = [
     ParamDescriptor {
         id: "breath_enabled",
         display_name: "Breath",
@@ -47,6 +47,17 @@ static HIFIGAN_PARAM_DESCRIPTORS: [ParamDescriptor; 3] = [
             default_value: 0.0,
             min_value: -100.0,
             max_value: 100.0,
+        },
+    },
+    ParamDescriptor {
+        id: "formant_shift_cents",
+        display_name: "Formant Shift",
+        group: "NSF-HiFiGAN",
+        kind: super::traits::ParamKind::AutomationCurve {
+            unit: "cents",
+            default_value: 0.0,
+            min_value: -500.0,
+            max_value: 500.0,
         },
     },
 ];
@@ -242,8 +253,13 @@ impl ProcessingStage for HiFiGanStage {
             return Ok(input_pcm);
         }
 
+        let rate = cc.playback_rate;
+        let needs_stretch = (rate - 1.0).abs() > 1e-6;
+
         let breath_enabled = crate::pitch_editing::extra_param_enabled(cc.extra_params, "breath_enabled");
+        let formant_curve = cc.extra_curves.get("formant_shift_cents");
         if !breath_enabled {
+            // ── 非 Breath 路径 ──────────────────────────────────────────────
             let render_ctx = RenderContext {
                 mono_pcm: &input_pcm,
                 sample_rate: cc.sample_rate,
@@ -255,9 +271,16 @@ impl ProcessingStage for HiFiGanStage {
                 clip_midi: cc.clip_midi,
                 clip_id: cc.clip_id,
             };
-            return crate::renderer::hifigan::HiFiGanRenderer.render(&render_ctx);
+            if needs_stretch {
+                // mel 域时间拉伸 + HiFiGAN 推理
+                return crate::renderer::hifigan::HiFiGanRenderer
+                    .render_mel_stretch(&render_ctx, rate, formant_curve);
+            } else {
+                return crate::renderer::hifigan::HiFiGanRenderer.render_with_formant(&render_ctx, formant_curve);
+            }
         }
 
+        // ── Breath 路径 ─────────────────────────────────────────────────────
         if !crate::hnsep_onnx::is_available() {
             return Err("HNSEP is enabled but model is unavailable".to_string());
         }
@@ -268,6 +291,7 @@ impl ProcessingStage for HiFiGanStage {
             cc.sample_rate,
         )?;
 
+        // harmonic 走 mel stretch
         let processed_harmonic = if cc.clip_midi.is_empty() {
             harmonic
         } else {
@@ -282,16 +306,35 @@ impl ProcessingStage for HiFiGanStage {
                 clip_midi: cc.clip_midi,
                 clip_id: cc.clip_id,
             };
-            crate::renderer::hifigan::HiFiGanRenderer.render(&render_ctx)?
+            if needs_stretch {
+                crate::renderer::hifigan::HiFiGanRenderer
+                    .render_mel_stretch(&render_ctx, rate, formant_curve)?
+            } else {
+                crate::renderer::hifigan::HiFiGanRenderer.render_with_formant(&render_ctx, formant_curve)?
+            }
+        };
+
+        // noise 走 RubberBand 时间拉伸（noise 是非谐波信号，波形域拉伸无明显伪影）
+        let stretched_noise = if needs_stretch {
+            let out_frames = processed_harmonic.len();
+            crate::time_stretch::time_stretch_interleaved(
+                &noise,
+                1,
+                cc.sample_rate,
+                out_frames,
+                crate::time_stretch::StretchAlgorithm::RubberBand,
+            )
+        } else {
+            noise
         };
 
         let breath_curve = cc.extra_curves.get("breath_gain");
-        let out_len = processed_harmonic.len().min(noise.len());
+        let out_len = processed_harmonic.len().min(stretched_noise.len());
         let mut mixed = vec![0.0f32; out_len];
         for index in 0..out_len {
             let abs_sec = cc.seg_start_sec + index as f64 / cc.sample_rate.max(1) as f64;
             let gain = sample_curve_at_abs_sec(breath_curve, abs_sec, cc.frame_period_ms, 1.0);
-            mixed[index] = processed_harmonic[index] + noise[index] * gain;
+            mixed[index] = processed_harmonic[index] + stretched_noise[index] * gain;
         }
         Ok(mixed)
     }
@@ -313,12 +356,14 @@ pub fn world_chain() -> ProcessorChain {
 }
 
 /// 构造 NSF-HiFiGAN 处理链。
+///
+/// 时间拉伸由 HiFiGanStage 内部通过 mel 域线性插值完成，
+/// 不再需要外部 RubberBandTimeStretchStage。
 pub fn hifigan_chain() -> ProcessorChain {
     ProcessorChain {
         id: "nsf_hifigan".into(),
         display_name: "NSF-HiFiGAN".into(),
         stages: vec![
-            Box::new(RubberBandTimeStretchStage),
             Box::new(HiFiGanStage),
         ],
         handles_time_stretch: true,

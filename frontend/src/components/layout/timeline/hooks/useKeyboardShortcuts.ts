@@ -11,7 +11,11 @@ import {
 } from "../../../../features/session/sessionSlice";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { selectMergedKeybindings } from "../../../../features/keybindings/keybindingsSlice";
-import type { ActionId, Keybinding, KeybindingMap } from "../../../../features/keybindings/types";
+import type {
+    ActionId,
+    Keybinding,
+    KeybindingMap,
+} from "../../../../features/keybindings/types";
 import { applyAutoCrossfade } from "./autoCrossfade";
 
 /**
@@ -48,6 +52,7 @@ function matchClipAction(
         "clip.cut",
         "clip.paste",
         "clip.split",
+        "clip.normalize",
     ];
     // 优先匹配含修饰键的
     for (const actionId of clipActions) {
@@ -73,6 +78,7 @@ export function useKeyboardShortcuts(deps: {
     clipClipboardRef: React.RefObject<ClipTemplate[] | null>;
     isEditableTarget: (target: EventTarget | null) => boolean;
     autoCrossfadeEnabled: boolean;
+    onNormalize: (ids: string[]) => void;
 }) {
     const {
         sessionRef,
@@ -82,6 +88,7 @@ export function useKeyboardShortcuts(deps: {
         clipClipboardRef,
         isEditableTarget,
         autoCrossfadeEnabled,
+        onNormalize,
     } = deps;
 
     const keybindings = useAppSelector(selectMergedKeybindings);
@@ -96,7 +103,8 @@ export function useKeyboardShortcuts(deps: {
                 return;
 
             // 快捷键设置对话框打开时，阻塞所有快捷键
-            if (document.body.hasAttribute("data-keybindings-dialog-open")) return;
+            if (document.body.hasAttribute("data-keybindings-dialog-open"))
+                return;
 
             const s = sessionRef.current;
             const selectedIds =
@@ -148,7 +156,9 @@ export function useKeyboardShortcuts(deps: {
                     if (selectedIds.length === 0) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    const clips = s.clips.filter((c) => selectedIds.includes(c.id));
+                    const clips = s.clips.filter((c) =>
+                        selectedIds.includes(c.id),
+                    );
                     if (clips.length === 0) return;
                     const templates = clips.map((c) => ({
                         trackId: c.trackId,
@@ -165,7 +175,11 @@ export function useKeyboardShortcuts(deps: {
                         fadeInSec: c.fadeInSec,
                         fadeOutSec: c.fadeOutSec,
                     }));
-                    (clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>).current = templates;
+                    (
+                        clipClipboardRef as React.MutableRefObject<
+                            ClipTemplate[] | null
+                        >
+                    ).current = templates;
                     try {
                         void navigator.clipboard?.writeText(
                             JSON.stringify({
@@ -184,7 +198,9 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     // 先复制到剪贴板
-                    const cutClips = s.clips.filter((c) => selectedIds.includes(c.id));
+                    const cutClips = s.clips.filter((c) =>
+                        selectedIds.includes(c.id),
+                    );
                     if (cutClips.length === 0) return;
                     const cutTemplates = cutClips.map((c) => ({
                         trackId: c.trackId,
@@ -201,7 +217,11 @@ export function useKeyboardShortcuts(deps: {
                         fadeInSec: c.fadeInSec,
                         fadeOutSec: c.fadeOutSec,
                     }));
-                    (clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>).current = cutTemplates;
+                    (
+                        clipClipboardRef as React.MutableRefObject<
+                            ClipTemplate[] | null
+                        >
+                    ).current = cutTemplates;
                     try {
                         void navigator.clipboard?.writeText(
                             JSON.stringify({
@@ -228,9 +248,13 @@ export function useKeyboardShortcuts(deps: {
                     const playhead = s.playheadSec ?? 0;
                     const minStart = tpl
                         .map((c) => c.startSec)
-                        .reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY);
+                        .reduce(
+                            (a, b) => Math.min(a, b),
+                            Number.POSITIVE_INFINITY,
+                        );
                     const delta =
-                        Number.isFinite(minStart) && minStart !== Number.POSITIVE_INFINITY
+                        Number.isFinite(minStart) &&
+                        minStart !== Number.POSITIVE_INFINITY
                             ? playhead - minStart
                             : 0;
                     const templates = tpl.map((c) => ({
@@ -241,15 +265,21 @@ export function useKeyboardShortcuts(deps: {
                     void dispatch(createClipsRemote({ templates }))
                         .unwrap()
                         .then((payload) => {
-                            const created: string[] = payload?.createdClipIds ?? [];
-                            if (!Array.isArray(created) || created.length === 0) return;
+                            const created: string[] =
+                                payload?.createdClipIds ?? [];
+                            if (!Array.isArray(created) || created.length === 0)
+                                return;
                             setMultiSelectedClipIds(created);
                             void dispatch(selectClipRemote(created[0]));
                             if (autoCrossfadeEnabled) {
                                 const latestSession = sessionRef.current;
                                 if (latestSession) {
                                     setTimeout(() => {
-                                        applyAutoCrossfade(latestSession, created, dispatch);
+                                        applyAutoCrossfade(
+                                            latestSession,
+                                            created,
+                                            dispatch,
+                                        );
                                     }, 0);
                                 }
                             }
@@ -263,8 +293,19 @@ export function useKeyboardShortcuts(deps: {
                     if (!clipId) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    const splitSec = Math.max(0, Number(s.playheadSec ?? 0) || 0);
+                    const splitSec = Math.max(
+                        0,
+                        Number(s.playheadSec ?? 0) || 0,
+                    );
                     void dispatch(splitClipRemote({ clipId, splitSec }));
+                    return;
+                }
+
+                case "clip.normalize": {
+                    if (selectedIds.length === 0) return;
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    onNormalize(selectedIds);
                     return;
                 }
             }
@@ -279,5 +320,6 @@ export function useKeyboardShortcuts(deps: {
         clipClipboardRef,
         isEditableTarget,
         keybindings,
+        onNormalize,
     ]);
 }

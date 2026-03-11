@@ -160,6 +160,7 @@ pub(super) fn set_track_state(
     compose_enabled: Option<bool>,
     pitch_analysis_algo: Option<String>,
     color: Option<String>,
+    name: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
@@ -170,7 +171,7 @@ pub(super) fn set_track_state(
         "none" => crate::state::PitchAnalysisAlgo::None,
         _ => crate::state::PitchAnalysisAlgo::Unknown,
     });
-    tl.set_track_state(&track_id, muted, solo, volume, compose_enabled, algo, color);
+    tl.set_track_state(&track_id, muted, solo, volume, compose_enabled, algo, color, name);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());

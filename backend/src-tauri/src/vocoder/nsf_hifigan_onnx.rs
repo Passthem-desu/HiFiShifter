@@ -719,6 +719,7 @@ impl NsfHifiganOnnx {
         sample_rate: u32,
         start_sec: f64,
         midi_at_time: impl Fn(f64) -> f64,
+        formant_shift_at_time: impl Fn(f64) -> f32,
     ) -> Result<Vec<f32>, String> {
         let model_sr = self.cfg.sampling_rate;
 
@@ -740,7 +741,7 @@ impl NsfHifiganOnnx {
 
         // Fast path: key_shift=0 is the only mode used by the app currently.
         // This avoids reallocating STFT matrices and re-planning FFT every call.
-        let mel = self.mel_from_audio_fast(audio_model)?;
+        let mut mel = self.mel_from_audio_fast(audio_model)?;
 
         // mel is stored as (n_mels, T) contiguous. Build f0 (1, T) in Hz.
         let t = mel.len() / self.cfg.num_mels;
@@ -748,7 +749,19 @@ impl NsfHifiganOnnx {
             return Ok(vec![0.0; audio_mono.len()]);
         }
 
+        // 应用共振峰偏移（在 mel 域沿频率轴做线性插值）
         let hop_sec = (self.cfg.hop_size as f64) / (model_sr.max(1) as f64);
+        let formant_shifts: Vec<f32> = (0..t)
+            .map(|i| {
+                let abs_t = start_sec + (i as f64) * hop_sec;
+                formant_shift_at_time(abs_t)
+            })
+            .collect();
+        let has_formant_shift = formant_shifts.iter().any(|s| s.abs() >= 0.5);
+        if has_formant_shift {
+            shift_mel_formant(&mut mel, self.cfg.num_mels, t, &formant_shifts, self.cfg.fmin, self.cfg.fmax);
+        }
+
         let mut f0 = vec![0.0f32; t];
         for i in 0..t {
             let abs_t = start_sec + (i as f64) * hop_sec;
@@ -882,6 +895,7 @@ pub fn infer_pitch_edit_mono(
     sample_rate: u32,
     start_sec: f64,
     midi_at_time: impl Fn(f64) -> f64,
+    formant_shift_at_time: impl Fn(f64) -> f32,
 ) -> Result<Vec<f32>, String> {
     if let Err(e) = probe() {
         return Err(e.clone());
@@ -898,7 +912,7 @@ pub fn infer_pitch_edit_mono(
             .as_mut()
             .map_err(|e| e.clone())?;
 
-        sess.infer_from_audio_and_midi(audio_mono, sample_rate, start_sec, midi_at_time)
+        sess.infer_from_audio_and_midi(audio_mono, sample_rate, start_sec, midi_at_time, formant_shift_at_time)
     })
 }
 
@@ -1019,6 +1033,7 @@ pub fn infer_pitch_edit_chunked(
     sample_rate: u32,
     start_sec: f64,
     midi_at_time: impl Fn(f64) -> f64 + Clone,
+    formant_shift_at_time: impl Fn(f64) -> f32 + Clone,
     chunk_sec: f64,
     overlap_sec: f64,
 ) -> Result<Vec<f32>, String> {
@@ -1033,7 +1048,7 @@ pub fn infer_pitch_edit_chunked(
 
     // 单块情况：直接调用 infer_pitch_edit_mono，无额外开销
     if total_samples <= chunk_samples {
-        return infer_pitch_edit_mono(mono_pcm, sample_rate, start_sec, midi_at_time);
+        return infer_pitch_edit_mono(mono_pcm, sample_rate, start_sec, midi_at_time, formant_shift_at_time);
     }
 
     // 多块情况：分块推理 + 等功率 crossfade 拼接
@@ -1056,6 +1071,7 @@ pub fn infer_pitch_edit_chunked(
             sample_rate,
             chunk_start_sec,
             midi_at_time.clone(),
+            formant_shift_at_time.clone(),
         )?;
 
         // 确保推理结果长度与输入一致（infer_pitch_edit_mono 保证这一点）
@@ -1106,6 +1122,455 @@ pub fn infer_pitch_edit_chunked(
                 out[out_idx] = chunk_result.get(i).copied().unwrap_or(0.0);
             }
             prev_chunk_out = Some((chunk_result, chunk_start));
+        }
+
+        if chunk_end >= total_samples {
+            break;
+        }
+        chunk_start += step;
+    }
+
+    Ok(out)
+}
+
+// ─── Mel 共振峰偏移（频率轴线性插值）──────────────────────────────────────────
+
+/// 对 mel 矩阵逐帧应用共振峰偏移。
+///
+/// `mel`: `[n_mels * t]` 行优先展平数据（n_mels 行 × t 列）。
+/// `formant_shifts`: `[t]`，每帧的共振峰偏移量（单位：cents）。
+/// `fmin` / `fmax`：mel filterbank 的频率范围（Hz），必须与提取 mel 时使用的参数一致。
+///
+/// 对每帧，根据 shift 值计算频率缩放因子 `ratio = 2^(shift/1200)`，
+/// 然后在 **Hz 域**对每个输出 mel bin 查找对应源 bin（正确处理 Slaney mel 的非线性刻度）：
+///   source_hz = center_hz(output_bin) / ratio  →  source_bin = hz_to_mel_bin(source_hz)
+///
+/// - 正值 → 共振峰上移 → 声音变细
+/// - 负值 → 共振峰下移 → 声音变粗
+fn shift_mel_formant(
+    mel: &mut [f32],
+    n_mels: usize,
+    t: usize,
+    formant_shifts: &[f32],
+    fmin: f32,
+    fmax: f32,
+) {
+    let mel_min = hz_to_mel_slaney(fmin.max(0.0));
+    let mel_max = hz_to_mel_slaney(fmax.max(fmin + 1.0));
+    let mel_range = (mel_max - mel_min).max(1e-9);
+    let n_mels_f = n_mels as f32;
+    // log 压缩后的静音值：dynamic_range_compression_ln(0) = ln(1e-9)
+    let silence = (1e-9_f32).ln();
+
+    // 临时缓冲区复用
+    let mut col_buf = vec![0.0f32; n_mels];
+
+    for frame in 0..t {
+        let shift = formant_shifts.get(frame).copied().unwrap_or(0.0);
+        if shift.abs() < 0.5 {
+            continue; // < 0.5 cents 可忽略
+        }
+
+        let ratio = 2.0f32.powf(shift / 1200.0);
+        if !ratio.is_finite() || ratio <= 0.0 {
+            continue;
+        }
+
+        // 从 mel 中提取当前帧的列
+        for m in 0..n_mels {
+            col_buf[m] = mel[m * t + frame];
+        }
+
+        // 正确的 Hz 域偏移：
+        //   mel filterbank 中心频率公式：mel_center[m] = mel_min + (m+1) * mel_range / (n_mels+1)
+        //   Hz 域：source_hz = hz_center[m] / ratio
+        //   反查 bin：src_bin_f = (hz_to_mel(source_hz) - mel_min) / mel_range * (n_mels+1) - 1
+        for m in 0..n_mels {
+            let mel_center = mel_min + (m as f32 + 1.0) * mel_range / (n_mels_f + 1.0);
+            let hz_m = mel_to_hz_slaney(mel_center);
+            let hz_src = hz_m / ratio;
+            let mel_src = hz_to_mel_slaney(hz_src.max(0.0));
+            let src_bin_f = (mel_src - mel_min) / mel_range * (n_mels_f + 1.0) - 1.0;
+
+            let i0 = src_bin_f.floor() as isize;
+            let frac = (src_bin_f - i0 as f32).clamp(0.0, 1.0);
+
+            let v = if i0 < 0 {
+                // 低于 fmin：静音填充（共振峰上移时低频端留空）
+                silence
+            } else {
+                let i0u = i0 as usize;
+                if i0u >= n_mels {
+                    // 高于 fmax：静音填充（共振峰下移时高频端留空，避免引入伪高频能量）
+                    silence
+                } else if i0u == n_mels - 1 {
+                    col_buf[i0u]
+                } else {
+                    let a = col_buf[i0u];
+                    let b = col_buf[i0u + 1];
+                    a + (b - a) * frac
+                }
+            };
+
+            mel[m * t + frame] = v;
+        }
+    }
+}
+
+// ─── Mel 时间轴线性插值 + HiFiGAN 推理（mel stretch 方案）─────────────────────
+
+/// 沿时间轴对 mel 矩阵做线性插值。
+///
+/// 输入: `mel` 为 `[n_mels * t_in]` 的行优先（n_mels 行 × t_in 列）展平数据。
+/// 输出: `[n_mels * t_out]`，同样行优先。
+///
+/// 当 `t_in == t_out` 时直接返回输入的拷贝。
+fn interpolate_mel_time(mel: &[f32], n_mels: usize, t_in: usize, t_out: usize) -> Vec<f32> {
+    if t_in == t_out {
+        return mel.to_vec();
+    }
+    if t_in == 0 || t_out == 0 {
+        return vec![0.0f32; n_mels * t_out];
+    }
+
+    let mut out = vec![0.0f32; n_mels * t_out];
+    let scale = if t_out <= 1 {
+        0.0
+    } else {
+        (t_in as f64 - 1.0) / (t_out as f64 - 1.0)
+    };
+
+    for m in 0..n_mels {
+        let src_row = m * t_in;
+        let dst_row = m * t_out;
+        for j in 0..t_out {
+            let t_src = (j as f64) * scale;
+            let i0 = t_src.floor() as usize;
+            let i1 = (i0 + 1).min(t_in - 1);
+            let frac = (t_src - i0 as f64) as f32;
+            let a = mel[src_row + i0];
+            let b = mel[src_row + i1];
+            out[dst_row + j] = a + (b - a) * frac;
+        }
+    }
+    out
+}
+
+impl NsfHifiganOnnx {
+    /// 从原始 PCM 提取 mel → 沿时间轴插值到目标长度 → 构建 F0 → 推理输出波形。
+    ///
+    /// 与 [`infer_from_audio_and_midi`] 的区别：不需要预先对 PCM 做 RubberBand 拉伸，
+    /// 而是在 mel 域完成时间拉伸，由 HiFiGAN 直接从插值后的 mel 合成波形。
+    ///
+    /// # 参数
+    /// - `audio_mono`：**源速率**的原始 PCM（未拉伸）
+    /// - `sample_rate`：PCM 采样率
+    /// - `playback_rate`：播放速率（> 1.0 快放/缩短，< 1.0 慢放/拉长）
+    /// - `start_sec`：该段在**时间轴**上的起始秒（已考虑拉伸后坐标）
+    /// - `midi_at_time`：回调，参数为时间轴绝对时间（秒），返回目标 MIDI 值
+    pub fn infer_from_audio_and_midi_mel_stretch(
+        &mut self,
+        audio_mono: &[f32],
+        sample_rate: u32,
+        playback_rate: f64,
+        start_sec: f64,
+        midi_at_time: impl Fn(f64) -> f64,
+        formant_shift_at_time: impl Fn(f64) -> f32,
+    ) -> Result<Vec<f32>, String> {
+        let model_sr = self.cfg.sampling_rate;
+
+        // 1. 重采样到模型采样率
+        let audio_owned: Vec<f32>;
+        let audio_model: &[f32] = if sample_rate == model_sr {
+            audio_mono
+        } else {
+            linear_resample_mono_into(
+                audio_mono,
+                sample_rate,
+                model_sr,
+                &mut self.audio_resample_buf,
+            );
+            audio_owned = self.audio_resample_buf.clone();
+            &audio_owned
+        };
+
+        // 2. 从原始 PCM 提取 mel [n_mels, T_orig]
+        let mel_orig = self.mel_from_audio_fast(audio_model)?;
+        let t_orig = mel_orig.len() / self.cfg.num_mels;
+        if t_orig == 0 {
+            // 拉伸后的目标 PCM 长度
+            let target_len = ((audio_mono.len() as f64) / playback_rate).round().max(0.0) as usize;
+            return Ok(vec![0.0; target_len]);
+        }
+
+        // 3. 计算拉伸后的目标帧数 T_new = T_orig / playback_rate
+        let t_new = ((t_orig as f64) / playback_rate).round().max(1.0) as usize;
+
+        // 4. mel 时间轴线性插值 [n_mels, T_orig] → [n_mels, T_new]
+        let mut mel_stretched = if (playback_rate - 1.0).abs() <= 1e-6 {
+            mel_orig
+        } else {
+            interpolate_mel_time(&mel_orig, self.cfg.num_mels, t_orig, t_new)
+        };
+
+        // 4.5 应用共振峰偏移（在 mel 域沿频率轴做线性插值）
+        let hop_sec = (self.cfg.hop_size as f64) / (model_sr.max(1) as f64);
+        let formant_shifts: Vec<f32> = (0..t_new)
+            .map(|i| {
+                let abs_t = start_sec + (i as f64) * hop_sec;
+                formant_shift_at_time(abs_t)
+            })
+            .collect();
+        let has_formant_shift = formant_shifts.iter().any(|s| s.abs() >= 0.5);
+        if has_formant_shift {
+            shift_mel_formant(&mut mel_stretched, self.cfg.num_mels, t_new, &formant_shifts, self.cfg.fmin, self.cfg.fmax);
+        }
+
+        // 5. 构建 F0 [T_new]
+        // F0 直接按时间轴坐标查询，pitch_edit / clip_midi 已与时间轴对齐
+        let mut f0 = vec![0.0f32; t_new];
+        for i in 0..t_new {
+            let abs_t = start_sec + (i as f64) * hop_sec;
+            let midi = midi_at_time(abs_t);
+            f0[i] = midi_to_hz(midi);
+        }
+
+        // 6. 分段推理（复用现有环境变量控制的段式推理逻辑）
+        let seg_frames = Self::env_usize("HIFISHIFTER_NSF_HIFIGAN_SEGMENT_FRAMES").unwrap_or(0);
+        let overlap_frames = Self::env_usize("HIFISHIFTER_NSF_HIFIGAN_OVERLAP_FRAMES").unwrap_or(8);
+
+        let y_vec: Vec<f32> = if seg_frames >= 16 && t_new > seg_frames {
+            let overlap_frames = overlap_frames.min(seg_frames.saturating_sub(1));
+            let step = seg_frames.saturating_sub(overlap_frames).max(1);
+
+            let expected_total = t_new.saturating_mul(self.cfg.hop_size).max(1);
+            let mut out = vec![0.0f32; expected_total];
+            let mut wsum = vec![0.0f32; expected_total];
+
+            let mut s = 0usize;
+            while s < t_new {
+                let end = (s + seg_frames).min(t_new);
+                let seg_t = end.saturating_sub(s).max(1);
+
+                let mut mel_seg = vec![0.0f32; self.cfg.num_mels * seg_t];
+                for m in 0..self.cfg.num_mels {
+                    let src = &mel_stretched[m * t_new + s..m * t_new + end];
+                    let dst = &mut mel_seg[m * seg_t..(m + 1) * seg_t];
+                    dst.copy_from_slice(src);
+                }
+                let f0_seg = f0[s..end].to_vec();
+
+                let y_seg = self.run_model(mel_seg, f0_seg, seg_t)?;
+                let seg_expected = seg_t.saturating_mul(self.cfg.hop_size).max(1);
+                let seg_samples = y_seg.len().min(seg_expected);
+
+                let overlap_samples = overlap_frames.saturating_mul(self.cfg.hop_size);
+                let base = s.saturating_mul(self.cfg.hop_size);
+
+                for i in 0..seg_samples {
+                    let g = base + i;
+                    if g >= out.len() {
+                        break;
+                    }
+                    let mut w = 1.0f32;
+                    if overlap_samples > 0 {
+                        if s > 0 && i < overlap_samples {
+                            w = (i as f32) / (overlap_samples as f32);
+                        }
+                        if end < t_new && seg_samples > overlap_samples {
+                            let tail = seg_samples.saturating_sub(1).saturating_sub(i);
+                            if tail < overlap_samples {
+                                let w_out = (tail as f32) / (overlap_samples as f32);
+                                w = w.min(w_out);
+                            }
+                        }
+                    }
+
+                    out[g] += y_seg[i] * w;
+                    wsum[g] += w;
+                }
+
+                if end >= t_new {
+                    break;
+                }
+                s += step;
+            }
+
+            for i in 0..out.len() {
+                let w = wsum[i];
+                if w > 1e-6 {
+                    out[i] /= w;
+                }
+            }
+            out
+        } else {
+            self.run_model(mel_stretched, f0, t_new)?
+        };
+
+        // 7. 重采样回原始采样率
+        let mut out = if model_sr == sample_rate {
+            y_vec
+        } else {
+            linear_resample_mono(&y_vec, model_sr, sample_rate)
+        };
+
+        // 8. 对齐到拉伸后的目标长度
+        let target_len = ((audio_mono.len() as f64) / playback_rate).round().max(0.0) as usize;
+        if out.len() > target_len {
+            out.truncate(target_len);
+        } else if out.len() < target_len {
+            out.resize(target_len, 0.0);
+        }
+        Ok(out)
+    }
+}
+
+/// 单次 mel stretch 推理入口（thread-local session）。
+///
+/// 参数语义与 [`infer_pitch_edit_mono`] 相似，但额外接收 `playback_rate`
+/// 并在 mel 域完成时间拉伸，省去外部 RubberBand 预处理。
+pub fn infer_pitch_edit_mono_mel_stretch(
+    audio_mono: &[f32],
+    sample_rate: u32,
+    playback_rate: f64,
+    start_sec: f64,
+    midi_at_time: impl Fn(f64) -> f64,
+    formant_shift_at_time: impl Fn(f64) -> f32,
+) -> Result<Vec<f32>, String> {
+    if let Err(e) = probe() {
+        return Err(e.clone());
+    }
+
+    TLS_SESSION.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        if opt.is_none() {
+            *opt = Some(NsfHifiganOnnx::load());
+        }
+        let sess = opt
+            .as_mut()
+            .expect("TLS_SESSION just initialized")
+            .as_mut()
+            .map_err(|e| e.clone())?;
+
+        sess.infer_from_audio_and_midi_mel_stretch(
+            audio_mono,
+            sample_rate,
+            playback_rate,
+            start_sec,
+            midi_at_time,
+            formant_shift_at_time,
+        )
+    })
+}
+
+/// 分块 mel stretch 推理：对长 clip 分块调用 [`infer_pitch_edit_mono_mel_stretch`]，
+/// 相邻块之间使用等功率 crossfade 拼接。
+pub fn infer_pitch_edit_chunked_mel_stretch(
+    mono_pcm: &[f32],
+    sample_rate: u32,
+    playback_rate: f64,
+    start_sec: f64,
+    midi_at_time: impl Fn(f64) -> f64 + Clone,
+    formant_shift_at_time: impl Fn(f64) -> f32 + Clone,
+    chunk_sec: f64,
+    overlap_sec: f64,
+) -> Result<Vec<f32>, String> {
+    if mono_pcm.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let sr = sample_rate.max(1) as f64;
+    let total_samples = mono_pcm.len();
+    // chunk_samples 基于源 PCM 长度（未拉伸）
+    let chunk_samples = ((chunk_sec * sr * playback_rate).round() as usize).max(1);
+    // overlap_samples 也基于源 PCM
+    let overlap_samples = ((overlap_sec * sr * playback_rate).round() as usize)
+        .min(chunk_samples.saturating_sub(1));
+
+    // 拉伸后的总目标长度
+    let target_total = ((total_samples as f64) / playback_rate).round().max(0.0) as usize;
+
+    // 单块情况
+    if total_samples <= chunk_samples {
+        return infer_pitch_edit_mono_mel_stretch(
+            mono_pcm,
+            sample_rate,
+            playback_rate,
+            start_sec,
+            midi_at_time,
+            formant_shift_at_time,
+        );
+    }
+
+    // 多块情况：按源 PCM 分块，每块独立做 mel stretch，然后拼接
+    let mut out = vec![0.0f32; target_total];
+    let step = chunk_samples.saturating_sub(overlap_samples).max(1);
+
+    let mut chunk_start = 0usize;
+    let mut prev_chunk_out: Option<(Vec<f32>, usize)> = None;
+
+    loop {
+        let chunk_end = (chunk_start + chunk_samples).min(total_samples);
+        let chunk_pcm = &mono_pcm[chunk_start..chunk_end];
+
+        // 该块在时间轴上的起始时间
+        let chunk_start_sec = start_sec + (chunk_start as f64) / sr / playback_rate;
+
+        let chunk_result = infer_pitch_edit_mono_mel_stretch(
+            chunk_pcm,
+            sample_rate,
+            playback_rate,
+            chunk_start_sec,
+            midi_at_time.clone(),
+            formant_shift_at_time.clone(),
+        )?;
+
+        // 该块在输出中的起始位置
+        let out_start = ((chunk_start as f64) / playback_rate).round() as usize;
+        let chunk_len = chunk_result.len();
+
+        // 重叠区域的输出样本数
+        let overlap_out_samples = ((overlap_samples as f64) / playback_rate).round() as usize;
+
+        if let Some((_prev_out, _prev_start)) = prev_chunk_out.take() {
+            // crossfade 区域
+            let xfade_len = overlap_out_samples.min(chunk_len);
+
+            for i in 0..xfade_len {
+                let t = (i as f64 + 0.5) / (xfade_len as f64).max(1.0);
+                let angle = t * std::f64::consts::FRAC_PI_2;
+                let w_curr = angle.sin() as f32;
+                let w_prev = angle.cos() as f32;
+
+                let out_idx = out_start + i;
+                if out_idx >= target_total {
+                    break;
+                }
+                let prev_val = out[out_idx];
+                let curr_val = chunk_result.get(i).copied().unwrap_or(0.0);
+                out[out_idx] = prev_val * w_prev + curr_val * w_curr;
+            }
+
+            // crossfade 之后的部分
+            for i in xfade_len..chunk_len {
+                let out_idx = out_start + i;
+                if out_idx >= target_total {
+                    break;
+                }
+                out[out_idx] = chunk_result.get(i).copied().unwrap_or(0.0);
+            }
+
+            prev_chunk_out = Some((chunk_result, out_start));
+        } else {
+            // 第一块
+            for i in 0..chunk_len {
+                let out_idx = out_start + i;
+                if out_idx >= target_total {
+                    break;
+                }
+                out[out_idx] = chunk_result.get(i).copied().unwrap_or(0.0);
+            }
+            prev_chunk_out = Some((chunk_result, out_start));
         }
 
         if chunk_end >= total_samples {

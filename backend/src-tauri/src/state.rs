@@ -18,8 +18,8 @@ fn default_frame_period_ms() -> f64 {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PitchAnalysisAlgo {
-    #[default]
     WorldDll,
+    #[default]
     NsfHifiganOnnx,
     #[serde(rename = "vslib")]
     VocalShifterVslib,
@@ -818,6 +818,7 @@ impl TimelineState {
         compose_enabled: Option<bool>,
         pitch_analysis_algo: Option<PitchAnalysisAlgo>,
         color: Option<String>,
+        name: Option<String>,
     ) {
         if let Some(t) = self.tracks.iter_mut().find(|t| t.id == track_id) {
             if let Some(v) = muted {
@@ -838,6 +839,12 @@ impl TimelineState {
             }
             if let Some(v) = color {
                 t.color = v;
+            }
+            if let Some(v) = name {
+                let trimmed = v.trim().to_string();
+                if !trimmed.is_empty() {
+                    t.name = trimmed;
+                }
             }
         }
     }

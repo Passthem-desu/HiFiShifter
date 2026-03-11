@@ -38,6 +38,7 @@ export type ActionId =
     | "clip.cut" // 剪切 clip
     | "clip.paste" // 粘贴 clip
     | "clip.split" // 分割 clip
+    | "clip.normalize" // 规格化选中 clip
     // PianoRoll 操作
     | "pianoRoll.copy" // PianoRoll 内复制参数帧
     | "pianoRoll.paste" // PianoRoll 内粘贴参数帧
@@ -84,7 +85,15 @@ export interface ActionMeta {
     /** 国际化文本的 key（用于操作名称显示） */
     labelKey: string;
     /** 分组（用于设置面板分组展示） */
-    group: "playback" | "edit" | "project" | "clip" | "pianoRoll" | "mode" | "modifier" | "quickSearch";
+    group:
+        | "playback"
+        | "edit"
+        | "project"
+        | "clip"
+        | "pianoRoll"
+        | "mode"
+        | "modifier"
+        | "quickSearch";
     /**
      * 修饰键操作类型（仅用于修饰键冲突检测）。
      * 同类型的修饰键绑定才会提示冲突，不同类型不提示。

@@ -27,7 +27,11 @@ import { getWaveformColors } from "../../theme/waveformColors";
 import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
 import type { ParamFramesPayload } from "../../types/api";
-import { snapToScale, snapToSemitone, SCALE_NOTES } from "../../utils/musicalScales";
+import {
+    snapToScale,
+    snapToSemitone,
+    SCALE_NOTES,
+} from "../../utils/musicalScales";
 import type { ScaleKey } from "../../utils/musicalScales";
 import {
     pasteReaperClipboard,
@@ -61,7 +65,10 @@ import type {
     StrokePoint,
     ValueViewport,
 } from "./pianoRoll/types";
-import { selectKeybinding, selectMergedKeybindings } from "../../features/keybindings/keybindingsSlice";
+import {
+    selectKeybinding,
+    selectMergedKeybindings,
+} from "../../features/keybindings/keybindingsSlice";
 
 import { useAsyncPitchRefresh } from "../../hooks/useAsyncPitchRefresh";
 import { ProgressBar } from "../ProgressBar";
@@ -113,7 +120,9 @@ export const PianoRollPanel: React.FC = () => {
     } | null>(null);
 
     // 右键编辑菜单状态
-    const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+    const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(
+        null,
+    );
 
     const handleOpenMidiDialog = useCallback(async () => {
         try {
@@ -248,7 +257,7 @@ export const PianoRollPanel: React.FC = () => {
 
     // 当 algo 变化时，重新抓取参数描述符
     useEffect(() => {
-        const algo = rootTrack?.pitchAnalysisAlgo ?? "world_dll";
+        const algo = rootTrack?.pitchAnalysisAlgo ?? "nsf_hifigan_onnx";
         let cancelled = false;
         paramsApi
             .getProcessorParams(algo)
@@ -349,6 +358,8 @@ export const PianoRollPanel: React.FC = () => {
                     return t("breath_gain_label");
                 case "hifigan_tension":
                     return t("hifigan_tension_label");
+                case "formant_shift_cents":
+                    return t("formant_shift_label");
                 default:
                     return param.display_name;
             }
@@ -736,8 +747,14 @@ export const PianoRollPanel: React.FC = () => {
     const midiSelArgs = useMemo(() => {
         if (!midiDialogSelection) return {};
         const fp = paramView?.framePeriodMs ?? 5;
-        const a = Math.min(midiDialogSelection.aBeat, midiDialogSelection.bBeat);
-        const b = Math.max(midiDialogSelection.aBeat, midiDialogSelection.bBeat);
+        const a = Math.min(
+            midiDialogSelection.aBeat,
+            midiDialogSelection.bBeat,
+        );
+        const b = Math.max(
+            midiDialogSelection.aBeat,
+            midiDialogSelection.bBeat,
+        );
         const sf = Math.max(0, Math.floor((a * secPerBeat * 1000) / fp));
         const fc = Math.max(1, Math.ceil(((b - a) * secPerBeat * 1000) / fp));
         return { selectionStartFrame: sf, selectionMaxFrames: fc };
@@ -834,7 +851,6 @@ export const PianoRollPanel: React.FC = () => {
                 framePeriodMs: c.framePeriodMs,
             }));
     }, [editParam, rootTrack, s.clipPitchCurves, s.clips, groupTrackIds]);
-
 
     // 检测音高曲线更新时触发重绘
     useEffect(() => {
@@ -1015,13 +1031,27 @@ export const PianoRollPanel: React.FC = () => {
             // External clipboard paste ops – work with or without selection
             if (op === "pasteReaper" || op === "pasteVocalShifter") {
                 const sel2 = selectionRef.current;
-                let selArgs: { selectionStartFrame?: number; selectionMaxFrames?: number } | undefined;
+                let selArgs:
+                    | {
+                          selectionStartFrame?: number;
+                          selectionMaxFrames?: number;
+                      }
+                    | undefined;
                 if (sel2) {
                     const a = Math.min(sel2.aBeat, sel2.bBeat);
                     const b = Math.max(sel2.aBeat, sel2.bBeat);
-                    const sf = Math.max(0, Math.floor((a * secPerBeat * 1000) / fp));
-                    const fc = Math.max(1, Math.ceil(((b - a) * secPerBeat * 1000) / fp));
-                    selArgs = { selectionStartFrame: sf, selectionMaxFrames: fc };
+                    const sf = Math.max(
+                        0,
+                        Math.floor((a * secPerBeat * 1000) / fp),
+                    );
+                    const fc = Math.max(
+                        1,
+                        Math.ceil(((b - a) * secPerBeat * 1000) / fp),
+                    );
+                    selArgs = {
+                        selectionStartFrame: sf,
+                        selectionMaxFrames: fc,
+                    };
                 }
                 if (op === "pasteReaper") {
                     void dispatch(pasteReaperClipboard(selArgs));
@@ -1049,13 +1079,18 @@ export const PianoRollPanel: React.FC = () => {
             switch (op) {
                 case "copy": {
                     const res = await paramsApi.getParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, 1,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        1,
                     );
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
                     clipboardRef.current = {
                         param: editParam,
-                        framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
+                        framePeriodMs:
+                            Number(payload.frame_period_ms ?? fp) || fp,
                         values: (payload.edit ?? []).map((v) => Number(v) || 0),
                     };
                     // 刷新剪贴板预览
@@ -1064,19 +1099,28 @@ export const PianoRollPanel: React.FC = () => {
                 }
                 case "cut": {
                     const res = await paramsApi.getParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, 1,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        1,
                     );
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
                     clipboardRef.current = {
                         param: editParam,
-                        framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
+                        framePeriodMs:
+                            Number(payload.frame_period_ms ?? fp) || fp,
                         values: (payload.edit ?? []).map((v) => Number(v) || 0),
                     };
                     invalidate();
                     // 初始化（恢复原始值）
                     await paramsApi.restoreParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1085,37 +1129,57 @@ export const PianoRollPanel: React.FC = () => {
                     const clip = clipboardRef.current;
                     if (!clip || clip.param !== editParam) return;
                     // 将剪贴板数据截断到选区帧数范围内
-                    const pasteValues = clip.values.length > frameCount
-                        ? clip.values.slice(0, frameCount)
-                        : clip.values;
+                    const pasteValues =
+                        clip.values.length > frameCount
+                            ? clip.values.slice(0, frameCount)
+                            : clip.values;
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, pasteValues, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        pasteValues,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
                 }
                 case "initialize": {
                     await paramsApi.restoreParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
                 }
                 case "average": {
                     const res = await paramsApi.getParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, 1,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        1,
                     );
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
-                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    const vals = (payload.edit ?? []).map(
+                        (v) => Number(v) || 0,
+                    );
                     if (vals.length === 0) return;
                     // pitch=0 视为未编辑，保持为0
                     const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-                    const result = editParam === "pitch"
-                        ? vals.map((v) => v === 0 ? 0 : avg)
-                        : vals.map(() => avg);
+                    const result =
+                        editParam === "pitch"
+                            ? vals.map((v) => (v === 0 ? 0 : avg))
+                            : vals.map(() => avg);
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, result, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        result,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1124,17 +1188,28 @@ export const PianoRollPanel: React.FC = () => {
                     const cents = Number(data?.cents ?? 0);
                     if (cents === 0) return;
                     const res = await paramsApi.getParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, 1,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        1,
                     );
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
-                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    const vals = (payload.edit ?? []).map(
+                        (v) => Number(v) || 0,
+                    );
                     const delta = cents / 100;
-                    const result = editParam === "pitch"
-                        ? vals.map((v) => v === 0 ? 0 : v + delta)
-                        : vals.map((v) => v + delta);
+                    const result =
+                        editParam === "pitch"
+                            ? vals.map((v) => (v === 0 ? 0 : v + delta))
+                            : vals.map((v) => v + delta);
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, result, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        result,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1144,38 +1219,70 @@ export const PianoRollPanel: React.FC = () => {
                     const scale = (data?.scale as string) ?? "chromatic";
                     if (degrees === 0) return;
                     const res = await paramsApi.getParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, 1,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        1,
                     );
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
-                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
-                    const scaleNotes = SCALE_NOTES[scale as ScaleKey] ?? SCALE_NOTES["C"];
-                    const transposed = editParam === "pitch"
-                        ? vals.map((midi) => {
-                            if (midi === 0) return 0;
-                            const semitone = Math.round(midi) % 12;
-                            const idx = scaleNotes.indexOf(semitone);
-                            if (idx >= 0) {
-                                const newIdx = idx + degrees;
-                                const octShift = Math.floor(newIdx / scaleNotes.length);
-                                const noteIdx = ((newIdx % scaleNotes.length) + scaleNotes.length) % scaleNotes.length;
-                                return Math.floor(midi / 12) * 12 + scaleNotes[noteIdx] + octShift * 12 + (midi - Math.round(midi));
-                            }
-                            return midi + degrees;
-                        })
-                        : vals.map((midi) => {
-                            const semitone = Math.round(midi) % 12;
-                            const idx = scaleNotes.indexOf(semitone);
-                            if (idx >= 0) {
-                                const newIdx = idx + degrees;
-                                const octShift = Math.floor(newIdx / scaleNotes.length);
-                                const noteIdx = ((newIdx % scaleNotes.length) + scaleNotes.length) % scaleNotes.length;
-                                return Math.floor(midi / 12) * 12 + scaleNotes[noteIdx] + octShift * 12 + (midi - Math.round(midi));
-                            }
-                            return midi + degrees;
-                        });
+                    const vals = (payload.edit ?? []).map(
+                        (v) => Number(v) || 0,
+                    );
+                    const scaleNotes =
+                        SCALE_NOTES[scale as ScaleKey] ?? SCALE_NOTES["C"];
+                    const transposed =
+                        editParam === "pitch"
+                            ? vals.map((midi) => {
+                                  if (midi === 0) return 0;
+                                  const semitone = Math.round(midi) % 12;
+                                  const idx = scaleNotes.indexOf(semitone);
+                                  if (idx >= 0) {
+                                      const newIdx = idx + degrees;
+                                      const octShift = Math.floor(
+                                          newIdx / scaleNotes.length,
+                                      );
+                                      const noteIdx =
+                                          ((newIdx % scaleNotes.length) +
+                                              scaleNotes.length) %
+                                          scaleNotes.length;
+                                      return (
+                                          Math.floor(midi / 12) * 12 +
+                                          scaleNotes[noteIdx] +
+                                          octShift * 12 +
+                                          (midi - Math.round(midi))
+                                      );
+                                  }
+                                  return midi + degrees;
+                              })
+                            : vals.map((midi) => {
+                                  const semitone = Math.round(midi) % 12;
+                                  const idx = scaleNotes.indexOf(semitone);
+                                  if (idx >= 0) {
+                                      const newIdx = idx + degrees;
+                                      const octShift = Math.floor(
+                                          newIdx / scaleNotes.length,
+                                      );
+                                      const noteIdx =
+                                          ((newIdx % scaleNotes.length) +
+                                              scaleNotes.length) %
+                                          scaleNotes.length;
+                                      return (
+                                          Math.floor(midi / 12) * 12 +
+                                          scaleNotes[noteIdx] +
+                                          octShift * 12 +
+                                          (midi - Math.round(midi))
+                                      );
+                                  }
+                                  return midi + degrees;
+                              });
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, transposed, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        transposed,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1183,8 +1290,11 @@ export const PianoRollPanel: React.FC = () => {
                 case "setPitch": {
                     const midiNote = Number(data?.midiNote ?? 60);
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame,
-                        Array.from({ length: frameCount }, () => midiNote), true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        Array.from({ length: frameCount }, () => midiNote),
+                        true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1192,7 +1302,11 @@ export const PianoRollPanel: React.FC = () => {
                 case "smooth": {
                     const strength = Number(data?.strength ?? 50) / 100;
                     const res = await paramsApi.getParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, 1,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        1,
                     );
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
@@ -1211,17 +1325,31 @@ export const PianoRollPanel: React.FC = () => {
                             let count = 0;
                             for (let j = lo; j <= hi; j++) {
                                 // pitch=0 视为未编辑，不参与平滑
-                                if (editParam === "pitch" && vals[j] === 0) continue;
+                                if (editParam === "pitch" && vals[j] === 0)
+                                    continue;
                                 sum += buf[j];
                                 count++;
                             }
-                            next[i] = (editParam === "pitch" && vals[i] === 0) ? 0 : (count > 0 ? sum / count : buf[i]);
+                            next[i] =
+                                editParam === "pitch" && vals[i] === 0
+                                    ? 0
+                                    : count > 0
+                                      ? sum / count
+                                      : buf[i];
                         }
                         buf = next;
                     }
-                    const result = vals.map((v, i) => (editParam === "pitch" && v === 0) ? 0 : v + (buf[i] - v) * strength);
+                    const result = vals.map((v, i) =>
+                        editParam === "pitch" && v === 0
+                            ? 0
+                            : v + (buf[i] - v) * strength,
+                    );
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, result, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        result,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1234,11 +1362,17 @@ export const PianoRollPanel: React.FC = () => {
                     const release = Number(data?.release ?? 50);
                     const phase = Number(data?.phase ?? 0);
                     const res = await paramsApi.getParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, 1,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        1,
                     );
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
-                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    const vals = (payload.edit ?? []).map(
+                        (v) => Number(v) || 0,
+                    );
                     const fpMs = Number(payload.frame_period_ms ?? fp) || fp;
                     const totalMs = vals.length * fpMs;
                     const attackMs = Math.min(attack, totalMs / 2);
@@ -1251,13 +1385,21 @@ export const PianoRollPanel: React.FC = () => {
                         const tMs = i * fpMs;
                         let env = 1;
                         if (tMs < attackMs) env = tMs / Math.max(1, attackMs);
-                        else if (tMs > totalMs - releaseMs) env = (totalMs - tMs) / Math.max(1, releaseMs);
+                        else if (tMs > totalMs - releaseMs)
+                            env = (totalMs - tMs) / Math.max(1, releaseMs);
                         const phaseRad = (phase * Math.PI) / 180;
-                        const vib = Math.sin(2 * Math.PI * tMs / Math.max(1, period) + phaseRad);
+                        const vib = Math.sin(
+                            (2 * Math.PI * tMs) / Math.max(1, period) +
+                                phaseRad,
+                        );
                         return v + ampFactor * env * vib;
                     });
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, result, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        result,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1266,16 +1408,35 @@ export const PianoRollPanel: React.FC = () => {
                     const unit = (data?.unit as string) ?? "semitone";
                     const scale = (data?.scale as string) ?? "chromatic";
                     const res = await paramsApi.getParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, 1,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        1,
                     );
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
-                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
-                    const quantized = unit === "semitone"
-                        ? vals.map((v) => (editParam === "pitch" && v === 0) ? 0 : snapToSemitone(v))
-                        : vals.map((v) => (editParam === "pitch" && v === 0) ? 0 : snapToScale(v, scale as ScaleKey));
+                    const vals = (payload.edit ?? []).map(
+                        (v) => Number(v) || 0,
+                    );
+                    const quantized =
+                        unit === "semitone"
+                            ? vals.map((v) =>
+                                  editParam === "pitch" && v === 0
+                                      ? 0
+                                      : snapToSemitone(v),
+                              )
+                            : vals.map((v) =>
+                                  editParam === "pitch" && v === 0
+                                      ? 0
+                                      : snapToScale(v, scale as ScaleKey),
+                              );
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, quantized, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        quantized,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1284,32 +1445,56 @@ export const PianoRollPanel: React.FC = () => {
                     const unit = (data?.unit as string) ?? "semitone";
                     const scale = (data?.scale as string) ?? "chromatic";
                     const res = await paramsApi.getParamFrames(
-                        rootTrackId, editParam, startFrame, frameCount, 1,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        frameCount,
+                        1,
                     );
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
-                    const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                    const vals = (payload.edit ?? []).map(
+                        (v) => Number(v) || 0,
+                    );
                     if (vals.length === 0) return;
                     // pitch=0 视为未编辑，不参与均值
-                    const nonZero = editParam === "pitch" ? vals.filter((v) => v !== 0) : vals;
+                    const nonZero =
+                        editParam === "pitch"
+                            ? vals.filter((v) => v !== 0)
+                            : vals;
                     if (nonZero.length === 0) return;
-                    const avg = nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
-                    const quantizedAvg = unit === "semitone"
-                        ? snapToSemitone(avg)
-                        : snapToScale(avg, scale as ScaleKey);
+                    const avg =
+                        nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
+                    const quantizedAvg =
+                        unit === "semitone"
+                            ? snapToSemitone(avg)
+                            : snapToScale(avg, scale as ScaleKey);
                     const delta = quantizedAvg - avg;
-                    const result = editParam === "pitch"
-                        ? vals.map((v) => v === 0 ? 0 : v + delta)
-                        : vals.map((v) => v + delta);
+                    const result =
+                        editParam === "pitch"
+                            ? vals.map((v) => (v === 0 ? 0 : v + delta))
+                            : vals.map((v) => v + delta);
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, result, true,
+                        rootTrackId,
+                        editParam,
+                        startFrame,
+                        result,
+                        true,
                     );
                     bumpRefreshToken();
                     break;
                 }
             }
         },
-        [rootTrackId, editParam, paramView?.framePeriodMs, secPerBeat, s.projectSec, bumpRefreshToken, invalidate],
+        [
+            rootTrackId,
+            editParam,
+            paramView?.framePeriodMs,
+            secPerBeat,
+            s.projectSec,
+            bumpRefreshToken,
+            invalidate,
+        ],
     );
 
     // Keep the ref in sync so usePianoRollInteractions can dispatch edit ops
@@ -1328,19 +1513,29 @@ export const PianoRollPanel: React.FC = () => {
     }, [handleEditOp]);
 
     // Dispatch helper: context menu dialog ops → open MenuBar dialogs
-    const openEditDialog = useCallback((dialog: string) => {
-        // 为颤音对话框附带当前参数范围信息
-        let paramRange: { min: number; max: number } | undefined;
-        if (dialog === "addVibrato") {
-            const desc = processorParamsRef.current.find((d) => d.id === editParam);
-            if (desc?.kind.type === "automation_curve") {
-                paramRange = { min: desc.kind.min_value, max: desc.kind.max_value };
+    const openEditDialog = useCallback(
+        (dialog: string) => {
+            // 为颤音对话框附带当前参数范围信息
+            let paramRange: { min: number; max: number } | undefined;
+            if (dialog === "addVibrato") {
+                const desc = processorParamsRef.current.find(
+                    (d) => d.id === editParam,
+                );
+                if (desc?.kind.type === "automation_curve") {
+                    paramRange = {
+                        min: desc.kind.min_value,
+                        max: desc.kind.max_value,
+                    };
+                }
             }
-        }
-        window.dispatchEvent(
-            new CustomEvent("hifi:openEditDialog", { detail: { dialog, paramRange } }),
-        );
-    }, [editParam]);
+            window.dispatchEvent(
+                new CustomEvent("hifi:openEditDialog", {
+                    detail: { dialog, paramRange },
+                }),
+            );
+        },
+        [editParam],
+    );
 
     // Pitch Snap 设置弹窗状态
     const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
@@ -1493,7 +1688,7 @@ export const PianoRollPanel: React.FC = () => {
                         ))}
                     </Flex>
 
-                    {editParam === "pitch" && rootTrack ? (
+                    {rootTrack ? (
                         <Flex align="center" gap="2">
                             <Text size="1" color="gray">
                                 {t("algo_label")}
@@ -1507,7 +1702,7 @@ export const PianoRollPanel: React.FC = () => {
                                         "none",
                                     ].includes(rootTrack.pitchAnalysisAlgo)
                                         ? rootTrack.pitchAnalysisAlgo
-                                        : "world_dll"
+                                        : "nsf_hifigan_onnx"
                                 }
                                 onValueChange={(v) => {
                                     if (!rootTrackId) return;
@@ -1582,17 +1777,21 @@ export const PianoRollPanel: React.FC = () => {
                                     </Flex>
                                 );
                             })}
-                            <Button
-                                size="1"
-                                variant="soft"
-                                color="blue"
-                                onClick={handleOpenMidiDialog}
-                                disabled={!pitchEnabled}
-                                style={{ cursor: "pointer" }}
-                                title={pitchHardDisableReason ?? undefined}
-                            >
-                                {(t as (key: string) => string)("midi_import")}
-                            </Button>
+                            {editParam === "pitch" ? (
+                                <Button
+                                    size="1"
+                                    variant="soft"
+                                    color="blue"
+                                    onClick={handleOpenMidiDialog}
+                                    disabled={!pitchEnabled}
+                                    style={{ cursor: "pointer" }}
+                                    title={pitchHardDisableReason ?? undefined}
+                                >
+                                    {(t as (key: string) => string)(
+                                        "midi_import",
+                                    )}
+                                </Button>
+                            ) : null}
                         </Flex>
                     ) : null}
                 </Flex>
@@ -1790,7 +1989,9 @@ export const PianoRollPanel: React.FC = () => {
                     onDeselect={() => void handleEditOp("deselect")}
                     onInitialize={() => void handleEditOp("initialize")}
                     onTransposeCents={() => openEditDialog("transposeCents")}
-                    onTransposeDegrees={() => openEditDialog("transposeDegrees")}
+                    onTransposeDegrees={() =>
+                        openEditDialog("transposeDegrees")
+                    }
                     onSetPitch={() => openEditDialog("setPitch")}
                     onAverage={() => void handleEditOp("average")}
                     onSmooth={() => openEditDialog("smooth")}

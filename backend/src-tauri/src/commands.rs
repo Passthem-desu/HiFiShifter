@@ -258,6 +258,7 @@ pub fn set_track_state(
     compose_enabled: Option<bool>,
     pitch_analysis_algo: Option<String>,
     color: Option<String>,
+    name: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     timeline::set_track_state(
         state,
@@ -268,6 +269,7 @@ pub fn set_track_state(
         compose_enabled,
         pitch_analysis_algo,
         color,
+        name,
     )
 }
 
