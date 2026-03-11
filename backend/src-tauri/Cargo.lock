@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "HiFiShifter"
-version = "1.0.2-beta.1"
+version = "1.0.2-beta.2"
 dependencies = [
  "arc-swap",
  "base64 0.22.1",
