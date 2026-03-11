@@ -29,10 +29,8 @@ import {
     setGrid,
     toggleAutoCrossfade,
     toggleGridSnap,
-    togglePitchSnap,
     togglePlayheadZoom,
     toggleAutoScroll,
-    toggleClipboardPreview,
     persistUiSettings,
 } from "../../features/session/sessionSlice";
 import { toggleVisible } from "../../features/fileBrowser/fileBrowserSlice";
@@ -306,24 +304,6 @@ onClick={() => dispatch(playOriginal())}
                     </svg>
                 </IconButton>
 
-                {/* Pitch Snap */}
-                <IconButton
-                    size="1"
-                    variant={s.pitchSnapEnabled ? "solid" : "ghost"}
-                    color="gray"
-                    title={tAny("pitch_snap")}
-                    tabIndex={-1}
-                    onClick={() => { dispatch(togglePitchSnap()); void dispatch(persistUiSettings()); }}
-                    onContextMenu={(e) => {
-                        e.preventDefault();
-                        setPitchSnapOpen(true);
-                    }}
-                >
-                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M10 2V10.5C10 11.88 8.88 13 7.5 13C6.12 13 5 11.88 5 10.5C5 9.12 6.12 8 7.5 8C8.16 8 8.77 8.26 9.22 8.68" stroke="currentColor" strokeWidth="1.2" fill="none"/>
-                        <path d="M3 4.5H7M3 7.5H6" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
-                    </svg>
-                </IconButton>
 
                 {/* Playhead Zoom */}
                 <IconButton
@@ -360,21 +340,6 @@ onClick={() => dispatch(playOriginal())}
                     </svg>
                 </IconButton>
 
-                {/* Clipboard Preview */}
-                <IconButton
-                    size="1"
-                    variant={s.showClipboardPreview ? "solid" : "ghost"}
-                    color="gray"
-                    title={tAny("clipboard_preview")}
-                    tabIndex={-1}
-                    onClick={() => { dispatch(toggleClipboardPreview()); void dispatch(persistUiSettings()); }}
-                >
-                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="3" y="1" width="9" height="13" rx="1" stroke="currentColor" strokeWidth="1" fill="none"/>
-                        <path d="M5.5 1V2.5H9.5V1" stroke="currentColor" strokeWidth="0.8"/>
-                        <path d="M5 6L7 8L10 5" stroke="currentColor" strokeWidth="1.2" opacity="0.7"/>
-                    </svg>
-                </IconButton>
             </Flex>
 
             {/* Pitch Snap Settings Dialog */}

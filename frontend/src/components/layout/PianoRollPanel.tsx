@@ -1,4 +1,5 @@
-﻿import React, {
+﻿import { PitchSnapSettingsDialog } from "./PitchSnapSettingsDialog";
+import React, {
     type CSSProperties,
     useCallback,
     useEffect,
@@ -16,6 +17,9 @@ import { useI18n } from "../../i18n/I18nProvider";
 import {
     setEditParam,
     setTrackStateRemote,
+    togglePitchSnap,
+    toggleClipboardPreview,
+    persistUiSettings,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
 import { useAppTheme } from "../../theme/AppThemeProvider";
@@ -72,6 +76,7 @@ export const PianoRollPanel: React.FC = () => {
     const { t } = useI18n();
     const s = useAppSelector((state: RootState) => state.session);
     const editParam = s.editParam as ParamName;
+    // pitchSnapOpen 已在顶部工具栏 JSX 内声明和使用，无需重复声明
     const pianoRollCopyKb = useAppSelector((state) =>
         selectKeybinding(state, "pianoRoll.copy"),
     );
@@ -1337,6 +1342,9 @@ export const PianoRollPanel: React.FC = () => {
         );
     }, [editParam]);
 
+    // Pitch Snap 设置弹窗状态
+    const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
+
     return (
         <Flex
             direction="column"
@@ -1348,9 +1356,52 @@ export const PianoRollPanel: React.FC = () => {
                 justify="between"
                 className="h-8 bg-qt-base border-b border-qt-border px-2 shrink-0"
             >
-                <Text size="1" weight="bold" color="gray">
-                    {t("param_editor")}
-                </Text>
+
+                <Flex align="center" gap="2">
+                    <Text size="1" weight="bold" color="gray">
+                        {t("param_editor")}
+                    </Text>
+                    {/* 音高吸附和剪贴板预览按钮，紧邻 param_editor 右侧，留 8px 空白 */}
+                    <Flex gap="1" align="center" style={{ marginLeft: 8 }}>
+                        <IconButton
+                            size="1"
+                            variant={s.pitchSnapEnabled ? "solid" : "ghost"}
+                            color="gray"
+                            title={t("pitch_snap")}
+                            tabIndex={-1}
+                            onClick={() => { dispatch(togglePitchSnap()); void dispatch(persistUiSettings()); }}
+                            onContextMenu={(e) => {
+                                e.preventDefault();
+                                setPitchSnapOpen(true);
+                            }}
+                        >
+                            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M10 2V10.5C10 11.88 8.88 13 7.5 13C6.12 13 5 11.88 5 10.5C5 9.12 6.12 8 7.5 8C8.16 8 8.77 8.26 9.22 8.68" stroke="currentColor" strokeWidth="1.2" fill="none"/>
+                                <path d="M3 4.5H7M3 7.5H6" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
+                            </svg>
+                        </IconButton>
+                        <IconButton
+                            size="1"
+                            variant={s.showClipboardPreview ? "solid" : "ghost"}
+                            color="gray"
+                            title={t("clipboard_preview")}
+                            tabIndex={-1}
+                            onClick={() => { dispatch(toggleClipboardPreview()); void dispatch(persistUiSettings()); }}
+                        >
+                            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="3" y="1" width="9" height="13" rx="1" stroke="currentColor" strokeWidth="1" fill="none"/>
+                                <path d="M5.5 1V2.5H9.5V1" stroke="currentColor" strokeWidth="0.8"/>
+                                <path d="M5 6L7 8L10 5" stroke="currentColor" strokeWidth="1.2" opacity="0.7"/>
+                            </svg>
+                        </IconButton>
+                    </Flex>
+                </Flex>
+
+                {/* Pitch Snap 设置弹窗 */}
+                <PitchSnapSettingsDialog
+                    open={pitchSnapOpen}
+                    onOpenChange={setPitchSnapOpen}
+                />
 
                 <Flex gap="2" align="center">
                     <Flex gap="1" align="center">
