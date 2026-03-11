@@ -1,6 +1,9 @@
 /**
  * Musical scale key signatures for pitch snap feature.
- * Each entry: [keyName, localizedLabelKey]
+ * SCALE_KEYS: key name (e.g. "C", "Db", ...)
+ * SCALE_LABELS: human-readable label (e.g. "C / Am", "D♭ / B♭m")
+ *
+ * Note: SCALE_LABELS 不是 i18n key，而是直接用于显示的本地化友好标签。
  */
 export const SCALE_KEYS = [
     "C",
@@ -20,7 +23,7 @@ export const SCALE_KEYS = [
 export type ScaleKey = (typeof SCALE_KEYS)[number];
 
 /**
- * i18n label keys for each scale (major/minor pair).
+ * Human-readable label for each scale (major/minor pair).
  * e.g. "C" => "C / Am"
  */
 export const SCALE_LABELS: Record<ScaleKey, string> = {

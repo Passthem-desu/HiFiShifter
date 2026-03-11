@@ -101,6 +101,11 @@ export const PianoRollPanel: React.FC = () => {
     // MIDI 导入弹窗状态
     const [midiDialogOpen, setMidiDialogOpen] = useState(false);
     const [midiPath, setMidiPath] = useState<string | null>(null);
+    // 记录打开弹窗时的选区（拍数），用于后续计算帧偏移
+    const [midiDialogSelection, setMidiDialogSelection] = useState<{
+        aBeat: number;
+        bBeat: number;
+    } | null>(null);
 
     // 右键编辑菜单状态
     const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
@@ -109,6 +114,9 @@ export const PianoRollPanel: React.FC = () => {
         try {
             const res = await coreApi.openMidiDialog();
             if (res.ok && !res.canceled && res.path) {
+                // 快照当前选区（拍为单位）
+                const sel = selectionRef.current;
+                setMidiDialogSelection(sel ? { ...sel } : null);
                 setMidiPath(res.path);
                 setMidiDialogOpen(true);
             }
@@ -719,6 +727,17 @@ export const PianoRollPanel: React.FC = () => {
         [refreshNow],
     );
 
+    // 计算 MIDI 导入的选区帧约束（与 pasteReaper 逻辑一致）
+    const midiSelArgs = useMemo(() => {
+        if (!midiDialogSelection) return {};
+        const fp = paramView?.framePeriodMs ?? 5;
+        const a = Math.min(midiDialogSelection.aBeat, midiDialogSelection.bBeat);
+        const b = Math.max(midiDialogSelection.aBeat, midiDialogSelection.bBeat);
+        const sf = Math.max(0, Math.floor((a * secPerBeat * 1000) / fp));
+        const fc = Math.max(1, Math.ceil(((b - a) * secPerBeat * 1000) / fp));
+        return { selectionStartFrame: sf, selectionMaxFrames: fc };
+    }, [midiDialogSelection, paramView?.framePeriodMs, secPerBeat]);
+
     // 获取当前 track 下的所�?clips，用�?per-clip 波形叠加绘制
     // 获取轨道组内所有 clips（包含 root 轨道及所有子轨道的 clip）
     const trackClips = useMemo(
@@ -1085,9 +1104,13 @@ export const PianoRollPanel: React.FC = () => {
                     const payload = res as ParamFramesPayload;
                     const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
                     if (vals.length === 0) return;
+                    // pitch=0 视为未编辑，保持为0
                     const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                    const result = editParam === "pitch"
+                        ? vals.map((v) => v === 0 ? 0 : avg)
+                        : vals.map(() => avg);
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, vals.map(() => avg), true,
+                        rootTrackId, editParam, startFrame, result, true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1102,8 +1125,11 @@ export const PianoRollPanel: React.FC = () => {
                     const payload = res as ParamFramesPayload;
                     const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
                     const delta = cents / 100;
+                    const result = editParam === "pitch"
+                        ? vals.map((v) => v === 0 ? 0 : v + delta)
+                        : vals.map((v) => v + delta);
                     await paramsApi.setParamFrames(
-                        rootTrackId, editParam, startFrame, vals.map((v) => v + delta), true,
+                        rootTrackId, editParam, startFrame, result, true,
                     );
                     bumpRefreshToken();
                     break;
@@ -1119,17 +1145,30 @@ export const PianoRollPanel: React.FC = () => {
                     const payload = res as ParamFramesPayload;
                     const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
                     const scaleNotes = SCALE_NOTES[scale as ScaleKey] ?? SCALE_NOTES["C"];
-                    const transposed = vals.map((midi) => {
-                        const semitone = Math.round(midi) % 12;
-                        const idx = scaleNotes.indexOf(semitone);
-                        if (idx >= 0) {
-                            const newIdx = idx + degrees;
-                            const octShift = Math.floor(newIdx / scaleNotes.length);
-                            const noteIdx = ((newIdx % scaleNotes.length) + scaleNotes.length) % scaleNotes.length;
-                            return Math.floor(midi / 12) * 12 + scaleNotes[noteIdx] + octShift * 12 + (midi - Math.round(midi));
-                        }
-                        return midi + degrees;
-                    });
+                    const transposed = editParam === "pitch"
+                        ? vals.map((midi) => {
+                            if (midi === 0) return 0;
+                            const semitone = Math.round(midi) % 12;
+                            const idx = scaleNotes.indexOf(semitone);
+                            if (idx >= 0) {
+                                const newIdx = idx + degrees;
+                                const octShift = Math.floor(newIdx / scaleNotes.length);
+                                const noteIdx = ((newIdx % scaleNotes.length) + scaleNotes.length) % scaleNotes.length;
+                                return Math.floor(midi / 12) * 12 + scaleNotes[noteIdx] + octShift * 12 + (midi - Math.round(midi));
+                            }
+                            return midi + degrees;
+                        })
+                        : vals.map((midi) => {
+                            const semitone = Math.round(midi) % 12;
+                            const idx = scaleNotes.indexOf(semitone);
+                            if (idx >= 0) {
+                                const newIdx = idx + degrees;
+                                const octShift = Math.floor(newIdx / scaleNotes.length);
+                                const noteIdx = ((newIdx % scaleNotes.length) + scaleNotes.length) % scaleNotes.length;
+                                return Math.floor(midi / 12) * 12 + scaleNotes[noteIdx] + octShift * 12 + (midi - Math.round(midi));
+                            }
+                            return midi + degrees;
+                        });
                     await paramsApi.setParamFrames(
                         rootTrackId, editParam, startFrame, transposed, true,
                     );
@@ -1164,12 +1203,18 @@ export const PianoRollPanel: React.FC = () => {
                             const lo = Math.max(0, i - radius);
                             const hi = Math.min(buf.length - 1, i + radius);
                             let sum = 0;
-                            for (let j = lo; j <= hi; j++) sum += buf[j];
-                            next[i] = sum / (hi - lo + 1);
+                            let count = 0;
+                            for (let j = lo; j <= hi; j++) {
+                                // pitch=0 视为未编辑，不参与平滑
+                                if (editParam === "pitch" && vals[j] === 0) continue;
+                                sum += buf[j];
+                                count++;
+                            }
+                            next[i] = (editParam === "pitch" && vals[i] === 0) ? 0 : (count > 0 ? sum / count : buf[i]);
                         }
                         buf = next;
                     }
-                    const result = vals.map((v, i) => v + (buf[i] - v) * strength);
+                    const result = vals.map((v, i) => (editParam === "pitch" && v === 0) ? 0 : v + (buf[i] - v) * strength);
                     await paramsApi.setParamFrames(
                         rootTrackId, editParam, startFrame, result, true,
                     );
@@ -1222,8 +1267,8 @@ export const PianoRollPanel: React.FC = () => {
                     const payload = res as ParamFramesPayload;
                     const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
                     const quantized = unit === "semitone"
-                        ? vals.map((v) => snapToSemitone(v))
-                        : vals.map((v) => snapToScale(v, scale as ScaleKey));
+                        ? vals.map((v) => (editParam === "pitch" && v === 0) ? 0 : snapToSemitone(v))
+                        : vals.map((v) => (editParam === "pitch" && v === 0) ? 0 : snapToScale(v, scale as ScaleKey));
                     await paramsApi.setParamFrames(
                         rootTrackId, editParam, startFrame, quantized, true,
                     );
@@ -1240,13 +1285,17 @@ export const PianoRollPanel: React.FC = () => {
                     const payload = res as ParamFramesPayload;
                     const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
                     if (vals.length === 0) return;
-                    // Compute mean, quantize that mean, then shift all values by the delta
-                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                    // pitch=0 视为未编辑，不参与均值
+                    const nonZero = editParam === "pitch" ? vals.filter((v) => v !== 0) : vals;
+                    if (nonZero.length === 0) return;
+                    const avg = nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
                     const quantizedAvg = unit === "semitone"
                         ? snapToSemitone(avg)
                         : snapToScale(avg, scale as ScaleKey);
                     const delta = quantizedAvg - avg;
-                    const result = vals.map((v) => v + delta);
+                    const result = editParam === "pitch"
+                        ? vals.map((v) => v === 0 ? 0 : v + delta)
+                        : vals.map((v) => v + delta);
                     await paramsApi.setParamFrames(
                         rootTrackId, editParam, startFrame, result, true,
                     );
@@ -1674,7 +1723,8 @@ export const PianoRollPanel: React.FC = () => {
                 open={midiDialogOpen}
                 onOpenChange={setMidiDialogOpen}
                 midiPath={midiPath}
-                offsetSec={s.playheadSec}
+                selectionStartFrame={midiSelArgs.selectionStartFrame}
+                selectionMaxFrames={midiSelArgs.selectionMaxFrames}
                 onImported={handleMidiImported}
             />
             {ctxMenu && s.toolMode === "select" && (

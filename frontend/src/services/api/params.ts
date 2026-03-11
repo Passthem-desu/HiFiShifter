@@ -114,12 +114,13 @@ export const paramsApi = {
     importMidiToPitch: (
         midiPath: string,
         trackIndex?: number,
-        offsetSec?: number,
+        selectionStartFrame?: number,
+        selectionMaxFrames?: number,
     ) =>
         invoke<{
             ok: boolean;
             error?: string;
             notes_imported?: number;
             frames_touched?: number;
-        }>("import_midi_to_pitch", midiPath, trackIndex, offsetSec),
+        }>("import_midi_to_pitch", midiPath, trackIndex, selectionStartFrame, selectionMaxFrames),
 };

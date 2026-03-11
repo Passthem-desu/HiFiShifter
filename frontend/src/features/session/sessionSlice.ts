@@ -1472,7 +1472,7 @@ const sessionSlice = createSlice({
                 state.lastResult = action.payload;
                 const payload = action.payload as { ok?: boolean; restoreAnchor?: boolean };
                 // If restoreAnchor is set (Play/Stop action), restore playhead to anchor position
-                if (payload.restoreAnchor && state.playbackAnchorSec > 0) {
+                if (payload.restoreAnchor && state.playbackAnchorSec !== undefined && state.playbackAnchorSec !== null) {
                     state.playheadSec = state.playbackAnchorSec;
                 }
                 state.runtime.isPlaying = false;

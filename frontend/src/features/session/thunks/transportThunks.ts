@@ -18,7 +18,7 @@ export const stopAudioPlayback = createAsyncThunk(
         const anchorSec = state.session.playbackAnchorSec;
         const result = await webApi.stopAudio();
         // If restoreAnchor, sync backend transport to the anchor position
-        if (restoreAnchor && anchorSec > 0) {
+        if (restoreAnchor && anchorSec !== undefined && anchorSec !== null) {
             await webApi.setTransport({ playheadSec: anchorSec });
         }
         return { ...result, restoreAnchor };

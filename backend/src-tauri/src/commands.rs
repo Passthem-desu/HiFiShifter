@@ -640,9 +640,10 @@ pub fn import_midi_to_pitch(
     state: State<'_, AppState>,
     midi_path: String,
     track_index: Option<usize>,
-    offset_sec: Option<f64>,
+    selection_start_frame: Option<usize>,
+    selection_max_frames: Option<usize>,
 ) -> serde_json::Value {
-    midi::import_midi_to_pitch(state.inner(), midi_path, track_index, offset_sec)
+    midi::import_midi_to_pitch(state.inner(), midi_path, track_index, selection_start_frame, selection_max_frames)
 }
 
 // ===================== ui_settings =====================
