@@ -44,12 +44,11 @@ export type ActionId =
     | "pianoRoll.shiftParamUp" // 选中 clip 参数线整体上移
     | "pianoRoll.shiftParamDown" // 选中 clip 参数线整体下移
     // 模式切换
-    | "mode.toggle" // 切换选区/编辑模式
+    | "mode.toggle" // 模式切换（正向）
+    | "mode.toggleReverse" // 模式切换（反向）
     | "mode.selectTool" // 切换到选择工具
     | "mode.drawTool" // 切换到绘制工具
     | "mode.lineTool" // 切换到直线工具
-    | "mode.cycleTool" // 正顺序切换工具
-    | "mode.cycleToolReverse" // 逆顺序切换工具
     // 修饰键行为
     | "modifier.clipSlipEdit" // 拖动 clip 时进入 slip edit
     | "modifier.clipStretch" // clip 边缘拖动时从 trim 变为 stretch

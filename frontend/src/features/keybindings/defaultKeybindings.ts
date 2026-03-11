@@ -8,11 +8,10 @@ import type { ActionId, ActionMeta, KeybindingMap } from "./types";
 export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     // 模式切换
     "mode.toggle": { key: "tab" },
+    "mode.toggleReverse": { key: "tab", shift: true },
     "mode.selectTool": { key: "f7" },
     "mode.drawTool": { key: "f8" },
     "mode.lineTool": { key: "f9" },
-    "mode.cycleTool": { key: "d" },
-    "mode.cycleToolReverse": { key: "d", ctrl: true },
 
     // 播放控制
     "playback.toggle": { key: "space" },
@@ -82,11 +81,10 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
  */
 export const ACTION_META: Record<ActionId, ActionMeta> = {
     "mode.toggle": { labelKey: "kb_mode_toggle", group: "mode" },
+    "mode.toggleReverse": { labelKey: "kb_mode_toggle_reverse", group: "mode" },
     "mode.selectTool": { labelKey: "kb_mode_select_tool", group: "mode" },
     "mode.drawTool": { labelKey: "kb_mode_draw_tool", group: "mode" },
     "mode.lineTool": { labelKey: "kb_mode_line_tool", group: "mode" },
-    "mode.cycleTool": { labelKey: "kb_mode_cycle_tool", group: "mode" },
-    "mode.cycleToolReverse": { labelKey: "kb_mode_cycle_tool_reverse", group: "mode" },
 
     "playback.toggle": { labelKey: "kb_playback_toggle", group: "playback" },
     "playback.stop": { labelKey: "kb_playback_stop", group: "playback" },

@@ -126,14 +126,14 @@ cargo tauri dev
 | 纵向缩放（轨道高度，时间轴） | Ctrl + 鼠标滚轮                 |
 | 纵向缩放（参数轴，参数面板） | Ctrl + 鼠标滚轮（参数面板内）   |
 | 播放/暂停                    | Space（空格）                   |
-| 播放/停止 | Enter                          |
-| 撤销 / 重做                  | Ctrl + Z / Ctrl + Y             |
+| 播放/停止                    | Enter                          |
+| 撤销/重做                    | Ctrl + Z / Ctrl + Y             |
 | 新建工程                     | Ctrl + N                        |
 | 打开工程                     | Ctrl + Shift + O                |
 | 保存                         | Ctrl + S                        |
 | 另存为                       | Ctrl + Shift + S                |
 | 导出音频                     | Ctrl + E                        |
-| 切换模式（编辑/选区）        | Tab                             |
+| 模式切换（选择/绘制/直线）    | Tab  /  Shift + Tab             |
 | 删除选中剪辑                 | Delete / Backspace              |
 | 复制选中剪辑（应用内剪贴板） | Ctrl + C                        |
 | 粘贴到播放头位置             | Ctrl + V                        |

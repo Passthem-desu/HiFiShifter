@@ -593,15 +593,20 @@ function AppInner() {
                         await dispatch(exportAudio(curPath));
                     })();
                     break;
-                case "mode.toggle":
-                    dispatch(
-                        setToolMode(
-                            runtimeRef.current.toolMode === "draw"
-                                ? "select"
-                                : "draw",
-                        ),
-                    );
+                case "mode.toggle": {
+                    const cur = runtimeRef.current.toolMode;
+                    const order: Array<"select" | "draw" | "line"> = ["select", "draw", "line"];
+                    const idx = order.indexOf(cur as "select" | "draw" | "line");
+                    dispatch(setToolMode(order[(idx + 1) % order.length]));
                     break;
+                }
+                case "mode.toggleReverse": {
+                    const cur2 = runtimeRef.current.toolMode;
+                    const order2: Array<"select" | "draw" | "line"> = ["select", "draw", "line"];
+                    const idx2 = order2.indexOf(cur2 as "select" | "draw" | "line");
+                    dispatch(setToolMode(order2[(idx2 - 1 + order2.length) % order2.length]));
+                    break;
+                }
                 case "mode.selectTool":
                     dispatch(setToolMode("select"));
                     break;
@@ -611,20 +616,6 @@ function AppInner() {
                 case "mode.lineTool":
                     dispatch(setToolMode("line"));
                     break;
-                case "mode.cycleTool": {
-                    const cur = runtimeRef.current.toolMode;
-                    const order: Array<"select" | "draw" | "line"> = ["select", "draw", "line"];
-                    const idx = order.indexOf(cur as "select" | "draw" | "line");
-                    dispatch(setToolMode(order[(idx + 1) % order.length]));
-                    break;
-                }
-                case "mode.cycleToolReverse": {
-                    const cur2 = runtimeRef.current.toolMode;
-                    const order2: Array<"select" | "draw" | "line"> = ["select", "draw", "line"];
-                    const idx2 = order2.indexOf(cur2 as "select" | "draw" | "line");
-                    dispatch(setToolMode(order2[(idx2 - 1 + order2.length) % order2.length]));
-                    break;
-                }
                 case "quickSearch.open":
                     setQuickSearchOpen(true);
                     break;
