@@ -457,7 +457,7 @@ export function usePianoRollInteractions(args: {
                 e.preventDefault();
                 // 实现参数值轴的平移（center 上下移动）
                 const h = Math.max(1, el.clientHeight);
-                const delta = (e.deltaY / h) * 0.5; // 平移幅度可调
+                const delta = (-e.deltaY / h) * 0.5;
                 if (editParam === "pitch") {
                     const cur = pitchViewRef.current;
                     const next = clampViewport("pitch", {
