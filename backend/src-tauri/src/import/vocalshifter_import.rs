@@ -82,7 +82,17 @@ struct VspItemExt {
 #[derive(Debug, Clone, Copy)]
 struct VspPitchPoint {
     disabled: bool,
-    pitch: i16,
+    original_pitch: i16, // *PIT (offset 20)
+    pitch: i16,          // PIT (offset 22)
+    formant: i16,        // FRM (offset 24)
+    bre: i16,            // BRE (offset 26)
+    eq1: i16,            // EQ1 (offset 28)
+    eq2: i16,            // EQ2 (offset 30)
+    dyn_orig: f64,       // *DYN (offset 32)
+    dyn_edit: f64,       // DYN (offset 40)
+    vol: f64,            // VOL (offset 48)
+    pan: f64,            // PAN (offset 56)
+    heq_or_mrp: i16,     // HEQ/MRP (offset 82)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -103,6 +113,18 @@ struct PitchFrameAccumulator {
     sum: f64,
     weight: f64,
     disabled_weight: f64,
+}
+
+/// 累积器：用于收集 vslib 额外曲线帧数据（加权平均）。
+#[derive(Default, Clone, Copy)]
+struct ExtraCurveAccumulator {
+    formant_shift_sum: f64,
+    vol_sum: f64,
+    dyn_orig_sum: f64,
+    dyn_edit_sum: f64,
+    pan_sum: f64,
+    breathiness_sum: f64,
+    weight: f64,
 }
 
 // ─── 系统编码检测 ───
@@ -376,7 +398,17 @@ fn parse_itmp_ext(data: &[u8]) -> VspItemExt {
 fn parse_ctrp(data: &[u8]) -> VspPitchPoint {
     VspPitchPoint {
         disabled: read_i16_at(data, 18).unwrap_or(0) != 0,
+        original_pitch: read_i16_at(data, 20).unwrap_or(0),
         pitch: read_i16_at(data, 22).unwrap_or(0),
+        formant: read_i16_at(data, 24).unwrap_or(0),
+        bre: read_i16_at(data, 26).unwrap_or(0),
+        eq1: read_i16_at(data, 28).unwrap_or(0),
+        eq2: read_i16_at(data, 30).unwrap_or(0),
+        dyn_orig: read_f64_at(data, 32).unwrap_or(1.0),
+        dyn_edit: read_f64_at(data, 40).unwrap_or(1.0),
+        vol: read_f64_at(data, 48).unwrap_or(1.0),
+        pan: read_f64_at(data, 56).unwrap_or(0.0),
+        heq_or_mrp: read_i16_at(data, 82).unwrap_or(0),
     }
 }
 
@@ -384,6 +416,50 @@ fn parse_time_marker(data: &[u8]) -> VspTimeMarker {
     VspTimeMarker {
         original_pos: read_f64_at(data, 0).unwrap_or(0.0),
         new_pos: read_f64_at(data, 8).unwrap_or(0.0),
+    }
+}
+
+// ─── 算法映射 ───
+
+/// 将 VocalShifter algo_type 映射为 (is_world, synth_mode)。
+///
+/// - M=0 → vslib SYNTHMODE_M (单音)
+/// - V=1 → vslib SYNTHMODE_MF (单音+共振峰补正)
+/// - P=2 → vslib SYNTHMODE_P (和音)
+/// - R=4 → vslib SYNTHMODE_M (打击乐→暂无对应，回退到单音)
+/// - World=8 → WorldDll
+/// - 其他 → V 算法 → vslib SYNTHMODE_MF
+fn algo_type_to_hs(algo_type: i16) -> (bool, i32) {
+    match algo_type {
+        0 => (false, 0), // M → SYNTHMODE_M
+        1 => (false, 1), // V → SYNTHMODE_MF
+        2 => (false, 2), // P → SYNTHMODE_P
+        4 => (false, 0), // R → SYNTHMODE_M（暂无对应）
+        8 => (true, 0),  // World
+        _ => (false, 1), // 默认 V → SYNTHMODE_MF
+    }
+}
+
+/// 判断 algo_type 是否为 World 算法。
+fn is_world_algo(algo_type: i16) -> bool {
+    algo_type_to_hs(algo_type).0
+}
+
+/// 获取 algo_type 对应的 vslib synth_mode。
+fn algo_synth_mode(algo_type: i16) -> i32 {
+    algo_type_to_hs(algo_type).1
+}
+
+/// 根据 (is_world, synth_mode) 对返回轨道名称后缀。
+fn algo_pair_suffix(is_world: bool, synth_mode: i32) -> &'static str {
+    if is_world {
+        " (World)"
+    } else {
+        match synth_mode {
+            0 => " (VsLib-M)",
+            2 => " (VsLib-P)",
+            _ => " (VsLib-V)",
+        }
     }
 }
 
@@ -432,21 +508,21 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
 
     // ─── 第一步：创建轨道映射 ───
     // 检测每个原始轨道内是否存在混合算法，需要拆分
-    // key: (original_track_index, is_world_algo) → new_track_id
-    let mut track_algo_map: std::collections::HashMap<(i32, bool), String> =
+    // key: (original_track_index, is_world, synth_mode) → new_track_id
+    let mut track_algo_map: std::collections::HashMap<(i32, bool, i32), String> =
         std::collections::HashMap::new();
     let mut hs_tracks: Vec<Track> = Vec::new();
     let mut track_order: i32 = 0;
 
-    // 统计每个原始轨道内使用的算法
-    let mut track_algos: std::collections::HashMap<i32, std::collections::HashSet<bool>> =
+    // 统计每个原始轨道内使用的算法（按 (is_world, synth_mode) 对区分）
+    let mut track_algos: std::collections::HashMap<i32, std::collections::HashSet<(bool, i32)>> =
         std::collections::HashMap::new();
     for (i, base) in item_bases.iter().enumerate() {
-        let is_world = item_exts.get(i).map(|e| e.algo_type == 8).unwrap_or(false);
+        let pair = item_exts.get(i).map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
         track_algos
             .entry(base.track_index)
             .or_default()
-            .insert(is_world);
+            .insert(pair);
     }
 
     // 为每个 VspTrack 创建 HiFiShifter 轨道
@@ -456,44 +532,43 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         let has_mixed = algos.map(|s| s.len() > 1).unwrap_or(false);
 
         if has_mixed {
-            // 需要拆分：为 World 和 非-World 各建一条轨道
-            for &is_world in &[true, false] {
-                if algos.map(|s| s.contains(&is_world)).unwrap_or(false) {
-                    let suffix = if is_world { " (World)" } else { " (VsLib)" };
-                    let id = new_track_id();
-                    let algo = if is_world {
-                        PitchAnalysisAlgo::WorldDll
-                    } else {
-                        PitchAnalysisAlgo::VocalShifterVslib
-                    };
-                    hs_tracks.push(Track {
-                        id: id.clone(),
-                        name: format!("{}{}", vsp_track.name, suffix),
-                        parent_id: None,
-                        order: track_order,
-                        muted: vsp_track.muted,
-                        solo: vsp_track.solo,
-                        volume: convert_volume(vsp_track.volume),
-                        compose_enabled: false,
-                        pitch_analysis_algo: algo,
-                        color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
-                    });
-                    track_algo_map.insert((idx, is_world), id);
-                    track_order += 1;
-                }
+            // 需要拆分：为每个不同的 (is_world, synth_mode) 各建一条轨道
+            let mut sorted: Vec<(bool, i32)> = algos.map(|s| s.iter().copied().collect()).unwrap_or_default();
+            sorted.sort();
+            for (is_world, synth_mode) in sorted {
+                let suffix = algo_pair_suffix(is_world, synth_mode);
+                let id = new_track_id();
+                let algo = if is_world {
+                    PitchAnalysisAlgo::WorldDll
+                } else {
+                    PitchAnalysisAlgo::VocalShifterVslib
+                };
+                hs_tracks.push(Track {
+                    id: id.clone(),
+                    name: format!("{}{}", vsp_track.name, suffix),
+                    parent_id: None,
+                    order: track_order,
+                    muted: vsp_track.muted,
+                    solo: vsp_track.solo,
+                    volume: convert_volume(vsp_track.volume),
+                    compose_enabled: false,
+                    pitch_analysis_algo: algo,
+                    color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
+                });
+                track_algo_map.insert((idx, is_world, synth_mode), id);
+                track_order += 1;
             }
         } else {
             // 单一算法或无音频项
-            let is_world = algos
+            let (is_world, synth_mode) = algos
                 .and_then(|s| s.iter().next().copied())
-                .unwrap_or(false);
+                .unwrap_or((false, 1));
             let algo = if is_world {
                 PitchAnalysisAlgo::WorldDll
             } else {
                 PitchAnalysisAlgo::VocalShifterVslib
             };
             let id = new_track_id();
-            let has_items = algos.is_some();
             hs_tracks.push(Track {
                 id: id.clone(),
                 name: vsp_track.name.clone(),
@@ -506,9 +581,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 pitch_analysis_algo: algo,
                 color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
             });
-            // 对两种 is_world 值都映射到同一个轨道（因为不混合）
-            track_algo_map.insert((idx, true), id.clone());
-            track_algo_map.insert((idx, false), id);
+            // 单一算法，映射精确的 (is_world, synth_mode) 对
+            track_algo_map.insert((idx, is_world, synth_mode), id);
             track_order += 1;
         }
     }
@@ -517,8 +591,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
     for base in &item_bases {
         if (base.track_index as usize) >= vsp_tracks.len() {
             let idx = base.track_index;
-            if !track_algo_map.contains_key(&(idx, true))
-                && !track_algo_map.contains_key(&(idx, false))
+            if !track_algo_map.keys().any(|&(i, _, _)| i == idx)
             {
                 let id = new_track_id();
                 hs_tracks.push(Track {
@@ -533,8 +606,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     pitch_analysis_algo: PitchAnalysisAlgo::default(),
                     color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
                 });
-                track_algo_map.insert((idx, true), id.clone());
-                track_algo_map.insert((idx, false), id);
+                track_algo_map.insert((idx, false, 1), id);
                 track_order += 1;
             }
         }
@@ -547,6 +619,14 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         String,
         std::collections::HashMap<usize, PitchFrameAccumulator>,
     > = std::collections::HashMap::new();
+    // 用于收集 vslib 轨道的额外曲线数据
+    let mut extra_curve_data_by_track: std::collections::HashMap<
+        String,
+        std::collections::HashMap<usize, ExtraCurveAccumulator>,
+    > = std::collections::HashMap::new();
+    // 记录每个轨道的 synth_mode（仅 vslib 轨道有效）
+    let mut synth_mode_by_track: std::collections::HashMap<String, i32> =
+        std::collections::HashMap::new();
 
     for (i, base) in item_bases.iter().enumerate() {
         let ext = item_exts.get(i);
@@ -567,9 +647,15 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         }
 
         // 确定目标轨道
-        let is_world = ext.map(|e| e.algo_type == 8).unwrap_or(false);
+        let (is_world, synth_mode) = ext.map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
         let track_id = track_algo_map
-            .get(&(base.track_index, is_world))
+            .get(&(base.track_index, is_world, synth_mode))
+            .or_else(|| {
+                // 回退：查找同一原始轨道索引下的任意映射
+                track_algo_map.iter()
+                    .find(|(&(i, _, _), _)| i == base.track_index)
+                    .map(|(_, id)| id)
+            })
             .cloned()
             .unwrap_or_else(|| {
                 hs_tracks
@@ -577,6 +663,15 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     .map(|t| t.id.clone())
                     .unwrap_or_default()
             });
+
+        // 记录 vslib 轨道的 synth_mode
+        if !is_world {
+            if let Some(e) = ext {
+                synth_mode_by_track
+                    .entry(track_id.clone())
+                    .or_insert_with(|| algo_synth_mode(e.algo_type));
+            }
+        }
 
         let item_start_sec = base.start_sample / sample_rate;
 
@@ -692,6 +787,21 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     fade_out,
                     &mut pitch_data_by_track,
                 );
+
+                // vslib 轨道：写入额外曲线数据
+                if !is_world {
+                    write_extra_curves_for_segment(
+                        &track_id,
+                        pitch_points,
+                        seg_src_start,
+                        seg_src_end,
+                        clip_start,
+                        rate64,
+                        fade_in,
+                        fade_out,
+                        &mut extra_curve_data_by_track,
+                    );
+                }
             }
         } else {
             // 线性拉伸或无拉伸
@@ -755,6 +865,21 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 0.0,
                 &mut pitch_data_by_track,
             );
+
+            // vslib 轨道：写入额外曲线数据
+            if !is_world {
+                write_extra_curves_for_segment(
+                    &track_id,
+                    pitch_points,
+                    0.0,
+                    source_duration_sec,
+                    item_start_sec,
+                    rate as f64,
+                    0.0,
+                    0.0,
+                    &mut extra_curve_data_by_track,
+                );
+            }
         }
     }
 
@@ -787,6 +912,18 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 }
             }
 
+            // 构建 vslib 额外曲线和参数
+            let extra_curves = extra_curve_data_by_track
+                .get(&track.id)
+                .map(|ecm| build_extra_curves_from_accumulators(ecm, total_frames))
+                .unwrap_or_default();
+
+            let mut extra_params: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
+            if let Some(&sm) = synth_mode_by_track.get(&track.id) {
+                extra_params.insert("synth_mode".to_string(), sm as f64);
+            }
+
             params_by_root_track.insert(
                 track.id.clone(),
                 TrackParamsState {
@@ -798,8 +935,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
                     pending_pitch_offset: None,
-                    extra_curves: Default::default(),
-                    extra_params: Default::default(),
+                    extra_curves,
+                    extra_params,
                 },
             );
         }
@@ -912,6 +1049,126 @@ fn write_pitch_data_for_segment(
     }
 }
 
+/// 将 Ctrp 调音点的额外曲线数据（FRM, VOL, DYN, *DYN, PAN, BRE）写入累积器。
+/// 仅用于 vslib 算法轨道。
+fn write_extra_curves_for_segment(
+    track_id: &str,
+    pitch_points: &[VspPitchPoint],
+    src_start_sec: f64,
+    src_end_sec: f64,
+    clip_start_sec: f64,
+    playback_rate: f64,
+    fade_in_sec: f64,
+    fade_out_sec: f64,
+    curve_data: &mut std::collections::HashMap<
+        String,
+        std::collections::HashMap<usize, ExtraCurveAccumulator>,
+    >,
+) {
+    if pitch_points.is_empty() {
+        return;
+    }
+
+    let rate = playback_rate.max(0.0001);
+    let clip_end_sec = clip_start_sec + (src_end_sec - src_start_sec).max(0.0) / rate;
+    if clip_end_sec <= clip_start_sec {
+        return;
+    }
+
+    let start_frame = (clip_start_sec / CTRP_FRAME_PERIOD).floor().max(0.0) as usize;
+    let end_frame = (clip_end_sec / CTRP_FRAME_PERIOD).ceil().max(0.0) as usize;
+
+    let entry = curve_data.entry(track_id.to_string()).or_default();
+
+    for frame_idx in start_frame..=end_frame {
+        let timeline_time = frame_idx as f64 * CTRP_FRAME_PERIOD;
+        if timeline_time < clip_start_sec || timeline_time > clip_end_sec {
+            continue;
+        }
+
+        let rel_t = timeline_time - clip_start_sec;
+        let src_time = src_start_sec + rel_t * rate;
+        if src_time < src_start_sec || src_time > src_end_sec {
+            continue;
+        }
+
+        let src_idx = (src_time / CTRP_FRAME_PERIOD).round().max(0.0) as usize;
+        let Some(point) = pitch_points.get(src_idx) else {
+            continue;
+        };
+
+        // disabled 点不贡献额外曲线数据
+        if point.disabled {
+            continue;
+        }
+
+        let mut weight = 1.0;
+        if fade_in_sec > 0.0 {
+            let fi_end = clip_start_sec + fade_in_sec;
+            if timeline_time <= fi_end {
+                let k = ((timeline_time - clip_start_sec) / fade_in_sec).clamp(0.0, 1.0);
+                weight *= k;
+            }
+        }
+        if fade_out_sec > 0.0 {
+            let fo_start = (clip_end_sec - fade_out_sec).max(clip_start_sec);
+            if timeline_time >= fo_start {
+                let k = ((clip_end_sec - timeline_time) / fade_out_sec).clamp(0.0, 1.0);
+                weight *= k;
+            }
+        }
+        if weight <= 0.0 {
+            continue;
+        }
+
+        // 共振峰偏移：FRM 已经是相对值（cents），默认为 0
+        let formant_shift = point.formant as f64;
+
+        let acc = entry.entry(frame_idx).or_default();
+        acc.formant_shift_sum += formant_shift * weight;
+        acc.vol_sum += point.vol * weight;
+        acc.dyn_orig_sum += point.dyn_orig * weight;
+        acc.dyn_edit_sum += point.dyn_edit * weight;
+        acc.pan_sum += point.pan * weight;
+        acc.breathiness_sum += point.bre as f64 * weight;
+        acc.weight += weight;
+    }
+}
+
+/// 从 ExtraCurveAccumulator 映射构建 extra_curves HashMap。
+fn build_extra_curves_from_accumulators(
+    acc_map: &std::collections::HashMap<usize, ExtraCurveAccumulator>,
+    total_frames: usize,
+) -> std::collections::HashMap<String, Vec<f32>> {
+    let mut formant_shift = vec![0.0f32; total_frames];
+    let mut volume = vec![1.0f32; total_frames];
+    let mut dyn_orig = vec![1.0f32; total_frames];
+    let mut dyn_edit = vec![1.0f32; total_frames];
+    let mut pan = vec![0.0f32; total_frames];
+    let mut breathiness = vec![0.0f32; total_frames];
+
+    for (&frame_idx, acc) in acc_map {
+        if frame_idx < total_frames && acc.weight > 0.0 {
+            let w = acc.weight;
+            formant_shift[frame_idx] = (acc.formant_shift_sum / w) as f32;
+            volume[frame_idx] = (acc.vol_sum / w) as f32;
+            dyn_orig[frame_idx] = (acc.dyn_orig_sum / w) as f32;
+            dyn_edit[frame_idx] = (acc.dyn_edit_sum / w) as f32;
+            pan[frame_idx] = (acc.pan_sum / w) as f32;
+            breathiness[frame_idx] = (acc.breathiness_sum / w) as f32;
+        }
+    }
+
+    let mut curves = std::collections::HashMap::new();
+    curves.insert("formant_shift_cents".to_string(), formant_shift);
+    curves.insert("volume".to_string(), volume);
+    curves.insert("dyn_orig".to_string(), dyn_orig);
+    curves.insert("dyn_edit".to_string(), dyn_edit);
+    curves.insert("pan".to_string(), pan);
+    curves.insert("breathiness".to_string(), breathiness);
+    curves
+}
+
 /// 从 VocalShifter 剪贴板工程文件 (.clb.vshp / .clb.vsp) 导入选中的 Item。
 ///
 /// - 只导入被标记为 `selected` 的 Item
@@ -979,6 +1236,12 @@ pub fn import_vsp_clipboard(
         String,
         std::collections::HashMap<usize, PitchFrameAccumulator>,
     > = std::collections::HashMap::new();
+    let mut extra_curve_data_by_track: std::collections::HashMap<
+        String,
+        std::collections::HashMap<usize, ExtraCurveAccumulator>,
+    > = std::collections::HashMap::new();
+    let mut synth_mode_by_track: std::collections::HashMap<String, i32> =
+        std::collections::HashMap::new();
 
     let mut next_order = ordered_track_ids.len() as i32;
 
@@ -999,7 +1262,7 @@ pub fn import_vsp_clipboard(
         } else {
             // 需要创建新轨道
             let tid = new_track_id();
-            let is_world = ext.map(|e| e.algo_type == 8).unwrap_or(false);
+            let is_world = ext.map(|e| is_world_algo(e.algo_type)).unwrap_or(false);
             let algo = if is_world {
                 PitchAnalysisAlgo::WorldDll
             } else {
@@ -1027,6 +1290,16 @@ pub fn import_vsp_clipboard(
             next_order += 1;
             tid
         };
+
+        // 记录 vslib 轨道的 synth_mode
+        let is_world = ext.map(|e| is_world_algo(e.algo_type)).unwrap_or(false);
+        if !is_world {
+            if let Some(e) = ext {
+                synth_mode_by_track
+                    .entry(target_track_id.clone())
+                    .or_insert_with(|| algo_synth_mode(e.algo_type));
+            }
+        }
 
         // 解析音频路径
         let audio_path = resolve_audio_path(&base.audio_path, vsp_file_dir);
@@ -1151,6 +1424,20 @@ pub fn import_vsp_clipboard(
                     fade_out,
                     &mut pitch_data_by_track,
                 );
+
+                if !is_world {
+                    write_extra_curves_for_segment(
+                        &target_track_id,
+                        pitch_points,
+                        seg_src_start,
+                        seg_src_end,
+                        clip_start,
+                        rate64,
+                        fade_in,
+                        fade_out,
+                        &mut extra_curve_data_by_track,
+                    );
+                }
             }
         } else {
             // 线性拉伸或无拉伸
@@ -1213,6 +1500,20 @@ pub fn import_vsp_clipboard(
                 0.0,
                 &mut pitch_data_by_track,
             );
+
+            if !is_world {
+                write_extra_curves_for_segment(
+                    &target_track_id,
+                    pitch_points,
+                    0.0,
+                    source_duration_sec,
+                    item_start_sec,
+                    rate as f64,
+                    0.0,
+                    0.0,
+                    &mut extra_curve_data_by_track,
+                );
+            }
         }
     }
 
@@ -1245,6 +1546,18 @@ pub fn import_vsp_clipboard(
                 }
             }
 
+            // 构建 vslib 额外曲线和参数
+            let extra_curves = extra_curve_data_by_track
+                .get(track_id)
+                .map(|ecm| build_extra_curves_from_accumulators(ecm, total_frames))
+                .unwrap_or_default();
+
+            let mut extra_params: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
+            if let Some(&sm) = synth_mode_by_track.get(track_id) {
+                extra_params.insert("synth_mode".to_string(), sm as f64);
+            }
+
             params_by_root_track.insert(
                 track_id.clone(),
                 TrackParamsState {
@@ -1256,8 +1569,8 @@ pub fn import_vsp_clipboard(
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
                     pending_pitch_offset: None,
-                    extra_curves: Default::default(),
-                    extra_params: Default::default(),
+                    extra_curves,
+                    extra_params,
                 },
             );
         }
@@ -1322,53 +1635,89 @@ fn import_vsp_clipboard_selected_tracks(
         String,
         std::collections::HashMap<usize, PitchFrameAccumulator>,
     > = std::collections::HashMap::new();
+    let mut extra_curve_data_by_track: std::collections::HashMap<
+        String,
+        std::collections::HashMap<usize, ExtraCurveAccumulator>,
+    > = std::collections::HashMap::new();
+    let mut synth_mode_by_track: std::collections::HashMap<String, i32> =
+        std::collections::HashMap::new();
 
     let mut track_order = ordered_track_ids.len() as i32;
 
-    // 原始轨道索引 → 新建的 HiFiShifter 轨道 ID
-    let mut vsp_to_hs_track: std::collections::HashMap<i32, String> =
+    // 原始轨道索引 + (is_world, synth_mode) → 新建的 HiFiShifter 轨道 ID
+    let mut vsp_to_hs_track: std::collections::HashMap<(i32, bool, i32), String> =
         std::collections::HashMap::new();
 
-    // 为每个选中的轨道创建新轨道
+    // 为每个选中的轨道创建新轨道（按不同算法对拆分）
     for &vsp_idx in &selected_track_indices {
         let vsp_track = &vsp_tracks[vsp_idx];
 
-        // 检测该轨道内的算法类型
-        let mut has_world = false;
-        let mut has_other = false;
+        // 收集该轨道内所有不同的 (is_world, synth_mode) 对
+        let mut algo_pairs: std::collections::HashSet<(bool, i32)> =
+            std::collections::HashSet::new();
         for (i, base) in item_bases.iter().enumerate() {
             if base.track_index as usize == vsp_idx {
-                let is_world = item_exts.get(i).map(|e| e.algo_type == 8).unwrap_or(false);
-                if is_world {
-                    has_world = true;
-                } else {
-                    has_other = true;
-                }
+                let pair = item_exts.get(i).map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+                algo_pairs.insert(pair);
             }
         }
 
-        let algo = if has_world && !has_other {
-            PitchAnalysisAlgo::WorldDll
-        } else {
-            PitchAnalysisAlgo::VocalShifterVslib
-        };
+        let has_mixed = algo_pairs.len() > 1;
 
-        let id = new_track_id();
-        let color_idx = (ordered_track_ids.len() + hs_tracks.len()) % TRACK_COLORS.len();
-        hs_tracks.push(Track {
-            id: id.clone(),
-            name: vsp_track.name.clone(),
-            parent_id: None,
-            order: track_order,
-            muted: vsp_track.muted,
-            solo: vsp_track.solo,
-            volume: convert_volume(vsp_track.volume),
-            compose_enabled: false,
-            pitch_analysis_algo: algo,
-            color: TRACK_COLORS[color_idx].to_string(),
-        });
-        vsp_to_hs_track.insert(vsp_idx as i32, id);
-        track_order += 1;
+        if has_mixed {
+            let mut sorted: Vec<(bool, i32)> = algo_pairs.into_iter().collect();
+            sorted.sort();
+            for (is_world, synth_mode) in sorted {
+                let suffix = algo_pair_suffix(is_world, synth_mode);
+                let algo = if is_world {
+                    PitchAnalysisAlgo::WorldDll
+                } else {
+                    PitchAnalysisAlgo::VocalShifterVslib
+                };
+                let id = new_track_id();
+                let color_idx = (ordered_track_ids.len() + hs_tracks.len()) % TRACK_COLORS.len();
+                hs_tracks.push(Track {
+                    id: id.clone(),
+                    name: format!("{}{}", vsp_track.name, suffix),
+                    parent_id: None,
+                    order: track_order,
+                    muted: vsp_track.muted,
+                    solo: vsp_track.solo,
+                    volume: convert_volume(vsp_track.volume),
+                    compose_enabled: false,
+                    pitch_analysis_algo: algo,
+                    color: TRACK_COLORS[color_idx].to_string(),
+                });
+                vsp_to_hs_track.insert((vsp_idx as i32, is_world, synth_mode), id);
+                track_order += 1;
+            }
+        } else {
+            let (is_world, _synth_mode) = algo_pairs
+                .into_iter()
+                .next()
+                .unwrap_or((false, 1));
+            let algo = if is_world {
+                PitchAnalysisAlgo::WorldDll
+            } else {
+                PitchAnalysisAlgo::VocalShifterVslib
+            };
+            let id = new_track_id();
+            let color_idx = (ordered_track_ids.len() + hs_tracks.len()) % TRACK_COLORS.len();
+            hs_tracks.push(Track {
+                id: id.clone(),
+                name: vsp_track.name.clone(),
+                parent_id: None,
+                order: track_order,
+                muted: vsp_track.muted,
+                solo: vsp_track.solo,
+                volume: convert_volume(vsp_track.volume),
+                compose_enabled: false,
+                pitch_analysis_algo: algo,
+                color: TRACK_COLORS[color_idx].to_string(),
+            });
+            vsp_to_hs_track.insert((vsp_idx as i32, is_world, _synth_mode), id);
+            track_order += 1;
+        }
     }
 
     // 导入选中轨道上的所有 Item（保持原始起始位置）
@@ -1379,9 +1728,25 @@ fn import_vsp_clipboard_selected_tracks(
 
         let ext = item_exts.get(i);
 
-        let Some(track_id) = vsp_to_hs_track.get(&base.track_index).cloned() else {
+        let (is_world, synth_mode) = ext.map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+        let Some(track_id) = vsp_to_hs_track
+            .get(&(base.track_index, is_world, synth_mode))
+            .or_else(|| {
+                // 回退：查找同一原始轨道索引下的任意映射
+                vsp_to_hs_track.iter()
+                    .find(|(&(i, _, _), _)| i == base.track_index)
+                    .map(|(_, id)| id)
+            })
+            .cloned()
+        else {
             continue;
         };
+
+        // 记录 vslib 轨道的 synth_mode
+        if !is_world {
+            let sm = ext.map(|e| algo_synth_mode(e.algo_type)).unwrap_or(1);
+            synth_mode_by_track.entry(track_id.clone()).or_insert(sm);
+        }
 
         let audio_path = resolve_audio_path(&base.audio_path, vsp_file_dir);
 
@@ -1503,6 +1868,20 @@ fn import_vsp_clipboard_selected_tracks(
                     fade_out,
                     &mut pitch_data_by_track,
                 );
+
+                if !is_world {
+                    write_extra_curves_for_segment(
+                        &track_id,
+                        pitch_points,
+                        seg_src_start,
+                        seg_src_end,
+                        clip_start,
+                        rate64,
+                        fade_in,
+                        fade_out,
+                        &mut extra_curve_data_by_track,
+                    );
+                }
             }
         } else {
             let (rate, clip_length) = if time_markers.len() == 2 {
@@ -1564,6 +1943,20 @@ fn import_vsp_clipboard_selected_tracks(
                 0.0,
                 &mut pitch_data_by_track,
             );
+
+            if !is_world {
+                write_extra_curves_for_segment(
+                    &track_id,
+                    pitch_points,
+                    0.0,
+                    source_duration_sec,
+                    item_start_sec,
+                    rate as f64,
+                    0.0,
+                    0.0,
+                    &mut extra_curve_data_by_track,
+                );
+            }
         }
     }
 
@@ -1591,6 +1984,18 @@ fn import_vsp_clipboard_selected_tracks(
                 }
             }
 
+            // 构建 vslib 额外曲线和参数
+            let extra_curves = extra_curve_data_by_track
+                .get(&track.id)
+                .map(|ecm| build_extra_curves_from_accumulators(ecm, total_frames))
+                .unwrap_or_default();
+
+            let mut extra_params: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
+            if let Some(&sm) = synth_mode_by_track.get(&track.id) {
+                extra_params.insert("synth_mode".to_string(), sm as f64);
+            }
+
             params_by_root_track.insert(
                 track.id.clone(),
                 TrackParamsState {
@@ -1602,8 +2007,8 @@ fn import_vsp_clipboard_selected_tracks(
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
                     pending_pitch_offset: None,
-                    extra_curves: Default::default(),
-                    extra_params: Default::default(),
+                    extra_curves,
+                    extra_params,
                 },
             );
         }

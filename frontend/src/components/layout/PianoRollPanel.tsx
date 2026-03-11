@@ -1056,7 +1056,12 @@ export const PianoRollPanel: React.FC = () => {
                 if (op === "pasteReaper") {
                     void dispatch(pasteReaperClipboard(selArgs));
                 } else {
-                    void dispatch(pasteVocalShifterClipboard(selArgs));
+                    void dispatch(
+                        pasteVocalShifterClipboard({
+                            ...selArgs,
+                            activeParam: editParam,
+                        }),
+                    );
                 }
                 bumpRefreshToken();
                 return;

@@ -8,10 +8,19 @@
 // - vocalshifter_id.clb        (音高线数据)
 // - vocalshifter_le_id.clb     (音高线数据)
 //
-// .clb 记录格式：每条 0x80 字节（16 个 little-endian f64），仅使用前 3 个字段：
-// - [0] time_sec
-// - [1] disabled (1.0 disabled / 0.0 enabled)
-// - [2] pitch_cents (0 = C-1, 6000 = C4)
+// .clb 记录格式：每条 0x80 字节（16 个 little-endian f64）：
+// - [0]  offset  0: time_sec
+// - [1]  offset  8: disabled (1.0 disabled / 0.0 enabled)
+// - [2]  offset 16: pitch_cents (0 = C-1, 6000 = C4)
+// - [3]  offset 24: formant_cents (FRM)
+// - [4]  offset 32: volume (VOL, double multiplier)
+// - [5]  offset 40: pan (PAN, -1.0..1.0)
+// - [6]  offset 48: dyn_edit (DYN, double multiplier)
+// - [7]  offset 56: original_pitch_cents (*PIT)
+// - [8]  offset 64: breathiness (BRE, raw)
+// - [9]  offset 72: eq1 (EQ1, raw)
+// - [10] offset 80: eq2 (EQ2, raw)
+// - [11] offset 88: heq_mrp (HEQ/MRP, raw)
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,6 +34,24 @@ pub struct ClipboardPitchPoint {
     pub time_sec: f64,
     pub disabled: bool,
     pub midi_pitch: f32,
+    /// FRM (formant, absolute cents, same scale as pitch)
+    pub formant_cents: f64,
+    /// VOL (volume multiplier, 1.0 = 0dB)
+    pub volume: f64,
+    /// PAN (-1.0 = left, 0.0 = center, 1.0 = right)
+    pub pan: f64,
+    /// DYN (dynamics edit, multiplier)
+    pub dyn_edit: f64,
+    /// *PIT (original pitch cents before edit)
+    pub original_pitch_cents: f64,
+    /// BRE (breathiness, raw value -10000..10000)
+    pub breathiness: f64,
+    /// EQ1 (raw value)
+    pub eq1: f64,
+    /// EQ2 (raw value)
+    pub eq2: f64,
+    /// HEQ/MRP (raw value)
+    pub heq_mrp: f64,
 }
 
 /// 剪贴板文件类型。
@@ -79,28 +106,42 @@ pub fn parse_clipboard_file(path: &Path) -> Result<Vec<ClipboardPitchPoint>, Str
         ));
     }
 
+    let read_f64 = |rec: &[u8], offset: usize| -> f64 {
+        f64::from_le_bytes(
+            rec[offset..offset + 8]
+                .try_into()
+                .unwrap_or([0u8; 8]),
+        )
+    };
+
     let mut out = Vec::with_capacity(data.len() / RECORD_SIZE);
     for rec in data.chunks_exact(RECORD_SIZE) {
-        let time_sec = f64::from_le_bytes(
-            rec[0..8]
-                .try_into()
-                .map_err(|_| "invalid_format: bad time field".to_string())?,
-        );
-        let disabled_raw = f64::from_le_bytes(
-            rec[8..16]
-                .try_into()
-                .map_err(|_| "invalid_format: bad disabled field".to_string())?,
-        );
-        let pitch_cents = f64::from_le_bytes(
-            rec[16..24]
-                .try_into()
-                .map_err(|_| "invalid_format: bad pitch field".to_string())?,
-        );
+        let time_sec = read_f64(rec, 0);
+        let disabled_raw = read_f64(rec, 8);
+        let pitch_cents = read_f64(rec, 16);
+        let formant_cents = read_f64(rec, 24);
+        let volume = read_f64(rec, 32);
+        let pan = read_f64(rec, 40);
+        let dyn_edit = read_f64(rec, 48);
+        let original_pitch_cents = read_f64(rec, 56);
+        let breathiness = read_f64(rec, 64);
+        let eq1 = read_f64(rec, 72);
+        let eq2 = read_f64(rec, 80);
+        let heq_mrp = read_f64(rec, 88);
 
         out.push(ClipboardPitchPoint {
             time_sec,
             disabled: (disabled_raw - 1.0).abs() < 1e-9,
             midi_pitch: (pitch_cents * CENTS_TO_MIDI) as f32,
+            formant_cents,
+            volume,
+            pan,
+            dyn_edit,
+            original_pitch_cents,
+            breathiness,
+            eq1,
+            eq2,
+            heq_mrp,
         });
     }
 
