@@ -85,6 +85,7 @@ export const timelineApi = {
         composeEnabled?: boolean;
         pitchAnalysisAlgo?: string;
         color?: string;
+        name?: string;
     }) =>
         invoke<TimelineResult>(
             "set_track_state",
@@ -95,6 +96,7 @@ export const timelineApi = {
             payload.composeEnabled,
             payload.pitchAnalysisAlgo,
             payload.color,
+            payload.name,
         ),
 
     selectTrack: (trackId: string) =>

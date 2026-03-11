@@ -84,6 +84,10 @@ impl HiFiGanRenderer {
             pitch_orig: vec![],  // 离线路径不需要 pitch_orig 参与 hash
             pitch_edit: pitch_edit.to_vec(),
         };
+        let mut extra_curves = std::collections::HashMap::new();
+        if let Some(curve) = formant_shift_curve {
+            extra_curves.insert("formant_shift_cents".to_string(), curve.clone());
+        }
         let param_hash = crate::synth_clip_cache::compute_param_hash(
             ctx.clip_id,
             seg_start_frame,
@@ -91,7 +95,7 @@ impl HiFiGanRenderer {
             sr,
             self.id(),
             &curves_snapshot,
-            &std::collections::HashMap::new(), // HiFiGAN 不支持 extra_curves
+            &extra_curves,
             &std::collections::HashMap::new(), // HiFiGAN 不支持 extra_params
         );
         let cache_key = crate::synth_clip_cache::SynthClipCacheKey {

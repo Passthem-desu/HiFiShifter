@@ -243,7 +243,7 @@ export const PianoRollPanel: React.FC = () => {
 
     // 当 algo 变化时，重新抓取参数描述符
     useEffect(() => {
-        const algo = rootTrack?.pitchAnalysisAlgo ?? "world_dll";
+        const algo = rootTrack?.pitchAnalysisAlgo ?? "nsf_hifigan_onnx";
         let cancelled = false;
         paramsApi
             .getProcessorParams(algo)
@@ -1444,7 +1444,7 @@ export const PianoRollPanel: React.FC = () => {
                         ))}
                     </Flex>
 
-                    {editParam === "pitch" && rootTrack ? (
+                    {rootTrack ? (
                         <Flex align="center" gap="2">
                             <Text size="1" color="gray">
                                 {t("algo_label")}
@@ -1458,7 +1458,7 @@ export const PianoRollPanel: React.FC = () => {
                                         "none",
                                     ].includes(rootTrack.pitchAnalysisAlgo)
                                         ? rootTrack.pitchAnalysisAlgo
-                                        : "world_dll"
+                                        : "nsf_hifigan_onnx"
                                 }
                                 onValueChange={(v) => {
                                     if (!rootTrackId) return;
@@ -1533,17 +1533,19 @@ export const PianoRollPanel: React.FC = () => {
                                     </Flex>
                                 );
                             })}
-                            <Button
-                                size="1"
-                                variant="soft"
-                                color="blue"
-                                onClick={handleOpenMidiDialog}
-                                disabled={!pitchEnabled}
-                                style={{ cursor: "pointer" }}
-                                title={pitchHardDisableReason ?? undefined}
-                            >
-                                {(t as (key: string) => string)("midi_import")}
-                            </Button>
+                            {editParam === "pitch" ? (
+                                <Button
+                                    size="1"
+                                    variant="soft"
+                                    color="blue"
+                                    onClick={handleOpenMidiDialog}
+                                    disabled={!pitchEnabled}
+                                    style={{ cursor: "pointer" }}
+                                    title={pitchHardDisableReason ?? undefined}
+                                >
+                                    {(t as (key: string) => string)("midi_import")}
+                                </Button>
+                            ) : null}
                         </Flex>
                     ) : null}
                 </Flex>

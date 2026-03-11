@@ -310,7 +310,7 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         volume: clamp(Number(track.volume ?? 0.9), 0, 1),
 
         composeEnabled: Boolean(track.compose_enabled),
-        pitchAnalysisAlgo: String(track.pitch_analysis_algo ?? "world_dll"),
+        pitchAnalysisAlgo: String(track.pitch_analysis_algo ?? "nsf_hifigan_onnx"),
         color: track.color || undefined,
     }));
 
@@ -462,7 +462,7 @@ function upsertImportedClip(
             volume: 0.9,
 
             composeEnabled: false,
-            pitchAnalysisAlgo: "world_dll",
+            pitchAnalysisAlgo: "nsf_hifigan_onnx",
         });
     }
 
@@ -537,7 +537,7 @@ const initialState: SessionState = {
             volume: 0.9,
 
             composeEnabled: false,
-            pitchAnalysisAlgo: "world_dll",
+            pitchAnalysisAlgo: "nsf_hifigan_onnx",
         },
     ],
     clips: [],

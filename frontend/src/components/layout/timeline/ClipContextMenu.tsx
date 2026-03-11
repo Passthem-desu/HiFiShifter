@@ -5,16 +5,22 @@ import type {
 } from "../../../features/session/sessionTypes";
 import { useI18n } from "../../../i18n/I18nProvider";
 import type { MessageKey } from "../../../i18n/messages";
+import { useAppSelector } from "../../../app/hooks";
+import {
+    selectKeybinding,
+    formatKeybinding,
+} from "../../../features/keybindings/keybindingsSlice";
 
 // ── 单条菜单项 ──────────────────────────────────────────────────────────────
 const MenuItem: React.FC<{
     label: string;
+    shortcut?: string;
     disabled?: boolean;
     danger?: boolean;
     onClick: () => void;
-}> = ({ label, disabled, danger, onClick }) => (
+}> = ({ label, shortcut, disabled, danger, onClick }) => (
     <button
-        className={`px-3 py-1.5 text-left w-full text-[12px] transition-colors
+        className={`px-3 py-1.5 text-left w-full text-[12px] transition-colors flex items-center justify-between gap-3
             ${
                 disabled
                     ? "opacity-40 cursor-default"
@@ -29,7 +35,10 @@ const MenuItem: React.FC<{
             onClick();
         }}
     >
-        {label}
+        <span>{label}</span>
+        {shortcut && (
+            <span className="text-[10px] opacity-50 shrink-0">{shortcut}</span>
+        )}
     </button>
 );
 
@@ -124,6 +133,13 @@ export const ClipContextMenu: React.FC<{
     const isMulti = selectedClips.length >= 2;
     const ids = isMulti ? selectedClips.map((c) => c.id) : [clip.id];
 
+    const normalizeKb = useAppSelector((state) =>
+        selectKeybinding(state, "clip.normalize"),
+    );
+    const normalizeShortcut = normalizeKb
+        ? formatKeybinding(normalizeKb, "")
+        : undefined;
+
     // 胶合：仅同轨且多选时可用
     const glueDisabled =
         !isMulti ||
@@ -196,6 +212,7 @@ export const ClipContextMenu: React.FC<{
                     />
                     <MenuItem
                         label={t("ctx_normalize_all")}
+                        shortcut={normalizeShortcut}
                         onClick={() => {
                             onNormalize(ids);
                             close();
@@ -260,6 +277,7 @@ export const ClipContextMenu: React.FC<{
                     />
                     <MenuItem
                         label={t("ctx_normalize")}
+                        shortcut={normalizeShortcut}
                         onClick={() => {
                             onNormalize([clip.id]);
                             close();

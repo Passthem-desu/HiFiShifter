@@ -196,21 +196,16 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
         return sorted;
     }, [results, sortMode]);
 
-    // 预览播放
+    // 预览播放（始终从头重新播放）
     const handlePreview = useCallback(
         (filePath: string) => {
-            if (previewingPath === filePath) {
-                audioPreview.stop();
+            audioPreview.stop();
+            setPreviewingPath(filePath);
+            void audioPreview.play(filePath, () => {
                 setPreviewingPath(null);
-            } else {
-                audioPreview.stop();
-                setPreviewingPath(filePath);
-                void audioPreview.play(filePath, () => {
-                    setPreviewingPath(null);
-                });
-            }
+            });
         },
-        [previewingPath],
+        [],
     );
 
     // 确认放置音频
@@ -244,10 +239,28 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
         (e: React.KeyboardEvent<HTMLInputElement>) => {
             if (matchKey(e, keybindings["quickSearch.navigate.down"])) {
                 e.preventDefault();
-                setSelectedIndex((prev) => Math.min(prev + 1, sortedResults.length - 1));
+                setSelectedIndex((prev) => {
+                    const next = Math.min(prev + 1, sortedResults.length - 1);
+                    const entry = sortedResults[next];
+                    if (entry && isAudioFile(entry)) {
+                        audioPreview.stop();
+                        setPreviewingPath(entry.path);
+                        void audioPreview.play(entry.path, () => setPreviewingPath(null));
+                    }
+                    return next;
+                });
             } else if (matchKey(e, keybindings["quickSearch.navigate.up"])) {
                 e.preventDefault();
-                setSelectedIndex((prev) => Math.max(prev - 1, 0));
+                setSelectedIndex((prev) => {
+                    const next = Math.max(prev - 1, 0);
+                    const entry = sortedResults[next];
+                    if (entry && isAudioFile(entry)) {
+                        audioPreview.stop();
+                        setPreviewingPath(entry.path);
+                        void audioPreview.play(entry.path, () => setPreviewingPath(null));
+                    }
+                    return next;
+                });
             } else if (matchKey(e, keybindings["quickSearch.preview"])) {
                 // 预览试听（仅当有结果时）
                 if (sortedResults.length > 0) {

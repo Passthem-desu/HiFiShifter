@@ -245,23 +245,15 @@ export const FileBrowserPanel: React.FC = () => {
         [dispatch],
     );
 
-    // 点击音频文件 → 预览播放/停止
+    // 点击音频文件 → 预览播放（始终从头重新播放）
     const handleClickAudio = useCallback(
         (entry: FileEntry) => {
-            if (fb.previewingFile === entry.path) {
-                // 停止播放
-                audioPreview.stop();
+            dispatch(setPreviewingFile(entry.path));
+            void audioPreview.play(entry.path, () => {
                 dispatch(setPreviewingFile(null));
-            } else {
-                // 开始播放
-                dispatch(setPreviewingFile(entry.path));
-                void audioPreview.play(entry.path, () => {
-                    // 播放结束回调
-                    dispatch(setPreviewingFile(null));
-                });
-            }
+            });
         },
-        [dispatch, fb.previewingFile],
+        [dispatch],
     );
 
     // 拖拽开始 — 使用自定义 pointer 事件实现，替代 HTML5 drag API

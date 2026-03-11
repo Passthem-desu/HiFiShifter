@@ -48,6 +48,7 @@ function matchClipAction(
         "clip.cut",
         "clip.paste",
         "clip.split",
+        "clip.normalize",
     ];
     // 优先匹配含修饰键的
     for (const actionId of clipActions) {
@@ -73,6 +74,7 @@ export function useKeyboardShortcuts(deps: {
     clipClipboardRef: React.RefObject<ClipTemplate[] | null>;
     isEditableTarget: (target: EventTarget | null) => boolean;
     autoCrossfadeEnabled: boolean;
+    onNormalize: (ids: string[]) => void;
 }) {
     const {
         sessionRef,
@@ -82,6 +84,7 @@ export function useKeyboardShortcuts(deps: {
         clipClipboardRef,
         isEditableTarget,
         autoCrossfadeEnabled,
+        onNormalize,
     } = deps;
 
     const keybindings = useAppSelector(selectMergedKeybindings);
@@ -267,6 +270,14 @@ export function useKeyboardShortcuts(deps: {
                     void dispatch(splitClipRemote({ clipId, splitSec }));
                     return;
                 }
+
+                case "clip.normalize": {
+                    if (selectedIds.length === 0) return;
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    onNormalize(selectedIds);
+                    return;
+                }
             }
         }
         window.addEventListener("keydown", onKeyDown, true);
@@ -279,5 +290,6 @@ export function useKeyboardShortcuts(deps: {
         clipClipboardRef,
         isEditableTarget,
         keybindings,
+        onNormalize,
     ]);
 }

@@ -714,7 +714,8 @@ pub fn global_tension_rendered_clip_cache() -> &'static Mutex<TensionRenderedCli
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_hifigan_tension_hash, compute_rendered_clip_hash};
+    use super::{compute_hifigan_tension_hash, compute_param_hash, compute_rendered_clip_hash};
+    use crate::pitch_editing::PitchCurvesSnapshot;
     use std::collections::HashMap;
 
     #[test]
@@ -785,6 +786,45 @@ mod tests {
             5.0,
             &pitch_orig,
             Some(&curve_b),
+        );
+
+        assert_ne!(hash_a, hash_b);
+    }
+
+    #[test]
+    fn segment_param_hash_changes_with_formant_curve() {
+        let curves = PitchCurvesSnapshot {
+            frame_period_ms: 5.0,
+            pitch_orig: vec![],
+            pitch_edit: vec![60.0f32; 64],
+        };
+        let extra_params = HashMap::new();
+
+        let mut curve_a = HashMap::new();
+        curve_a.insert("formant_shift_cents".to_string(), vec![0.0f32; 64]);
+
+        let mut curve_b = HashMap::new();
+        curve_b.insert("formant_shift_cents".to_string(), vec![240.0f32; 64]);
+
+        let hash_a = compute_param_hash(
+            "clip-1",
+            0,
+            44_100,
+            44_100,
+            "nsf_hifigan_onnx",
+            &curves,
+            &curve_a,
+            &extra_params,
+        );
+        let hash_b = compute_param_hash(
+            "clip-1",
+            0,
+            44_100,
+            44_100,
+            "nsf_hifigan_onnx",
+            &curves,
+            &curve_b,
+            &extra_params,
         );
 
         assert_ne!(hash_a, hash_b);

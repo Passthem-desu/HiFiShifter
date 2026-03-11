@@ -734,6 +734,29 @@ export const TimelinePanel: React.FC = () => {
     }
 
     // ���� ���̿�ݼ� hook ������������������������������������������������������������������������������������������������������������
+    // 规格化 clip 音量（快捷键 & 右键菜单共用）
+    const normalizeClips = React.useCallback(
+        (ids: string[]) => {
+            for (const id of ids) {
+                const waveform = sessionRef.current.clipWaveforms[id];
+                if (!waveform) continue;
+                const samples = Array.isArray(waveform)
+                    ? waveform
+                    : [...waveform.l, ...waveform.r];
+                if (samples.length === 0) continue;
+                const peak = Math.max(...samples.map(Math.abs));
+                if (peak <= 0) continue;
+                const newGain = Math.min(
+                    Math.max(1.0 / peak, dbToGain(-12)),
+                    dbToGain(12),
+                );
+                dispatch(setClipGain({ clipId: id, gain: newGain }));
+                void dispatch(setClipStateRemote({ clipId: id, gain: newGain }));
+            }
+        },
+        [dispatch, sessionRef],
+    );
+
     useKeyboardShortcuts({
         sessionRef,
         dispatch,
@@ -742,6 +765,7 @@ export const TimelinePanel: React.FC = () => {
         clipClipboardRef,
         isEditableTarget,
         autoCrossfadeEnabled: s.autoCrossfadeEnabled,
+        onNormalize: normalizeClips,
     });
     useEffect(() => {
         if (!contextMenu) return;
@@ -859,6 +883,22 @@ export const TimelinePanel: React.FC = () => {
                         setTrackStateRemote({
                             trackId,
                             color,
+                        }),
+                    );
+                }}
+                onAlgoChange={(trackId, algo) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            pitchAnalysisAlgo: algo,
+                        }),
+                    );
+                }}
+                onTrackNameChange={(trackId, name) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            name,
                         }),
                     );
                 }}
@@ -1474,44 +1514,7 @@ export const TimelinePanel: React.FC = () => {
                                           }),
                                       );
                                   }}
-                                  onNormalize={(ids) => {
-                                      for (const id of ids) {
-                                          const waveform =
-                                              sessionRef.current.clipWaveforms[
-                                                  id
-                                              ];
-                                          if (!waveform) continue;
-                                          const samples = Array.isArray(
-                                              waveform,
-                                          )
-                                              ? waveform
-                                              : [...waveform.l, ...waveform.r];
-                                          if (samples.length === 0) continue;
-                                          const peak = Math.max(
-                                              ...samples.map(Math.abs),
-                                          );
-                                          if (peak <= 0) continue;
-                                          const newGain = Math.min(
-                                              Math.max(
-                                                  1.0 / peak,
-                                                  dbToGain(-12),
-                                              ),
-                                              dbToGain(12),
-                                          );
-                                          dispatch(
-                                              setClipGain({
-                                                  clipId: id,
-                                                  gain: newGain,
-                                              }),
-                                          );
-                                          void dispatch(
-                                              setClipStateRemote({
-                                                  clipId: id,
-                                                  gain: newGain,
-                                              }),
-                                          );
-                                      }
-                                  }}
+                                  onNormalize={normalizeClips}
                               />
                           );
                       })()
