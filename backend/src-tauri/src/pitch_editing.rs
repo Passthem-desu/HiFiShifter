@@ -183,6 +183,31 @@ pub(crate) fn hifigan_tension_active_for_clip(
     )
 }
 
+pub(crate) fn hifigan_formant_shift_curve_for_clip<'a>(
+    entry: &'a crate::state::TrackParamsState,
+    clip: &'a crate::state::Clip,
+) -> Option<&'a Vec<f32>> {
+    clip.extra_curves
+        .as_ref()
+        .and_then(|curves| curves.get("formant_shift_cents"))
+        .or_else(|| entry.extra_curves.get("formant_shift_cents"))
+}
+
+pub(crate) fn hifigan_formant_shift_active_for_clip(
+    entry: &crate::state::TrackParamsState,
+    clip: &crate::state::Clip,
+    clip_start_sec: f64,
+) -> bool {
+    let curve = hifigan_formant_shift_curve_for_clip(entry, clip);
+    curve_differs_from_default_in_range(
+        curve,
+        entry.frame_period_ms.max(0.1),
+        clip_start_sec,
+        clip_start_sec + clip.length_sec.max(0.0),
+        0.0,
+    )
+}
+
 fn track_requests_extra_processing(
     algo: PitchEditAlgorithm,
     entry: &crate::state::TrackParamsState,
@@ -484,10 +509,12 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let extra_processing = track_requests_extra_processing(algo, entry, clip);
     let tension_processing = matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
         && hifigan_tension_active_for_clip(entry, clip, clip_start_sec);
+    let formant_processing = matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
+        && hifigan_formant_shift_active_for_clip(entry, clip, clip_start_sec);
 
     // v2 semantics: do nothing until the user actually modified the edit curve.
     // This avoids treating auto-synced `pitch_edit` (e.g. copied from pitch_orig) as an edit.
-    if !entry.pitch_edit_user_modified && !extra_processing && !tension_processing {
+    if !entry.pitch_edit_user_modified && !extra_processing && !tension_processing && !formant_processing {
         return Ok(false);
     }
 
@@ -515,7 +542,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let seg_end_sec =
         seg_start_sec + (expected_out_frames as f64) / (sample_rate.max(1) as f64);
     let has_pitch_user_edit = any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec);
-    if !has_pitch_user_edit && !extra_processing && !tension_processing {
+    if !has_pitch_user_edit && !extra_processing && !tension_processing && !formant_processing {
         return Ok(false);
     }
 
@@ -574,7 +601,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             seg_end_sec,
         );
         if !has_effective_pitch_change {
-            if extra_processing || tension_processing {
+            if extra_processing || tension_processing || formant_processing {
                 Vec::new()
             } else {
                 return Ok(false);
@@ -778,15 +805,17 @@ pub fn does_clip_need_processor_render(
     let extra_processing = track_requests_extra_processing(algo, entry, clip);
     let tension_processing = matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
         && hifigan_tension_active_for_clip(entry, clip, clip_start_sec);
+    let formant_processing = matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
+        && hifigan_formant_shift_active_for_clip(entry, clip, clip_start_sec);
 
     // v2 semantics: only treat pitch edit as active after the user modified the edit curve.
     // Otherwise `pitch_edit` may be auto-synced to `pitch_orig` and contain non-zero MIDI values,
     // which should NOT trigger synthesis / prerender.
-    if !entry.pitch_edit_user_modified && !extra_processing && !tension_processing {
+    if !entry.pitch_edit_user_modified && !extra_processing && !tension_processing && !formant_processing {
         return false;
     }
 
-    if extra_processing || tension_processing {
+    if extra_processing || tension_processing || formant_processing {
         return true;
     }
 

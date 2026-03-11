@@ -34,6 +34,28 @@ impl Renderer for HiFiGanRenderer {
     }
 
     fn render(&self, ctx: &RenderContext<'_>) -> Result<Vec<f32>, String> {
+        self.render_with_formant(ctx, None)
+    }
+
+    fn capabilities(&self) -> RendererCapabilities {
+        RendererCapabilities {
+            supports_realtime: false,
+            prefers_prerender: true,
+            max_pitch_shift_semitones: 24.0,
+        }
+    }
+}
+
+impl HiFiGanRenderer {
+    /// 内部实现：带共振峰偏移曲线的渲染方法。
+    ///
+    /// `formant_shift_curve`：共振峰偏移曲线（cents），`None` 或空表示无偏移。
+    /// 曲线按 `frame_period_ms` 采样，`curve[0]` 对应绝对时间 0。
+    pub fn render_with_formant(
+        &self,
+        ctx: &RenderContext<'_>,
+        formant_shift_curve: Option<&Vec<f32>>,
+    ) -> Result<Vec<f32>, String> {
         let fp = ctx.frame_period_ms;
         let clip_start = ctx.clip_start_sec;
         let pitch_edit = ctx.pitch_edit;
@@ -99,6 +121,22 @@ impl Renderer for HiFiGanRenderer {
         let chunk_sec = crate::nsf_hifigan_onnx::env_chunk_sec();
         let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
 
+        // 构造共振峰偏移回调
+        let formant_curve_owned: Option<Vec<f32>> = formant_shift_curve.cloned();
+        let formant_shift_fn = move |abs_time_sec: f64| -> f32 {
+            let Some(ref curve) = formant_curve_owned else { return 0.0 };
+            if curve.is_empty() { return 0.0; }
+            let fp_local = fp.max(0.1);
+            let idx_f = (abs_time_sec.max(0.0) * 1000.0) / fp_local;
+            if !idx_f.is_finite() { return 0.0; }
+            let i0 = idx_f.floor().max(0.0) as usize;
+            let i1 = (i0 + 1).min(curve.len().saturating_sub(1));
+            let frac = (idx_f - i0 as f64).clamp(0.0, 1.0) as f32;
+            let a = curve.get(i0).copied().unwrap_or(0.0);
+            let b = curve.get(i1).copied().unwrap_or(a);
+            a + (b - a) * frac
+        };
+
         let result = crate::nsf_hifigan_onnx::infer_pitch_edit_chunked(
             ctx.mono_pcm,
             sr,
@@ -116,6 +154,7 @@ impl Renderer for HiFiGanRenderer {
                 };
                 if target.is_finite() && target > 0.0 { target } else { 0.0 }
             },
+            formant_shift_fn,
             chunk_sec,
             overlap_sec,
         )?;
@@ -144,11 +183,72 @@ impl Renderer for HiFiGanRenderer {
         Ok(result)
     }
 
-    fn capabilities(&self) -> RendererCapabilities {
-        RendererCapabilities {
-            supports_realtime: false,
-            prefers_prerender: true,
-            max_pitch_shift_semitones: 24.0,
+    /// Mel stretch 路径：在 mel 域完成时间拉伸后推理。
+    ///
+    /// 与 [`render_with_formant`] 的区别：`mono_pcm` 是**未拉伸的源 PCM**，由本方法在 mel 域
+    /// 完成 `playback_rate` 对应的时间拉伸，然后经 HiFiGAN 合成拉伸后的波形。
+    pub fn render_mel_stretch(
+        &self,
+        ctx: &RenderContext<'_>,
+        playback_rate: f64,
+        formant_shift_curve: Option<&Vec<f32>>,
+    ) -> Result<Vec<f32>, String> {
+        let fp = ctx.frame_period_ms;
+        let clip_start = ctx.clip_start_sec;
+        let pitch_edit = ctx.pitch_edit;
+        let clip_midi = ctx.clip_midi;
+
+        if clip_midi.is_empty() {
+            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                eprintln!(
+                    "HiFiGanRenderer::render_mel_stretch: clip_midi is empty, \
+                     skipping inference and returning original PCM"
+                );
+            }
+            return Ok(ctx.mono_pcm.to_vec());
         }
+
+        let sr = ctx.sample_rate;
+        let chunk_sec = crate::nsf_hifigan_onnx::env_chunk_sec();
+        let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
+
+        // 构造共振峰偏移回调
+        let formant_curve_owned: Option<Vec<f32>> = formant_shift_curve.cloned();
+        let formant_shift_fn = move |abs_time_sec: f64| -> f32 {
+            let Some(ref curve) = formant_curve_owned else { return 0.0 };
+            if curve.is_empty() { return 0.0; }
+            let fp_local = fp.max(0.1);
+            let idx_f = (abs_time_sec.max(0.0) * 1000.0) / fp_local;
+            if !idx_f.is_finite() { return 0.0; }
+            let i0 = idx_f.floor().max(0.0) as usize;
+            let i1 = (i0 + 1).min(curve.len().saturating_sub(1));
+            let frac = (idx_f - i0 as f64).clamp(0.0, 1.0) as f32;
+            let a = curve.get(i0).copied().unwrap_or(0.0);
+            let b = curve.get(i1).copied().unwrap_or(a);
+            a + (b - a) * frac
+        };
+
+        let result = crate::nsf_hifigan_onnx::infer_pitch_edit_chunked_mel_stretch(
+            ctx.mono_pcm,
+            sr,
+            playback_rate,
+            ctx.seg_start_sec,
+            move |abs_time_sec| {
+                let orig = clip_midi_at_time(fp, clip_start, clip_midi, abs_time_sec);
+                if !(orig.is_finite() && orig > 0.0) {
+                    return 0.0;
+                }
+                let target = match edit_midi_at_time_or_none(fp, pitch_edit, abs_time_sec) {
+                    Some(v) => v,
+                    None => orig,
+                };
+                if target.is_finite() && target > 0.0 { target } else { 0.0 }
+            },
+            formant_shift_fn,
+            chunk_sec,
+            overlap_sec,
+        )?;
+
+        Ok(result)
     }
 }

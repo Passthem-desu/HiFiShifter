@@ -344,6 +344,8 @@ export const PianoRollPanel: React.FC = () => {
                     return t("breath_gain_label");
                 case "hifigan_tension":
                     return t("hifigan_tension_label");
+                case "formant_shift_cents":
+                    return t("formant_shift_label");
                 default:
                     return param.display_name;
             }
