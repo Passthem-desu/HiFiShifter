@@ -387,9 +387,13 @@ export const TrackList: React.FC<{
 
                                     let indicatorY: number | null = null;
                                     if (spec.mode === "reorder") {
-                                        const listBounds = listRef.current?.getBoundingClientRect();
+                                        const listBounds =
+                                            listRef.current?.getBoundingClientRect();
                                         // 鼠标在列表上方时，指示线固定在顶部
-                                        if (listBounds && ev.clientY < listBounds.top) {
+                                        if (
+                                            listBounds &&
+                                            ev.clientY < listBounds.top
+                                        ) {
                                             indicatorY = 0;
                                         } else {
                                             const idx = overInfo.index;
@@ -401,12 +405,14 @@ export const TrackList: React.FC<{
                                                     tracks.length * rowHeight;
                                             } else {
                                                 const insertAfter =
-                                                    overInfo.yInRow > rowHeight - edgeZone;
+                                                    overInfo.yInRow >
+                                                    rowHeight - edgeZone;
                                                 const insertBefore =
                                                     overInfo.yInRow < edgeZone;
                                                 if (insertAfter) {
                                                     indicatorY =
-                                                        idx * rowHeight + rowHeight;
+                                                        idx * rowHeight +
+                                                        rowHeight;
                                                 } else if (insertBefore) {
                                                     indicatorY =
                                                         idx * rowHeight;
@@ -639,14 +645,20 @@ export const TrackList: React.FC<{
                                                     value={editingName}
                                                     className="bg-transparent outline outline-1 outline-qt-highlight rounded px-0.5 flex-1 min-w-0 text-qt-text text-sm font-medium pr-2"
                                                     onChange={(e) =>
-                                                        setEditingName(e.target.value)
+                                                        setEditingName(
+                                                            e.target.value,
+                                                        )
                                                     }
                                                     onBlur={commitTrackName}
                                                     onKeyDown={(e) => {
                                                         if (e.key === "Enter") {
                                                             commitTrackName();
-                                                        } else if (e.key === "Escape") {
-                                                            setEditingTrackId(null);
+                                                        } else if (
+                                                            e.key === "Escape"
+                                                        ) {
+                                                            setEditingTrackId(
+                                                                null,
+                                                            );
                                                         }
                                                     }}
                                                     onPointerDown={(e) =>
@@ -667,8 +679,12 @@ export const TrackList: React.FC<{
                                                     }
                                                     onDoubleClick={(e) => {
                                                         e.stopPropagation();
-                                                        setEditingTrackId(track.id);
-                                                        setEditingName(track.name);
+                                                        setEditingTrackId(
+                                                            track.id,
+                                                        );
+                                                        setEditingName(
+                                                            track.name,
+                                                        );
                                                         setTimeout(() => {
                                                             nameInputRef.current?.select();
                                                         }, 0);
@@ -777,47 +793,53 @@ export const TrackList: React.FC<{
                                         >
                                             S
                                         </IconButton>
-                                        {isRoot && composeEnabled && onAlgoChange ? (
-                                            <div onPointerDown={(e) => e.stopPropagation()}>
-                                            <Select.Root
-                                                size="1"
-                                                value={
-                                                    [
-                                                        "world_dll",
-                                                        "nsf_hifigan_onnx",
-                                                        "vslib",
-                                                        "none",
-                                                    ].includes(
-                                                        track.pitchAnalysisAlgo,
-                                                    )
-                                                        ? track.pitchAnalysisAlgo
-                                                        : "nsf_hifigan_onnx"
+                                        {isRoot &&
+                                        composeEnabled &&
+                                        onAlgoChange ? (
+                                            <div
+                                                onPointerDown={(e) =>
+                                                    e.stopPropagation()
                                                 }
-                                                onValueChange={(v) => {
-                                                    onAlgoChange(
-                                                        track.id,
-                                                        v,
-                                                    );
-                                                }}
                                             >
-                                                <Select.Trigger
-                                                    style={{ minWidth: 80 }}
-                                                />
-                                                <Select.Content>
-                                                    <Select.Item value="world_dll">
-                                                        world
-                                                    </Select.Item>
-                                                    <Select.Item value="nsf_hifigan_onnx">
-                                                        nsf-hifigan
-                                                    </Select.Item>
-                                                    <Select.Item value="vslib">
-                                                        vslib
-                                                    </Select.Item>
-                                                    <Select.Item value="none">
-                                                        {t("none")}
-                                                    </Select.Item>
-                                                </Select.Content>
-                                            </Select.Root>
+                                                <Select.Root
+                                                    size="1"
+                                                    value={
+                                                        [
+                                                            "world_dll",
+                                                            "nsf_hifigan_onnx",
+                                                            "vslib",
+                                                            "none",
+                                                        ].includes(
+                                                            track.pitchAnalysisAlgo,
+                                                        )
+                                                            ? track.pitchAnalysisAlgo
+                                                            : "nsf_hifigan_onnx"
+                                                    }
+                                                    onValueChange={(v) => {
+                                                        onAlgoChange(
+                                                            track.id,
+                                                            v,
+                                                        );
+                                                    }}
+                                                >
+                                                    <Select.Trigger
+                                                        style={{ minWidth: 80 }}
+                                                    />
+                                                    <Select.Content>
+                                                        <Select.Item value="world_dll">
+                                                            world
+                                                        </Select.Item>
+                                                        <Select.Item value="nsf_hifigan_onnx">
+                                                            nsf-hifigan
+                                                        </Select.Item>
+                                                        <Select.Item value="vslib">
+                                                            vslib
+                                                        </Select.Item>
+                                                        <Select.Item value="none">
+                                                            {t("none")}
+                                                        </Select.Item>
+                                                    </Select.Content>
+                                                </Select.Root>
                                             </div>
                                         ) : null}
                                         <Box flexGrow="1" />

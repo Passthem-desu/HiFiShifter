@@ -112,11 +112,7 @@ class AudioPreviewEngine {
         const floats = new Float32Array(bytes.buffer);
         const channels = Math.max(1, data.channels);
         const frames = Math.floor(floats.length / channels);
-        const audioBuffer = ctx.createBuffer(
-            channels,
-            frames,
-            data.sampleRate,
-        );
+        const audioBuffer = ctx.createBuffer(channels, frames, data.sampleRate);
 
         // 反交错到各声道
         for (let ch = 0; ch < channels; ch++) {

@@ -122,9 +122,14 @@ export const timelineApi = {
             payload.sourcePath,
         ),
 
-    removeClip: (clipId: string) => invoke<TimelineResult>("remove_clip", clipId),
+    removeClip: (clipId: string) =>
+        invoke<TimelineResult>("remove_clip", clipId),
 
-    moveClip: (payload: { clipId: string; startSec: number; trackId?: string }) =>
+    moveClip: (payload: {
+        clipId: string;
+        startSec: number;
+        trackId?: string;
+    }) =>
         invoke<TimelineResult>(
             "move_clip",
             payload.clipId,

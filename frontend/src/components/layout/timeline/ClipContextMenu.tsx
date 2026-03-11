@@ -162,8 +162,10 @@ export const ClipContextMenu: React.FC<{
         const rect = el.getBoundingClientRect();
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        if (rect.right > vw) el.style.left = `${Math.max(0, vw - rect.width)}px`;
-        if (rect.bottom > vh) el.style.top = `${Math.max(0, vh - rect.height)}px`;
+        if (rect.right > vw)
+            el.style.left = `${Math.max(0, vw - rect.width)}px`;
+        if (rect.bottom > vh)
+            el.style.top = `${Math.max(0, vh - rect.height)}px`;
     }, [x, y]);
 
     return (
@@ -175,10 +177,13 @@ export const ClipContextMenu: React.FC<{
             onPointerDown={(e) => e.stopPropagation()}
         >
             {isMulti ? (
-// ── 多选菜单 ──
+                // ── 多选菜单 ──
                 <>
                     <div className="px-3 py-1 text-[11px] text-qt-text/50 select-none">
-                    {t("ctx_selected_n").replace("{n}", String(selectedClips.length))}
+                        {t("ctx_selected_n").replace(
+                            "{n}",
+                            String(selectedClips.length),
+                        )}
                     </div>
                     <Divider />
                     <MenuItem
@@ -190,7 +195,9 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                     <MenuItem
-                        label={allMuted ? t("ctx_unmute_all") : t("ctx_mute_all")}
+                        label={
+                            allMuted ? t("ctx_unmute_all") : t("ctx_mute_all")
+                        }
                         onClick={() => {
                             onMute(ids, !allMuted);
                             close();
@@ -229,7 +236,7 @@ export const ClipContextMenu: React.FC<{
                     />
                 </>
             ) : (
-// ── 单选菜单 ──
+                // ── 单选菜单 ──
                 <>
                     <MenuItem
                         label={t("ctx_delete")}

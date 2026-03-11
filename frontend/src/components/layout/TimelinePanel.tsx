@@ -399,7 +399,10 @@ export const TimelinePanel: React.FC = () => {
             if (detail.type === "duration") {
                 setDropPreview((prev) => {
                     if (prev && prev.path === detail.filePath) {
-                        return { ...prev, durationSec: (detail as any).durationSec };
+                        return {
+                            ...prev,
+                            durationSec: (detail as any).durationSec,
+                        };
                     }
                     return prev;
                 });
@@ -419,7 +422,10 @@ export const TimelinePanel: React.FC = () => {
                         fileName: detail.fileName,
                         trackId,
                         startSec: beat,
-                        durationSec: prev?.path === detail.filePath ? prev.durationSec : 2,
+                        durationSec:
+                            prev?.path === detail.filePath
+                                ? prev.durationSec
+                                : 2,
                     }));
                 } else {
                     setDropPreview(null);
@@ -751,7 +757,9 @@ export const TimelinePanel: React.FC = () => {
                     dbToGain(12),
                 );
                 dispatch(setClipGain({ clipId: id, gain: newGain }));
-                void dispatch(setClipStateRemote({ clipId: id, gain: newGain }));
+                void dispatch(
+                    setClipStateRemote({ clipId: id, gain: newGain }),
+                );
             }
         },
         [dispatch, sessionRef],
@@ -1123,8 +1131,18 @@ export const TimelinePanel: React.FC = () => {
                         if (!scroller) return;
                         const bounds = scroller.getBoundingClientRect();
                         // Ignore clicks on the native scrollbar region
-                        if (e.clientY > bounds.bottom - (scroller.offsetHeight - scroller.clientHeight)) return;
-                        if (e.clientX > bounds.right - (scroller.offsetWidth - scroller.clientWidth)) return;
+                        if (
+                            e.clientY >
+                            bounds.bottom -
+                                (scroller.offsetHeight - scroller.clientHeight)
+                        )
+                            return;
+                        if (
+                            e.clientX >
+                            bounds.right -
+                                (scroller.offsetWidth - scroller.clientWidth)
+                        )
+                            return;
                         setPlayheadFromClientX(
                             e.clientX,
                             bounds,
@@ -1307,7 +1325,10 @@ export const TimelinePanel: React.FC = () => {
                                     top:
                                         rowTopForTrackId(dropPreview.trackId) +
                                         8,
-                                    width: Math.max(80, pxPerSec * dropPreview.durationSec),
+                                    width: Math.max(
+                                        80,
+                                        pxPerSec * dropPreview.durationSec,
+                                    ),
                                     height: rowHeight - 16,
                                 }}
                             >

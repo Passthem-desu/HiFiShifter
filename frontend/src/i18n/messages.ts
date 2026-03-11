@@ -477,7 +477,8 @@ export const messages = {
         pitch_snap_settings: "Pitch Snap Settings",
 
         // Keybinding hint
-        kb_hint_recording: "Left-click a binding to set it to None. Right-click to reset to default.",
+        kb_hint_recording:
+            "Left-click a binding to set it to None. Right-click to reset to default.",
 
         // Keybinding None
         kb_none: "None",

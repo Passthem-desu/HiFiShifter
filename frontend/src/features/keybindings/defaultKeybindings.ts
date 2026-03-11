@@ -15,8 +15,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
 
     // 播放控制
     "playback.toggle": { key: "space" },
-    "playback.stop": { key: "enter" },  // Play/Stop: 播放/停止（停止时回到起始位置）
-    "playback.focusCursor": { key: "\\" },  // 聚焦播放光标
+    "playback.stop": { key: "enter" }, // Play/Stop: 播放/停止（停止时回到起始位置）
+    "playback.focusCursor": { key: "\\" }, // 聚焦播放光标
 
     // 编辑
     "edit.undo": { key: "z", ctrl: true },
@@ -64,8 +64,16 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "modifier.clipStretch": { key: "alt", modifierOnly: true, alt: true },
     "modifier.clipNoSnap": { key: "shift", modifierOnly: true, shift: true },
     "modifier.clipCopyDrag": { key: "control", modifierOnly: true, ctrl: true },
-    "modifier.pianoRollVerticalZoom": { key: "control", modifierOnly: true, ctrl: true },
-    "modifier.scrollHorizontal": { key: "shift", modifierOnly: true, shift: true },
+    "modifier.pianoRollVerticalZoom": {
+        key: "control",
+        modifierOnly: true,
+        ctrl: true,
+    },
+    "modifier.scrollHorizontal": {
+        key: "shift",
+        modifierOnly: true,
+        shift: true,
+    },
     "modifier.scrollVertical": { key: "alt", modifierOnly: true, alt: true },
 
     // 快速搜索
@@ -89,23 +97,65 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
 
     "playback.toggle": { labelKey: "kb_playback_toggle", group: "playback" },
     "playback.stop": { labelKey: "kb_playback_stop", group: "playback" },
-    "playback.focusCursor": { labelKey: "kb_playback_focus_cursor", group: "playback" },
+    "playback.focusCursor": {
+        labelKey: "kb_playback_focus_cursor",
+        group: "playback",
+    },
 
     "edit.undo": { labelKey: "kb_edit_undo", group: "edit" },
     "edit.redo": { labelKey: "kb_edit_redo", group: "edit" },
     "edit.selectAll": { labelKey: "kb_edit_select_all", group: "edit" },
     "edit.deselect": { labelKey: "kb_edit_deselect", group: "edit" },
-    "edit.initialize": { labelKey: "kb_edit_initialize", group: "edit", scopedContext: "paramEditorSelect" },
-    "edit.transposeCents": { labelKey: "kb_edit_transpose_cents", group: "edit", scopedContext: "paramEditorSelect" },
-    "edit.transposeDegrees": { labelKey: "kb_edit_transpose_degrees", group: "edit", scopedContext: "paramEditorSelect" },
-    "edit.setPitch": { labelKey: "kb_edit_set_pitch", group: "edit", scopedContext: "paramEditorSelect" },
-    "edit.average": { labelKey: "kb_edit_average", group: "edit", scopedContext: "paramEditorSelect" },
-    "edit.smooth": { labelKey: "kb_edit_smooth", group: "edit", scopedContext: "paramEditorSelect" },
-    "edit.addVibrato": { labelKey: "kb_edit_add_vibrato", group: "edit", scopedContext: "paramEditorSelect" },
-    "edit.quantize": { labelKey: "kb_edit_quantize", group: "edit", scopedContext: "paramEditorSelect" },
-    "edit.meanQuantize": { labelKey: "kb_edit_mean_quantize", group: "edit", scopedContext: "paramEditorSelect" },
+    "edit.initialize": {
+        labelKey: "kb_edit_initialize",
+        group: "edit",
+        scopedContext: "paramEditorSelect",
+    },
+    "edit.transposeCents": {
+        labelKey: "kb_edit_transpose_cents",
+        group: "edit",
+        scopedContext: "paramEditorSelect",
+    },
+    "edit.transposeDegrees": {
+        labelKey: "kb_edit_transpose_degrees",
+        group: "edit",
+        scopedContext: "paramEditorSelect",
+    },
+    "edit.setPitch": {
+        labelKey: "kb_edit_set_pitch",
+        group: "edit",
+        scopedContext: "paramEditorSelect",
+    },
+    "edit.average": {
+        labelKey: "kb_edit_average",
+        group: "edit",
+        scopedContext: "paramEditorSelect",
+    },
+    "edit.smooth": {
+        labelKey: "kb_edit_smooth",
+        group: "edit",
+        scopedContext: "paramEditorSelect",
+    },
+    "edit.addVibrato": {
+        labelKey: "kb_edit_add_vibrato",
+        group: "edit",
+        scopedContext: "paramEditorSelect",
+    },
+    "edit.quantize": {
+        labelKey: "kb_edit_quantize",
+        group: "edit",
+        scopedContext: "paramEditorSelect",
+    },
+    "edit.meanQuantize": {
+        labelKey: "kb_edit_mean_quantize",
+        group: "edit",
+        scopedContext: "paramEditorSelect",
+    },
     "edit.pasteReaper": { labelKey: "kb_edit_paste_reaper", group: "edit" },
-    "edit.pasteVocalShifter": { labelKey: "kb_edit_paste_vocalshifter", group: "edit" },
+    "edit.pasteVocalShifter": {
+        labelKey: "kb_edit_paste_vocalshifter",
+        group: "edit",
+    },
 
     "project.new": { labelKey: "kb_project_new", group: "project" },
     "project.open": { labelKey: "kb_project_open", group: "project" },
@@ -124,24 +174,81 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
 
     "pianoRoll.copy": { labelKey: "kb_pianoroll_copy", group: "pianoRoll" },
     "pianoRoll.paste": { labelKey: "kb_pianoroll_paste", group: "pianoRoll" },
-    "pianoRoll.shiftParamUp": { labelKey: "kb_pianoroll_shift_param_up", group: "pianoRoll" },
-    "pianoRoll.shiftParamDown": { labelKey: "kb_pianoroll_shift_param_down", group: "pianoRoll" },
+    "pianoRoll.shiftParamUp": {
+        labelKey: "kb_pianoroll_shift_param_up",
+        group: "pianoRoll",
+    },
+    "pianoRoll.shiftParamDown": {
+        labelKey: "kb_pianoroll_shift_param_down",
+        group: "pianoRoll",
+    },
 
-    "modifier.clipSlipEdit": { labelKey: "kb_modifier_slip_edit", group: "modifier", modifierOperationType: "drag" },
-    "modifier.clipStretch": { labelKey: "kb_modifier_stretch", group: "modifier", modifierOperationType: "drag" },
-    "modifier.clipNoSnap": { labelKey: "kb_modifier_no_snap", group: "modifier", modifierOperationType: "drag" },
-    "modifier.clipCopyDrag": { labelKey: "kb_modifier_copy_drag", group: "modifier", modifierOperationType: "drag" },
-    "modifier.pianoRollVerticalZoom": { labelKey: "kb_modifier_pr_vzoom", group: "modifier", modifierOperationType: "wheel" },
-    "modifier.scrollHorizontal": { labelKey: "kb_modifier_scroll_h", group: "modifier", modifierOperationType: "wheel" },
-    "modifier.scrollVertical": { labelKey: "kb_modifier_scroll_v", group: "modifier", modifierOperationType: "wheel" },
+    "modifier.clipSlipEdit": {
+        labelKey: "kb_modifier_slip_edit",
+        group: "modifier",
+        modifierOperationType: "drag",
+    },
+    "modifier.clipStretch": {
+        labelKey: "kb_modifier_stretch",
+        group: "modifier",
+        modifierOperationType: "drag",
+    },
+    "modifier.clipNoSnap": {
+        labelKey: "kb_modifier_no_snap",
+        group: "modifier",
+        modifierOperationType: "drag",
+    },
+    "modifier.clipCopyDrag": {
+        labelKey: "kb_modifier_copy_drag",
+        group: "modifier",
+        modifierOperationType: "drag",
+    },
+    "modifier.pianoRollVerticalZoom": {
+        labelKey: "kb_modifier_pr_vzoom",
+        group: "modifier",
+        modifierOperationType: "wheel",
+    },
+    "modifier.scrollHorizontal": {
+        labelKey: "kb_modifier_scroll_h",
+        group: "modifier",
+        modifierOperationType: "wheel",
+    },
+    "modifier.scrollVertical": {
+        labelKey: "kb_modifier_scroll_v",
+        group: "modifier",
+        modifierOperationType: "wheel",
+    },
 
     // 快速搜索
-    "quickSearch.open": { labelKey: "kb_quick_search_open", group: "quickSearch" },
-    "quickSearch.navigate.up": { labelKey: "kb_quick_search_nav_up", group: "quickSearch", scopedContext: "quickSearch" },
-    "quickSearch.navigate.down": { labelKey: "kb_quick_search_nav_down", group: "quickSearch", scopedContext: "quickSearch" },
-    "quickSearch.preview": { labelKey: "kb_quick_search_preview", group: "quickSearch", scopedContext: "quickSearch" },
-    "quickSearch.confirm": { labelKey: "kb_quick_search_confirm", group: "quickSearch", scopedContext: "quickSearch" },
-    "quickSearch.close": { labelKey: "kb_quick_search_close", group: "quickSearch", scopedContext: "quickSearch" },
+    "quickSearch.open": {
+        labelKey: "kb_quick_search_open",
+        group: "quickSearch",
+    },
+    "quickSearch.navigate.up": {
+        labelKey: "kb_quick_search_nav_up",
+        group: "quickSearch",
+        scopedContext: "quickSearch",
+    },
+    "quickSearch.navigate.down": {
+        labelKey: "kb_quick_search_nav_down",
+        group: "quickSearch",
+        scopedContext: "quickSearch",
+    },
+    "quickSearch.preview": {
+        labelKey: "kb_quick_search_preview",
+        group: "quickSearch",
+        scopedContext: "quickSearch",
+    },
+    "quickSearch.confirm": {
+        labelKey: "kb_quick_search_confirm",
+        group: "quickSearch",
+        scopedContext: "quickSearch",
+    },
+    "quickSearch.close": {
+        labelKey: "kb_quick_search_close",
+        group: "quickSearch",
+        scopedContext: "quickSearch",
+    },
 };
 
 /**

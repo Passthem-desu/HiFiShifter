@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import {
     Flex,
     Text,
@@ -168,7 +174,9 @@ export const FileBrowserPanel: React.FC = () => {
                 sorted.sort((a, b) => a.name.localeCompare(b.name));
                 break;
             case "date":
-                sorted.sort((a, b) => (b.modifiedTime ?? 0) - (a.modifiedTime ?? 0));
+                sorted.sort(
+                    (a, b) => (b.modifiedTime ?? 0) - (a.modifiedTime ?? 0),
+                );
                 break;
             case "size":
                 sorted.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
@@ -315,27 +323,44 @@ export const FileBrowserPanel: React.FC = () => {
                     }),
                 );
                 // 异步获取音频时长，获取后通知 TimelinePanel 更新 ghost 宽度
-                import("../../services/api/fileBrowser").then(({ fileBrowserApi }) => {
-                    fileBrowserApi.getAudioFileInfo(ds.filePath).then((info) => {
-                        if (info && dragStateRef.current?.filePath === ds.filePath) {
-                            window.dispatchEvent(
-                                new CustomEvent("hifi-file-drag", {
-                                    detail: {
-                                        type: "duration",
-                                        filePath: ds.filePath,
-                                        durationSec: info.durationSec,
-                                    },
-                                }),
-                            );
-                        }
-                    }).catch(() => { /* 获取失败则保持默认宽度 */ });
-                });
+                import("../../services/api/fileBrowser").then(
+                    ({ fileBrowserApi }) => {
+                        fileBrowserApi
+                            .getAudioFileInfo(ds.filePath)
+                            .then((info) => {
+                                if (
+                                    info &&
+                                    dragStateRef.current?.filePath ===
+                                        ds.filePath
+                                ) {
+                                    window.dispatchEvent(
+                                        new CustomEvent("hifi-file-drag", {
+                                            detail: {
+                                                type: "duration",
+                                                filePath: ds.filePath,
+                                                durationSec: info.durationSec,
+                                            },
+                                        }),
+                                    );
+                                }
+                            })
+                            .catch(() => {
+                                /* 获取失败则保持默认宽度 */
+                            });
+                    },
+                );
             }
 
             // 更新 ghost 位置（clamp 到窗口可视范围内，鼠标超出界面时 ghost 停在边缘）
             if (ghostRef.current) {
-                const clampedX = Math.max(0, Math.min(e.clientX + 12, window.innerWidth - 100));
-                const clampedY = Math.max(0, Math.min(e.clientY + 12, window.innerHeight - 30));
+                const clampedX = Math.max(
+                    0,
+                    Math.min(e.clientX + 12, window.innerWidth - 100),
+                );
+                const clampedY = Math.max(
+                    0,
+                    Math.min(e.clientY + 12, window.innerHeight - 30),
+                );
                 ghostRef.current.style.left = `${clampedX}px`;
                 ghostRef.current.style.top = `${clampedY}px`;
             }
@@ -500,22 +525,35 @@ export const FileBrowserPanel: React.FC = () => {
                                 );
                             }
                         }}
-                        style={{ fontFamily: "monospace", fontSize: 10, width: 22, height: 22 }}
+                        style={{
+                            fontFamily: "monospace",
+                            fontSize: 10,
+                            width: 22,
+                            height: 22,
+                        }}
                     >
                         .*
                     </IconButton>
                     <Select.Root
                         value={fb.sortMode}
                         size="1"
-                        onValueChange={(v) => dispatch(setSortMode(v as SortMode))}
+                        onValueChange={(v) =>
+                            dispatch(setSortMode(v as SortMode))
+                        }
                     >
                         <Select.Trigger
                             style={{ fontSize: 11, height: 22, flex: 1 }}
                         />
                         <Select.Content>
-                            <Select.Item value="name">{tAny("fb_sort_name")}</Select.Item>
-                            <Select.Item value="date">{tAny("fb_sort_date")}</Select.Item>
-                            <Select.Item value="size">{tAny("fb_sort_size")}</Select.Item>
+                            <Select.Item value="name">
+                                {tAny("fb_sort_name")}
+                            </Select.Item>
+                            <Select.Item value="date">
+                                {tAny("fb_sort_date")}
+                            </Select.Item>
+                            <Select.Item value="size">
+                                {tAny("fb_sort_size")}
+                            </Select.Item>
                         </Select.Content>
                     </Select.Root>
                 </Flex>
