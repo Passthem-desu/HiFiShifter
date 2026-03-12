@@ -568,7 +568,7 @@ fn render_single_clip(
             2,
             out_rate,
             target_frames,
-            crate::time_stretch::StretchAlgorithm::RubberBand,
+crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
         );
     }
 

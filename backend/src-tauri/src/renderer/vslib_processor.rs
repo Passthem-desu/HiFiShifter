@@ -3,7 +3,7 @@
 //! 仅在 `feature = "vslib"` 下编译（VocalShifter 仅限 Windows）。
 //!
 //! vslib 原生支持：
-//! - 时间拉伸（Timing 控制点，不需要外部 RubberBand）
+//! - 时间拉伸（Timing 控制点，不需要外部 Signalsmith Stretch）
 //! - 共振峰偏移（formant_shift_cents）
 //! - 气声强度（breathiness）
 //! - 合成模式（SYNTHMODE_M / SYNTHMODE_MF / SYNTHMODE_P）
@@ -377,7 +377,7 @@ impl ClipProcessor for VslibProcessor {
 
     fn capabilities(&self) -> ProcessorCapabilities {
         ProcessorCapabilities {
-            handles_time_stretch: true, // 使用 Timing 控制点，不需要外部 RubberBand
+handles_time_stretch: true, // 使用 Timing 控制点，不需要外部 Signalsmith Stretch
             supports_formant: true,
             supports_breathiness: true,
         }

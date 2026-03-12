@@ -4,7 +4,7 @@
 //! [`ProcessorChain`] 串联多个 Stage 并实现 [`ClipProcessor`] trait。
 //!
 //! 内置 Stage：
-//! - [`RubberBandTimeStretchStage`]：应用 playback_rate 时间拉伸
+//! - [`SignalsmithTimeStretchStage`]：应用 playback_rate 时间拉伸
 //! - [`WorldVocoderStage`]：WORLD 声码器合成
 //! - [`HiFiGanStage`]：NSF-HiFiGAN 合成
 //!
@@ -90,9 +90,9 @@ pub struct ProcessorChain {
     pub id: String,
     pub display_name: String,
     pub stages: Vec<Box<dyn ProcessingStage>>,
-    /// 链内是否包含时间拉伸 Stage（[`RubberBandTimeStretchStage`]）。
+    /// 链内是否包含时间拉伸 Stage（[`SignalsmithTimeStretchStage`]）。
     /// 为 `true` 时调用方（`render_single_clip` / `render_mixdown_interleaved`）跳过外部
-    /// RubberBand 预拉伸，并将实际 `playback_rate` 通过 [`ClipProcessContext`] 传入链内。
+    /// Signalsmith 预拉伸，并将实际 `playback_rate` 通过 [`ClipProcessContext`] 传入链内。
     pub handles_time_stretch: bool,
 }
 
@@ -140,16 +140,16 @@ impl ClipProcessor for ProcessorChain {
 
 // ─── 内置 Stage 实现 ──────────────────────────────────────────────────────────
 
-/// Stage 1：RubberBand 时间拉伸（playback_rate ≈ 1.0 时直接透传）。
-pub struct RubberBandTimeStretchStage;
+/// Stage 1：Signalsmith Stretch 时间拉伸（playback_rate ≈ 1.0 时直接透传）。
+pub struct SignalsmithTimeStretchStage;
 
-impl ProcessingStage for RubberBandTimeStretchStage {
+impl ProcessingStage for SignalsmithTimeStretchStage {
     fn id(&self) -> &str {
-        "rubberband_stretch"
+        "signalsmith_stretch"
     }
 
     fn display_name(&self) -> &str {
-        "时间拉伸 (RubberBand)"
+        "时间拉伸 (Signalsmith)"
     }
 
     fn process(&self, input_pcm: Vec<f32>, ctx: &StageContext<'_>) -> Result<Vec<f32>, String> {
@@ -172,7 +172,7 @@ impl ProcessingStage for RubberBandTimeStretchStage {
             1, // mono
             cc.sample_rate,
             out_frames,
-            crate::time_stretch::StretchAlgorithm::RubberBand,
+crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
         );
         Ok(stretched)
     }
@@ -314,7 +314,7 @@ impl ProcessingStage for HiFiGanStage {
             }
         };
 
-        // noise 走 RubberBand 时间拉伸（noise 是非谐波信号，波形域拉伸无明显伪影）
+        // noise 走 Signalsmith Stretch 时间拉伸（noise 是非谐波信号，波形域拉伸无明显伪影）
         let stretched_noise = if needs_stretch {
             let out_frames = processed_harmonic.len();
             crate::time_stretch::time_stretch_interleaved(
@@ -322,7 +322,7 @@ impl ProcessingStage for HiFiGanStage {
                 1,
                 cc.sample_rate,
                 out_frames,
-                crate::time_stretch::StretchAlgorithm::RubberBand,
+crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
             )
         } else {
             noise
@@ -348,7 +348,7 @@ pub fn world_chain() -> ProcessorChain {
         id: "world".into(),
         display_name: "WORLD Vocoder".into(),
         stages: vec![
-            Box::new(RubberBandTimeStretchStage),
+            Box::new(SignalsmithTimeStretchStage),
             Box::new(WorldVocoderStage),
         ],
         handles_time_stretch: true,
@@ -358,7 +358,7 @@ pub fn world_chain() -> ProcessorChain {
 /// 构造 NSF-HiFiGAN 处理链。
 ///
 /// 时间拉伸由 HiFiGanStage 内部通过 mel 域线性插值完成，
-/// 不再需要外部 RubberBandTimeStretchStage。
+/// 不再需要外部 SignalsmithTimeStretchStage。
 pub fn hifigan_chain() -> ProcessorChain {
     ProcessorChain {
         id: "nsf_hifigan".into(),

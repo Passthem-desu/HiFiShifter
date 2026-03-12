@@ -5,11 +5,11 @@ pub enum StretchAlgorithm {
     /// NOTE: This changes pitch/formants when the ratio != 1.
     LinearResample,
 
-    /// High-quality time-stretch (pitch-preserving) via Rubber Band Library (GPL).
+    /// High-quality time-stretch (pitch-preserving) via Signalsmith Stretch (MIT).
     ///
-    /// Implementation uses the C API (`rubberband-c.h`) loaded dynamically at runtime
-    /// from `rubberband.dll`. If the DLL is missing, we fall back to `LinearResample`.
-    RubberBand,
+    /// Implementation uses a C wrapper over the header-only C++ library,
+    /// statically linked at compile time. Always available.
+    SignalsmithStretch,
 
     /// Desired: zplane Elastique (Soloist) time-stretch preserving pitch + formants.
     /// This requires integrating the Elastique SDK (commercial).
@@ -27,8 +27,8 @@ pub fn time_stretch_interleaved(
         StretchAlgorithm::LinearResample => {
             linear_time_stretch_interleaved(input, channels, out_frames)
         }
-        StretchAlgorithm::RubberBand => {
-            // Rubber Band uses time ratio = out / in.
+        StretchAlgorithm::SignalsmithStretch => {
+            // Signalsmith Stretch: time ratio = out / in.
             let in_frames = if channels == 0 {
                 0
             } else {
@@ -39,10 +39,9 @@ pub fn time_stretch_interleaved(
             }
             let ratio = (out_frames as f64) / (in_frames as f64);
 
-            // 优先使用实时模式（process + retrieve），与 stretch_stream 路径统一。
-            // 实时模式无需 study pass，内存占用更低，代码路径与流式拉伸一致。
-            // 若实时模式失败，回退到离线模式（study + process + retrieve）。
-            let result = crate::rubberband::try_time_stretch_interleaved_realtime(
+            // 优先使用实时模式，与 stretch_stream 路径统一。
+            // 若实时模式失败，回退到离线模式。
+            let result = crate::sstretch::try_time_stretch_interleaved_realtime(
                 input,
                 channels,
                 sample_rate.max(1),
@@ -50,7 +49,7 @@ pub fn time_stretch_interleaved(
                 out_frames,
             )
             .or_else(|_| {
-                crate::rubberband::try_time_stretch_interleaved_offline(
+                crate::sstretch::try_time_stretch_interleaved_offline(
                     input,
                     channels,
                     sample_rate.max(1),
@@ -61,7 +60,7 @@ pub fn time_stretch_interleaved(
 
             match result {
                 Ok(mut out) => {
-                    // Ensure requested length. Rubber Band may output slightly different size.
+                    // 确保输出长度精确匹配请求
                     let got_frames = out.len() / channels.max(1);
                     if got_frames == out_frames {
                         out
@@ -75,7 +74,7 @@ pub fn time_stretch_interleaved(
                 }
                 Err(e) => {
                     if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
-                        eprintln!("time_stretch: RubberBand unavailable, falling back: {e}");
+                        eprintln!("time_stretch: SignalsmithStretch failed, falling back: {e}");
                     }
                     linear_time_stretch_interleaved(input, channels, out_frames)
                 }
