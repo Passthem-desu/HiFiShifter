@@ -73,8 +73,6 @@ import {
     synthesizeAudio,
 } from "./thunks/audioThunks";
 
-
-
 import { SCALE_KEYS } from "../../utils/musicalScales";
 import {
     importAudioAtPosition,
@@ -310,7 +308,9 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
         volume: clamp(Number(track.volume ?? 0.9), 0, 1),
 
         composeEnabled: Boolean(track.compose_enabled),
-        pitchAnalysisAlgo: String(track.pitch_analysis_algo ?? "world_dll"),
+        pitchAnalysisAlgo: String(
+            track.pitch_analysis_algo ?? "nsf_hifigan_onnx",
+        ),
         color: track.color || undefined,
     }));
 
@@ -462,7 +462,7 @@ function upsertImportedClip(
             volume: 0.9,
 
             composeEnabled: false,
-            pitchAnalysisAlgo: "world_dll",
+            pitchAnalysisAlgo: "nsf_hifigan_onnx",
         });
     }
 
@@ -537,7 +537,7 @@ const initialState: SessionState = {
             volume: 0.9,
 
             composeEnabled: false,
-            pitchAnalysisAlgo: "world_dll",
+            pitchAnalysisAlgo: "nsf_hifigan_onnx",
         },
     ],
     clips: [],
@@ -699,7 +699,10 @@ const sessionSlice = createSlice({
         setPitchSnapUnit(state, action: PayloadAction<PitchSnapUnit>) {
             state.pitchSnapUnit = action.payload;
         },
-        setPitchSnapScale(state, action: PayloadAction<import("../../utils/musicalScales").ScaleKey>) {
+        setPitchSnapScale(
+            state,
+            action: PayloadAction<import("../../utils/musicalScales").ScaleKey>,
+        ) {
             state.pitchSnapScale = action.payload;
         },
         togglePlayheadZoom(state) {
@@ -1143,18 +1146,24 @@ const sessionSlice = createSlice({
                 state.gridSnapEnabled = s.gridSnap;
                 if (s.gridSize) state.grid = s.gridSize as GridSize;
                 state.pitchSnapEnabled = s.pitchSnap;
-                                // Validate pitchSnapUnit
-                                const validUnits: PitchSnapUnit[] = ["semitone", "scale"];
-                                state.pitchSnapUnit = validUnits.includes(s.pitchSnapUnit as PitchSnapUnit)
-                                    ? (s.pitchSnapUnit as PitchSnapUnit)
-                                    : "semitone";
-                                // Validate pitchSnapScale
-                                state.pitchSnapScale = (SCALE_KEYS as readonly string[]).includes(s.pitchSnapScale)
-                                    ? s.pitchSnapScale as typeof state.pitchSnapScale
-                                    : "C";
+                // Validate pitchSnapUnit
+                const validUnits: PitchSnapUnit[] = ["semitone", "scale"];
+                state.pitchSnapUnit = validUnits.includes(
+                    s.pitchSnapUnit as PitchSnapUnit,
+                )
+                    ? (s.pitchSnapUnit as PitchSnapUnit)
+                    : "semitone";
+                // Validate pitchSnapScale
+                state.pitchSnapScale = (
+                    SCALE_KEYS as readonly string[]
+                ).includes(s.pitchSnapScale)
+                    ? (s.pitchSnapScale as typeof state.pitchSnapScale)
+                    : "C";
                 state.playheadZoomEnabled = s.playheadZoom;
-                if (s.autoScroll != null) state.autoScrollEnabled = s.autoScroll;
-                if (s.showClipboardPreview != null) state.showClipboardPreview = s.showClipboardPreview;
+                if (s.autoScroll != null)
+                    state.autoScrollEnabled = s.autoScroll;
+                if (s.showClipboardPreview != null)
+                    state.showClipboardPreview = s.showClipboardPreview;
             })
 
             .addCase(loadDefaultModel.pending, (state) =>
@@ -1470,9 +1479,16 @@ const sessionSlice = createSlice({
             .addCase(stopAudioPlayback.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
-                const payload = action.payload as { ok?: boolean; restoreAnchor?: boolean };
+                const payload = action.payload as {
+                    ok?: boolean;
+                    restoreAnchor?: boolean;
+                };
                 // If restoreAnchor is set (Play/Stop action), restore playhead to anchor position
-                if (payload.restoreAnchor && state.playbackAnchorSec !== undefined && state.playbackAnchorSec !== null) {
+                if (
+                    payload.restoreAnchor &&
+                    state.playbackAnchorSec !== undefined &&
+                    state.playbackAnchorSec !== null
+                ) {
                     state.playheadSec = state.playbackAnchorSec;
                 }
                 state.runtime.isPlaying = false;

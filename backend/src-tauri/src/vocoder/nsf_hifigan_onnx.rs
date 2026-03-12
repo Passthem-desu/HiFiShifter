@@ -759,7 +759,7 @@ impl NsfHifiganOnnx {
             .collect();
         let has_formant_shift = formant_shifts.iter().any(|s| s.abs() >= 0.5);
         if has_formant_shift {
-            shift_mel_formant(&mut mel, self.cfg.num_mels, t, &formant_shifts);
+            shift_mel_formant(&mut mel, self.cfg.num_mels, t, &formant_shifts, self.cfg.fmin, self.cfg.fmax);
         }
 
         let mut f0 = vec![0.0f32; t];
@@ -1139,13 +1139,29 @@ pub fn infer_pitch_edit_chunked(
 ///
 /// `mel`: `[n_mels * t]` 行优先展平数据（n_mels 行 × t 列）。
 /// `formant_shifts`: `[t]`，每帧的共振峰偏移量（单位：cents）。
+/// `fmin` / `fmax`：mel filterbank 的频率范围（Hz），必须与提取 mel 时使用的参数一致。
 ///
 /// 对每帧，根据 shift 值计算频率缩放因子 `ratio = 2^(shift/1200)`，
-/// 然后沿频率轴（mel bin 方向）对该帧做线性插值重采样。
+/// 然后在 **Hz 域**对每个输出 mel bin 查找对应源 bin（正确处理 Slaney mel 的非线性刻度）：
+///   source_hz = center_hz(output_bin) / ratio  →  source_bin = hz_to_mel_bin(source_hz)
 ///
 /// - 正值 → 共振峰上移 → 声音变细
 /// - 负值 → 共振峰下移 → 声音变粗
-fn shift_mel_formant(mel: &mut [f32], n_mels: usize, t: usize, formant_shifts: &[f32]) {
+fn shift_mel_formant(
+    mel: &mut [f32],
+    n_mels: usize,
+    t: usize,
+    formant_shifts: &[f32],
+    fmin: f32,
+    fmax: f32,
+) {
+    let mel_min = hz_to_mel_slaney(fmin.max(0.0));
+    let mel_max = hz_to_mel_slaney(fmax.max(fmin + 1.0));
+    let mel_range = (mel_max - mel_min).max(1e-9);
+    let n_mels_f = n_mels as f32;
+    // log 压缩后的静音值：dynamic_range_compression_ln(0) = ln(1e-9)
+    let silence = (1e-9_f32).ln();
+
     // 临时缓冲区复用
     let mut col_buf = vec![0.0f32; n_mels];
 
@@ -1155,7 +1171,7 @@ fn shift_mel_formant(mel: &mut [f32], n_mels: usize, t: usize, formant_shifts: &
             continue; // < 0.5 cents 可忽略
         }
 
-        let ratio = 2.0f64.powf(shift as f64 / 1200.0);
+        let ratio = 2.0f32.powf(shift / 1200.0);
         if !ratio.is_finite() || ratio <= 0.0 {
             continue;
         }
@@ -1165,22 +1181,35 @@ fn shift_mel_formant(mel: &mut [f32], n_mels: usize, t: usize, formant_shifts: &
             col_buf[m] = mel[m * t + frame];
         }
 
-        // 重采样：输出 bin m 对应源 bin m / ratio
+        // 正确的 Hz 域偏移：
+        //   mel filterbank 中心频率公式：mel_center[m] = mel_min + (m+1) * mel_range / (n_mels+1)
+        //   Hz 域：source_hz = hz_center[m] / ratio
+        //   反查 bin：src_bin_f = (hz_to_mel(source_hz) - mel_min) / mel_range * (n_mels+1) - 1
         for m in 0..n_mels {
-            let src_bin = (m as f64) / ratio;
-            let i0 = src_bin.floor() as isize;
-            let frac = (src_bin - i0 as f64) as f32;
+            let mel_center = mel_min + (m as f32 + 1.0) * mel_range / (n_mels_f + 1.0);
+            let hz_m = mel_to_hz_slaney(mel_center);
+            let hz_src = hz_m / ratio;
+            let mel_src = hz_to_mel_slaney(hz_src.max(0.0));
+            let src_bin_f = (mel_src - mel_min) / mel_range * (n_mels_f + 1.0) - 1.0;
+
+            let i0 = src_bin_f.floor() as isize;
+            let frac = (src_bin_f - i0 as f32).clamp(0.0, 1.0);
 
             let v = if i0 < 0 {
-                // 超出低端：用最低 bin 的值
-                col_buf[0]
-            } else if i0 >= (n_mels - 1) as isize {
-                // 超出高端：用最高 bin 的值（静音 padding）
-                col_buf[n_mels - 1]
+                // 低于 fmin：静音填充（共振峰上移时低频端留空）
+                silence
             } else {
-                let a = col_buf[i0 as usize];
-                let b = col_buf[(i0 + 1) as usize];
-                a + (b - a) * frac
+                let i0u = i0 as usize;
+                if i0u >= n_mels {
+                    // 高于 fmax：静音填充（共振峰下移时高频端留空，避免引入伪高频能量）
+                    silence
+                } else if i0u == n_mels - 1 {
+                    col_buf[i0u]
+                } else {
+                    let a = col_buf[i0u];
+                    let b = col_buf[i0u + 1];
+                    a + (b - a) * frac
+                }
             };
 
             mel[m * t + frame] = v;
@@ -1294,7 +1323,7 @@ impl NsfHifiganOnnx {
             .collect();
         let has_formant_shift = formant_shifts.iter().any(|s| s.abs() >= 0.5);
         if has_formant_shift {
-            shift_mel_formant(&mut mel_stretched, self.cfg.num_mels, t_new, &formant_shifts);
+            shift_mel_formant(&mut mel_stretched, self.cfg.num_mels, t_new, &formant_shifts, self.cfg.fmin, self.cfg.fmax);
         }
 
         // 5. 构建 F0 [T_new]

@@ -85,6 +85,7 @@ export const timelineApi = {
         composeEnabled?: boolean;
         pitchAnalysisAlgo?: string;
         color?: string;
+        name?: string;
     }) =>
         invoke<TimelineResult>(
             "set_track_state",
@@ -95,6 +96,7 @@ export const timelineApi = {
             payload.composeEnabled,
             payload.pitchAnalysisAlgo,
             payload.color,
+            payload.name,
         ),
 
     selectTrack: (trackId: string) =>
@@ -120,9 +122,14 @@ export const timelineApi = {
             payload.sourcePath,
         ),
 
-    removeClip: (clipId: string) => invoke<TimelineResult>("remove_clip", clipId),
+    removeClip: (clipId: string) =>
+        invoke<TimelineResult>("remove_clip", clipId),
 
-    moveClip: (payload: { clipId: string; startSec: number; trackId?: string }) =>
+    moveClip: (payload: {
+        clipId: string;
+        startSec: number;
+        trackId?: string;
+    }) =>
         invoke<TimelineResult>(
             "move_clip",
             payload.clipId,

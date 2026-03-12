@@ -271,6 +271,18 @@ fn root_pitch_edit_state<'a>(
     Some((track, entry))
 }
 
+fn clip_pitch_edit_state<'a>(
+    timeline: &'a TimelineState,
+    clip: &crate::state::Clip,
+) -> Option<(&'a crate::state::Track, &'a crate::state::TrackParamsState)> {
+    let clip_root = timeline.resolve_root_track_id(&clip.track_id)?;
+    root_pitch_edit_state(timeline, &clip_root)
+}
+
+fn clip_root_track_id(timeline: &TimelineState, clip: &crate::state::Clip) -> Option<String> {
+    timeline.resolve_root_track_id(&clip.track_id)
+}
+
 fn edit_midi_at_time_or_none(
     frame_period_ms: f64,
     pitch_edit: &[f32],
@@ -472,24 +484,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         return Ok(false);
     }
 
-    let selected = timeline
-        .selected_track_id
-        .clone()
-        .or_else(|| timeline.tracks.first().map(|t| t.id.clone()))
-        .unwrap_or_default();
-    let Some(root) = timeline.resolve_root_track_id(&selected) else {
-        return Ok(false);
-    };
-
-    let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
-        return Ok(false);
-    };
-    if clip_root != root {
-        return Ok(false);
-    }
-
-    let track = timeline.tracks.iter().find(|t| t.id == root);
-    let Some(track) = track else {
+    let Some((track, entry)) = clip_pitch_edit_state(timeline, clip) else {
         return Ok(false);
     };
     if !track.compose_enabled {
@@ -500,11 +495,6 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     if matches!(algo, PitchEditAlgorithm::Bypass) {
         return Ok(false);
     }
-
-    let entry = timeline.params_by_root_track.get(&root);
-    let Some(entry) = entry else {
-        return Ok(false);
-    };
 
     let extra_processing = track_requests_extra_processing(algo, entry, clip);
     let tension_processing = matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
@@ -562,14 +552,20 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let is_vslib = false;
 
     // Get per-clip original MIDI curve (full source, source-time indexed).
-    let timeline_midi: Vec<f32> = if is_vslib || !has_pitch_user_edit {
+    // HiFi-GAN 始终需要 clip_midi 才能合成（即使没有音高编辑）：
+    //   clip_midi 提供原始音高，使 HiFi-GAN 能以相同音高重合成并应用 formant/tension 效果。
+    // vslib 例外：使用内部分析，忽略 clip_midi 字段。
+    let timeline_midi: Vec<f32> = if is_vslib {
         // vslib 不需要原始音高轮廓，传空切片，VslibProcessor 会忽略 clip_midi 字段。
         Vec::new()
     } else {
+        let Some(clip_root) = clip_root_track_id(timeline, clip) else {
+            return Ok(false);
+        };
         let clip_pitch = crate::pitch_clip::get_or_compute_clip_pitch_midi_global(
             timeline,
             clip,
-            &root,
+            &clip_root,
             frame_period_ms,
         );
         let Some(clip_pitch) = clip_pitch else {
@@ -591,24 +587,26 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             return Ok(false);
         }
 
-        // Skip expensive processing if the edit curve does not actually change pitch vs clip's original MIDI.
-        let has_effective_pitch_change = any_effective_pitch_change_in_range(
-            frame_period_ms,
-            pitch_edit,
-            clip_start_sec,
-            &tm,
-            seg_start_sec,
-            seg_end_sec,
-        );
-        if !has_effective_pitch_change {
-            if extra_processing || tension_processing || formant_processing {
-                Vec::new()
-            } else {
+        if has_pitch_user_edit {
+            // 若音高编辑值与原始音高完全一致（无实际变化），且不需要其他效果处理，则跳过。
+            let has_effective_pitch_change = any_effective_pitch_change_in_range(
+                frame_period_ms,
+                pitch_edit,
+                clip_start_sec,
+                &tm,
+                seg_start_sec,
+                seg_end_sec,
+            );
+            if !has_effective_pitch_change
+                && !(extra_processing || tension_processing || formant_processing)
+            {
                 return Ok(false);
             }
-        } else {
-            tm
         }
+        // !has_pitch_user_edit 时：早期退出已确保 extra/tension/formant 至少一个为 true。
+        // 始终传递原始 MIDI 曲线；pitch_edit 全零时 edit_midi_at_time_or_none 返回 None，
+        // HiFi-GAN fallback 到原始音高，在原始音高基础上应用 formant/tension 效果。
+        tm
     };
 
     // stereo -> mono (we don't preserve stereo; use left channel for cheaper conversion)
@@ -969,5 +967,55 @@ mod tests {
         };
 
         assert!(does_clip_need_pitch_edit(&tl, &clip, 0.0));
+    }
+
+    #[test]
+    fn clip_pitch_edit_state_ignores_selected_track_id() {
+        let frame_period_ms = 5.0;
+        let mut tl = make_timeline_with_pitch_edit(frame_period_ms, true, 20_000, &[1.0]);
+
+        let other_track = Track {
+            id: "track_other".to_string(),
+            name: "Other".to_string(),
+            parent_id: None,
+            order: 1,
+            muted: false,
+            solo: false,
+            volume: 1.0,
+            compose_enabled: false,
+            pitch_analysis_algo: PitchAnalysisAlgo::None,
+            color: String::new(),
+        };
+        tl.tracks.push(other_track);
+        tl.selected_track_id = Some("track_other".to_string());
+
+        let clip = crate::state::Clip {
+            id: "clip1".to_string(),
+            track_id: "track_root".to_string(),
+            name: "c".to_string(),
+            start_sec: 0.0,
+            length_sec: 2.0,
+            color: String::new(),
+            source_path: None,
+            duration_sec: Some(2.0),
+            duration_frames: None,
+            source_sample_rate: None,
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            source_start_sec: 0.0,
+            source_end_sec: 2.0,
+            playback_rate: 1.0,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            fade_in_curve: "sine".to_string(),
+            fade_out_curve: "sine".to_string(),
+        };
+
+        let (track, entry) = clip_pitch_edit_state(&tl, &clip).expect("clip root state");
+
+        assert_eq!(track.id, "track_root");
+        assert!(entry.pitch_edit_user_modified);
     }
 }

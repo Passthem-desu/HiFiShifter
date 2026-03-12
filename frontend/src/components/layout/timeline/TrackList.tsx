@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Flex, Box, Text, IconButton, Slider } from "@radix-ui/themes";
+import { Flex, Box, Text, IconButton, Slider, Select } from "@radix-ui/themes";
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
 import type { TrackInfo } from "../../../features/session/sessionTypes";
 import type { MessageKey } from "../../../i18n/messages";
@@ -36,6 +36,8 @@ export const TrackList: React.FC<{
     onVolumeCommit: (trackId: string, nextVolume: number) => void;
     onAddTrack: () => void;
     onTrackColorChange?: (trackId: string, color: string) => void;
+    onAlgoChange?: (trackId: string, algo: string) => void;
+    onTrackNameChange?: (trackId: string, name: string) => void;
     /** 外部持有该滚动容器的 ref，用于同步右侧轨道区的竖向滚动 */
     listScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
 }> = ({
@@ -54,6 +56,8 @@ export const TrackList: React.FC<{
     onVolumeCommit,
     onAddTrack,
     onTrackColorChange,
+    onAlgoChange,
+    onTrackNameChange,
     listScrollRef,
 }) => {
     const listRef = useRef<HTMLDivElement | null>(null);
@@ -78,6 +82,20 @@ export const TrackList: React.FC<{
     const [colorPickerTrackId, setColorPickerTrackId] = useState<string | null>(
         null,
     );
+
+    // 轨道名称行内编辑状态
+    const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
+    const [editingName, setEditingName] = useState("");
+    const nameInputRef = useRef<HTMLInputElement | null>(null);
+
+    function commitTrackName() {
+        if (!editingTrackId) return;
+        const trimmed = editingName.trim();
+        if (trimmed && onTrackNameChange) {
+            onTrackNameChange(editingTrackId, trimmed);
+        }
+        setEditingTrackId(null);
+    }
 
     // 点击其他区域关闭颜色选择器
     useEffect(() => {
@@ -369,9 +387,13 @@ export const TrackList: React.FC<{
 
                                     let indicatorY: number | null = null;
                                     if (spec.mode === "reorder") {
-                                        const listBounds = listRef.current?.getBoundingClientRect();
+                                        const listBounds =
+                                            listRef.current?.getBoundingClientRect();
                                         // 鼠标在列表上方时，指示线固定在顶部
-                                        if (listBounds && ev.clientY < listBounds.top) {
+                                        if (
+                                            listBounds &&
+                                            ev.clientY < listBounds.top
+                                        ) {
                                             indicatorY = 0;
                                         } else {
                                             const idx = overInfo.index;
@@ -383,12 +405,14 @@ export const TrackList: React.FC<{
                                                     tracks.length * rowHeight;
                                             } else {
                                                 const insertAfter =
-                                                    overInfo.yInRow > rowHeight - edgeZone;
+                                                    overInfo.yInRow >
+                                                    rowHeight - edgeZone;
                                                 const insertBefore =
                                                     overInfo.yInRow < edgeZone;
                                                 if (insertAfter) {
                                                     indicatorY =
-                                                        idx * rowHeight + rowHeight;
+                                                        idx * rowHeight +
+                                                        rowHeight;
                                                 } else if (insertBefore) {
                                                     indicatorY =
                                                         idx * rowHeight;
@@ -615,13 +639,60 @@ export const TrackList: React.FC<{
                                                     </div>
                                                 )}
                                             </div>
-                                            <Text
-                                                size="2"
-                                                weight="medium"
-                                                className={`text-qt-text truncate pr-2 ${depth > 0 ? "opacity-90" : ""}`}
-                                            >
-                                                {track.name}
-                                            </Text>
+                                            {editingTrackId === track.id ? (
+                                                <input
+                                                    ref={nameInputRef}
+                                                    value={editingName}
+                                                    className="bg-transparent outline outline-1 outline-qt-highlight rounded px-0.5 flex-1 min-w-0 text-qt-text text-sm font-medium pr-2"
+                                                    onChange={(e) =>
+                                                        setEditingName(
+                                                            e.target.value,
+                                                        )
+                                                    }
+                                                    onBlur={commitTrackName}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === "Enter") {
+                                                            commitTrackName();
+                                                        } else if (
+                                                            e.key === "Escape"
+                                                        ) {
+                                                            setEditingTrackId(
+                                                                null,
+                                                            );
+                                                        }
+                                                    }}
+                                                    onPointerDown={(e) =>
+                                                        e.stopPropagation()
+                                                    }
+                                                    onClick={(e) =>
+                                                        e.stopPropagation()
+                                                    }
+                                                    autoFocus
+                                                />
+                                            ) : (
+                                                <Text
+                                                    size="2"
+                                                    weight="medium"
+                                                    className={`text-qt-text truncate pr-2 ${depth > 0 ? "opacity-90" : ""} cursor-text select-none`}
+                                                    onPointerDown={(e) =>
+                                                        e.stopPropagation()
+                                                    }
+                                                    onDoubleClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setEditingTrackId(
+                                                            track.id,
+                                                        );
+                                                        setEditingName(
+                                                            track.name,
+                                                        );
+                                                        setTimeout(() => {
+                                                            nameInputRef.current?.select();
+                                                        }, 0);
+                                                    }}
+                                                >
+                                                    {track.name}
+                                                </Text>
+                                            )}
                                         </Flex>
                                         <IconButton
                                             size="1"
@@ -722,6 +793,55 @@ export const TrackList: React.FC<{
                                         >
                                             S
                                         </IconButton>
+                                        {isRoot &&
+                                        composeEnabled &&
+                                        onAlgoChange ? (
+                                            <div
+                                                onPointerDown={(e) =>
+                                                    e.stopPropagation()
+                                                }
+                                            >
+                                                <Select.Root
+                                                    size="1"
+                                                    value={
+                                                        [
+                                                            "world_dll",
+                                                            "nsf_hifigan_onnx",
+                                                            "vslib",
+                                                            "none",
+                                                        ].includes(
+                                                            track.pitchAnalysisAlgo,
+                                                        )
+                                                            ? track.pitchAnalysisAlgo
+                                                            : "nsf_hifigan_onnx"
+                                                    }
+                                                    onValueChange={(v) => {
+                                                        onAlgoChange(
+                                                            track.id,
+                                                            v,
+                                                        );
+                                                    }}
+                                                >
+                                                    <Select.Trigger
+                                                        style={{ minWidth: 80 }}
+                                                    />
+                                                    <Select.Content>
+                                                        <Select.Item value="world_dll">
+                                                            world
+                                                        </Select.Item>
+                                                        <Select.Item value="nsf_hifigan_onnx">
+                                                            nsf-hifigan
+                                                        </Select.Item>
+                                                        <Select.Item value="vslib">
+                                                            vslib
+                                                        </Select.Item>
+                                                        <Select.Item value="none">
+                                                            {t("none")}
+                                                        </Select.Item>
+                                                    </Select.Content>
+                                                </Select.Root>
+                                            </div>
+                                        ) : null}
                                         <Box flexGrow="1" />
                                         <Text size="1" color="gray">
                                             {Math.round(volume * 100)}%

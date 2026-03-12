@@ -265,6 +265,7 @@ export const messages = {
         kb_clip_cut: "Cut Clip",
         kb_clip_paste: "Paste Clip",
         kb_clip_split: "Split Clip",
+        kb_clip_normalize: "Normalize Clip",
         kb_group_pianoroll: "Piano Roll",
         kb_group_modifier: "Modifier Keys",
         kb_pianoroll_copy: "Copy Param Frames",
@@ -476,7 +477,8 @@ export const messages = {
         pitch_snap_settings: "Pitch Snap Settings",
 
         // Keybinding hint
-        kb_hint_recording: "Left-click a binding to set it to None. Right-click to reset to default.",
+        kb_hint_recording:
+            "Left-click a binding to set it to None. Right-click to reset to default.",
 
         // Keybinding None
         kb_none: "None",
@@ -742,6 +744,7 @@ export const messages = {
         kb_clip_cut: "剪切音频块",
         kb_clip_paste: "粘贴音频块",
         kb_clip_split: "分割音频块",
+        kb_clip_normalize: "规格化音频块",
         kb_group_pianoroll: "钢琴卷帘",
         kb_group_modifier: "修饰键",
         kb_pianoroll_copy: "复制参数帧",

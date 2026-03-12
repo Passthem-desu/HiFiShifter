@@ -399,7 +399,10 @@ export const TimelinePanel: React.FC = () => {
             if (detail.type === "duration") {
                 setDropPreview((prev) => {
                     if (prev && prev.path === detail.filePath) {
-                        return { ...prev, durationSec: (detail as any).durationSec };
+                        return {
+                            ...prev,
+                            durationSec: (detail as any).durationSec,
+                        };
                     }
                     return prev;
                 });
@@ -419,7 +422,10 @@ export const TimelinePanel: React.FC = () => {
                         fileName: detail.fileName,
                         trackId,
                         startSec: beat,
-                        durationSec: prev?.path === detail.filePath ? prev.durationSec : 2,
+                        durationSec:
+                            prev?.path === detail.filePath
+                                ? prev.durationSec
+                                : 2,
                     }));
                 } else {
                     setDropPreview(null);
@@ -734,6 +740,31 @@ export const TimelinePanel: React.FC = () => {
     }
 
     // ���� ���̿�ݼ� hook ������������������������������������������������������������������������������������������������������������
+    // 规格化 clip 音量（快捷键 & 右键菜单共用）
+    const normalizeClips = React.useCallback(
+        (ids: string[]) => {
+            for (const id of ids) {
+                const waveform = sessionRef.current.clipWaveforms[id];
+                if (!waveform) continue;
+                const samples = Array.isArray(waveform)
+                    ? waveform
+                    : [...waveform.l, ...waveform.r];
+                if (samples.length === 0) continue;
+                const peak = Math.max(...samples.map(Math.abs));
+                if (peak <= 0) continue;
+                const newGain = Math.min(
+                    Math.max(1.0 / peak, dbToGain(-12)),
+                    dbToGain(12),
+                );
+                dispatch(setClipGain({ clipId: id, gain: newGain }));
+                void dispatch(
+                    setClipStateRemote({ clipId: id, gain: newGain }),
+                );
+            }
+        },
+        [dispatch, sessionRef],
+    );
+
     useKeyboardShortcuts({
         sessionRef,
         dispatch,
@@ -742,6 +773,7 @@ export const TimelinePanel: React.FC = () => {
         clipClipboardRef,
         isEditableTarget,
         autoCrossfadeEnabled: s.autoCrossfadeEnabled,
+        onNormalize: normalizeClips,
     });
     useEffect(() => {
         if (!contextMenu) return;
@@ -859,6 +891,22 @@ export const TimelinePanel: React.FC = () => {
                         setTrackStateRemote({
                             trackId,
                             color,
+                        }),
+                    );
+                }}
+                onAlgoChange={(trackId, algo) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            pitchAnalysisAlgo: algo,
+                        }),
+                    );
+                }}
+                onTrackNameChange={(trackId, name) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            name,
                         }),
                     );
                 }}
@@ -1083,8 +1131,18 @@ export const TimelinePanel: React.FC = () => {
                         if (!scroller) return;
                         const bounds = scroller.getBoundingClientRect();
                         // Ignore clicks on the native scrollbar region
-                        if (e.clientY > bounds.bottom - (scroller.offsetHeight - scroller.clientHeight)) return;
-                        if (e.clientX > bounds.right - (scroller.offsetWidth - scroller.clientWidth)) return;
+                        if (
+                            e.clientY >
+                            bounds.bottom -
+                                (scroller.offsetHeight - scroller.clientHeight)
+                        )
+                            return;
+                        if (
+                            e.clientX >
+                            bounds.right -
+                                (scroller.offsetWidth - scroller.clientWidth)
+                        )
+                            return;
                         setPlayheadFromClientX(
                             e.clientX,
                             bounds,
@@ -1267,7 +1325,10 @@ export const TimelinePanel: React.FC = () => {
                                     top:
                                         rowTopForTrackId(dropPreview.trackId) +
                                         8,
-                                    width: Math.max(80, pxPerSec * dropPreview.durationSec),
+                                    width: Math.max(
+                                        80,
+                                        pxPerSec * dropPreview.durationSec,
+                                    ),
                                     height: rowHeight - 16,
                                 }}
                             >
@@ -1474,44 +1535,7 @@ export const TimelinePanel: React.FC = () => {
                                           }),
                                       );
                                   }}
-                                  onNormalize={(ids) => {
-                                      for (const id of ids) {
-                                          const waveform =
-                                              sessionRef.current.clipWaveforms[
-                                                  id
-                                              ];
-                                          if (!waveform) continue;
-                                          const samples = Array.isArray(
-                                              waveform,
-                                          )
-                                              ? waveform
-                                              : [...waveform.l, ...waveform.r];
-                                          if (samples.length === 0) continue;
-                                          const peak = Math.max(
-                                              ...samples.map(Math.abs),
-                                          );
-                                          if (peak <= 0) continue;
-                                          const newGain = Math.min(
-                                              Math.max(
-                                                  1.0 / peak,
-                                                  dbToGain(-12),
-                                              ),
-                                              dbToGain(12),
-                                          );
-                                          dispatch(
-                                              setClipGain({
-                                                  clipId: id,
-                                                  gain: newGain,
-                                              }),
-                                          );
-                                          void dispatch(
-                                              setClipStateRemote({
-                                                  clipId: id,
-                                                  gain: newGain,
-                                              }),
-                                          );
-                                      }
-                                  }}
+                                  onNormalize={normalizeClips}
                               />
                           );
                       })()

@@ -56,8 +56,8 @@ static HIFIGAN_PARAM_DESCRIPTORS: [ParamDescriptor; 4] = [
         kind: super::traits::ParamKind::AutomationCurve {
             unit: "cents",
             default_value: 0.0,
-            min_value: -2400.0,
-            max_value: 2400.0,
+            min_value: -500.0,
+            max_value: 500.0,
         },
     },
 ];
