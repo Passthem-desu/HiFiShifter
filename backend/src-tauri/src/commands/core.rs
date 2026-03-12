@@ -17,11 +17,22 @@ pub(super) fn get_runtime_info(state: State<'_, AppState>) -> crate::models::Run
 
 pub(super) fn set_ui_locale(state: State<'_, AppState>, locale: String) -> serde_json::Value {
     let locale = locale.trim();
+    let lower = locale.to_lowercase();
     let normalized = if locale.eq_ignore_ascii_case("zh-CN")
         || locale.eq_ignore_ascii_case("zh_CN")
-        || locale.to_lowercase().starts_with("zh")
+        || lower.starts_with("zh")
     {
         "zh-CN".to_string()
+    } else if locale.eq_ignore_ascii_case("ja-JP")
+        || locale.eq_ignore_ascii_case("ja_JP")
+        || lower.starts_with("ja")
+    {
+        "ja-JP".to_string()
+    } else if locale.eq_ignore_ascii_case("ko-KR")
+        || locale.eq_ignore_ascii_case("ko_KR")
+        || lower.starts_with("ko")
+    {
+        "ko-KR".to_string()
     } else {
         // Default to en-US for unknown values.
         "en-US".to_string()

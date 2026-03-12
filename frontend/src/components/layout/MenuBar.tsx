@@ -451,6 +451,12 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         <DropdownMenu.Item onSelect={() => setLocale("zh-CN")}>
                             {t("lang_zh")}
                         </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => setLocale("ja-JP")}>
+                            {t("lang_ja")}
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => setLocale("ko-KR")}>
+                            {t("lang_ko")}
+                        </DropdownMenu.Item>
                     </DropdownMenu.Content>
                 </DropdownMenu.Root>
             </Flex>

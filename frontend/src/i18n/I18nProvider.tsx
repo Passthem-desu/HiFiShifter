@@ -21,12 +21,14 @@ const STORAGE_KEY = "hifishifter.locale";
 
 function getDefaultLocale(): Locale {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "zh-CN" || stored === "en-US") {
-        return stored;
+    if (stored && stored in messages) {
+        return stored as Locale;
     }
-    return navigator.language.toLowerCase().startsWith("zh")
-        ? "zh-CN"
-        : "en-US";
+    const lang = navigator.language.toLowerCase();
+    if (lang.startsWith("zh")) return "zh-CN";
+    if (lang.startsWith("ja")) return "ja-JP";
+    if (lang.startsWith("ko")) return "ko-KR";
+    return "en-US";
 }
 
 export function I18nProvider({ children }: PropsWithChildren) {
