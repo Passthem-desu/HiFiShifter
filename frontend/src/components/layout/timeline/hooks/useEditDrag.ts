@@ -146,16 +146,18 @@ export function useEditDrag(deps: {
 
             if (drag.type === "stretch_left") {
                 const desiredStart = clamp(beat, 0, drag.rightEdgeBeat - minLen);
-                const nextStart = desiredStart;
-                const nextLen = clamp(drag.rightEdgeBeat - nextStart, minLen, 10_000);
+                const rawLen = clamp(drag.rightEdgeBeat - desiredStart, minLen, 10_000);
                 const baseLen = Math.max(1e-6, Number(drag.baselengthSec) || 0);
                 const baseRate =
                     drag.basePlaybackRate > 0 && Number.isFinite(drag.basePlaybackRate)
                         ? drag.basePlaybackRate
                         : 1;
-                const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, nextLen), 0.1, 10);
+                const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, rawLen), 0.1, 10);
+                // 用 clamp 后的 rate 反算真实长度，确保 lengthSec 和 playbackRate 一致
+                const correctedLen = (baseRate * baseLen) / nextRate;
+                const nextStart = drag.rightEdgeBeat - correctedLen;
                 dispatch(moveClipStart({ clipId: drag.clipId, startSec: nextStart }));
-                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
+                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: correctedLen }));
                 dispatch(setClipPlaybackRate({ clipId: drag.clipId, playbackRate: nextRate }));
                 return;
             }
@@ -193,14 +195,16 @@ export function useEditDrag(deps: {
 
             if (drag.type === "stretch_right") {
                 const desiredRight = clamp(beat, drag.basestartSec + minLen, 10_000);
-                const nextLen = clamp(desiredRight - drag.basestartSec, minLen, 10_000);
+                const rawLen = clamp(desiredRight - drag.basestartSec, minLen, 10_000);
                 const baseLen = Math.max(1e-6, Number(drag.baselengthSec) || 0);
                 const baseRate =
                     drag.basePlaybackRate > 0 && Number.isFinite(drag.basePlaybackRate)
                         ? drag.basePlaybackRate
                         : 1;
-                const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, nextLen), 0.1, 10);
-                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
+                const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, rawLen), 0.1, 10);
+                // 用 clamp 后的 rate 反算真实长度，确保 lengthSec 和 playbackRate 一致
+                const correctedLen = (baseRate * baseLen) / nextRate;
+                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: correctedLen }));
                 dispatch(setClipPlaybackRate({ clipId: drag.clipId, playbackRate: nextRate }));
             }
         }
