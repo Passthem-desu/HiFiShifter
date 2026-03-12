@@ -35,7 +35,7 @@ $ErrorActionPreference = "Stop"
 # ===== 路径定义 =====
 $ProjectRoot = Resolve-Path "$PSScriptRoot\.."
 $TauriDir = Join-Path $ProjectRoot "backend\src-tauri"
-$TargetRelease = Join-Path $ProjectRoot "backend\src-tauri\target\release"
+$TargetRelease = Join-Path $ProjectRoot "backend\src-tauri\target\x86_64-pc-windows-msvc\release"
 
 # 从 tauri.conf.json 读取版本号和产品名
 $TauriConf = Get-Content (Join-Path $TauriDir "tauri.conf.json") -Raw | ConvertFrom-Json
