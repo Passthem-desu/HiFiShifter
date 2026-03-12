@@ -47,7 +47,7 @@ if (-not $OutputDir) {
     $OutputDir = Join-Path $ProjectRoot "dist"
 }
 
-$PortableDirName = "$ProductName-portable"
+$PortableDirName = "$ProductName"
 $TempDir = Join-Path $OutputDir $PortableDirName
 $ZipName = "$ProductName-v$Version-portable-win-x64.zip"
 $ZipPath = Join-Path $OutputDir $ZipName
@@ -61,9 +61,32 @@ Write-Host "  版本:     $Version"
 Write-Host "  输出路径: $ZipPath"
 Write-Host ""
 
+# ===== 交互式选择（未指定 -SkipBuild 时） =====
+if (-not $SkipBuild) {
+    Write-Host "请选择操作：" -ForegroundColor White
+    Write-Host "  [1] 完整构建 + 打包" -ForegroundColor Yellow
+    Write-Host "  [2] 跳过构建，直接打包（使用已有产物）" -ForegroundColor Yellow
+    Write-Host ""
+    do {
+        $choice = Read-Host "请输入选项 (1/2)"
+        if ($choice -eq "2") {
+            $SkipBuild = $true
+            Write-Host ""
+            break
+        }
+        elseif ($choice -eq "1") {
+            Write-Host ""
+            break
+        }
+        else {
+            Write-Host "无效输入，请输入 1 或 2" -ForegroundColor Red
+        }
+    } while ($true)
+}
+
 # ===== 步骤 1: 构建（可选） =====
 if (-not $SkipBuild) {
-    Write-Host "[1/4] 正在构建 Release 版本..." -ForegroundColor Yellow
+    Write-Host "[1/5] 正在构建 Release 版本..." -ForegroundColor Yellow
     Push-Location $TauriDir
     try {
         cargo tauri build
@@ -74,14 +97,14 @@ if (-not $SkipBuild) {
     finally {
         Pop-Location
     }
-    Write-Host "[1/4] 构建完成 ✓" -ForegroundColor Green
+    Write-Host "[1/5] 构建完成 ✓" -ForegroundColor Green
 }
 else {
-    Write-Host "[1/4] 跳过构建步骤（-SkipBuild）" -ForegroundColor DarkGray
+    Write-Host "[1/5] 跳过构建步骤（-SkipBuild）" -ForegroundColor DarkGray
 }
 
 # ===== 步骤 2: 检查产物 =====
-Write-Host "[2/4] 检查构建产物..." -ForegroundColor Yellow
+Write-Host "[2/5] 检查构建产物..." -ForegroundColor Yellow
 
 $ExePath = Join-Path $TargetRelease "$ProductName.exe"
 if (-not (Test-Path $ExePath)) {
@@ -110,10 +133,10 @@ if ($Missing.Count -gt 0) {
     throw "资源文件不完整，无法打包"
 }
 
-Write-Host "[2/4] 产物检查通过 ✓" -ForegroundColor Green
+Write-Host "[2/5] 产物检查通过 ✓" -ForegroundColor Green
 
 # ===== 步骤 3: 组装目录 =====
-Write-Host "[3/4] 组装便携包目录..." -ForegroundColor Yellow
+Write-Host "[3/5] 组装便携包目录..." -ForegroundColor Yellow
 
 # 清理旧的临时目录和 zip
 if (Test-Path $TempDir) {
@@ -162,10 +185,10 @@ if (Test-Path $Wv2Dll) {
     Write-Host "  ✓ WebView2Loader.dll" -ForegroundColor DarkGreen
 }
 
-Write-Host "[3/4] 目录组装完成 ✓" -ForegroundColor Green
+Write-Host "[3/5] 目录组装完成 ✓" -ForegroundColor Green
 
 # ===== 步骤 4: 压缩 =====
-Write-Host "[4/4] 正在压缩为 ZIP..." -ForegroundColor Yellow
+Write-Host "[4/5] 正在压缩为 ZIP..." -ForegroundColor Yellow
 
 Compress-Archive -Path $TempDir -DestinationPath $ZipPath -CompressionLevel Optimal
 
@@ -175,10 +198,32 @@ Remove-Item $TempDir -Recurse -Force
 $ZipSize = (Get-Item $ZipPath).Length
 $ZipSizeMB = [math]::Round($ZipSize / 1MB, 2)
 
-Write-Host "[4/4] 压缩完成 ✓" -ForegroundColor Green
+Write-Host "[4/5] 压缩完成 ✓" -ForegroundColor Green
+
+# ===== 步骤 5: 复制 NSIS 安装包 =====
+Write-Host "[5/5] 复制 NSIS 安装包到 dist..." -ForegroundColor Yellow
+
+$NsisDir = Join-Path $ProjectRoot "backend\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis"
+$NsisPattern = "${ProductName}_${Version}_x64-setup.exe"
+$NsisExePath = Join-Path $NsisDir $NsisPattern
+
+if (Test-Path $NsisExePath) {
+    Copy-Item $NsisExePath -Destination $OutputDir
+    $NsisSize = (Get-Item (Join-Path $OutputDir $NsisPattern)).Length
+    $NsisSizeMB = [math]::Round($NsisSize / 1MB, 2)
+    Write-Host "[5/5] NSIS 安装包已复制 ✓ ($NsisSizeMB MB)" -ForegroundColor Green
+}
+else {
+    Write-Host "[5/5] 未找到 NSIS 安装包，跳过（路径: $NsisExePath）" -ForegroundColor DarkGray
+}
+
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  打包成功！" -ForegroundColor Green
-Write-Host "  输出: $ZipPath" -ForegroundColor Green
-Write-Host "  大小: $ZipSizeMB MB" -ForegroundColor Green
+Write-Host "  便携版: $ZipPath" -ForegroundColor Green
+Write-Host "  大小:   $ZipSizeMB MB" -ForegroundColor Green
+if (Test-Path (Join-Path $OutputDir $NsisPattern)) {
+    Write-Host "  安装包: $(Join-Path $OutputDir $NsisPattern)" -ForegroundColor Green
+    Write-Host "  大小:   $NsisSizeMB MB" -ForegroundColor Green
+}
 Write-Host "============================================" -ForegroundColor Cyan
