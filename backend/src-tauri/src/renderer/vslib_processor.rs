@@ -538,6 +538,7 @@ impl ClipProcessor for VslibProcessor {
 
             let volume_c = ctx.extra_curves.get("volume");
             let dyn_c = ctx.extra_curves.get("dyn_edit");
+            let dyn_orig_c = ctx.extra_curves.get("dyn_orig");
             let pan_c = ctx.extra_curves.get("pan");
             let formant_c = ctx.extra_curves.get("formant_shift_cents");
             let breathiness_c = ctx.extra_curves.get("breathiness");
@@ -581,6 +582,9 @@ impl ClipProcessor for VslibProcessor {
                 }
                 if let Some(v) = curve_at_abs_sec(dyn_c, at_abs, fp) {
                     cp2.dynEdit = v as f64;
+                }
+                if let Some(v) = curve_at_abs_sec(dyn_orig_c, at_abs, fp) {
+                    cp2.dynOrg = v as f64;
                 }
                 if let Some(v) = curve_at_abs_sec(pan_c, at_abs, fp) {
                     cp2.pan = v as f64;

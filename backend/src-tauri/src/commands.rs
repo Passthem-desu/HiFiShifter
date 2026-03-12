@@ -579,11 +579,13 @@ pub fn paste_vocalshifter_clipboard(
     state: State<'_, AppState>,
     selection_start_frame: Option<usize>,
     selection_max_frames: Option<usize>,
+    active_param: Option<String>,
 ) -> serde_json::Value {
     vocalshifter_clipboard::paste_vocalshifter_clipboard(
         state.inner(),
         selection_start_frame,
         selection_max_frames,
+        active_param,
     )
 }
 

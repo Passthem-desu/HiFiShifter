@@ -76,11 +76,13 @@ export const paramsApi = {
     pasteVocalShifterClipboard: (
         selectionStartFrame?: number,
         selectionMaxFrames?: number,
+        activeParam?: string,
     ) =>
         invoke<{ ok: boolean; error?: string; updated?: number }>(
             "paste_vocalshifter_clipboard",
             selectionStartFrame,
             selectionMaxFrames,
+            activeParam,
         ),
 
     pasteReaperClipboard: (

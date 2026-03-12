@@ -50,12 +50,19 @@ export const exportSeparated = createAsyncThunk(
 export const pasteVocalShifterClipboard = createAsyncThunk(
     "session/pasteVocalShifterClipboard",
     async (
-        arg: { selectionStartFrame?: number; selectionMaxFrames?: number } | undefined,
+        arg:
+            | {
+                  selectionStartFrame?: number;
+                  selectionMaxFrames?: number;
+                  activeParam?: string;
+              }
+            | undefined,
         { rejectWithValue },
     ) => {
         const result = await webApi.pasteVocalShifterClipboard(
             arg?.selectionStartFrame,
             arg?.selectionMaxFrames,
+            arg?.activeParam,
         );
         if (!result?.ok) {
             return rejectWithValue(result?.error ?? "paste_vocalshifter_clipboard_failed");

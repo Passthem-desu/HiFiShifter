@@ -272,6 +272,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return {
                 ...(args[0] !== undefined ? { selectionStartFrame: args[0] } : {}),
                 ...(args[1] !== undefined ? { selectionMaxFrames: args[1] } : {}),
+                ...(args[2] !== undefined ? { activeParam: args[2] } : {}),
             };
 
         case "paste_reaper_clipboard":
