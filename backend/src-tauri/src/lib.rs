@@ -30,7 +30,7 @@ use nsf_hifigan_onnx_stub as nsf_hifigan_onnx;
 use hnsep_onnx_stub as hnsep_onnx;
 
 mod project;
-#[path = "audio/rubberband.rs"] mod rubberband;
+#[path = "audio/sstretch.rs"] mod sstretch;
 #[path = "import/vocalshifter_clipboard.rs"] mod vocalshifter_clipboard;
 #[path = "import/vocalshifter_import.rs"] mod vocalshifter_import;
 #[path = "import/reaper_parser.rs"] mod reaper_parser;

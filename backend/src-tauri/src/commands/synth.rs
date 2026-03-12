@@ -274,7 +274,7 @@ pub(super) fn save_separated(state: State<'_, AppState>, output_dir: String) -> 
             sample_rate: 44100,
             start_sec: 0.0,
             end_sec: None,
-            stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
+stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
             apply_pitch_edit: true,
             export_format: crate::mixdown::ExportFormat::Wav32f,
             quality_preset: crate::mixdown::QualityPreset::Export,

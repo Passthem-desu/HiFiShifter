@@ -57,7 +57,7 @@ pub fn all_renderers() -> Vec<&'static dyn Renderer> {
 
 /// 根据 [`SynthPipelineKind`] 创建对应的 [`ClipProcessor`] 实例（Box 分配）。
 ///
-/// 对于 World / HiFiGAN，返回对应的 [`ProcessorChain`]（含 RubberBand + 声码器 Stage）。
+/// 对于 World / HiFiGAN，返回对应的 [`ProcessorChain`]（含 Signalsmith Stretch + 声码器 Stage）。
 /// 对于 vslib，返回 [`VslibProcessor`]（需 `feature = "vslib"`）。
 pub fn get_processor(kind: SynthPipelineKind) -> Box<dyn ClipProcessor> {
     match kind {

@@ -548,7 +548,7 @@ fn render_single_clip(
 
     // 5. 时间拉伸（playback_rate != 1）
     // 若合成处理器声明自己处理时间拉伸（handles_time_stretch = true），
-    // 则跳过此处的 RubberBand，由处理器在 pitch edit 阶段通过 ClipProcessContext.playback_rate 内部完成。
+    // 则跳过此处的时间拉伸，由处理器在 pitch edit 阶段通过 ClipProcessContext.playback_rate 内部完成。
     let processor_handles_stretch = {
         let clip_root = timeline.resolve_root_track_id(&clip.track_id);
         clip_root
@@ -568,7 +568,7 @@ fn render_single_clip(
             2,
             out_rate,
             target_frames,
-            crate::time_stretch::StretchAlgorithm::RubberBand,
+crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
         );
     }
 

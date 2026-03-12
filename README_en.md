@@ -60,7 +60,7 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
-**Note:** WORLD vocoder is now statically compiled via cc crate, no additional configuration needed. First build will automatically compile WORLD C++ source code (takes about 1-2 minutes).
+**Note:** WORLD vocoder and Signalsmith Stretch are now statically compiled via cc crate, no additional configuration needed. First build will automatically compile C++ source code (takes about 1-2 minutes).
 
 ### ONNX Inference (Optional)
 
@@ -184,9 +184,7 @@ Also supports direct editing on timeline (closer to DAW interaction):
 - **Snap to grid**: Clip move/trim defaults to grid snapping; hold `Shift` to temporarily disable snapping.
 - **Trim/extend range**: Drag clip left/right boundaries to trim or extend; when clip length exceeds source audio available range, excess becomes "blank/silence" (waveform preview shows blank), doesn't loop repeat.
 - **Time Stretch**: Hold `Alt` + left-click drag clip left/right boundaries to stretch audio (changes playback rate and clip length simultaneously).
-  - High-quality "pitch-preserving" real-time stretching uses Rubber Band Library (GPL); Windows requires `rubberband.dll` in executable directory, or set `HIFISHIFTER_RUBBERBAND_DLL` environment variable pointing to DLL.
-  - Repository provides one-click build script: run `tools/build_rubberband_windows.cmd`, generated DLL defaults to `backend/src-tauri/third_party/rubberband/source/rubberband-4.0.0/otherbuilds/x64/Release/rubberband.dll`.
-  - If Rubber Band not found, automatically falls back to linear method (changes pitch).
+  - High-quality "pitch-preserving" real-time stretching uses Signalsmith Stretch (MIT), statically compiled via cc crate.
 - **Internal offset (Slip-Edit)**: Hold `Alt` + left-click drag clip body to slide internal content left/right (equivalent to modifying Trim In), doesn't change clip timeline position (no snapping); offset limited to "±1x source audio duration", allows leading/trailing silence.
 - **Fade in/out**: Drag top-left/top-right corner handles to adjust fade durations.
 - **Fade effect on waveform**: Waveform preview updates amplitude in real-time with fades for intuitive audio-visual alignment.
@@ -271,10 +269,11 @@ Detailed implementation see [DEVELOPMENT.md - Pitch analysis performance optimiz
 
 This project uses code or model architectures from the following open-source libraries:
 - [WORLD](https://github.com/mmorise/World) — High-quality speech analysis and synthesis system
-- [Rubber Band Library](https://breakfastquay.com/rubberband/) — High-quality audio time stretching and pitch shifting library
+- [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) — High-quality audio time stretching library (MIT)
+- [VocalShifter Library (vslib)](https://ackiesound.ifdef.jp/) — Audio analysis and synthesis library
 - [SingingVocoders](https://github.com/openvpi/SingingVocoders) — Singing voice synthesis vocoders (OpenVPI)
 - [HiFi-GAN](https://github.com/jik876/hifi-gan) — High-fidelity generative adversarial network vocoder
 
 ## License
 
-This project is released under the [GNU General Public License v2](LICENSE).
+This project is released under the [MIT License](LICENSE).

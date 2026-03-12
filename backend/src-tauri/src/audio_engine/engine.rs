@@ -166,7 +166,7 @@ impl AudioEngine {
 
             let (stretch_tx, stretch_rx) = mpsc::channel::<StretchJob>();
 
-            // Worker that computes RubberBand stretches off the command thread.
+            // Worker that computes Signalsmith Stretch off the command thread.
             // Keep it small to avoid CPU spikes.
             {
                 let cache = cache_for_cmd.clone();
@@ -175,8 +175,8 @@ impl AudioEngine {
                 let tx_ready = tx_for_worker.clone();
                 thread::spawn(move || {
                     while let Ok(job) = stretch_rx.recv() {
-                        // If RubberBand isn't available, drop the job.
-                        if !crate::rubberband::is_available() {
+                        // If Signalsmith Stretch isn't available, drop the job.
+                        if !crate::sstretch::is_available() {
                             if let Ok(mut s) = inflight.lock() {
                                 s.remove(&job.key);
                             }
@@ -250,7 +250,7 @@ impl AudioEngine {
                             2,
                             job.key.out_rate,
                             loop_out_frames,
-                            StretchAlgorithm::RubberBand,
+                            StretchAlgorithm::SignalsmithStretch,
                         );
 
                         let stretched_src = ResampledStereo {
@@ -712,7 +712,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     }
 
     // Schedule stretch work in background (do not block snapshot build).
-    if crate::rubberband::is_available() {
+    if crate::sstretch::is_available() {
         schedule_stretch_jobs(
             &tl,
             s.sr,
