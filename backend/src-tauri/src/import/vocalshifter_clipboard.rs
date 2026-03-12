@@ -34,7 +34,7 @@ pub struct ClipboardPitchPoint {
     pub time_sec: f64,
     pub disabled: bool,
     pub midi_pitch: f32,
-    /// FRM (formant, absolute cents, same scale as pitch)
+    /// FRM (formant shift in cents, relative to original formant; 0.0 = no shift)
     pub formant_cents: f64,
     /// VOL (volume multiplier, 1.0 = 0dB)
     pub volume: f64,

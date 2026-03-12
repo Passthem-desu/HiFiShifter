@@ -185,7 +185,7 @@ fn paste_clb_pitch_data(
 }
 
 /// 粘贴 .clb 非 pitch 参数到当前选中轨道的 extra_curves。
-/// 仅当轨道算法为 VocalShifterVslib 时生效。
+/// 当轨道算法为 VocalShifterVslib 或 NsfHifiganOnnx（且参数为 `formant_shift_cents`）时生效。
 fn paste_clb_vslib_param(
     state: &AppState,
     tl: &mut crate::state::TimelineState,
