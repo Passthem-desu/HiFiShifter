@@ -960,6 +960,29 @@ impl TimelineState {
         let ss = start_sec.unwrap_or(self.playhead_sec).max(0.0);
         let ls = length_sec.unwrap_or(4.0).max(0.01);
         self.ensure_project_end_sec(ss + ls);
+
+        // If no inherited metadata (duration / waveform) is available for this
+        // source_path, try to read basic audio info and a preview from the file
+        // so newly created clips (e.g. pasted ones) display waveforms.
+        let mut computed_duration_sec = inherited.as_ref().and_then(|v| v.0);
+        let mut computed_duration_frames = inherited.as_ref().and_then(|v| v.1);
+        let mut computed_source_sr = inherited.as_ref().and_then(|v| v.2);
+        let mut computed_waveform = inherited.as_ref().and_then(|v| v.3.clone());
+
+        if computed_waveform.is_none() {
+            if let Some(sp) = source_path.as_deref() {
+                let p = std::path::Path::new(sp);
+                if p.exists() {
+                    if let Some(info) = crate::audio_utils::try_read_wav_info(p, 4096) {
+                        computed_duration_sec = Some(info.duration_sec);
+                        computed_duration_frames = Some(info.total_frames);
+                        computed_source_sr = Some(info.sample_rate);
+                        computed_waveform = Some(info.waveform_preview);
+                    }
+                }
+            }
+        }
+
         let clip = Clip {
             id: id.clone(),
             track_id: track_id.clone(),
@@ -968,10 +991,10 @@ impl TimelineState {
             length_sec: ls,
             color: default_clip_color(),
             source_path,
-            duration_sec: inherited.as_ref().and_then(|v| v.0),
-            duration_frames: inherited.as_ref().and_then(|v| v.1),
-            source_sample_rate: inherited.as_ref().and_then(|v| v.2),
-            waveform_preview: inherited.as_ref().and_then(|v| v.3.clone()),
+            duration_sec: computed_duration_sec,
+            duration_frames: computed_duration_frames,
+            source_sample_rate: computed_source_sr,
+            waveform_preview: computed_waveform,
             pitch_range: inherited
                 .as_ref()
                 .and_then(|v| v.4.clone())
@@ -982,7 +1005,7 @@ impl TimelineState {
             gain: 1.0,
             muted: false,
             source_start_sec: 0.0,
-            source_end_sec: inherited.as_ref().and_then(|v| v.0).unwrap_or(ls),
+            source_end_sec: computed_duration_sec.unwrap_or(ls),
             playback_rate: 1.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,

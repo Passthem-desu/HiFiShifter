@@ -482,4 +482,10 @@ export const zhCN = {
     import_across_tracks: "跨轨道添加",
     // Overlapping clips context menu
     overlapping_clips_header: "重叠的音频块 ({n})",
+
+    // Drag direction
+    drag_direction_free: "自由",
+    drag_direction_x_only: "仅 X",
+    drag_direction_y_only: "仅 Y",
+    drag_direction: "拖动方向",
 } as const;

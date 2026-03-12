@@ -490,4 +490,10 @@ export const enUS = {
     import_across_tracks: "Add Across Tracks",
     // Overlapping clips context menu
     overlapping_clips_header: "Overlapping clips ({n})",
+
+    // Drag direction
+    drag_direction_free: "Free",
+    drag_direction_x_only: "X Only",
+    drag_direction_y_only: "Y Only",
+    drag_direction: "Drag Direction",
 } as const;

@@ -490,4 +490,10 @@ export const jaJP = {
     import_across_tracks: "トラック間に追加",
     // Overlapping clips context menu
     overlapping_clips_header: "重なっているクリップ ({n})",
+
+    // Drag direction
+    drag_direction_free: "フリー",
+    drag_direction_x_only: "X方向のみ",
+    drag_direction_y_only: "Y方向のみ",
+    drag_direction: "ドラッグ方向",
 } as const;

@@ -490,4 +490,10 @@ export const koKR = {
     import_across_tracks: "트랙 간 추가",
     // Overlapping clips context menu
     overlapping_clips_header: "겹치는 클립 ({n})",
+
+    // Drag direction
+    drag_direction_free: "자유",
+    drag_direction_x_only: "X 축만",
+    drag_direction_y_only: "Y 축만",
+    drag_direction: "드래그 방향",
 } as const;
