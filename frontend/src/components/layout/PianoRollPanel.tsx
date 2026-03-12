@@ -19,6 +19,7 @@ import {
     setTrackStateRemote,
     togglePitchSnap,
     toggleClipboardPreview,
+    cycleDragDirection,
     persistUiSettings,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
@@ -81,6 +82,7 @@ import { EditContextMenu } from "../editDialogs/EditContextMenu";
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
     const { t } = useI18n();
+    const tAny = t as (key: string) => string;
     const s = useAppSelector((state: RootState) => state.session);
     const editParam = s.editParam as ParamName;
     // pitchSnapOpen 已在顶部工具栏 JSX 内声明和使用，无需重复声明
@@ -956,6 +958,11 @@ export const PianoRollPanel: React.FC = () => {
         pitchSnapScale: s.pitchSnapScale,
         keybindingMap: mergedKeybindings,
         onEditAction: stableEditAction,
+        dragDirection: s.dragDirection,
+        onCycleDragDirection: useCallback(() => {
+            dispatch(cycleDragDirection());
+            void dispatch(persistUiSettings());
+        }, [dispatch]),
     });
 
     const onScrollerWheelNative = interactions.onScrollerWheelNative;
@@ -1563,6 +1570,29 @@ export const PianoRollPanel: React.FC = () => {
                     </Text>
                     {/* 音高吸附和剪贴板预览按钮，紧邻 param_editor 右侧，留 8px 空白 */}
                     <Flex gap="1" align="center" style={{ marginLeft: 8 }}>
+                        {/* 拖动方向按钮 */}
+                        <IconButton
+                            size="1"
+                            variant="ghost"
+                            color="gray"
+                            title={`${tAny("drag_direction")}: ${tAny(s.dragDirection === "free" ? "drag_direction_free" : s.dragDirection === "x-only" ? "drag_direction_x_only" : "drag_direction_y_only")}`}
+                            tabIndex={-1}
+                            onClick={() => { dispatch(cycleDragDirection()); void dispatch(persistUiSettings()); }}
+                        >
+                            {s.dragDirection === "free" ? (
+                                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M3.5 11.5L11.5 3.5M11.5 3.5L8 3.5M11.5 3.5L11.5 7M3.5 11.5L7 11.5M3.5 11.5L3.5 8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                            ) : s.dragDirection === "x-only" ? (
+                                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M2 7.5H13M2 7.5L4.5 5M2 7.5L4.5 10M13 7.5L10.5 5M13 7.5L10.5 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                            ) : (
+                                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M7.5 2V13M7.5 2L5 4.5M7.5 2L10 4.5M7.5 13L5 10.5M7.5 13L10 10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                            )}
+                        </IconButton>
                         <IconButton
                             size="1"
                             variant={s.pitchSnapEnabled ? "solid" : "ghost"}

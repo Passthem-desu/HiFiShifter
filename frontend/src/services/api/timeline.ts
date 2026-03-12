@@ -7,6 +7,10 @@ export const timelineApi = {
     undoTimeline: () => invoke<TimelineResult>("undo_timeline"),
     redoTimeline: () => invoke<TimelineResult>("redo_timeline"),
 
+    // Undo grouping: all commands between begin/end share a single undo entry
+    beginUndoGroup: () => invoke<TimelineResult>("begin_undo_group"),
+    endUndoGroup: () => invoke<{ ok: boolean }>("end_undo_group"),
+
     getTimelineState: () => invoke<TimelineResult>("get_timeline_state"),
 
     // Transport

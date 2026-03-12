@@ -17,6 +17,7 @@ import type {
     KeybindingMap,
 } from "../../../../features/keybindings/types";
 import { applyAutoCrossfade } from "./autoCrossfade";
+import { webApi } from "../../../../services/webviewApi";
 
 /**
  * 判断 KeyboardEvent 是否匹配某个 Keybinding
@@ -262,9 +263,10 @@ export function useKeyboardShortcuts(deps: {
                         startSec: Math.max(0, c.startSec + delta),
                     }));
                     dispatch(checkpointHistory());
-                    void dispatch(createClipsRemote({ templates }))
-                        .unwrap()
-                        .then((payload) => {
+                    void (async () => {
+                        await webApi.beginUndoGroup();
+                        try {
+                            const payload = await dispatch(createClipsRemote({ templates })).unwrap();
                             const created: string[] =
                                 payload?.createdClipIds ?? [];
                             if (!Array.isArray(created) || created.length === 0)
@@ -274,17 +276,18 @@ export function useKeyboardShortcuts(deps: {
                             if (autoCrossfadeEnabled) {
                                 const latestSession = sessionRef.current;
                                 if (latestSession) {
-                                    setTimeout(() => {
-                                        applyAutoCrossfade(
-                                            latestSession,
-                                            created,
-                                            dispatch,
-                                        );
-                                    }, 0);
+                                    await new Promise((r) => setTimeout(r, 0));
+                                    applyAutoCrossfade(
+                                        latestSession,
+                                        created,
+                                        dispatch,
+                                    );
                                 }
                             }
-                        })
-                        .catch(() => undefined);
+                        } finally {
+                            void webApi.endUndoGroup();
+                        }
+                    })().catch(() => undefined);
                     return;
                 }
 

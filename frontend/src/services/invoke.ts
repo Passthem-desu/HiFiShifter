@@ -374,6 +374,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "save_ui_settings":
             return args[0] as Record<string, unknown>;
 
+        case "begin_undo_group":
+            return undefined;
+
+        case "end_undo_group":
+            return undefined;
+
         default:
             return { __unwired: true };
     }

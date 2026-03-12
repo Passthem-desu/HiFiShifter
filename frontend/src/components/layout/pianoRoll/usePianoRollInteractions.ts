@@ -1,6 +1,6 @@
 import type {
     KeyboardEvent,
-    MouseEvent,
+    MouseEvent as ReactMouseEvent,
     MutableRefObject,
     PointerEvent as ReactPointerEvent,
     UIEvent,
@@ -136,6 +136,10 @@ export function usePianoRollInteractions(args: {
     keybindingMap?: KeybindingMap;
     /** 参数编辑操作回调 (op: selectAll, deselect, initialize, ...) */
     onEditAction?: (op: string) => void;
+    /** 拖动方向限制 */
+    dragDirection?: "free" | "x-only" | "y-only";
+    /** 切换拖动方向的回调 */
+    onCycleDragDirection?: () => void;
 }) {
     const {
         dispatch,
@@ -185,7 +189,7 @@ export function usePianoRollInteractions(args: {
         playheadZoomEnabled,
     } = args;
 
-    const { pitchSnapEnabled, pitchSnapUnit, pitchSnapScale, keybindingMap, onEditAction } = args;
+    const { pitchSnapEnabled, pitchSnapUnit, pitchSnapScale, keybindingMap, onEditAction, dragDirection, onCycleDragDirection } = args;
 
     /** Apply pitch snap to a drawn value when editParam is "pitch" and snap is enabled.
      *  When shiftHeld=true, the snap state is toggled (XOR with pitchSnapEnabled). */
@@ -229,7 +233,7 @@ export function usePianoRollInteractions(args: {
     );
 
     const onRulerMouseDown = useCallback(
-        (e: MouseEvent<HTMLDivElement>) => {
+        (e: ReactMouseEvent<HTMLDivElement>) => {
             if (e.button !== 0) return;
             const bounds = (
                 e.currentTarget as HTMLDivElement
@@ -249,11 +253,11 @@ export function usePianoRollInteractions(args: {
         [dispatch, scrollLeftRef, pxPerBeatRef, secPerBeat],
     );
 
-    const onScrollerMouseDownCapture = useCallback((e: MouseEvent) => {
+    const onScrollerMouseDownCapture = useCallback((e: ReactMouseEvent) => {
         if (e.button === 1) e.preventDefault();
     }, []);
 
-    const onScrollerAuxClick = useCallback((e: MouseEvent) => {
+    const onScrollerAuxClick = useCallback((e: ReactMouseEvent) => {
         if (e.button === 1) e.preventDefault();
     }, []);
 
@@ -265,7 +269,7 @@ export function usePianoRollInteractions(args: {
     );
 
     const onScrollerContextMenu = useCallback(
-        (e: MouseEvent) => {
+        (e: ReactMouseEvent) => {
             e.preventDefault();
             if (args.onContextMenu) {
                 args.onContextMenu(e.clientX, e.clientY);
@@ -843,17 +847,22 @@ export function usePianoRollInteractions(args: {
                                 // 用闭包变量记录最新 X/Y 偏移量
                                 let lastValueDelta = 0;
                                 let lastFrameDelta = 0; // 帧偏移（整数）
+                                // 使用闭包变量跟踪当前拖动方向（可通过右键切换）
+                                let currentDragDir = dragDirection ?? "y-only";
 
                                 const onMove = (
                                     ev: globalThis.PointerEvent,
                                 ) => {
                                     const currentVal = pointerValue(ev.clientY);
-                                    lastValueDelta = currentVal - startMouseVal;
+                                    let rawValueDelta = currentVal - startMouseVal;
 
-                                    // 音高吸附：当启用 pitch snap 且编辑 pitch 参数时，量化 Y 轴偏移
-                                    if (pitchSnapEnabled && editParam === "pitch") {
+                                    // 音高吸附：Toggle snap modifier (XOR with pitchSnapEnabled)
+                                    const noSnapKb = keybindingMap?.["modifier.clipNoSnap" as ActionId];
+                                    const snapToggled = noSnapKb ? isModifierActive(noSnapKb, ev) : false;
+                                    const effectiveSnap = snapToggled ? !pitchSnapEnabled : pitchSnapEnabled;
+                                    if (effectiveSnap && editParam === "pitch") {
                                         if (pitchSnapUnit === "semitone") {
-                                            lastValueDelta = Math.round(lastValueDelta);
+                                            rawValueDelta = Math.round(rawValueDelta);
                                         }
                                         // scale 模式下不对 delta 量化，因为需要对每个值单独 snap
                                     }
@@ -862,9 +871,13 @@ export function usePianoRollInteractions(args: {
                                     const currentBeat = pointerBeat(ev.clientX);
                                     const beatDelta = currentBeat - startBeat;
                                     const secDelta = beatDelta * secPerBeat;
-                                    lastFrameDelta = Math.round(
+                                    const rawFrameDelta = Math.round(
                                         (secDelta * 1000) / fp,
                                     );
+
+                                    // 应用拖动方向限制
+                                    lastValueDelta = currentDragDir === "x-only" ? 0 : rawValueDelta;
+                                    lastFrameDelta = currentDragDir === "y-only" ? 0 : rawFrameDelta;
 
                                     const pvNow = paramViewRef.current;
                                     if (!pvNow) return;
@@ -1099,11 +1112,32 @@ export function usePianoRollInteractions(args: {
                                     }
                                     setCanvasCursor("grab");
                                     invalidate();
+                                    window.removeEventListener("contextmenu", onContextMenuDuringDrag, true);
+                                    window.removeEventListener("mousedown", onMouseDownDuringDrag, true);
+                                };
+
+                                // 拖拽过程中右键点击切换拖动方向
+                                const onContextMenuDuringDrag = (ev: Event) => {
+                                    ev.preventDefault();
+                                    ev.stopImmediatePropagation();
+                                };
+                                const onMouseDownDuringDrag = (ev: globalThis.MouseEvent) => {
+                                    if (ev.button === 2) {
+                                        ev.preventDefault();
+                                        ev.stopPropagation();
+                                        const order: Array<"free" | "x-only" | "y-only"> = ["free", "x-only", "y-only"];
+                                        const idx = order.indexOf(currentDragDir);
+                                        currentDragDir = order[(idx + 1) % order.length];
+                                        // Also cycle the global setting
+                                        if (onCycleDragDirection) onCycleDragDirection();
+                                    }
                                 };
 
                                 window.addEventListener("pointermove", onMove);
                                 window.addEventListener("pointerup", onUp);
                                 window.addEventListener("pointercancel", onUp);
+                                window.addEventListener("contextmenu", onContextMenuDuringDrag, true);
+                                window.addEventListener("mousedown", onMouseDownDuringDrag, true);
                                 return;
                             }
                         }

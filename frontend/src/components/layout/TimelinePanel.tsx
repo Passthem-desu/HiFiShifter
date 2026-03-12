@@ -15,6 +15,7 @@ import {
     setClipMuted,
     importAudioAtPosition,
     importAudioFileAtPosition,
+    importMultipleAudioAtPosition,
     setClipStateRemote,
     setClipGain,
     setClipFades,
@@ -271,11 +272,12 @@ export const TimelinePanel: React.FC = () => {
                             payload?.cursorPosition) as
                             | { x?: number; y?: number }
                             | undefined;
-                        // Tauri's position is in window/client coordinates.
+                        // Tauri reports physical (screen) pixels; convert to CSS logical pixels.
+                        const dpr = window.devicePixelRatio || 1;
                         const clientX =
-                            typeof pos?.x === "number" ? pos.x : undefined;
+                            typeof pos?.x === "number" ? pos.x / dpr : undefined;
                         const clientY =
-                            typeof pos?.y === "number" ? pos.y : undefined;
+                            typeof pos?.y === "number" ? pos.y / dpr : undefined;
                         const fallbackBeat =
                             sessionRef.current.playheadSec ?? 0;
                         const beat =
@@ -333,6 +335,21 @@ export const TimelinePanel: React.FC = () => {
                                 tauriLastDropPathRef.current = primaryPath;
                             }
                             setDropPreview(null);
+
+                            // Multi-file drop: if multiple paths, show import mode menu
+                            if (paths.length > 1) {
+                                tauriDropHandledAtRef.current = Date.now();
+                                tauriDraggedPathRef.current = null;
+                                tauriLastDropPathRef.current = null;
+                                setImportModeMenu({
+                                    x: Math.round(window.innerWidth / 2),
+                                    y: Math.round(window.innerHeight / 2),
+                                    audioPaths: paths,
+                                    trackId,
+                                    startSec: beat,
+                                });
+                                return;
+                            }
 
                             const resolvedPath =
                                 primaryPath ||
@@ -442,13 +459,28 @@ export const TimelinePanel: React.FC = () => {
                         scroller.scrollLeft,
                     );
                     const trackId = trackIdFromClientY(detail.clientY);
-                    void dispatch(
-                        importAudioAtPosition({
-                            audioPath: detail.filePath,
+                    const filePaths: string[] = (detail as any).filePaths;
+                    const isRightDrag = !!(detail as any).isRightDrag;
+                    const isMulti = Array.isArray(filePaths) && filePaths.length > 1;
+
+                    // 右键拖拽或多文件 → 弹出导入模式菜单
+                    if (isRightDrag || isMulti) {
+                        setImportModeMenu({
+                            x: detail.clientX,
+                            y: detail.clientY,
+                            audioPaths: isMulti ? filePaths : [detail.filePath],
                             trackId,
                             startSec: beat,
-                        }),
-                    );
+                        });
+                    } else {
+                        void dispatch(
+                            importAudioAtPosition({
+                                audioPath: detail.filePath,
+                                trackId,
+                                startSec: beat,
+                            }),
+                        );
+                    }
                 }
                 return;
             }
@@ -488,6 +520,15 @@ export const TimelinePanel: React.FC = () => {
         x: number;
         y: number;
         clipId: string;
+    } | null>(null);
+
+    /** 导入模式选择菜单 */
+    const [importModeMenu, setImportModeMenu] = useState<{
+        x: number;
+        y: number;
+        audioPaths: string[];
+        trackId: string | null;
+        startSec: number;
     } | null>(null);
 
     /** �Ҽ��˵��д����������� clipId */
@@ -1418,6 +1459,71 @@ export const TimelinePanel: React.FC = () => {
                     </div>
                 </TimelineScrollArea>
 
+                {/* 导入模式选择菜单 */}
+                {importModeMenu && (
+                    <div
+                        className="fixed inset-0 z-[9999]"
+                        onClick={() => setImportModeMenu(null)}
+                        onContextMenu={(e) => { e.preventDefault(); setImportModeMenu(null); }}
+                    >
+                        <div
+                            className="absolute bg-qt-panel border border-qt-border rounded shadow-lg py-1 min-w-[180px]"
+                            style={{
+                                left: importModeMenu.x,
+                                top: importModeMenu.y,
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <button
+                                className="w-full text-left px-3 py-1.5 text-sm text-qt-text hover:bg-qt-hover"
+                                onClick={() => {
+                                    const m = importModeMenu;
+                                    setImportModeMenu(null);
+                                    if (m.audioPaths.length === 1) {
+                                        void dispatch(importAudioAtPosition({
+                                            audioPath: m.audioPaths[0],
+                                            trackId: m.trackId,
+                                            startSec: m.startSec,
+                                        }));
+                                    } else {
+                                        void dispatch(importMultipleAudioAtPosition({
+                                            audioPaths: m.audioPaths,
+                                            mode: "across-time",
+                                            trackId: m.trackId,
+                                            startSec: m.startSec,
+                                        }));
+                                    }
+                                }}
+                            >
+                                {t("import_across_time" as any) || "Import across time (same track)"}
+                            </button>
+                            <button
+                                className="w-full text-left px-3 py-1.5 text-sm text-qt-text hover:bg-qt-hover"
+                                onClick={() => {
+                                    const m = importModeMenu;
+                                    setImportModeMenu(null);
+                                    if (m.audioPaths.length === 1) {
+                                        void dispatch(importAudioAtPosition({
+                                            audioPath: m.audioPaths[0],
+                                            trackId: null,
+                                            startSec: m.startSec,
+                                        }));
+                                    } else {
+                                        void dispatch(importMultipleAudioAtPosition({
+                                            audioPaths: m.audioPaths,
+                                            mode: "across-tracks",
+                                            trackId: m.trackId,
+                                            startSec: m.startSec,
+                                        }));
+                                    }
+                                }}
+                            >
+                                {t("import_across_tracks" as any) || "Import across tracks (one per track)"}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {contextMenu
                     ? (() => {
                           const ctxClip = sessionRef.current.clips.find(
@@ -1433,6 +1539,17 @@ export const TimelinePanel: React.FC = () => {
                               (c) => selectedIds.includes(c.id),
                           );
 
+                          // Find all clips on the same track that overlap with the clicked clip
+                          const overlappingClips = sessionRef.current.clips
+                              .filter(
+                                  (c) =>
+                                      c.trackId === ctxClip.trackId &&
+                                      c.id !== ctxClip.id &&
+                                      c.startSec < ctxClip.startSec + ctxClip.lengthSec &&
+                                      c.startSec + c.lengthSec > ctxClip.startSec,
+                              )
+                              .sort((a, b) => a.startSec - b.startSec);
+
                           const playheadSec = sessionRef.current.playheadSec;
                           const playheadInClip =
                               playheadSec >= ctxClip.startSec &&
@@ -1445,6 +1562,7 @@ export const TimelinePanel: React.FC = () => {
                                   y={contextMenu.y}
                                   clip={ctxClip}
                                   selectedClips={selectedClips}
+                                  overlappingClips={overlappingClips}
                                   playheadInClip={playheadInClip}
                                   onClose={() => setContextMenu(null)}
                                   onDelete={(ids) => {

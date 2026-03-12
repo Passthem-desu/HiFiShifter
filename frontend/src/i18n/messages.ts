@@ -330,6 +330,19 @@ export const messages = {
         auto_scroll: "Auto Scroll",
         clipboard_preview: "Clipboard Preview",
 
+        // Drag direction
+        drag_direction_free: "Free",
+        drag_direction_x_only: "X Only",
+        drag_direction_y_only: "Y Only",
+        drag_direction: "Drag Direction",
+
+        // Multi-file import
+        import_across_time: "Add Across Time",
+        import_across_tracks: "Add Across Tracks",
+
+        // Overlapping clips context menu
+        overlapping_clips_header: "Overlapping clips ({n})",
+
         // Grid note type labels
         grid_note_normal: "Normal",
         grid_note_dotted: "Dotted",
@@ -806,6 +819,19 @@ export const messages = {
         playhead_zoom: "基于播放光标缩放",
         auto_scroll: "自动滚屏",
         clipboard_preview: "剪贴板预览",
+
+        // Drag direction
+        drag_direction_free: "自由",
+        drag_direction_x_only: "仅 X",
+        drag_direction_y_only: "仅 Y",
+        drag_direction: "拖拽方向",
+
+        // Multi-file import
+        import_across_time: "跨时间添加",
+        import_across_tracks: "跨轨道添加",
+
+        // Overlapping clips context menu
+        overlapping_clips_header: "重叠的音频块 ({n})",
 
         // Grid note type labels
         grid_note_normal: "标准",

@@ -99,6 +99,16 @@ pub fn redo_timeline(state: State<'_, AppState>) -> crate::models::TimelineState
     core::redo_timeline(state)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn begin_undo_group(state: State<'_, AppState>) -> crate::models::TimelineStatePayload {
+    state.begin_undo_group()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn end_undo_group(state: State<'_, AppState>) -> serde_json::Value {
+    state.end_undo_group()
+}
+
 // ===================== project =====================
 
 #[tauri::command(rename_all = "camelCase")]

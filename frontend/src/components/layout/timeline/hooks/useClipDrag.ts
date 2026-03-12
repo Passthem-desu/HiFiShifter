@@ -16,6 +16,7 @@ import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { applyAutoCrossfade } from "./autoCrossfade";
+import { webApi } from "../../../../services/webviewApi";
 
 const NEW_TRACK_SENTINEL = "__hs_new_track__";
 
@@ -185,6 +186,9 @@ export function useClipDrag(deps: {
                 drag.hasMoved = true;
                 if (!drag.copyMode) {
                     dispatch(checkpointHistory());
+                    // Begin backend undo group so that move_clip + auto-crossfade
+                    // share a single backend undo entry.
+                    void webApi.beginUndoGroup();
                 }
             }
             const b = el.getBoundingClientRect();
@@ -312,28 +316,33 @@ export function useClipDrag(deps: {
                 if (templates.length > 0) {
                     dispatch(checkpointHistory());
                     void (async () => {
-                        if (dropToNewTrack) {
-                            const newTrackId = await createNewTrackForDrop();
-                            if (newTrackId) {
-                                for (const tpl of templates) {
-                                    tpl.trackId = newTrackId;
+                        // Begin backend undo group for copy-drag + auto-crossfade
+                        await webApi.beginUndoGroup();
+                        try {
+                            if (dropToNewTrack) {
+                                const newTrackId = await createNewTrackForDrop();
+                                if (newTrackId) {
+                                    for (const tpl of templates) {
+                                        tpl.trackId = newTrackId;
+                                    }
                                 }
                             }
-                        }
-                        const payload = await dispatch(
-                            createClipsRemote({ templates }),
-                        ).unwrap();
-                        const created: string[] = payload?.createdClipIds ?? [];
-                        if (!Array.isArray(created) || created.length === 0) return;
-                        setMultiSelectedClipIds(created);
-                        void dispatch(selectClipRemote(created[0]));
-                        // 复制拖动后，尝试对新创建的 clip 应用自动交叉淡化
-                        if (autoCrossfadeEnabled) {
-                            // 使用 setTimeout 确保 Redux store 已经更新
-                            setTimeout(() => {
+                            const payload = await dispatch(
+                                createClipsRemote({ templates }),
+                            ).unwrap();
+                            const created: string[] = payload?.createdClipIds ?? [];
+                            if (!Array.isArray(created) || created.length === 0) return;
+                            setMultiSelectedClipIds(created);
+                            void dispatch(selectClipRemote(created[0]));
+                            // 复制拖动后，尝试对新创建的 clip 应用自动交叉淡化
+                            if (autoCrossfadeEnabled) {
+                                // 使用 setTimeout 确保 Redux store 已经更新
+                                await new Promise((r) => setTimeout(r, 0));
                                 const latestSession = sessionRef.current;
                                 applyAutoCrossfade(latestSession, created, dispatch);
-                            }, 0);
+                            }
+                        } finally {
+                            void webApi.endUndoGroup();
                         }
                     })().catch(() => undefined);
                 }
@@ -343,17 +352,26 @@ export function useClipDrag(deps: {
                         try {
                             const newTrackId = await createNewTrackForDrop();
                             if (!newTrackId) throw new Error("create_track_failed");
+                            const movePs: Promise<unknown>[] = [];
                             for (const id of drag.clipIds) {
                                 const initial = drag.initialById[id];
                                 const now = sessionRef.current.clips.find((c) => c.id === id);
                                 if (!initial || !now) continue;
-                                void dispatch(
-                                    moveClipRemote({
-                                        clipId: id,
-                                        startSec: Number(now.startSec),
-                                        trackId: newTrackId,
-                                    }),
+                                movePs.push(
+                                    dispatch(
+                                        moveClipRemote({
+                                            clipId: id,
+                                            startSec: Number(now.startSec),
+                                            trackId: newTrackId,
+                                        }),
+                                    ).unwrap(),
                                 );
+                            }
+                            await Promise.allSettled(movePs);
+                            if (autoCrossfadeEnabled) {
+                                await new Promise((r) => setTimeout(r, 0));
+                                const latestSession = sessionRef.current;
+                                applyAutoCrossfade(latestSession, drag.clipIds, dispatch);
                             }
                         } catch {
                             for (const id of drag.clipIds) {
@@ -361,6 +379,8 @@ export function useClipDrag(deps: {
                                 if (!initial) continue;
                                 dispatch(moveClipTrack({ clipId: id, trackId: initial.trackId }));
                             }
+                        } finally {
+                            void webApi.endUndoGroup();
                         }
                     })();
                     window.removeEventListener("pointermove", onMove);
@@ -392,14 +412,20 @@ export function useClipDrag(deps: {
                 }
 
                 // Auto crossfade: 等所有 move 完成后再计算并持久化交叉淡化
-                if (autoCrossfadeEnabled && movePromises.length > 0) {
+                if (movePromises.length > 0) {
                     const movedIds = drag.clipIds;
                     void Promise.allSettled(movePromises).then(() => {
-                        const latestSession = sessionRef.current;
-                        applyAutoCrossfade(latestSession, movedIds, dispatch);
+                        if (autoCrossfadeEnabled) {
+                            const latestSession = sessionRef.current;
+                            applyAutoCrossfade(latestSession, movedIds, dispatch);
+                        }
+                        void webApi.endUndoGroup();
                     });
-                } else if (autoCrossfadeEnabled) {
-                    applyAutoCrossfade(session, drag.clipIds, dispatch);
+                } else {
+                    if (autoCrossfadeEnabled) {
+                        applyAutoCrossfade(session, drag.clipIds, dispatch);
+                    }
+                    void webApi.endUndoGroup();
                 }
             }
             window.removeEventListener("pointermove", onMove);

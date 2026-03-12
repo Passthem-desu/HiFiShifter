@@ -395,6 +395,11 @@ pub struct AppState {
     /// Used to localize native dialogs implemented in Rust.
     pub ui_locale: RwLock<String>,
 
+    /// When true, `checkpoint_timeline` calls are suppressed.
+    /// Used by begin_undo_group / end_undo_group to group multiple
+    /// backend operations into a single undo entry.
+    pub suppress_checkpoints: std::sync::atomic::AtomicBool,
+
     pub waveform_cache_dir: std::sync::Mutex<PathBuf>,
     pub waveform_cache: std::sync::Mutex<
         std::collections::HashMap<String, std::sync::Arc<crate::waveform::CachedPeaks>>,
@@ -434,6 +439,8 @@ impl Default for AppState {
             }),
 
             ui_locale: RwLock::new("en-US".to_string()),
+
+            suppress_checkpoints: std::sync::atomic::AtomicBool::new(false),
 
             waveform_cache_dir: std::sync::Mutex::new(
                 crate::waveform_disk_cache::default_cache_dir(),
@@ -541,6 +548,28 @@ impl AppState {
     }
 
     pub fn checkpoint_timeline(&self, snapshot: &TimelineState) {
+        // When suppress_checkpoints is active (inside an undo group),
+        // skip pushing to the undo stack so multiple operations become
+        // a single undo entry.
+        if self.suppress_checkpoints.load(std::sync::atomic::Ordering::Acquire) {
+            // Still mark project dirty
+            let (name, was_clean) = {
+                let mut p = self.project.lock().unwrap_or_else(|e| e.into_inner());
+                let was_clean = !p.dirty;
+                p.dirty = true;
+                (p.name.clone(), was_clean)
+            };
+            if was_clean {
+                if let Some(handle) = self.app_handle.get() {
+                    use tauri::Manager;
+                    if let Some(win) = handle.get_webview_window("main") {
+                        let title = format!("HiFiShifter - {}*", name);
+                        let _ = win.set_title(&title);
+                    }
+                }
+            }
+            return;
+        }
         let mut h = self
             .timeline_history
             .lock()
@@ -578,6 +607,24 @@ impl AppState {
             .unwrap_or_else(|e| e.into_inner());
         h.undo.clear();
         h.redo.clear();
+    }
+
+    /// Begin an undo group: push the current state once and suppress further checkpoints.
+    pub fn begin_undo_group(&self) -> TimelineStatePayload {
+        let tl = self.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        // Force a checkpoint even if suppress was already active (defensive)
+        self.suppress_checkpoints.store(false, std::sync::atomic::Ordering::Release);
+        self.checkpoint_timeline(&tl);
+        self.suppress_checkpoints.store(true, std::sync::atomic::Ordering::Release);
+        let mut payload = tl.to_payload();
+        payload.project = Some(self.project_meta_payload());
+        payload
+    }
+
+    /// End the undo group: re-enable checkpoints.
+    pub fn end_undo_group(&self) -> serde_json::Value {
+        self.suppress_checkpoints.store(false, std::sync::atomic::Ordering::Release);
+        serde_json::json!({ "ok": true })
     }
 
     pub fn undo_timeline(&self) -> TimelineStatePayload {

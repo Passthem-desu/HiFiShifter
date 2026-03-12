@@ -8,6 +8,7 @@ import type {
     AutomationPoint,
     ClipInfo,
     ClipTemplate,
+    DragDirection,
     EditParam,
     FadeCurveType,
     GridSize,
@@ -79,6 +80,7 @@ import {
     importAudioFileAtPosition,
     importAudioFromDialog,
     importAudioFromPath,
+    importMultipleAudioAtPosition,
 } from "./thunks/importThunks";
 
 import {
@@ -91,6 +93,7 @@ export type {
     AutomationPoint,
     ClipInfo,
     ClipTemplate,
+    DragDirection,
     EditParam,
     FadeCurveType,
     GridSize,
@@ -124,6 +127,8 @@ export interface SessionState {
     autoScrollEnabled: boolean;
     /** 剪贴板预览（在参数编辑器选区内显示剪贴板曲线预览） */
     showClipboardPreview: boolean;
+    /** 参数编辑器拖动方向限制 */
+    dragDirection: DragDirection;
 
     // Monotonic bump token for invalidating parameter curve caches.
     // - Not included in undo/redo snapshots.
@@ -294,6 +299,69 @@ function normalizeClipColor(color: string | undefined): ClipColor {
     if (color === "violet") return "violet";
     if (color === "amber") return "amber";
     return "emerald";
+}
+
+/**
+ * Auto-crossfade logic applied directly in a reducer (no dispatch needed).
+ * For each clip in `movedIds`, detect overlaps with same-track clips and set
+ * fade in/out to the overlap duration.
+ */
+function applyAutoCrossfadeInReducer(
+    state: SessionState,
+    movedIds: string[],
+) {
+    if (!state.autoCrossfadeEnabled) return;
+
+    const fadeInOverlaps = new Map<string, number>();
+    const fadeOutOverlaps = new Map<string, number>();
+
+    for (const id of movedIds) {
+        const clip = state.clips.find((c) => c.id === id);
+        if (!clip) continue;
+        const clipStart = Number(clip.startSec);
+        const clipEnd = clipStart + Number(clip.lengthSec);
+
+        const sameTrack = state.clips.filter(
+            (c) => c.trackId === clip.trackId && c.id !== id,
+        );
+
+        for (const other of sameTrack) {
+            const otherStart = Number(other.startSec);
+            const otherEnd = otherStart + Number(other.lengthSec);
+            const overlapStart = Math.max(clipStart, otherStart);
+            const overlapEnd = Math.min(clipEnd, otherEnd);
+            const overlap = overlapEnd - overlapStart;
+            if (overlap <= 0.001) continue;
+
+            if (clipStart <= otherStart) {
+                fadeOutOverlaps.set(id, Math.max(fadeOutOverlaps.get(id) ?? 0, overlap));
+                fadeInOverlaps.set(other.id, Math.max(fadeInOverlaps.get(other.id) ?? 0, overlap));
+            } else {
+                fadeInOverlaps.set(id, Math.max(fadeInOverlaps.get(id) ?? 0, overlap));
+                fadeOutOverlaps.set(other.id, Math.max(fadeOutOverlaps.get(other.id) ?? 0, overlap));
+            }
+        }
+    }
+
+    const allClipIds = new Set([
+        ...fadeInOverlaps.keys(),
+        ...fadeOutOverlaps.keys(),
+        ...movedIds,
+    ]);
+    for (const clipId of allClipIds) {
+        const clip = state.clips.find((c) => c.id === clipId);
+        if (!clip) continue;
+
+        const hasOverlapIn = fadeInOverlaps.has(clipId);
+        const hasOverlapOut = fadeOutOverlaps.has(clipId);
+
+        if (hasOverlapIn) {
+            clip.fadeInSec = Math.max(0, fadeInOverlaps.get(clipId) ?? 0);
+        }
+        if (hasOverlapOut) {
+            clip.fadeOutSec = Math.max(0, fadeOutOverlaps.get(clipId) ?? 0);
+        }
+    }
 }
 
 function applyTimelineState(state: SessionState, timeline: TimelineState) {
@@ -524,6 +592,7 @@ const initialState: SessionState = {
     playheadZoomEnabled: false,
     autoScrollEnabled: false,
     showClipboardPreview: false,
+    dragDirection: "y-only" as DragDirection,
 
     paramsEpoch: 0,
 
@@ -658,6 +727,7 @@ export {
     importAudioFromPath,
     importAudioAtPosition,
     importAudioFileAtPosition,
+    importMultipleAudioAtPosition,
 } from "./thunks/importThunks";
 
 const sessionSlice = createSlice({
@@ -713,6 +783,14 @@ const sessionSlice = createSlice({
         },
         toggleClipboardPreview(state) {
             state.showClipboardPreview = !state.showClipboardPreview;
+        },
+        cycleDragDirection(state) {
+            const order: DragDirection[] = ["free", "x-only", "y-only"];
+            const idx = order.indexOf(state.dragDirection);
+            state.dragDirection = order[(idx + 1) % order.length];
+        },
+        setDragDirection(state, action: PayloadAction<DragDirection>) {
+            state.dragDirection = action.payload;
         },
         setplayheadSec(state, action: PayloadAction<number>) {
             state.playheadSec = Math.max(0, action.payload);
@@ -1164,6 +1242,11 @@ const sessionSlice = createSlice({
                     state.autoScrollEnabled = s.autoScroll;
                 if (s.showClipboardPreview != null)
                     state.showClipboardPreview = s.showClipboardPreview;
+                if (s.dragDirection != null) {
+                    const validDirs = ["free", "x-only", "y-only"];
+                    if (validDirs.includes(s.dragDirection))
+                        state.dragDirection = s.dragDirection as DragDirection;
+                }
             })
 
             .addCase(loadDefaultModel.pending, (state) =>
@@ -1281,6 +1364,7 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     ok?: boolean;
                     imported?: TimelineState;
+                    newClipIds?: string[];
                 };
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "Import done" : "Import failed";
@@ -1290,6 +1374,10 @@ const sessionSlice = createSlice({
                     (payload.imported as any).tracks
                 ) {
                     applyTimelineState(state, payload.imported as any);
+                    // Apply auto-crossfade for newly imported clips
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                    }
                 }
             })
             .addCase(importAudioAtPosition.rejected, setRejected)
@@ -1303,6 +1391,7 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     ok?: boolean;
                     imported?: TimelineState;
+                    newClipIds?: string[];
                 };
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "Import done" : "Import failed";
@@ -1312,9 +1401,34 @@ const sessionSlice = createSlice({
                     (payload.imported as any).tracks
                 ) {
                     applyTimelineState(state, payload.imported as any);
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                    }
                 }
             })
             .addCase(importAudioFileAtPosition.rejected, setRejected)
+
+            .addCase(importMultipleAudioAtPosition.pending, (state) =>
+                setPending(state, "Importing multiple audio files..."),
+            )
+            .addCase(importMultipleAudioAtPosition.fulfilled, (state, action) => {
+                state.busy = false;
+                state.lastResult = action.payload;
+                const payload = action.payload as {
+                    ok?: boolean;
+                    imported?: TimelineState;
+                    newClipIds?: string[];
+                };
+                const ok = Boolean(payload.ok);
+                state.status = ok ? "Import done" : "Import failed";
+                if (ok && payload.imported && (payload.imported as any).tracks) {
+                    applyTimelineState(state, payload.imported as any);
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                    }
+                }
+            })
+            .addCase(importMultipleAudioAtPosition.rejected, setRejected)
 
             .addCase(pickOutputPath.pending, (state) =>
                 setPending(state, "Selecting output path..."),
@@ -1989,6 +2103,8 @@ export const {
     togglePlayheadZoom,
     toggleAutoScroll,
     toggleClipboardPreview,
+    cycleDragDirection,
+    setDragDirection,
     setplayheadSec,
     setModelDir,
     setAudioPath,

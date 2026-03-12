@@ -39,6 +39,7 @@ export const persistUiSettings = createAsyncThunk(
             playheadZoom: s.playheadZoomEnabled,
             autoScroll: s.autoScrollEnabled,
             showClipboardPreview: s.showClipboardPreview,
+            dragDirection: s.dragDirection,
         });
     },
 );

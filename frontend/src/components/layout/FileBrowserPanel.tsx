@@ -253,24 +253,72 @@ export const FileBrowserPanel: React.FC = () => {
         [dispatch],
     );
 
-    // 点击音频文件 → 预览播放（始终从头重新播放）
+    // ── 多选状态 ───────────────────────────────────────────────────────────
+    const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+    const lastClickedIndexRef = useRef<number>(-1);
+
+    // 获取仅音频的列表用于 shift-range 选择
+    const audioEntries = useMemo(
+        () => displayEntries.filter(isAudioFile),
+        [displayEntries],
+    );
+
     const handleClickAudio = useCallback(
-        (entry: FileEntry) => {
+        (entry: FileEntry, ev?: React.MouseEvent) => {
+            const idx = audioEntries.findIndex((e) => e.path === entry.path);
+
+            if (ev?.ctrlKey || ev?.metaKey) {
+                // Ctrl+click: toggle selection
+                setSelectedPaths((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(entry.path)) next.delete(entry.path);
+                    else next.add(entry.path);
+                    return next;
+                });
+                lastClickedIndexRef.current = idx;
+                return;
+            }
+
+            if (ev?.shiftKey && lastClickedIndexRef.current >= 0) {
+                // Shift+click: range selection
+                const start = Math.min(lastClickedIndexRef.current, idx);
+                const end = Math.max(lastClickedIndexRef.current, idx);
+                setSelectedPaths((prev) => {
+                    const next = new Set(prev);
+                    for (let i = start; i <= end; i++) {
+                        next.add(audioEntries[i].path);
+                    }
+                    return next;
+                });
+                return;
+            }
+
+            // Normal click: clear selection, preview
+            setSelectedPaths(new Set());
+            lastClickedIndexRef.current = idx;
             dispatch(setPreviewingFile(entry.path));
             void audioPreview.play(entry.path, () => {
                 dispatch(setPreviewingFile(null));
             });
         },
-        [dispatch],
+        [dispatch, audioEntries],
     );
+
+    // Clear selection when directory changes
+    useEffect(() => {
+        setSelectedPaths(new Set());
+        lastClickedIndexRef.current = -1;
+    }, [fb.currentPath]);
 
     // 拖拽开始 — 使用自定义 pointer 事件实现，替代 HTML5 drag API
     const [dragState, setDragState] = useState<{
         filePath: string;
         fileName: string;
+        allFilePaths: string[];
         startX: number;
         startY: number;
         active: boolean; // 超过阈值后才真正激活拖拽
+        isRightDrag: boolean; // 右键拖拽标记
     } | null>(null);
     const dragStateRef = useRef(dragState);
     dragStateRef.current = dragState;
@@ -282,18 +330,24 @@ export const FileBrowserPanel: React.FC = () => {
 
     const handlePointerDownForDrag = useCallback(
         (e: React.PointerEvent<HTMLDivElement>, entry: FileEntry) => {
-            // 仅左键
-            if (e.button !== 0) return;
+            // 允许左键(0)和右键(2)拖拽
+            if (e.button !== 0 && e.button !== 2) return;
+            // Collect all selected paths (include current entry)
+            const paths = selectedPaths.size > 0 && selectedPaths.has(entry.path)
+                ? Array.from(selectedPaths)
+                : [entry.path];
             // 不拦截 pointer，让 click 事件仍能触发预览
             setDragState({
                 filePath: entry.path,
                 fileName: entry.name,
+                allFilePaths: paths,
                 startX: e.clientX,
                 startY: e.clientY,
                 active: false,
+                isRightDrag: e.button === 2,
             });
         },
-        [],
+        [selectedPaths],
     );
 
     useEffect(() => {
@@ -317,8 +371,10 @@ export const FileBrowserPanel: React.FC = () => {
                             type: "start",
                             filePath: ds.filePath,
                             fileName: ds.fileName,
+                            filePaths: ds.allFilePaths,
                             clientX: e.clientX,
                             clientY: e.clientY,
+                            isRightDrag: ds.isRightDrag,
                         },
                     }),
                 );
@@ -372,8 +428,10 @@ export const FileBrowserPanel: React.FC = () => {
                         type: "move",
                         filePath: dragStateRef.current!.filePath,
                         fileName: dragStateRef.current!.fileName,
+                        filePaths: dragStateRef.current!.allFilePaths,
                         clientX: e.clientX,
                         clientY: e.clientY,
+                        isRightDrag: dragStateRef.current!.isRightDrag,
                     },
                 }),
             );
@@ -389,8 +447,10 @@ export const FileBrowserPanel: React.FC = () => {
                             type: "drop",
                             filePath: ds.filePath,
                             fileName: ds.fileName,
+                            filePaths: ds.allFilePaths,
                             clientX: e.clientX,
                             clientY: e.clientY,
+                            isRightDrag: ds.isRightDrag,
                         },
                     }),
                 );
@@ -398,11 +458,20 @@ export const FileBrowserPanel: React.FC = () => {
             setDragState(null);
         }
 
+        // 右键拖拽时抑制浏览器原生右键菜单
+        function onContextMenu(e: MouseEvent) {
+            if (dragStateRef.current?.isRightDrag) {
+                e.preventDefault();
+            }
+        }
+
         window.addEventListener("pointermove", onPointerMove);
         window.addEventListener("pointerup", onPointerUp);
+        window.addEventListener("contextmenu", onContextMenu, true);
         return () => {
             window.removeEventListener("pointermove", onPointerMove);
             window.removeEventListener("pointerup", onPointerUp);
+            window.removeEventListener("contextmenu", onContextMenu, true);
         };
     }, [dragState !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -648,12 +717,13 @@ export const FileBrowserPanel: React.FC = () => {
                                 key={entry.path}
                                 entry={entry}
                                 isPlaying={fb.previewingFile === entry.path}
+                                isSelected={selectedPaths.has(entry.path)}
                                 onDoubleClickDir={handleEnterDir}
                                 onClickAudio={handleClickAudio}
                                 onPointerDownForDrag={handlePointerDownForDrag}
                                 isDragging={
                                     dragState?.active === true &&
-                                    dragState.filePath === entry.path
+                                    dragState.allFilePaths.includes(entry.path)
                                 }
                                 pathHint={
                                     isSearchMode
@@ -717,7 +787,9 @@ export const FileBrowserPanel: React.FC = () => {
                         boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
                     }}
                 >
-                    🎵 {dragState.fileName}
+                    🎵 {dragState.allFilePaths.length > 1
+                        ? `${dragState.fileName} (+${dragState.allFilePaths.length - 1})`
+                        : dragState.fileName}
                 </div>
             )}
         </Flex>
@@ -731,8 +803,9 @@ export const FileBrowserPanel: React.FC = () => {
 interface FileEntryRowProps {
     entry: FileEntry;
     isPlaying: boolean;
+    isSelected?: boolean;
     onDoubleClickDir: (dirPath: string) => void;
-    onClickAudio: (entry: FileEntry) => void;
+    onClickAudio: (entry: FileEntry, ev?: React.MouseEvent) => void;
     onPointerDownForDrag: (
         e: React.PointerEvent<HTMLDivElement>,
         entry: FileEntry,
@@ -745,6 +818,7 @@ const FileEntryRow: React.FC<FileEntryRowProps> = React.memo(
     ({
         entry,
         isPlaying,
+        isSelected,
         onDoubleClickDir,
         onClickAudio,
         onPointerDownForDrag,
@@ -758,7 +832,9 @@ const FileEntryRow: React.FC<FileEntryRowProps> = React.memo(
                 className={[
                     "flex items-center gap-1.5 px-2 py-[3px] cursor-default",
                     "hover:bg-[color-mix(in_oklab,var(--qt-highlight)_12%,transparent)]",
-                    isPlaying
+                    isSelected
+                        ? "bg-[color-mix(in_oklab,var(--qt-highlight)_25%,transparent)]"
+                        : isPlaying
                         ? "bg-[color-mix(in_oklab,var(--qt-highlight)_20%,transparent)]"
                         : "",
                     isDragging ? "opacity-50" : "",
@@ -772,7 +848,7 @@ const FileEntryRow: React.FC<FileEntryRowProps> = React.memo(
                 onDoubleClick={
                     entry.isDir ? () => onDoubleClickDir(entry.path) : undefined
                 }
-                onClick={isAudio ? () => onClickAudio(entry) : undefined}
+                onClick={isAudio ? (ev: React.MouseEvent) => onClickAudio(entry, ev) : undefined}
             >
                 {/* 图标 */}
                 <span className="shrink-0 w-[14px] flex items-center justify-center">

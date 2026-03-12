@@ -23,6 +23,8 @@ pub struct UiSettings {
     pub auto_scroll: bool,
     #[serde(default)]
     pub show_clipboard_preview: bool,
+    #[serde(default = "default_drag_direction")]
+    pub drag_direction: String,
 }
 
 fn default_true() -> bool {
@@ -37,6 +39,9 @@ fn default_pitch_snap_scale() -> String {
 fn default_grid_size() -> String {
     "1/4".to_string()
 }
+fn default_drag_direction() -> String {
+    "y-only".to_string()
+}
 
 impl Default for UiSettings {
     fn default() -> Self {
@@ -50,6 +55,7 @@ impl Default for UiSettings {
             playhead_zoom: false,
             auto_scroll: false,
             show_clipboard_preview: false,
+            drag_direction: default_drag_direction(),
         }
     }
 }

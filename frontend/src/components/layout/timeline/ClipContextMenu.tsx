@@ -95,6 +95,8 @@ export const ClipContextMenu: React.FC<{
     clip: ClipInfo;
     /** 多个 clip 列表（含 clip 本身），长度 >= 2 时进入多选模式 */
     selectedClips: ClipInfo[];
+    /** 与当前 clip 在同轨道上重叠的其他 clip */
+    overlappingClips?: ClipInfo[];
     /** 播放头是否在 clip 范围内（用于分割按钮启用判断）*/
     playheadInClip: boolean;
     onClose: () => void;
@@ -116,6 +118,7 @@ export const ClipContextMenu: React.FC<{
     y,
     clip,
     selectedClips,
+    overlappingClips = [],
     playheadInClip,
     onClose,
     onDelete,
@@ -291,41 +294,69 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                     {onFadeCurveChange &&
-                        (clip.fadeInSec > 0 || clip.fadeOutSec > 0) && (
-                            <>
-                                <Divider />
-                                {clip.fadeInSec > 0 && (
-                                    <FadeCurveRow
-                                        label={t("fade_in")}
-                                        current={
-                                            (clip.fadeInCurve as FadeCurveType) ??
-                                            "sine"
-                                        }
-                                        onSelect={(c) => {
-                                            onFadeCurveChange(clip.id, "in", c);
-                                        }}
-                                        t={t}
-                                    />
-                                )}
-                                {clip.fadeOutSec > 0 && (
-                                    <FadeCurveRow
-                                        label={t("fade_out")}
-                                        current={
-                                            (clip.fadeOutCurve as FadeCurveType) ??
-                                            "sine"
-                                        }
-                                        onSelect={(c) => {
-                                            onFadeCurveChange(
-                                                clip.id,
-                                                "out",
-                                                c,
-                                            );
-                                        }}
-                                        t={t}
-                                    />
-                                )}
-                            </>
-                        )}
+                        (() => {
+                            // Collect all clips involved in the overlap (clicked + overlapping neighbors), sorted by time
+                            const fadedClips =
+                                overlappingClips.length > 0
+                                    ? [clip, ...overlappingClips]
+                                          .filter(
+                                              (c) => c.fadeInSec > 0 || c.fadeOutSec > 0,
+                                          )
+                                          .sort((a, b) => a.startSec - b.startSec)
+                                    : clip.fadeInSec > 0 || clip.fadeOutSec > 0
+                                      ? [clip]
+                                      : [];
+                            if (fadedClips.length === 0) return null;
+                            const showHeader = overlappingClips.length > 0;
+                            return (
+                                <>
+                                    <Divider />
+                                    {showHeader && (
+                                        <div className="px-3 py-1 text-[11px] text-qt-text/50 select-none">
+                                            {t("overlapping_clips_header").replace(
+                                                "{n}",
+                                                String(fadedClips.length),
+                                            )}
+                                        </div>
+                                    )}
+                                    {fadedClips.map((fc) => (
+                                        <React.Fragment key={fc.id}>
+                                            {showHeader && (
+                                                <div className="px-3 pt-1 text-[10px] text-qt-text/40 truncate">
+                                                    {fc.name || fc.id}
+                                                </div>
+                                            )}
+                                            {fc.fadeInSec > 0 && (
+                                                <FadeCurveRow
+                                                    label={t("fade_in")}
+                                                    current={
+                                                        (fc.fadeInCurve as FadeCurveType) ??
+                                                        "sine"
+                                                    }
+                                                    onSelect={(c) => {
+                                                        onFadeCurveChange(fc.id, "in", c);
+                                                    }}
+                                                    t={t}
+                                                />
+                                            )}
+                                            {fc.fadeOutSec > 0 && (
+                                                <FadeCurveRow
+                                                    label={t("fade_out")}
+                                                    current={
+                                                        (fc.fadeOutCurve as FadeCurveType) ??
+                                                        "sine"
+                                                    }
+                                                    onSelect={(c) => {
+                                                        onFadeCurveChange(fc.id, "out", c);
+                                                    }}
+                                                    t={t}
+                                                />
+                                            )}
+                                        </React.Fragment>
+                                    ))}
+                                </>
+                            );
+                        })()}
                 </>
             )}
         </div>

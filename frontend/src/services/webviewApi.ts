@@ -46,6 +46,8 @@ export const webApi = {
     // Undo/Redo (backend-authoritative)
     undoTimeline: timelineApi.undoTimeline,
     redoTimeline: timelineApi.redoTimeline,
+    beginUndoGroup: timelineApi.beginUndoGroup,
+    endUndoGroup: timelineApi.endUndoGroup,
 
     // Project
     getProjectMeta: projectApi.getProjectMeta,
