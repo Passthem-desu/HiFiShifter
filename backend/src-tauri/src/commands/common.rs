@@ -74,7 +74,7 @@ pub(crate) fn render_timeline_to_wav(
             sample_rate: 44100,
             start_sec,
             end_sec,
-            stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
+stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
             apply_pitch_edit: true,
             // 导出时使用最高质量：32-bit float + Export 预设。
             export_format: crate::mixdown::ExportFormat::Wav32f,

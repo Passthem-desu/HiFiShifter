@@ -1259,7 +1259,7 @@ fn interpolate_mel_time(mel: &[f32], n_mels: usize, t_in: usize, t_out: usize) -
 impl NsfHifiganOnnx {
     /// 从原始 PCM 提取 mel → 沿时间轴插值到目标长度 → 构建 F0 → 推理输出波形。
     ///
-    /// 与 [`infer_from_audio_and_midi`] 的区别：不需要预先对 PCM 做 RubberBand 拉伸，
+    /// 与 [`infer_from_audio_and_midi`] 的区别：不需要预先对 PCM 做时间拉伸，
     /// 而是在 mel 域完成时间拉伸，由 HiFiGAN 直接从插值后的 mel 合成波形。
     ///
     /// # 参数
@@ -1428,7 +1428,7 @@ impl NsfHifiganOnnx {
 /// 单次 mel stretch 推理入口（thread-local session）。
 ///
 /// 参数语义与 [`infer_pitch_edit_mono`] 相似，但额外接收 `playback_rate`
-/// 并在 mel 域完成时间拉伸，省去外部 RubberBand 预处理。
+/// 并在 mel 域完成时间拉伸，省去外部预处理。
 pub fn infer_pitch_edit_mono_mel_stretch(
     audio_mono: &[f32],
     sample_rate: u32,

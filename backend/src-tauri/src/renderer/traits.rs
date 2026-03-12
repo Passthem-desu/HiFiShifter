@@ -126,7 +126,7 @@ pub struct ClipProcessContext<'a> {
 /// `ClipProcessor` 能力描述。
 #[derive(Debug, Clone, Default)]
 pub struct ProcessorCapabilities {
-    /// 是否原生处理 `playback_rate`（= true 时 compat 层不再调 RubberBand）。
+/// 是否原生处理 `playback_rate`（= true 时 compat 层不再调 Signalsmith Stretch）。
     pub handles_time_stretch: bool,
     /// 是否支持逐帧共振峰偏移曲线（"formant_shift_cents"）。
     pub supports_formant: bool,
@@ -174,7 +174,7 @@ pub struct ParamDescriptor {
 ///
 /// 一次 `process()` 调用涵盖——
 /// - 音高合成（声码器内核）
-/// - 时间拉伸（原生或 RubberBand Stage）
+/// - 时间拉伸（原生或 Signalsmith Stretch Stage）
 /// - 所有声码器参数曲线（共振峰、气声等）
 ///
 /// 实现者须 `Send + Sync`，以便在多线程场景下安全使用。

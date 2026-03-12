@@ -145,7 +145,7 @@ export function ActionBar() {
                     }}
                     style={{
                         width: 60,
-                        textAlign: "right",
+                        textAlign: "center",
                         backgroundColor: "var(--qt-base)",
                     }}
                 />

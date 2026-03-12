@@ -130,10 +130,9 @@ pub(super) fn get_root_mix_waveform_peaks_segment(
             sample_rate: 44100,
             start_sec,
             end_sec: Some(start_sec + duration_sec.max(0.0)),
-            // Peaks are used as a visual timing reference. Prefer RubberBand so
+            // Peaks are used as a visual timing reference. Use Signalsmith Stretch so
             // stretched clips line up with the same timing as pitch analysis.
-            // (Falls back to LinearResample if RubberBand is unavailable.)
-            stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
+stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
             apply_pitch_edit: true,
             // 实时预览使用默认质量（Wav16 + Realtime）。
             export_format: crate::mixdown::ExportFormat::Wav16,
@@ -273,10 +272,9 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
             sample_rate: 44100,
             start_sec,
             end_sec: Some(start_sec + duration_sec.max(0.0)),
-            // Peaks are used as a visual timing reference. Prefer RubberBand so
+            // Peaks are used as a visual timing reference. Use Signalsmith Stretch so
             // stretched clips line up with the same timing as pitch analysis.
-            // (Falls back to LinearResample if RubberBand is unavailable.)
-            stretch: crate::time_stretch::StretchAlgorithm::RubberBand,
+stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
             apply_pitch_edit: true,
             // 实时预览使用默认质量（Wav16 + Realtime）。
             export_format: crate::mixdown::ExportFormat::Wav16,

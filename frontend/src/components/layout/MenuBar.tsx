@@ -464,7 +464,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <span>{t("menu_help")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
-                    <DropdownMenu.Item>{t("menu_about")}</DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={async () => {
+                        const { openUrl } = await import("@tauri-apps/plugin-opener");
+                        openUrl("https://github.com/ARounder-183/HiFiShifter");
+                    }}>{t("menu_about")}</DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Root>
 
@@ -482,6 +485,12 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         </DropdownMenu.Item>
                         <DropdownMenu.Item onSelect={() => setLocale("zh-CN")}>
                             {t("lang_zh")}
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => setLocale("ja-JP")}>
+                            {t("lang_ja")}
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => setLocale("ko-KR")}>
+                            {t("lang_ko")}
                         </DropdownMenu.Item>
                     </DropdownMenu.Content>
                 </DropdownMenu.Root>
