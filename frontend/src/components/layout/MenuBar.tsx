@@ -432,7 +432,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <span>{t("menu_help")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
-                    <DropdownMenu.Item>{t("menu_about")}</DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={async () => {
+                        const { openUrl } = await import("@tauri-apps/plugin-opener");
+                        openUrl("https://github.com/ARounder-183/HiFiShifter");
+                    }}>{t("menu_about")}</DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Root>
 

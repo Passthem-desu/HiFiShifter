@@ -1,5 +1,4 @@
-
-<#
+﻿<#
 .SYNOPSIS
     将 HiFiShifter 打包为便携版压缩包（Portable ZIP）
 
