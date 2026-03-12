@@ -87,7 +87,7 @@ export const zhCN = {
 
     param_editor: "参数编辑器",
     pitch_requires_compose: "请在根轨开启 Compose（C）以生成音高曲线",
-    pitch_requires_algo: "请选择非"无"的音高算法以启用音高编辑",
+    pitch_requires_algo: "请选择算法以启用编辑",
     pitch_backend_unavailable:
         "音高后端不可用（请检查 WORLD DLL / ONNX 模型）",
     pitch_edit_not_modified_hint: "尚未修改曲线：当前等同原始音高",
