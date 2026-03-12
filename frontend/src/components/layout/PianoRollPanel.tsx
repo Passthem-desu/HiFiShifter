@@ -207,8 +207,8 @@ export const PianoRollPanel: React.FC = () => {
     }, []);
 
     const [pitchView, setPitchView] = useState<ValueViewport>(() => ({
-        center: (PITCH_MIN_MIDI + PITCH_MAX_MIDI) / 2,
-        span: PITCH_MAX_MIDI - PITCH_MIN_MIDI,
+        center: 72, // C5 为正中心
+        span: 24,   // 两个八度（C4~C6）
     }));
     // 按参数 id 屘化的视口状态（音高以外的所有参数）
     const [paramViews, setParamViews] = useState<Record<string, ValueViewport>>(
