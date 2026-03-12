@@ -61,7 +61,7 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
-**注意：** WORLD vocoder 和 Rubber band 现已通过 cc crate 静态编译集成，无需额外配置。首次构建时会自动编译C++ 源码（约需 1-2 分钟）。
+**注意：** WORLD vocoder 和 Signalsmith Stretch 现已通过 cc crate 静态编译集成，无需额外配置。首次构建时会自动编译 C++ 源码（约需 1-2 分钟）。
 
 ### Pitch Edit 作用方式
 
@@ -161,8 +161,7 @@ cargo tauri dev
 - **吸附网格**：剪辑移动/裁剪默认吸附网格；按住 `Shift` 可临时关闭吸附。
 - **裁剪/伸缩范围**：拖动剪辑左右边界进行裁剪或延长；当剪辑长度超出源音频可用范围时，超出部分为"空白/静音"（波形预览显示为空白），不再循环重复。
 - **伸缩（Time Stretch）**：按住 `Alt` + 鼠标左键拖动剪辑左右边界，可伸缩音频（联动改变播放速率与剪辑长度）。
-  - 高质量"保音高"实时伸缩使用 Rubber Band Library（GPL）
-  - 若未找到 Rubber Band，则会自动回退到线性方法（会变调）。
+  - 高质量"保音高"实时伸缩使用 Signalsmith Stretch（MIT），通过 cc crate 静态编译集成。
 - **内部偏移（Slip-Edit）**：按住 `Alt` + 鼠标左键拖动剪辑主体，可左右滑移剪辑的内部内容（等价于修改 Trim In），不改变剪辑在时间线上的位置（不吸附）；偏移会被限制在"源音频时长的 ±1 倍"，允许产生前置/后置空白（静音）。
 - **淡入淡出**：拖动剪辑左上角/右上角的手柄调整淡入/淡出时长。
 - **淡入淡出对波形的影响**：波形预览会随淡入/淡出实时改变显示幅度，帮助直观对齐听感与视觉。
@@ -247,10 +246,11 @@ cargo tauri dev
 
 本项目使用了以下开源库的代码或模型结构：
 - [WORLD](https://github.com/mmorise/World) — 高质量语音分析与合成系统
-- [Rubber Band Library](https://breakfastquay.com/rubberband/) — 高质量音频时间拉伸与变调库
+- [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) — 高质量音频时间拉伸库（MIT）
+- [VocalShifter Library (vslib)](https://ackiesound.ifdef.jp/) — 音声解析与合成库
 - [SingingVocoders](https://github.com/openvpi/SingingVocoders) — 歌声合成声码器（OpenVPI）
 - [HiFi-GAN](https://github.com/jik876/hifi-gan) — 高保真生成对抗网络声码器
 
 ## License
 
-本项目基于 [GNU General Public License v2](LICENSE) 发布。
+本项目基于 [MIT License](LICENSE) 发布。
