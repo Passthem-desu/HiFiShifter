@@ -336,18 +336,42 @@ export const TimelinePanel: React.FC = () => {
                             }
                             setDropPreview(null);
 
-                            // Multi-file drop: if multiple paths, show import mode menu
+                            // Multi-file drop
                             if (paths.length > 1) {
                                 tauriDropHandledAtRef.current = Date.now();
                                 tauriDraggedPathRef.current = null;
                                 tauriLastDropPathRef.current = null;
-                                setImportModeMenu({
-                                    x: Math.round(window.innerWidth / 2),
-                                    y: Math.round(window.innerHeight / 2),
-                                    audioPaths: paths,
-                                    trackId,
-                                    startSec: beat,
-                                });
+
+                                // TODO: Right Drag Support
+                                /* const isRightDrag = false;
+                                if (isRightDrag) {
+                                    // Suppress the contextmenu event that may fire after right-click drag
+                                    const suppressCtx = (ev: Event) => {
+                                        ev.preventDefault();
+                                        ev.stopImmediatePropagation();
+                                        window.removeEventListener("contextmenu", suppressCtx, true);
+                                    };
+                                    window.addEventListener("contextmenu", suppressCtx, true);
+
+                                    setImportModeMenu({
+                                        x: clientX ?? window.innerWidth / 2,
+                                        y: clientY ?? window.innerHeight / 2,
+                                        audioPaths: paths,
+                                        trackId,
+                                        startSec: beat,
+                                    });
+                                    return;
+                                } */
+
+                                void dispatch(
+                                    importMultipleAudioAtPosition({
+                                        audioPaths: paths,
+                                        mode: "across-time",
+                                        trackId,
+                                        startSec: beat,
+                                    }),
+                                );
+
                                 return;
                             }
 
@@ -463,8 +487,19 @@ export const TimelinePanel: React.FC = () => {
                     const isRightDrag = !!(detail as any).isRightDrag;
                     const isMulti = Array.isArray(filePaths) && filePaths.length > 1;
 
-                    // 右键拖拽或多文件 → 弹出导入模式菜单
-                    if (isRightDrag || isMulti) {
+                    if (isRightDrag) {
+                        // 右键松开后浏览器会立即触发 contextmenu 事件，
+                        // 如果不拦截，该事件会被 backdrop 的 onContextMenu 捕获，
+                        // 导致刚弹出的导入模式菜单立刻被关闭。
+                        // 添加一次性 capturing-phase 拦截器来吞掉那个多余的 contextmenu。
+                        const suppressCtx = (ev: Event) => {
+                            ev.preventDefault();
+                            ev.stopImmediatePropagation();
+                            window.removeEventListener("contextmenu", suppressCtx, true);
+                        };
+                        window.addEventListener("contextmenu", suppressCtx, true);
+
+                        // 右键拖拽 → 弹出导入模式菜单（跟随鼠标位置）
                         setImportModeMenu({
                             x: detail.clientX,
                             y: detail.clientY,
@@ -472,7 +507,18 @@ export const TimelinePanel: React.FC = () => {
                             trackId,
                             startSec: beat,
                         });
+                    } else if (isMulti) {
+                        // 左键多文件拖拽 → 直接跨时间导入
+                        void dispatch(
+                            importMultipleAudioAtPosition({
+                                audioPaths: filePaths,
+                                mode: "across-time",
+                                trackId,
+                                startSec: beat,
+                            }),
+                        );
                     } else {
+                        // 左键单文件拖拽 → 直接导入
                         void dispatch(
                             importAudioAtPosition({
                                 audioPath: detail.filePath,
@@ -1539,15 +1585,24 @@ export const TimelinePanel: React.FC = () => {
                               (c) => selectedIds.includes(c.id),
                           );
 
-                          // Find all clips on the same track that overlap with the clicked clip
-                          const overlappingClips = sessionRef.current.clips
-                              .filter(
-                                  (c) =>
-                                      c.trackId === ctxClip.trackId &&
-                                      c.id !== ctxClip.id &&
-                                      c.startSec < ctxClip.startSec + ctxClip.lengthSec &&
-                                      c.startSec + c.lengthSec > ctxClip.startSec,
-                              )
+                          // Convert context menu X to timeline seconds for fade region detection
+                          const _ctxScroller = scrollRef.current;
+                          const _ctxBounds = _ctxScroller?.getBoundingClientRect();
+                          const contextTimeSec =
+                              _ctxBounds && _ctxScroller
+                                  ? beatFromClientX(contextMenu.x, _ctxBounds, _ctxScroller.scrollLeft)
+                                  : ctxClip.startSec;
+
+                          // Find all clips on the same track whose fade regions contain the mouse position
+                          const overlappingFadeClips = sessionRef.current.clips
+                              .filter((c) => {
+                                  if (c.trackId !== ctxClip.trackId) return false;
+                                  const fadeInEnd = c.startSec + (c.fadeInSec || 0);
+                                  const fadeOutStart = c.startSec + c.lengthSec - (c.fadeOutSec || 0);
+                                  const mouseInFadeIn = c.fadeInSec > 0 && contextTimeSec >= c.startSec && contextTimeSec <= fadeInEnd;
+                                  const mouseInFadeOut = c.fadeOutSec > 0 && contextTimeSec >= fadeOutStart && contextTimeSec <= c.startSec + c.lengthSec;
+                                  return mouseInFadeIn || mouseInFadeOut;
+                              })
                               .sort((a, b) => a.startSec - b.startSec);
 
                           const playheadSec = sessionRef.current.playheadSec;
@@ -1562,7 +1617,7 @@ export const TimelinePanel: React.FC = () => {
                                   y={contextMenu.y}
                                   clip={ctxClip}
                                   selectedClips={selectedClips}
-                                  overlappingClips={overlappingClips}
+                                  overlappingClips={overlappingFadeClips}
                                   playheadInClip={playheadInClip}
                                   onClose={() => setContextMenu(null)}
                                   onDelete={(ids) => {

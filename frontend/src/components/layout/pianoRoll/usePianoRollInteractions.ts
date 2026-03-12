@@ -861,10 +861,7 @@ export function usePianoRollInteractions(args: {
                                     const snapToggled = noSnapKb ? isModifierActive(noSnapKb, ev) : false;
                                     const effectiveSnap = snapToggled ? !pitchSnapEnabled : pitchSnapEnabled;
                                     if (effectiveSnap && editParam === "pitch") {
-                                        if (pitchSnapUnit === "semitone") {
-                                            rawValueDelta = Math.round(rawValueDelta);
-                                        }
-                                        // scale 模式下不对 delta 量化，因为需要对每个值单独 snap
+                                        rawValueDelta = Math.round(rawValueDelta);
                                     }
 
                                     // 计算 X 方向帧偏移

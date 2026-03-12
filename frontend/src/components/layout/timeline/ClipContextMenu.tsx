@@ -295,14 +295,12 @@ export const ClipContextMenu: React.FC<{
                     />
                     {onFadeCurveChange &&
                         (() => {
-                            // Collect all clips involved in the overlap (clicked + overlapping neighbors), sorted by time
+                            // Collect all clips involved in the overlap (clicked + overlapping neighbors)
                             const fadedClips =
                                 overlappingClips.length > 0
-                                    ? [clip, ...overlappingClips]
-                                          .filter(
-                                              (c) => c.fadeInSec > 0 || c.fadeOutSec > 0,
-                                          )
-                                          .sort((a, b) => a.startSec - b.startSec)
+                                    ? [clip, ...overlappingClips].filter(
+                                          (c) => c.fadeInSec > 0 || c.fadeOutSec > 0,
+                                      )
                                     : clip.fadeInSec > 0 || clip.fadeOutSec > 0
                                       ? [clip]
                                       : [];

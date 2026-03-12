@@ -338,6 +338,8 @@ export const messages = {
 
         // Multi-file import
         import_across_time: "Add Across Time",
+        import_dialog_title: "Import files",
+        import_button: "Import",
         import_across_tracks: "Add Across Tracks",
 
         // Overlapping clips context menu
@@ -828,6 +830,8 @@ export const messages = {
 
         // Multi-file import
         import_across_time: "跨时间添加",
+        import_dialog_title: "导入文件",
+        import: "导入",
         import_across_tracks: "跨轨道添加",
 
         // Overlapping clips context menu

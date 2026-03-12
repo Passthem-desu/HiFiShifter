@@ -4,7 +4,6 @@ import { useI18n } from "../../i18n/I18nProvider";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import {
-    importAudioFromDialog,
     exportAudio,
     exportSeparated,
     openReaperFromDialog,
@@ -19,6 +18,7 @@ import {
     saveProjectRemote,
     saveProjectAsRemote,
 } from "../../features/session/sessionSlice";
+import { importMultipleAudioFilesAtPosition } from "../../features/session/thunks/importThunks";
 import { fileBrowserApi } from "../../services/api/fileBrowser";
 import { useAppTheme } from "../../theme/AppThemeProvider";
 import { GlobeIcon } from "@radix-ui/react-icons";
@@ -122,6 +122,32 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         await dispatch(exportSeparated(result.path));
     }
 
+    const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+    const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
+    const [importModalOpen, setImportModalOpen] = useState(false);
+    const [importMode, setImportMode] = useState<"across-time" | "across-tracks">("across-time");
+
+    async function handleConfirmImportFiles() {
+        if (!pendingFiles || pendingFiles.length === 0) return;
+        // Use selected track if any, otherwise null to create new track
+        const trackId = s.selectedTrackId ?? null;
+        const startSec = s.playheadSec ?? 0;
+        await dispatch(importMultipleAudioFilesAtPosition({ files: pendingFiles, mode: importMode, trackId, startSec }));
+        setPendingFiles(null);
+        setImportModalOpen(false);
+    }
+
+    function handleFilesSelected(files: FileList | null) {
+        if (!files || files.length === 0) return;
+        setPendingFiles(Array.from(files));
+        setImportModalOpen(true);
+    }
+
+    // Ensure hidden file input exists in DOM
+    React.useEffect(() => {
+        if (!fileInputRef.current) return;
+    }, [fileInputRef]);
+
     return (
         <Flex
             align="center"
@@ -194,9 +220,15 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <DropdownMenu.Separator />
 
                     <DropdownMenu.Item
-                        onSelect={() => dispatch(importAudioFromDialog())}
+                        onSelect={() => {
+                            // trigger native file picker (allow multiple)
+                            if (fileInputRef.current) {
+                                fileInputRef.current.value = "";
+                                fileInputRef.current.click();
+                            }
+                        }}
                     >
-                        {t("menu_import_audio")}{" "}
+                        {t("menu_import_audio")} {" "}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
                         onSelect={() => void dispatch(openReaperFromDialog())}
@@ -460,6 +492,41 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 open={kbDialogOpen}
                 onOpenChange={setKbDialogOpen}
             />
+
+            {/* Hidden native file picker for import (multiple) */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*"
+                multiple
+                className="hidden"
+                onChange={(e) => handleFilesSelected(e.target.files)}
+            />
+
+            {/* Simple import settings modal */}
+            {importModalOpen && (
+                <div className="fixed inset-0 z-[9999]" onClick={() => setImportModalOpen(false)}>
+                    <div
+                        className="absolute bg-qt-panel border border-qt-border rounded shadow-lg py-3 px-4 min-w-[300px]"
+                        style={{ left: '50%', top: '40%', transform: 'translate(-50%, -40%)' }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="mb-2 text-sm">{tAny("import_dialog_title")}</div>
+                        <div className="mb-3">
+                            <label className="mr-3">
+                                <input type="radio" name="impMode" value="across-time" checked={importMode === 'across-time'} onChange={() => setImportMode('across-time')} /> {tAny("import_across_time")}
+                            </label>
+                            <label>
+                                <input type="radio" name="impMode" value="across-tracks" checked={importMode === 'across-tracks'} onChange={() => setImportMode('across-tracks')} /> {tAny("import_across_tracks")}
+                            </label>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <button className="px-3 py-1 text-sm" onClick={() => { setImportModalOpen(false); setPendingFiles(null); }}>{tAny("cancel")}</button>
+                            <button className="px-3 py-1 text-sm bg-qt-primary text-white rounded" onClick={() => void handleConfirmImportFiles()}>{tAny("import")}</button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Edit operation dialogs */}
             <TransposeCentsDialog

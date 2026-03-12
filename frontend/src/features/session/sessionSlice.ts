@@ -81,6 +81,7 @@ import {
     importAudioFromDialog,
     importAudioFromPath,
     importMultipleAudioAtPosition,
+    importMultipleAudioFilesAtPosition,
 } from "./thunks/importThunks";
 
 import {
@@ -728,6 +729,7 @@ export {
     importAudioAtPosition,
     importAudioFileAtPosition,
     importMultipleAudioAtPosition,
+    importMultipleAudioFilesAtPosition,
 } from "./thunks/importThunks";
 
 const sessionSlice = createSlice({
@@ -1429,6 +1431,33 @@ const sessionSlice = createSlice({
                 }
             })
             .addCase(importMultipleAudioAtPosition.rejected, setRejected)
+
+            .addCase(importMultipleAudioFilesAtPosition.pending, (state) =>
+                setPending(state, "Importing multiple audio files..."),
+            )
+            .addCase(importMultipleAudioFilesAtPosition.fulfilled, (state, action) => {
+                state.busy = false;
+                state.lastResult = action.payload;
+                const payload = action.payload as {
+                    ok?: boolean;
+                    imported?: TimelineState;
+                    newClipIds?: string[];
+                };
+                const ok = Boolean(payload.ok);
+                state.status = ok ? "Import done" : "Import failed";
+                if (ok && payload.imported && (payload.imported as any).tracks) {
+                    applyTimelineState(state, payload.imported as any);
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                    }
+                    // select all imported clips
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
+                    }
+                }
+            })
+            .addCase(importMultipleAudioFilesAtPosition.rejected, setRejected)
 
             .addCase(pickOutputPath.pending, (state) =>
                 setPending(state, "Selecting output path..."),

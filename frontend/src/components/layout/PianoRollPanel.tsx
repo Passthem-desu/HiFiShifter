@@ -443,6 +443,7 @@ export const PianoRollPanel: React.FC = () => {
     const scrollerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const axisCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const axisWrapRef = useRef<HTMLDivElement | null>(null);
     const rafRef = useRef<number | null>(null);
     const drawRef = useRef<() => void>(() => {});
     const lastScrollLeftRef = useRef<number | null>(null);
@@ -983,6 +984,67 @@ export const PianoRollPanel: React.FC = () => {
         };
     }, [onScrollerWheelNative]);
 
+    // Piano keys (axis) area: scroll wheel → vertical zoom
+    useEffect(() => {
+        const el = axisWrapRef.current;
+        if (!el) return;
+
+        const handler = (e: WheelEvent) => {
+            e.preventDefault();
+
+            const bounds = el.getBoundingClientRect();
+            const h = Math.max(1, bounds.height);
+            const pointerY = clamp(e.clientY - bounds.top, 0, h);
+            // t: 0=top, 1=bottom — same semantics as usePianoRollInteractions
+            const t = pointerY / h;
+            const valueAtPointer = editParam === "pitch"
+                ? (() => {
+                    const view = pitchViewRef.current;
+                    const absMin = PITCH_MIN_MIDI;
+                    const absMax = PITCH_MAX_MIDI;
+                    const span = clamp(view.span, 1e-6, absMax - absMin);
+                    const min = clamp(view.center - span / 2, absMin, absMax - span);
+                    return clamp(min + (1 - t) * span, absMin, absMax);
+                })()
+                : (() => {
+                    const desc = processorParamsRef.current?.find((d: ProcessorParamDescriptor) => d.id === editParam);
+                    const absMin = desc?.kind.type === "automation_curve" ? desc.kind.min_value : 0;
+                    const absMax = desc?.kind.type === "automation_curve" ? desc.kind.max_value : 1;
+                    const view = paramViewsRef.current[editParam] ?? { center: (absMin + absMax) / 2, span: absMax - absMin || 1 };
+                    const span = clamp(view.span, 1e-6, absMax - absMin || 1);
+                    const min = clamp(view.center - span / 2, absMin, absMax - span);
+                    return clamp(min + (1 - t) * span, absMin, absMax);
+                })();
+
+            // Scroll up (negative deltaY) → zoom in (smaller span), scroll down → zoom out
+            const factor = e.deltaY < 0 ? 0.9 : 1.1;
+
+            if (editParam === "pitch") {
+                const cur = pitchViewRef.current;
+                const nextSpan = cur.span * factor;
+                const next = clampViewport("pitch", {
+                    span: nextSpan,
+                    center: valueAtPointer - (0.5 - t) * nextSpan,
+                });
+                setPitchView(next);
+            } else {
+                const cur = paramViewsRef.current[editParam] ?? { center: 0.5, span: 1 };
+                const nextSpan = cur.span * factor;
+                const next = clampViewport(editParam, {
+                    span: nextSpan,
+                    center: valueAtPointer - (0.5 - t) * nextSpan,
+                });
+                setParamViewport(editParam, next);
+            }
+            invalidate();
+        };
+
+        el.addEventListener("wheel", handler, { passive: false } as globalThis.AddEventListenerOptions);
+        return () => {
+            el.removeEventListener("wheel", handler);
+        };
+    }, [editParam, setPitchView, setParamViewport, invalidate]);
+
     // Silence unused state warnings; selectionUi is future UI.
     void selectionUi;
 
@@ -1180,8 +1242,16 @@ export const PianoRollPanel: React.FC = () => {
                         (v) => Number(v) || 0,
                     );
                     if (vals.length === 0) return;
-                    // pitch=0 视为未编辑，保持为0
-                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                    // pitch=0 视为未编辑，不参与平均值计算（与平滑化一致）
+                    let avg: number;
+                    if (editParam === "pitch") {
+                        const validVals = vals.filter((v) => v !== 0);
+                        avg = validVals.length > 0
+                            ? validVals.reduce((a, b) => a + b, 0) / validVals.length
+                            : 0;
+                    } else {
+                        avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                    }
                     const result =
                         editParam === "pitch"
                             ? vals.map((v) => (v === 0 ? 0 : avg))
@@ -1894,6 +1964,7 @@ export const PianoRollPanel: React.FC = () => {
                         style={{ width: AXIS_W }}
                     />
                     <div
+                        ref={axisWrapRef}
                         className="bg-qt-window border-r border-qt-border relative"
                         style={{ width: AXIS_W, flex: 1 }}
                     >
@@ -1943,7 +2014,7 @@ export const PianoRollPanel: React.FC = () => {
 
                     <div
                         ref={scrollerRef}
-                        className="flex-1 bg-qt-graph-bg overflow-x-auto overflow-y-hidden relative custom-scrollbar"
+                        className="flex-1 bg-qt-graph-bg overflow-x-scroll overflow-y-hidden relative custom-scrollbar"
                         data-piano-roll-scroller
                         tabIndex={0}
                         onMouseDownCapture={
