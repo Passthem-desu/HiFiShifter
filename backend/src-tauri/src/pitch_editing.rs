@@ -524,7 +524,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     // 预计算处理器能力：决定 seg_end_sec 的时间轴计算方式。
     // - handles_time_stretch=true（如 World/HiFiGAN chain、vslib）：
     //     输入 PCM 为源速率，输出 = 源帧数 / playback_rate（时间轴帧数）
-    // - handles_time_stretch=false：输入 PCM 已由外部 RubberBand 预拉伸，帧数 = 时间轴帧数
+    // - handles_time_stretch=false：输入 PCM 已由外部 Signalsmith Stretch 预拉伸，帧数 = 时间轴帧数
     let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
     let clip_playback_rate = (clip.playback_rate as f64).max(1e-6);
     let processor_handles_stretch =
@@ -640,7 +640,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             clip.extra_params.as_ref().unwrap_or(extra_params);
 
         // 若处理器自己处理时间拉伸（如 vslib 使用 Timing 控制点），传递实际 playback_rate；
-        // 否则 PCM 已由外部 RubberBand 预处理，rate=1.0。
+        // 否则 PCM 已由外部 Signalsmith Stretch 预处理，rate=1.0。
         let ctx_playback_rate = if processor_handles_stretch { clip_playback_rate } else { 1.0 };
 
         let ctx = crate::renderer::ClipProcessContext {

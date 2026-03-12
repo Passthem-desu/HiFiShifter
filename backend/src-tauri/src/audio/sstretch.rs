@@ -1,10 +1,9 @@
 //! Signalsmith Stretch FFI 封装
 //!
-//! 提供与原 rubberband.rs 相同的公共 API 接口，但底层使用
-//! Signalsmith Stretch (MIT) 替代 RubberBand (GPL)。
+//! 基于 Signalsmith Stretch (MIT) 的音频时间拉伸模块。
 //!
 //! 公共接口：
-//! - `SignalsmithRealtimeStretcher` — 实时流式拉伸器（替代 RubberBandRealtimeStretcher）
+//! - `SignalsmithRealtimeStretcher` — 实时流式拉伸器
 //! - `try_time_stretch_interleaved_offline()` — 离线批量拉伸
 //! - `try_time_stretch_interleaved_realtime()` — 实时模式批量拉伸
 //! - `is_available()` — 始终返回 true（静态链接）
@@ -56,7 +55,7 @@ pub fn is_available() -> bool {
     true
 }
 
-/// 实时流式拉伸器，API 与原 `RubberBandRealtimeStretcher` 兼容。
+/// 实时流式拉伸器。
 ///
 /// 用于 `stretch_stream` 后台 worker 的逐块 process + retrieve 流程。
 /// 注意：Signalsmith Stretch 不区分 process/retrieve，而是一次 process() 调用
@@ -131,7 +130,7 @@ impl SignalsmithRealtimeStretcher {
 
     /// 输入交错 PCM 进行处理。
     ///
-    /// 与 RubberBand 不同，Signalsmith Stretch 的 process() 同时消费输入和产出输出。
+    /// Signalsmith Stretch 的 process() 同时消费输入和产出输出。
     /// 输出帧数 = in_frames * time_ratio（向上取整），结果暂存在内部缓冲区。
     pub fn process_interleaved(
         &mut self,

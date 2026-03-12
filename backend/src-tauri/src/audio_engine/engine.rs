@@ -166,7 +166,7 @@ impl AudioEngine {
 
             let (stretch_tx, stretch_rx) = mpsc::channel::<StretchJob>();
 
-            // Worker that computes RubberBand stretches off the command thread.
+            // Worker that computes Signalsmith Stretch off the command thread.
             // Keep it small to avoid CPU spikes.
             {
                 let cache = cache_for_cmd.clone();
