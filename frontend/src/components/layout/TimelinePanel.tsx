@@ -80,9 +80,36 @@ export const TimelinePanel: React.FC = () => {
     const lastClickedClipIdRef = useRef<string | null>(null);
 
     const [scrollLeft, setScrollLeft] = useState(0);
+    const [viewportWidth, setViewportWidth] = useState(0);
     useEffect(() => {
         scrollLeftRef.current = scrollLeft;
     }, [scrollLeft]);
+
+    useEffect(() => {
+        const scroller = scrollRef.current;
+        if (!scroller) return;
+
+        const updateViewportWidth = () => {
+            setViewportWidth(scroller.clientWidth || 0);
+        };
+
+        updateViewportWidth();
+
+        if (typeof ResizeObserver !== "undefined") {
+            const observer = new ResizeObserver(() => {
+                updateViewportWidth();
+            });
+            observer.observe(scroller);
+            return () => {
+                observer.disconnect();
+            };
+        }
+
+        window.addEventListener("resize", updateViewportWidth);
+        return () => {
+            window.removeEventListener("resize", updateViewportWidth);
+        };
+    }, []);
 
     function syncScrollLeft(next: number) {
         scrollLeftRef.current = next;
@@ -568,17 +595,22 @@ export const TimelinePanel: React.FC = () => {
     const multiSelectedClipIds = useAppSelector(
         (state: RootState) => state.session.multiSelectedClipIds,
     );
+    const multiSelectedClipIdsRef = useRef(multiSelectedClipIds);
+    useEffect(() => {
+        multiSelectedClipIdsRef.current = multiSelectedClipIds;
+    }, [multiSelectedClipIds]);
+
     const setMultiSelectedClipIds = React.useCallback(
         (ids: string[] | ((prev: string[]) => string[])) => {
             if (typeof ids === "function") {
                 // 支持 callback 形式（与旧 useState dispatch 兼容）
-                const next = ids(multiSelectedClipIds);
+                const next = ids(multiSelectedClipIdsRef.current);
                 dispatch(setMultiSelectedClipIdsAction(next));
             } else {
                 dispatch(setMultiSelectedClipIdsAction(ids));
             }
         },
-        [dispatch, multiSelectedClipIds],
+        [dispatch],
     );
     // 切换工具时清除多选
     useEffect(() => {
@@ -588,6 +620,10 @@ export const TimelinePanel: React.FC = () => {
         () => new Set(multiSelectedClipIds),
         [multiSelectedClipIds],
     );
+    const multiSelectedSetRef = useRef(multiSelectedSet);
+    useEffect(() => {
+        multiSelectedSetRef.current = multiSelectedSet;
+    }, [multiSelectedSet]);
 
     const [contextMenu, setContextMenu] = useState<{
         x: number;
@@ -612,19 +648,26 @@ export const TimelinePanel: React.FC = () => {
     /** �Ҽ��˵��д����������� clipId */
     const [renamingClipId, setRenamingClipId] = useState<string | null>(null);
 
+    const clearContextMenu = React.useCallback(() => {
+        setContextMenu(null);
+    }, []);
+
+    const handleSelectionRectSingleSelect = React.useCallback(
+        (clipId: string) => {
+            void dispatch(selectClipRemote(clipId));
+        },
+        [dispatch],
+    );
+
     const { selectionRect, onPointerDown: onSelectionRectPointerDown } =
         useTimelineSelectionRect({
             scrollRef,
             sessionRef,
             pxPerBeat: pxPerSec,
             rowHeight,
-            clearContextMenu: () => {
-                setContextMenu(null);
-            },
+            clearContextMenu,
             setMultiSelectedClipIds,
-            onSingleSelect: (clipId) => {
-                void dispatch(selectClipRemote(clipId));
-            },
+            onSingleSelect: handleSelectionRectSingleSelect,
         });
 
     const contentWidth = useMemo(() => {
@@ -673,10 +716,13 @@ export const TimelinePanel: React.FC = () => {
     }, [s.clips]);
 
     /** 将客户端 X 坐标转换为秒（seconds-based，不受 BPM 影响） */
-    function secFromClientX(clientX: number, bounds: DOMRect, xScroll: number) {
-        const x = clientX - bounds.left + xScroll;
-        return Math.max(0, x / pxPerSec);
-    }
+    const secFromClientX = React.useCallback(
+        (clientX: number, bounds: DOMRect, xScroll: number) => {
+            const x = clientX - bounds.left + xScroll;
+            return Math.max(0, x / pxPerSec);
+        },
+        [pxPerSec],
+    );
 
     /** 兼容旧名称，内部统一使用 secFromClientX */
     const beatFromClientX = secFromClientX;
@@ -703,19 +749,123 @@ export const TimelinePanel: React.FC = () => {
         return idx * rowHeight;
     }
 
-    function setPlayheadFromClientX(
-        clientX: number,
-        bounds: DOMRect,
-        xScroll: number,
-        commit: boolean,
-    ) {
-        const beat = beatFromClientX(clientX, bounds, xScroll);
-        dispatch(setplayheadSec(beat));
-        if (commit) {
-            void dispatch(seekPlayhead(beat));
-        }
-        return beat;
-    }
+    const setPlayheadFromClientX = React.useCallback(
+        (
+            clientX: number,
+            bounds: DOMRect,
+            xScroll: number,
+            commit: boolean,
+        ) => {
+            const beat = beatFromClientX(clientX, bounds, xScroll);
+            dispatch(setplayheadSec(beat));
+            if (commit) {
+                void dispatch(seekPlayhead(beat));
+            }
+            return beat;
+        },
+        [beatFromClientX, dispatch],
+    );
+
+    const ensureTrackLaneSelected = React.useCallback(
+        (clipId: string) => {
+            lastClickedClipIdRef.current = clipId;
+            const selectedIds = multiSelectedClipIdsRef.current;
+            const selectedSet = multiSelectedSetRef.current;
+            if (selectedIds.length === 0 || !selectedSet.has(clipId)) {
+                setMultiSelectedClipIds([clipId]);
+            }
+        },
+        [setMultiSelectedClipIds],
+    );
+
+    const selectTrackLaneClipRemote = React.useCallback(
+        (clipId: string) => {
+            lastClickedClipIdRef.current = clipId;
+            void dispatch(selectClipRemote(clipId));
+        },
+        [dispatch],
+    );
+
+    const openTrackLaneContextMenu = React.useCallback(
+        (clipId: string, clientX: number, clientY: number) => {
+            setTrackAreaMenu(null);
+            setContextMenu({
+                x: clientX,
+                y: clientY,
+                clipId,
+            });
+        },
+        [],
+    );
+
+    const seekFromTrackLaneClientX = React.useCallback(
+        (clientX: number, commit: boolean) => {
+            const scroller = scrollRef.current;
+            if (!scroller) return;
+            const bounds = scroller.getBoundingClientRect();
+            setPlayheadFromClientX(clientX, bounds, scroller.scrollLeft, commit);
+        },
+        [setPlayheadFromClientX],
+    );
+
+    const toggleTrackLaneClipMuted = React.useCallback(
+        (clipId: string, nextMuted: boolean) => {
+            dispatch(
+                setClipMuted({
+                    clipId,
+                    muted: nextMuted,
+                }),
+            );
+            void dispatch(
+                setClipStateRemote({
+                    clipId,
+                    muted: nextMuted,
+                }),
+            );
+        },
+        [dispatch],
+    );
+
+    const toggleTrackLaneMultiSelect = React.useCallback(
+        (clipId: string) => {
+            setMultiSelectedClipIds((prev) => {
+                if (prev.includes(clipId)) {
+                    return prev.filter((id) => id !== clipId);
+                }
+                return [...prev, clipId];
+            });
+        },
+        [setMultiSelectedClipIds],
+    );
+
+    const commitTrackLaneRename = React.useCallback(
+        (clipId: string, newName: string) => {
+            void dispatch(
+                setClipStateRemote({
+                    clipId,
+                    name: newName,
+                }),
+            );
+        },
+        [dispatch],
+    );
+
+    const handleTrackLaneRenameDone = React.useCallback(() => {
+        setRenamingClipId(null);
+    }, []);
+
+    const commitTrackLaneGain = React.useCallback(
+        (clipId: string, db: number) => {
+            const gain = Math.pow(10, db / 20);
+            void dispatch(
+                setClipStateRemote({
+                    clipId,
+                    gain,
+                }),
+            );
+        },
+        [dispatch],
+    );
 
     function startPanPointer(e: React.PointerEvent) {
         const scroller = scrollRef.current;
@@ -843,20 +993,27 @@ export const TimelinePanel: React.FC = () => {
         },
     });
 
-    function startClipDrag(
-        e: React.PointerEvent<HTMLDivElement>,
-        clipId: string,
-        clipstartSec: number,
-        altPressedHint?: boolean,
-    ) {
-        _startClipDragInner(
-            e,
-            clipId,
-            clipstartSec,
-            altPressedHint,
-            startSlipDrag,
-        );
-    }
+    const startClipDrag = React.useCallback(
+        (
+            e: React.PointerEvent<HTMLDivElement>,
+            clipId: string,
+            clipstartSec: number,
+            altPressedHint?: boolean,
+        ) => {
+            _startClipDragInner(
+                e,
+                clipId,
+                clipstartSec,
+                altPressedHint,
+                startSlipDrag,
+            );
+        },
+        [_startClipDragInner, startSlipDrag],
+    );
+
+    const viewportStartSec = scrollLeft / Math.max(1e-9, pxPerSec);
+    const viewportEndSec =
+        (scrollLeft + viewportWidth) / Math.max(1e-9, pxPerSec);
 
     // ���� ���̿�ݼ� hook ������������������������������������������������������������������������������������������������������������
     // 规格化 clip 音量（快捷键 & 右键菜单共用）
@@ -1251,6 +1408,7 @@ export const TimelinePanel: React.FC = () => {
                     pxPerBeat={pxPerBeat}
                     pxPerSec={pxPerSec}
                     secPerBeat={secPerBeat}
+                    viewportWidth={viewportWidth}
                     playheadSec={s.playheadSec}
                     contentRef={rulerContentRef}
                     onMouseDown={(e) => {
@@ -1576,102 +1734,30 @@ export const TimelinePanel: React.FC = () => {
                                     rowHeight={rowHeight}
                                     pxPerSec={pxPerSec}
                                     bpm={s.bpm}
+                                    viewportStartSec={viewportStartSec}
+                                    viewportEndSec={viewportEndSec}
                                     clipWaveforms={s.clipWaveforms}
                                     altPressed={altPressed}
                                     selectedClipId={s.selectedClipId}
                                     multiSelectedClipIds={multiSelectedClipIds}
                                     multiSelectedSet={multiSelectedSet}
                                     trackColor={track.color || undefined}
-                                    ensureSelected={(clipId) => {
-                                        lastClickedClipIdRef.current = clipId;
-                                        if (
-                                            multiSelectedClipIds.length === 0 ||
-                                            !multiSelectedSet.has(clipId)
-                                        ) {
-                                            setMultiSelectedClipIds([clipId]);
-                                        }
-                                    }}
-                                    selectClipRemote={(clipId) => {
-                                        lastClickedClipIdRef.current = clipId;
-                                        void dispatch(selectClipRemote(clipId));
-                                    }}
+                                    ensureSelected={ensureTrackLaneSelected}
+                                    selectClipRemote={selectTrackLaneClipRemote}
                                     onShiftRangeSelect={selectClipRangeByRect}
-                                    openContextMenu={(
-                                        clipId,
-                                        clientX,
-                                        clientY,
-                                    ) => {
-                                        setTrackAreaMenu(null);
-                                        setContextMenu({
-                                            x: clientX,
-                                            y: clientY,
-                                            clipId,
-                                        });
-                                    }}
-                                    seekFromClientX={(clientX, commit) => {
-                                        const scroller = scrollRef.current;
-                                        if (!scroller) return;
-                                        const bounds =
-                                            scroller.getBoundingClientRect();
-                                        setPlayheadFromClientX(
-                                            clientX,
-                                            bounds,
-                                            scroller.scrollLeft,
-                                            commit,
-                                        );
-                                    }}
+                                    openContextMenu={openTrackLaneContextMenu}
+                                    seekFromClientX={seekFromTrackLaneClientX}
                                     ghostDrag={ghostDrag}
                                     allClips={s.clips}
                                     startClipDrag={startClipDrag}
                                     startEditDrag={startEditDrag}
-                                    toggleClipMuted={(clipId, nextMuted) => {
-                                        dispatch(
-                                            setClipMuted({
-                                                clipId,
-                                                muted: nextMuted,
-                                            }),
-                                        );
-                                        void dispatch(
-                                            setClipStateRemote({
-                                                clipId,
-                                                muted: nextMuted,
-                                            }),
-                                        );
-                                    }}
-                                    clearContextMenu={() => {
-                                        setContextMenu(null);
-                                    }}
-                                    toggleMultiSelect={(clipId) => {
-                                        setMultiSelectedClipIds((prev) => {
-                                            if (prev.includes(clipId)) {
-                                                return prev.filter(
-                                                    (id) => id !== clipId,
-                                                );
-                                            }
-                                            return [...prev, clipId];
-                                        });
-                                    }}
+                                    toggleClipMuted={toggleTrackLaneClipMuted}
+                                    clearContextMenu={clearContextMenu}
+                                    toggleMultiSelect={toggleTrackLaneMultiSelect}
                                     renamingClipId={renamingClipId}
-                                    onRenameCommit={(clipId, newName) => {
-                                        void dispatch(
-                                            setClipStateRemote({
-                                                clipId,
-                                                name: newName,
-                                            }),
-                                        );
-                                    }}
-                                    onRenameDone={() => {
-                                        setRenamingClipId(null);
-                                    }}
-                                    onGainCommit={(clipId, db) => {
-                                        const gain = Math.pow(10, db / 20);
-                                        void dispatch(
-                                            setClipStateRemote({
-                                                clipId,
-                                                gain,
-                                            }),
-                                        );
-                                    }}
+                                    onRenameCommit={commitTrackLaneRename}
+                                    onRenameDone={handleTrackLaneRenameDone}
+                                    onGainCommit={commitTrackLaneGain}
                                 />
                             );
                         })}

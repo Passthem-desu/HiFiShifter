@@ -43,6 +43,13 @@ export const TimelineScrollArea: React.FC<
     ...divProps
 }) => {
     const lastScrollLeftRef = useRef<number | null>(null);
+    const pxPerSecRef = useRef(pxPerSec);
+    const zoomRafRef = useRef<number | null>(null);
+    const zoomPendingRef = useRef<{
+        pointerX: number;
+        secAtPointer: number;
+        nextPxPerSec: number;
+    } | null>(null);
 
     // zoom 中心点以秒为基准
     const pendingZoomRef = useRef<{
@@ -50,6 +57,10 @@ export const TimelineScrollArea: React.FC<
         secAtPointer: number;
         nextPxPerSec: number;
     } | null>(null);
+
+    useEffect(() => {
+        pxPerSecRef.current = pxPerSec;
+    }, [pxPerSec]);
 
     function syncScrollLeft(scroller: HTMLDivElement) {
         const next = scroller.scrollLeft;
@@ -71,6 +82,15 @@ export const TimelineScrollArea: React.FC<
 
     useEffect(() => {
         return () => {};
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (zoomRafRef.current != null) {
+                cancelAnimationFrame(zoomRafRef.current);
+                zoomRafRef.current = null;
+            }
+        };
     }, []);
 
     useLayoutEffect(() => {
@@ -163,19 +183,31 @@ export const TimelineScrollArea: React.FC<
                     (anchorX + scroller.scrollLeft) / Math.max(1e-9, pxPerSec);
             }
 
+            const basePxPerSec =
+                zoomPendingRef.current?.nextPxPerSec ?? pxPerSecRef.current;
             const next = clamp(
-                pxPerSec * factor,
+                basePxPerSec * factor,
                 MIN_PX_PER_SEC,
                 MAX_PX_PER_SEC,
             );
-            if (Math.abs(next - pxPerSec) < 1e-9) return;
+            if (Math.abs(next - basePxPerSec) < 1e-9) return;
 
-            pendingZoomRef.current = {
+            zoomPendingRef.current = {
                 pointerX: anchorX,
                 secAtPointer: anchorSec,
                 nextPxPerSec: next,
             };
-            setPxPerSec(next);
+
+            if (zoomRafRef.current == null) {
+                zoomRafRef.current = requestAnimationFrame(() => {
+                    zoomRafRef.current = null;
+                    const pending = zoomPendingRef.current;
+                    if (!pending) return;
+                    zoomPendingRef.current = null;
+                    pendingZoomRef.current = pending;
+                    setPxPerSec(pending.nextPxPerSec);
+                });
+            }
         };
 
         scroller.addEventListener("wheel", handler, {

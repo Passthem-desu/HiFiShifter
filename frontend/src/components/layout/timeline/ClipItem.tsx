@@ -124,7 +124,31 @@ function minMaxEnvelopeFromSamples(
     return { min: outMin, max: outMax };
 }
 
-export const ClipItem: React.FC<{
+export const ClipItem = React.memo(function ClipItem({
+    clip,
+    rowHeight,
+    pxPerSec,
+    waveform,
+    altPressed = false,
+    selected,
+    isInMultiSelectedSet,
+    multiSelectedCount,
+    ensureSelected,
+    selectClipRemote,
+    openContextMenu,
+    seekFromClientX,
+    startClipDrag,
+    startEditDrag,
+    toggleClipMuted,
+    toggleMultiSelect: _toggleMultiSelect,
+    onShiftRangeSelect,
+    clearContextMenu,
+    triggerRename,
+    onRenameCommit,
+    onRenameDone,
+    onGainCommit,
+    trackColor,
+}: {
     clip: ClipInfo;
     rowHeight: number;
     pxPerSec: number;
@@ -173,31 +197,7 @@ export const ClipItem: React.FC<{
     onRenameCommit?: (clipId: string, newName: string) => void;
     onRenameDone?: () => void;
     onGainCommit?: (clipId: string, db: number) => void;
-}> = ({
-    clip,
-    rowHeight,
-    pxPerSec,
-    waveform,
-    altPressed = false,
-    selected,
-    isInMultiSelectedSet,
-    multiSelectedCount,
-    ensureSelected,
-    selectClipRemote,
-    openContextMenu,
-    seekFromClientX,
-    startClipDrag,
-    startEditDrag,
-    toggleClipMuted,
-    toggleMultiSelect: _toggleMultiSelect,
-    onShiftRangeSelect,
-    clearContextMenu,
-    triggerRename,
-    onRenameCommit,
-    onRenameDone,
-    onGainCommit,
-    trackColor,
-}) => {
+}) {
     const { t } = useI18n();
     const { mode: themeMode } = useAppTheme();
     const waveformColors = React.useMemo(
@@ -264,7 +264,11 @@ export const ClipItem: React.FC<{
         ],
     );
 
-    const waveformSvg = React.useMemo(() => {
+    // peaks 命中时，路径本身与缩放像素宽度无关；
+    // 用该值避免缩放时因 width 变化触发全量路径重算。
+    const widthForPath = peaks?.ok ? 0 : width;
+
+    const waveformSvgContent = React.useMemo(() => {
         const quantizeCols = (raw: number) =>
             clamp(
                 Math.round(clamp(Math.floor(raw), 16, 8192) / 64) * 64,
@@ -274,7 +278,7 @@ export const ClipItem: React.FC<{
 
         const renderCols = peaks?.ok
             ? clamp(Math.floor(peaks.columns), 16, 8192)
-            : quantizeCols(width);
+            : quantizeCols(widthForPath);
 
         const w = renderCols;
         const totalH = 24;
@@ -383,19 +387,13 @@ export const ClipItem: React.FC<{
                 amplitudeScale: 1.0, // 振幅已在 applyFadeGainToPeaks 中处理
             },
         );
-        // 波形 SVG 固定宽度 = source 可用窗口的 timeline 像素宽度。
-        // trim 拖动时此值不变，外层 overflow-hidden 裁掉超出部分，波形不拉伸。
-        const svgFixedWidthPx = peaks?.ok
-            ? peaks.cycleLenSecTimeline * pxPerSec
-            : width;
-
         if (!pathD) return null;
         return (
             <svg
                 viewBox={`0 0 ${w} ${totalH}`}
                 preserveAspectRatio="none"
                 style={{
-                    width: svgFixedWidthPx,
+                    width: "100%",
                     height: "100%",
                     opacity: waveformOpacity,
                     flexShrink: 0,
@@ -423,13 +421,18 @@ export const ClipItem: React.FC<{
         clip.sourceStartSec,
         clip.sourceEndSec,
         peaks,
-        pxPerSec,
-        width,
+        widthForPath,
         stereo,
         waveform,
         waveformAmpScale,
         waveformVisualAmpScale,
     ]);
+
+    // 波形 SVG 固定宽度 = source 可用窗口的 timeline 像素宽度。
+    // trim 拖动时此值不变，外层 overflow-hidden 裁掉超出部分，波形不拉伸。
+    const waveformSvgWidthPx = peaks?.ok
+        ? peaks.cycleLenSecTimeline * pxPerSec
+        : width;
 
     return (
         <div
@@ -750,6 +753,7 @@ export const ClipItem: React.FC<{
                         <div
                             style={{
                                 height: "100%",
+                                width: waveformSvgWidthPx,
                                 marginLeft: peaks?.ok
                                     ? -(
                                           Math.max(
@@ -767,11 +771,11 @@ export const ClipItem: React.FC<{
                                     : 0,
                             }}
                         >
-                            {waveformSvg}
+                            {waveformSvgContent}
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     );
-};
+});
