@@ -254,6 +254,11 @@ pub fn remove_track(state: State<'_, AppState>, track_id: String) -> crate::mode
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn duplicate_track(state: State<'_, AppState>, track_id: String) -> crate::models::TimelineStatePayload {
+    timeline::duplicate_track(state, track_id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn move_track(
     state: State<'_, AppState>,
     track_id: String,

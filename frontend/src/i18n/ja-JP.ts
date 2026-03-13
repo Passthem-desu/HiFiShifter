@@ -106,6 +106,7 @@ export const jaJP = {
     breath_gain_label: "ブレスゲイン",
     hifigan_tension_label: "テンション",
     formant_shift_label: "フォルマントシフト",
+    hifigan_volume_label: "ボリューム",
     switch_on: "オン",
     switch_off: "オフ",
     points_help: "ダブルクリックで追加 · ドラッグで移動 · 右クリックで削除",
@@ -219,6 +220,7 @@ export const jaJP = {
     clip_gain_drag_hint:
         "上下にドラッグしてゲインを調整 / ダブルクリックで数値入力",
     track_change_color: "トラックの色を変更",
+    track_clone: "トラックを複製",
     color_blue: "ブルー",
     color_purple: "パープル",
     color_green: "グリーン",

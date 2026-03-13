@@ -69,6 +69,9 @@ export const timelineApi = {
     removeTrack: (trackId: string) =>
         invoke<TimelineResult>("remove_track", trackId),
 
+    duplicateTrack: (trackId: string) =>
+        invoke<TimelineResult>("duplicate_track", trackId),
+
     moveTrack: (payload: {
         trackId: string;
         targetIndex: number;

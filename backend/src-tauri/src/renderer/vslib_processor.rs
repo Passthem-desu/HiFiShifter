@@ -301,18 +301,6 @@ static VSLIB_PARAMS: &[ParamDescriptor] = &[
             max_value: 4.0,
         },
     },
-    // 强弱（AutomationCurve）
-    ParamDescriptor {
-        id: "dyn_edit",
-        display_name: "强弱",
-        group: "动态",
-        kind: ParamKind::AutomationCurve {
-            unit: "×",
-            default_value: 1.0,
-            min_value: 0.0,
-            max_value: 4.0,
-        },
-    },
     // 声像（AutomationCurve）
     ParamDescriptor {
         id: "pan",
@@ -537,8 +525,7 @@ handles_time_stretch: true, // 使用 Timing 控制点，不需要外部 Signals
             let playback_rate = ctx.playback_rate.max(1e-6);
 
             let volume_c = ctx.extra_curves.get("volume");
-            let dyn_c = ctx.extra_curves.get("dyn_edit");
-            let dyn_orig_c = ctx.extra_curves.get("dyn_orig");
+
             let pan_c = ctx.extra_curves.get("pan");
             let formant_c = ctx.extra_curves.get("formant_shift_cents");
             let breathiness_c = ctx.extra_curves.get("breathiness");
@@ -580,12 +567,7 @@ handles_time_stretch: true, // 使用 Timing 控制点，不需要外部 Signals
                 if let Some(v) = curve_at_abs_sec(volume_c, at_abs, fp) {
                     cp2.volume = v as f64;
                 }
-                if let Some(v) = curve_at_abs_sec(dyn_c, at_abs, fp) {
-                    cp2.dynEdit = v as f64;
-                }
-                if let Some(v) = curve_at_abs_sec(dyn_orig_c, at_abs, fp) {
-                    cp2.dynOrg = v as f64;
-                }
+
                 if let Some(v) = curve_at_abs_sec(pan_c, at_abs, fp) {
                     cp2.pan = v as f64;
                 }
@@ -603,13 +585,12 @@ handles_time_stretch: true, // 使用 Timing 控制点，不需要外部 Signals
 
                 if debug && sample_points.contains(&pnt) {
                     eprintln!(
-                        "[vslib] ctrl_pnt[{}]: abs={:.3}s pit_edit={} pit_flag={} volume={:.3} dyn={:.3} pan={:.3} formant={} breathiness={}",
+                        "[vslib] ctrl_pnt[{}]: abs={:.3}s pit_edit={} pit_flag={} volume={:.3} pan={:.3} formant={} breathiness={}",
                         pnt,
                         at_abs,
                         cp2.pitEdit,
                         cp2.pitFlgEdit,
                         cp2.volume,
-                        cp2.dynEdit,
                         cp2.pan,
                         cp2.formant,
                         cp2.breathiness,

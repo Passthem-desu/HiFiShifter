@@ -59,6 +59,32 @@ fn clamp11(x: f32) -> f32 {
     x.clamp(-1.0, 1.0)
 }
 
+/// 在 mixdown 中采样自动化曲线（与 mix.rs 中的 sample_automation_curve 逻辑一致）。
+fn sample_automation_curve_at_sec(
+    curve: Option<&Vec<f32>>,
+    abs_sec: f64,
+    frame_period_ms: f64,
+    default_value: f32,
+) -> f32 {
+    let Some(curve) = curve else {
+        return default_value;
+    };
+    if curve.is_empty() {
+        return default_value;
+    }
+    let fp = frame_period_ms.max(0.1);
+    let idx_f = (abs_sec.max(0.0) * 1000.0) / fp;
+    if !idx_f.is_finite() {
+        return default_value;
+    }
+    let i0 = idx_f.floor().max(0.0) as usize;
+    let i1 = (i0 + 1).min(curve.len().saturating_sub(1));
+    let frac = (idx_f - i0 as f64).clamp(0.0, 1.0) as f32;
+    let a = curve.get(i0).copied().unwrap_or(default_value);
+    let b = curve.get(i1).copied().unwrap_or(a);
+    a + (b - a) * frac
+}
+
 pub(crate) fn linear_resample_interleaved(
     input: &[f32],
     channels: usize,
@@ -437,6 +463,25 @@ pub fn render_mixdown_interleaved(
             }
         }
 
+        // 提取 hifigan_volume 曲线（与 snapshot.rs 中的逻辑对应）
+        let (volume_curve, volume_curve_frame_period_ms) = timeline
+            .resolve_root_track_id(&clip.track_id)
+            .and_then(|root| {
+                let entry = timeline.params_by_root_track.get(&root)?;
+                let track = timeline.tracks.iter().find(|t| t.id == root)?;
+                let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+                let renderer_id = crate::renderer::get_renderer(kind).id();
+                if renderer_id == "nsf_hifigan_onnx" {
+                    Some((
+                        entry.extra_curves.get("hifigan_volume"),
+                        entry.frame_period_ms.max(0.1),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or((None, 5.0));
+
         // Apply fades (linear) and gain (timeline-referenced).
         let fade_in_frames = (clip.fade_in_sec.max(0.0) * out_rate as f64)
             .round()
@@ -500,8 +545,17 @@ pub fn render_mixdown_interleaved(
                 continue;
             }
 
-            mix[oi] += segment[si] * g;
-            mix[oi + 1] += segment[si + 1] * g;
+            // 应用 volume 曲线（不触发重渲染，与 mix.rs 中一致）
+            let abs_sec = clip_start_sec + (local_in_clip as f64 / out_rate as f64);
+            let vol = sample_automation_curve_at_sec(
+                volume_curve,
+                abs_sec,
+                volume_curve_frame_period_ms,
+                1.0,
+            );
+
+            mix[oi] += segment[si] * g * vol;
+            mix[oi + 1] += segment[si + 1] * g * vol;
         }
     }
 

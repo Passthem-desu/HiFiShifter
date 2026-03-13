@@ -84,6 +84,7 @@ export const webApi = {
     addTrack: timelineApi.addTrack,
     addTrackNested: timelineApi.addTrackNested,
     removeTrack: timelineApi.removeTrack,
+    duplicateTrack: timelineApi.duplicateTrack,
     moveTrack: timelineApi.moveTrack,
     setTrackState: timelineApi.setTrackState,
     selectTrack: timelineApi.selectTrack,

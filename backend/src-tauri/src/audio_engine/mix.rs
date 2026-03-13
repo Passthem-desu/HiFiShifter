@@ -67,7 +67,15 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
                     right += breath_noise[idx + 1] * gain;
                 }
             }
-            return Some((left, right));
+            // 应用 volume 曲线（不触发重渲染，实时乘到最终输出）
+            let vol = sample_automation_curve(
+                clip.volume_curve.as_deref(),
+                clip.start_frame.saturating_add(local),
+                clip.src.sample_rate,
+                clip.volume_curve_frame_period_ms,
+                1.0,
+            );
+            return Some((left * vol, right * vol));
         }
         // rendered_pcm 存在但越界时返回静音
         return None;

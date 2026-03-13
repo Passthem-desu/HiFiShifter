@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Flex, Box, Text, IconButton, Slider, Select } from "@radix-ui/themes";
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
 import type { TrackInfo } from "../../../features/session/sessionTypes";
@@ -38,6 +38,7 @@ export const TrackList: React.FC<{
     onTrackColorChange?: (trackId: string, color: string) => void;
     onAlgoChange?: (trackId: string, algo: string) => void;
     onTrackNameChange?: (trackId: string, name: string) => void;
+    onDuplicateTrack?: (trackId: string) => void;
     /** 外部持有该滚动容器的 ref，用于同步右侧轨道区的竖向滚动 */
     listScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
 }> = ({
@@ -58,6 +59,7 @@ export const TrackList: React.FC<{
     onTrackColorChange,
     onAlgoChange,
     onTrackNameChange,
+    onDuplicateTrack,
     listScrollRef,
 }) => {
     const listRef = useRef<HTMLDivElement | null>(null);
@@ -87,6 +89,41 @@ export const TrackList: React.FC<{
     const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
     const [editingName, setEditingName] = useState("");
     const nameInputRef = useRef<HTMLInputElement | null>(null);
+
+    // 轨道右键菜单状态
+    const [trackCtxMenu, setTrackCtxMenu] = useState<{
+        x: number;
+        y: number;
+        trackId: string;
+    } | null>(null);
+    const trackCtxMenuRef = useRef<HTMLDivElement | null>(null);
+
+    // 自动修正菜单溢出屏幕
+    useLayoutEffect(() => {
+        const el = trackCtxMenuRef.current;
+        if (!el || !trackCtxMenu) return;
+        const rect = el.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        if (rect.right > vw) {
+            el.style.left = `${Math.max(0, vw - rect.width)}px`;
+        }
+        if (rect.bottom > vh) {
+            el.style.top = `${Math.max(0, vh - rect.height)}px`;
+        }
+    }, [trackCtxMenu]);
+
+    // 点击其他区域关闭右键菜单
+    useEffect(() => {
+        if (!trackCtxMenu) return;
+        const handler = (e: PointerEvent) => {
+            const target = e.target as HTMLElement | null;
+            if (target?.closest?.("[data-track-ctx-menu]")) return;
+            setTrackCtxMenu(null);
+        };
+        window.addEventListener("pointerdown", handler, true);
+        return () => window.removeEventListener("pointerdown", handler, true);
+    }, [trackCtxMenu]);
 
     function commitTrackName() {
         if (!editingTrackId) return;
@@ -321,6 +358,14 @@ export const TrackList: React.FC<{
                             key={track.id}
                             style={{ height: rowHeight }}
                             className="border-b border-qt-border relative group overflow-hidden"
+                            onContextMenu={(e) => {
+                                e.preventDefault();
+                                setTrackCtxMenu({
+                                    x: e.clientX,
+                                    y: e.clientY,
+                                    trackId: track.id,
+                                });
+                            }}
                             onPointerDown={(e) => {
                                 if (e.button !== 0) return;
 
@@ -894,6 +939,38 @@ export const TrackList: React.FC<{
                     <Text size="1">{t("track_add")}</Text>
                 </Flex>
             </div>
+
+            {/* 轨道右键菜单 */}
+            {trackCtxMenu && (
+                <div
+                    ref={trackCtxMenuRef}
+                    data-track-ctx-menu
+                    data-hs-context-menu="1"
+                    className="fixed z-50 min-w-[140px] rounded border border-qt-border bg-qt-window text-qt-text shadow-lg py-1"
+                    style={{ left: trackCtxMenu.x, top: trackCtxMenu.y }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                >
+                    <button
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-qt-button-hover transition-colors"
+                        onClick={() => {
+                            onDuplicateTrack?.(trackCtxMenu.trackId);
+                            setTrackCtxMenu(null);
+                        }}
+                    >
+                        {t("track_clone")}
+                    </button>
+                    <button
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-qt-button-hover transition-colors text-red-400 hover:text-red-300"
+                        disabled={tracks.length <= 1}
+                        onClick={() => {
+                            onRemoveTrack(trackCtxMenu.trackId);
+                            setTrackCtxMenu(null);
+                        }}
+                    >
+                        {t("ctx_delete")}
+                    </button>
+                </div>
+            )}
         </Flex>
     );
 };

@@ -362,6 +362,8 @@ export const PianoRollPanel: React.FC = () => {
                     return t("hifigan_tension_label");
                 case "formant_shift_cents":
                     return t("formant_shift_label");
+                case "hifigan_volume":
+                    return t("hifigan_volume_label");
                 default:
                     return param.display_name;
             }

@@ -85,6 +85,10 @@ pub(crate) struct EngineClip {
     pub(crate) breath_curve: Option<Arc<Vec<f32>>>,
     pub(crate) breath_curve_frame_period_ms: f64,
 
+    /// 可选的 volume 曲线；存在时在 audio callback / mixdown 中逐帧乘到最终输出上。
+    pub(crate) volume_curve: Option<Arc<Vec<f32>>>,
+    pub(crate) volume_curve_frame_period_ms: f64,
+
     /// 该 clip 是否需要 pitch 合成。
     /// - true：需要合成；若 rendered_pcm 为 None，则静音等待渲染完成。
     /// - false：无需合成；直接回退到源 PCM 播放。

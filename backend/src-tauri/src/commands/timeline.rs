@@ -131,6 +131,21 @@ pub(super) fn remove_track(state: State<'_, AppState>, track_id: String) -> crat
 
 
 
+pub(super) fn duplicate_track(state: State<'_, AppState>, track_id: String) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.duplicate_track(&track_id);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    payload
+}
+
+
+
+
+
+
 
 
 pub(super) fn move_track(

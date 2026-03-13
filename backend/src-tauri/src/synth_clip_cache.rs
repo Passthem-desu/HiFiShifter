@@ -500,7 +500,7 @@ pub fn compute_rendered_clip_hash(
 
     fn include_rendered_extra_curve(renderer_id: &str, param_id: &str) -> bool {
         !(renderer_id == "nsf_hifigan_onnx"
-            && matches!(param_id, "breath_gain" | "hifigan_tension"))
+            && matches!(param_id, "breath_gain" | "hifigan_tension" | "hifigan_volume"))
     }
 
     macro_rules! mix_bytes {

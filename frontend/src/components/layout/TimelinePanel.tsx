@@ -7,6 +7,7 @@ import {
     addTrackRemote,
     checkpointHistory,
     createClipsRemote,
+    duplicateTrackRemote,
     removeTrackRemote,
     selectTrackRemote,
     setTrackStateRemote,
@@ -1121,6 +1122,9 @@ export const TimelinePanel: React.FC = () => {
                             name,
                         }),
                     );
+                }}
+                onDuplicateTrack={(trackId) => {
+                    dispatch(duplicateTrackRemote(trackId));
                 }}
             />
 

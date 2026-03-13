@@ -103,6 +103,7 @@ export const zhCN = {
     breath_gain_label: "气声音量",
     hifigan_tension_label: "张力",
     formant_shift_label: "共振峰偏移",
+    hifigan_volume_label: "音量",
     switch_on: "开启",
     switch_off: "关闭",
     points_help: "双击新增 · 拖拽移动 · 右键删除",
@@ -215,6 +216,7 @@ export const zhCN = {
 
     clip_gain_drag_hint: "上下拖拽调节增益 / 双击输入精确值",
     track_change_color: "更改轨道颜色",
+    track_clone: "克隆轨道",
     color_blue: "蓝",
     color_purple: "紫",
     color_green: "绿",
