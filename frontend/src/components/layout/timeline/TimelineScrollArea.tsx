@@ -173,7 +173,8 @@ export const TimelineScrollArea: React.FC<
                 anchorX = anchorSec * pxPerSec - scroller.scrollLeft;
                 // 如果 playhead 在可视区域外，先将其居中，再以其为锚点缩放
                 if (anchorX < 0 || anchorX > bounds.width) {
-                    const centeredScrollLeft = anchorSec * pxPerSec - bounds.width / 2;
+                    const centeredScrollLeft =
+                        anchorSec * pxPerSec - bounds.width / 2;
                     scroller.scrollLeft = Math.max(0, centeredScrollLeft);
                     anchorX = anchorSec * pxPerSec - scroller.scrollLeft;
                 }
@@ -216,7 +217,16 @@ export const TimelineScrollArea: React.FC<
         return () => {
             scroller.removeEventListener("wheel", handler);
         };
-    }, [pxPerSec, scrollRef, setPxPerSec, setRowHeight, scrollHorizontalKb, scrollVerticalKb, playheadSec, playheadZoomEnabled]);
+    }, [
+        pxPerSec,
+        scrollRef,
+        setPxPerSec,
+        setRowHeight,
+        scrollHorizontalKb,
+        scrollVerticalKb,
+        playheadSec,
+        playheadZoomEnabled,
+    ]);
 
     return (
         <div

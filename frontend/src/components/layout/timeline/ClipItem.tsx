@@ -450,7 +450,9 @@ export const ClipItem = React.memo(function ClipItem({
                 (e.currentTarget as HTMLElement).style.zIndex = "2";
             }}
             onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.zIndex = selected ? "2" : "";
+                (e.currentTarget as HTMLElement).style.zIndex = selected
+                    ? "2"
+                    : "";
             }}
             onContextMenu={(e) => {
                 e.preventDefault();
@@ -564,7 +566,8 @@ export const ClipItem = React.memo(function ClipItem({
                     {/* Fade 角落 handle：始终存在，位于 body 左上�?右上角，用于�?0 开始拖拽出渐变 */}
                     {/* left-[10px]：避开左侧 edge handle 的 10px 宽度，确保两者不重叠 */}
                     <div
-                        className="absolute left-[10px] top-0 w-[20px] h-[20px] z-[55]"                        style={{ cursor: "nwse-resize" }}
+                        className="absolute left-[10px] top-0 w-[20px] h-[20px] z-[55]"
+                        style={{ cursor: "nwse-resize" }}
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
@@ -581,7 +584,8 @@ export const ClipItem = React.memo(function ClipItem({
                     />
                     {/* right-[10px]：避开右侧 edge handle 的 10px 宽度，确保两者不重叠 */}
                     <div
-                        className="absolute right-[10px] top-0 w-[20px] h-[20px] z-[55]"                        style={{ cursor: "nesw-resize" }}
+                        className="absolute right-[10px] top-0 w-[20px] h-[20px] z-[55]"
+                        style={{ cursor: "nesw-resize" }}
                         onPointerDown={(e) => {
                             e.preventDefault();
                             e.stopPropagation();

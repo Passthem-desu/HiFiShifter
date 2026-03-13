@@ -1,6 +1,9 @@
 import React from "react";
 
-import type { ClipInfo, TrackInfo } from "../../../features/session/sessionTypes";
+import type {
+    ClipInfo,
+    TrackInfo,
+} from "../../../features/session/sessionTypes";
 import type { GhostDragInfo } from "./hooks/useClipDrag";
 import { ClipItem } from "./ClipItem";
 import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
@@ -121,19 +124,25 @@ export const TrackLane = React.memo(function TrackLane(props: {
                     ghostTrackId = initial.trackId;
                 } else {
                     const sourceIndex = trackIndexById[initial.trackId];
-                    const targetIndex = sourceIndex + ghostDrag.targetTrackOffset;
-                    ghostTrackId = orderedTrackIds[targetIndex] ?? initial.trackId;
+                    const targetIndex =
+                        sourceIndex + ghostDrag.targetTrackOffset;
+                    ghostTrackId =
+                        orderedTrackIds[targetIndex] ?? initial.trackId;
                 }
             }
             if (ghostTrackId !== track.id) continue;
             // 优先从当前轨道 clips 查找，跨轨道时从全部 clips 中查找
-            const clip = trackClips.find((c) => c.id === clipId)
-                ?? allClips?.find((c) => c.id === clipId)
-                ?? undefined;
+            const clip =
+                trackClips.find((c) => c.id === clipId) ??
+                allClips?.find((c) => c.id === clipId) ??
+                undefined;
             if (!clip) continue;
             result.push({
                 clip,
-                ghostStartSec: Math.max(0, initial.startSec + ghostDrag.deltaSec),
+                ghostStartSec: Math.max(
+                    0,
+                    initial.startSec + ghostDrag.deltaSec,
+                ),
             });
         }
         return result;
@@ -199,7 +208,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         onRenameDone={onRenameDone}
                         onGainCommit={onGainCommit}
                     />
-            );
+                );
             })}
             {/* Ghost clip 预览：Ctrl+拖动复制时显示半透明副本 */}
             {ghostClips.map(({ clip, ghostStartSec }) => {
