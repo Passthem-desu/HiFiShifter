@@ -567,6 +567,20 @@ function AppInner() {
                 case "edit.redo":
                     void dispatch(redoRemote());
                     break;
+                case "edit.selectAll":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:editOp", {
+                            detail: { op: "selectAll" },
+                        }),
+                    );
+                    break;
+                case "edit.deselect":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:editOp", {
+                            detail: { op: "deselect" },
+                        }),
+                    );
+                    break;
                 case "project.new":
                     handleNewProject();
                     break;

@@ -166,7 +166,9 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
                 }
                 // edit.selectAll / edit.deselect 在 PianoRoll 中也放行
                 if (matchedAction === "edit.selectAll" || matchedAction === "edit.deselect") {
-                    return;
+                    if (toolModeRef.current === "select") {
+                        return;
+                    }
                 }
             }
 

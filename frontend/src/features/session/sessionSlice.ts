@@ -204,6 +204,8 @@ export interface SessionState {
     lastResult?: unknown;
     vocalShifterSkippedFilesDialog: string[] | null;
     reaperSkippedFilesDialog: string[] | null;
+    /** 正在进行中的 moveClipRemote 调用数量，用于防止多块拖动松开时的闪烁 */
+    pendingMoveCount: number;
 }
 
 interface StateSnapshot {
@@ -661,6 +663,7 @@ const initialState: SessionState = {
     status: "Ready",
     vocalShifterSkippedFilesDialog: null,
     reaperSkippedFilesDialog: null,
+    pendingMoveCount: 0,
 };
 
 export {
@@ -1974,14 +1977,24 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload);
             })
 
+            .addCase(moveClipRemote.pending, (state) => {
+                state.pendingMoveCount += 1;
+            })
             .addCase(moveClipRemote.fulfilled, (state, action) => {
+                state.pendingMoveCount = Math.max(0, state.pendingMoveCount - 1);
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
-                applyTimelineState(state, payload);
+                // 仅在所有并发移动操作都完成后才刷新状态，避免多块拖动松开时的闪烁
+                if (state.pendingMoveCount === 0) {
+                    applyTimelineState(state, payload);
+                }
+            })
+            .addCase(moveClipRemote.rejected, (state) => {
+                state.pendingMoveCount = Math.max(0, state.pendingMoveCount - 1);
             })
 
             .addCase(splitClipRemote.fulfilled, (state, action) => {
@@ -2022,7 +2035,10 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
+                // 选中 clip 不应移动播放光标
+                const savedPlayheadSec = state.playheadSec;
                 applyTimelineState(state, payload);
+                state.playheadSec = savedPlayheadSec;
             })
 
             .addCase(setTrackStateRemote.fulfilled, (state, action) => {
@@ -2106,7 +2122,10 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
+                // 切换轨道不应移动播放光标，保留前端当前位置以防止闪烁
+                const savedPlayheadSec = state.playheadSec;
                 applyTimelineState(state, payload);
+                state.playheadSec = savedPlayheadSec;
             })
 
             .addCase(setProjectLengthRemote.fulfilled, (state, action) => {

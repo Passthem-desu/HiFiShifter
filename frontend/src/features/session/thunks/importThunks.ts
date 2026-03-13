@@ -194,9 +194,15 @@ export const importAudioAtPosition = createAsyncThunk(
                 newClipIds,
             });
 
+            // 导入后将光标定位到第一个音频块的起始位置
+            const importedResult = latestTimeline ?? imported;
+            if (importedResult && typeof payload.startSec === 'number') {
+                (importedResult as unknown as Record<string, unknown>).playhead_sec = payload.startSec;
+            }
+
             return {
                 ok: true,
-                imported: latestTimeline ?? imported,
+                imported: importedResult,
                 newClipIds,
             };
         } finally {
@@ -273,9 +279,15 @@ export const importAudioFileAtPosition = createAsyncThunk(
                 newClipIds,
             });
 
+            // 导入后将光标定位到第一个音频块的起始位置
+            const importedResult = latestTimeline ?? imported;
+            if (importedResult && typeof payload.startSec === 'number') {
+                (importedResult as unknown as Record<string, unknown>).playhead_sec = payload.startSec;
+            }
+
             return {
                 ok: true,
-                imported: latestTimeline ?? imported,
+                imported: importedResult,
                 newClipIds,
             };
         } catch (err) {
@@ -452,7 +464,13 @@ export const importMultipleAudioAtPosition = createAsyncThunk(
                 newClipIds,
             });
 
-            return { ok: true, imported: latestTimeline ?? lastImported, newClipIds };
+            // 导入后将光标定位到第一个音频块的起始位置
+            const importedResult = latestTimeline ?? lastImported;
+            if (importedResult) {
+                (importedResult as Record<string, unknown>).playhead_sec = startSec;
+            }
+
+            return { ok: true, imported: importedResult, newClipIds };
         } finally {
             void webApi.endUndoGroup();
         }
@@ -596,7 +614,13 @@ export const importMultipleAudioFilesAtPosition = createAsyncThunk(
                 newClipIds,
             });
 
-            return { ok: true, imported: latestTimeline ?? lastImported, newClipIds };
+            // 导入后将光标定位到第一个音频块的起始位置
+            const importedResult = latestTimeline ?? lastImported;
+            if (importedResult) {
+                (importedResult as Record<string, unknown>).playhead_sec = startSec;
+            }
+
+            return { ok: true, imported: importedResult, newClipIds };
         } finally {
             void webApi.endUndoGroup();
         }

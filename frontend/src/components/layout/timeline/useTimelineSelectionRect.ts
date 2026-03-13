@@ -3,6 +3,19 @@ import type * as React from "react";
 
 import type { SessionState } from "../../../features/session/sessionSlice";
 
+type ClosestCapableTarget = {
+    closest?: (selector: string) => unknown;
+};
+
+export function shouldStartTimelineSelectionRect(
+    button: number,
+    target: unknown,
+): boolean {
+    if (button !== 2) return false;
+    const closestTarget = target as ClosestCapableTarget | null;
+    return !closestTarget?.closest?.("[data-hs-clip-item='1']");
+}
+
 export function useTimelineSelectionRect(params: {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     sessionRef: React.RefObject<SessionState>;
@@ -39,7 +52,7 @@ export function useTimelineSelectionRect(params: {
     } | null>(null);
 
     function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-        if (e.button !== 2) return;
+        if (!shouldStartTimelineSelectionRect(e.button, e.target)) return;
         const el = e.currentTarget as HTMLDivElement;
         const bounds = el.getBoundingClientRect();
         const x = e.clientX - bounds.left + el.scrollLeft;

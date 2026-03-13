@@ -163,6 +163,7 @@ export const createClipsRemote = createAsyncThunk(
 
         const state0 = getState() as { session: SessionState };
         const knownIds = new Set(state0.session.clips.map((c) => c.id));
+        const createdIdsInBatch = new Set<string>();
 
         // 并行创建所�?clip，提升批量操作性能
         const results = await Promise.all(
@@ -181,12 +182,22 @@ export const createClipsRemote = createAsyncThunk(
                     );
                 }
 
+                const addedTimeline = added as TimelineState;
                 const createdId =
-                    (added as TimelineState).clips.find((c) => !knownIds.has(c.id))
-                        ?.id ?? null;
+                    addedTimeline.clips.find(
+                        (c) =>
+                            !knownIds.has(c.id) &&
+                            !createdIdsInBatch.has(c.id),
+                    )?.id ??
+                    (addedTimeline.selected_clip_id &&
+                    !knownIds.has(addedTimeline.selected_clip_id) &&
+                    !createdIdsInBatch.has(addedTimeline.selected_clip_id)
+                        ? addedTimeline.selected_clip_id
+                        : null);
                 if (!createdId) {
                     throw new Error("add_clip_failed");
                 }
+                createdIdsInBatch.add(createdId);
 
                 const updated = await webApi.setClipState({
                     clipId: createdId,

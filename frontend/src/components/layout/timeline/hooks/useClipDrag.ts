@@ -12,6 +12,8 @@ import {
     selectClipRemote,
     setClipStateRemote,
     selectTrackRemote,
+    seekPlayhead,
+    setplayheadSec,
 } from "../../../../features/session/sessionSlice";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
@@ -301,34 +303,60 @@ export function useClipDrag(deps: {
             if (drag.copyMode) {
                 // copyMode 下原 clip 未被移动，直接根据 ghost 偏移量计算副本位置
                 void (async () => {
-                    const templates: ClipTemplate[] = [];
-                    for (const id of drag.clipIds) {
-                        const initial = drag.initialById[id];
-                        const now = sessionRef.current.clips.find((c) => c.id === id);
-                        if (!initial || !now) continue;
-                        const targetTrackId = drag.allowTrackMove
-                            ? (drag.lastTrackId ?? null)
-                            : initial.trackId;
-                        const linkedParamsResult = await webApi.getClipLinkedParams(id);
-                        templates.push({
-                            trackId: targetTrackId ?? initial.trackId,
-                            name: String(now.name),
-                            startSec: Math.max(0, initial.startSec + drag.lastDeltaBeat),
-                            lengthSec: Number(now.lengthSec),
-                            sourcePath: now.sourcePath,
-                            durationSec: now.durationSec,
-                            gain: Number(now.gain ?? 1) || 1,
-                            muted: Boolean(now.muted),
-                            sourceStartSec: Number(now.sourceStartSec ?? 0) || 0,
-                            sourceEndSec: Number(now.sourceEndSec ?? 0) || 0,
-                            playbackRate: Number(now.playbackRate ?? 1) || 1,
-                            fadeInSec: Number(now.fadeInSec ?? 0) || 0,
-                            fadeOutSec: Number(now.fadeOutSec ?? 0) || 0,
-                            linkedParams: linkedParamsResult.ok
-                                ? linkedParamsResult.linkedParams
-                                : undefined,
-                        });
-                    }
+                    const templateInputs = drag.clipIds
+                        .map((id) => {
+                            const initial = drag.initialById[id];
+                            const now = sessionRef.current.clips.find((c) => c.id === id);
+                            if (!initial || !now) return null;
+                            return { id, initial, now };
+                        })
+                        .filter(
+                            (
+                                input,
+                            ): input is {
+                                id: string;
+                                initial: { startSec: number; trackId: string };
+                                now: (typeof sessionRef.current.clips)[number];
+                            } => input != null,
+                        );
+
+                    const linkedParamsResults = await Promise.all(
+                        templateInputs.map((input) =>
+                            webApi.getClipLinkedParams(input.id),
+                        ),
+                    );
+
+                    const templates: ClipTemplate[] = templateInputs.map(
+                        (input, index) => {
+                            const { initial, now } = input;
+                            const targetTrackId = drag.allowTrackMove
+                                ? (drag.lastTrackId ?? null)
+                                : initial.trackId;
+                            const linkedParamsResult = linkedParamsResults[index];
+                            return {
+                                trackId: targetTrackId ?? initial.trackId,
+                                name: String(now.name),
+                                startSec: Math.max(
+                                    0,
+                                    initial.startSec + drag.lastDeltaBeat,
+                                ),
+                                lengthSec: Number(now.lengthSec),
+                                sourcePath: now.sourcePath,
+                                durationSec: now.durationSec,
+                                gain: Number(now.gain ?? 1) || 1,
+                                muted: Boolean(now.muted),
+                                sourceStartSec: Number(now.sourceStartSec ?? 0) || 0,
+                                sourceEndSec: Number(now.sourceEndSec ?? 0) || 0,
+                                playbackRate: Number(now.playbackRate ?? 1) || 1,
+                                fadeInSec: Number(now.fadeInSec ?? 0) || 0,
+                                fadeOutSec: Number(now.fadeOutSec ?? 0) || 0,
+                                linkedParams: linkedParamsResult.ok
+                                    ? linkedParamsResult.linkedParams
+                                    : undefined,
+                            };
+                        },
+                    );
+
                     if (templates.length === 0) {
                         return;
                     }
@@ -355,6 +383,15 @@ export function useClipDrag(deps: {
                             if (!Array.isArray(created) || created.length === 0) return;
                             setMultiSelectedClipIds(created);
                             void dispatch(selectClipRemote(created[0]));
+                            // 复制拖动后，将播放光标定位到目标时间点（所有副本中最靠前的起始位置）
+                            const targetStartSec = templates.reduce(
+                                (min, t) => Math.min(min, t.startSec),
+                                Infinity,
+                            );
+                            if (Number.isFinite(targetStartSec)) {
+                                dispatch(setplayheadSec(targetStartSec));
+                                void dispatch(seekPlayhead(targetStartSec));
+                            }
                             // 复制拖动后，尝试对新创建的 clip 应用自动交叉淡化
                             if (autoCrossfadeEnabled) {
                                 const allClips = (payload?.clips ?? []) as Array<{

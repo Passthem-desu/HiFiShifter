@@ -52,6 +52,8 @@ export const TrackLane = React.memo(function TrackLane(props: {
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
     /** Ctrl+左键多选切换 */
     toggleMultiSelect: (clipId: string) => void;
+    /** Shift+点击范围选择 */
+    onShiftRangeSelect: (clipId: string) => void;
 
     clearContextMenu: () => void;
 
@@ -85,6 +87,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         startEditDrag,
         toggleClipMuted,
         toggleMultiSelect,
+        onShiftRangeSelect,
         clearContextMenu,
         renamingClipId,
         onRenameCommit,
@@ -152,6 +155,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         startEditDrag={startEditDrag}
                         toggleClipMuted={toggleClipMuted}
                         toggleMultiSelect={toggleMultiSelect}
+                        onShiftRangeSelect={onShiftRangeSelect}
                         clearContextMenu={clearContextMenu}
                         triggerRename={renamingClipId === clip.id}
                         onRenameCommit={onRenameCommit}

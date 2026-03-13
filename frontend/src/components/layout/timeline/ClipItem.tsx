@@ -163,6 +163,8 @@ export const ClipItem: React.FC<{
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
     /** Ctrl+左键多选切换 */
     toggleMultiSelect: (clipId: string) => void;
+    /** Shift+点击范围选择（跨轨按包围矩形选中） */
+    onShiftRangeSelect: (clipId: string) => void;
 
     clearContextMenu: () => void;
 
@@ -188,6 +190,7 @@ export const ClipItem: React.FC<{
     startEditDrag,
     toggleClipMuted,
     toggleMultiSelect: _toggleMultiSelect,
+    onShiftRangeSelect,
     clearContextMenu,
     triggerRename,
     onRenameCommit,
@@ -430,6 +433,7 @@ export const ClipItem: React.FC<{
 
     return (
         <div
+            data-hs-clip-item="1"
             className={`absolute cursor-pointer overflow-visible group ${clip.muted ? "opacity-60 grayscale" : "opacity-95"}`}
             style={{
                 left,
@@ -449,7 +453,7 @@ export const ClipItem: React.FC<{
                 e.preventDefault();
                 e.stopPropagation();
                 const keepExistingMultiSelection =
-                    multiSelectedCount > 1 && isInMultiSelectedSet;
+                    multiSelectedCount > 0 && isInMultiSelectedSet;
                 if (!keepExistingMultiSelection) {
                     ensureSelected(clip.id);
                     selectClipRemote(clip.id);
@@ -464,6 +468,14 @@ export const ClipItem: React.FC<{
                     e.altKey ||
                     e.nativeEvent.getModifierState?.("Alt"),
                 );
+
+                if (e.shiftKey && !alt && !e.ctrlKey && !e.metaKey) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    clearContextMenu();
+                    onShiftRangeSelect(clip.id);
+                    return;
+                }
 
                 // Seek should happen on click, not on drag.
                 // Track whether the pointer moved beyond a small deadzone.

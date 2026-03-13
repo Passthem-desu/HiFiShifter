@@ -1085,6 +1085,7 @@ export const PianoRollPanel: React.FC = () => {
             const fp = paramView?.framePeriodMs ?? 5;
 
             if (op === "selectAll") {
+                if (s.toolMode !== "select") return;
                 const totalBeats = s.projectSec / secPerBeat;
                 selectionRef.current = { aBeat: 0, bBeat: totalBeats };
                 setSelectionUi({ aBeat: 0, bBeat: totalBeats });
@@ -1092,6 +1093,7 @@ export const PianoRollPanel: React.FC = () => {
                 return;
             }
             if (op === "deselect") {
+                if (s.toolMode !== "select") return;
                 selectionRef.current = null;
                 setSelectionUi(null);
                 invalidate();
@@ -1589,11 +1591,20 @@ export const PianoRollPanel: React.FC = () => {
             const detail = (e as CustomEvent).detail;
             if (!detail?.op) return;
             const { op, ...data } = detail;
+            if (op === "selectAll" || op === "deselect") {
+                const active = document.activeElement as HTMLElement | null;
+                const inPianoRoll =
+                    active?.hasAttribute("data-piano-roll-scroller") ||
+                    active?.closest?.("[data-piano-roll-scroller]");
+                if (!inPianoRoll || s.toolMode !== "select") {
+                    return;
+                }
+            }
             void handleEditOp(op, data);
         };
         window.addEventListener("hifi:editOp", handler);
         return () => window.removeEventListener("hifi:editOp", handler);
-    }, [handleEditOp]);
+    }, [handleEditOp, s.toolMode]);
 
     // Dispatch helper: context menu dialog ops → open MenuBar dialogs
     const openEditDialog = useCallback(

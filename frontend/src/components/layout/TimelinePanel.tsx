@@ -25,6 +25,7 @@ import {
     removeClipRemote,
     splitClipRemote,
     setMultiSelectedClipIds as setMultiSelectedClipIdsAction,
+    setSelectedClip,
 } from "../../features/session/sessionSlice";
 
 import type { ClipTemplate } from "../../features/session/sessionTypes";
@@ -75,6 +76,7 @@ export const TimelinePanel: React.FC = () => {
         pointerId: number;
         lastBeat: number;
     } | null>(null);
+    const lastClickedClipIdRef = useRef<string | null>(null);
 
     const [scrollLeft, setScrollLeft] = useState(0);
     useEffect(() => {
@@ -908,6 +910,66 @@ export const TimelinePanel: React.FC = () => {
         splitClipIdsAtPlayhead(selectedIds);
     }, [multiSelectedClipIds, splitClipIdsAtPlayhead]);
 
+    const selectClipRangeByRect = React.useCallback(
+        (targetClipId: string) => {
+            const session = sessionRef.current;
+            const target = session.clips.find((c) => c.id === targetClipId);
+            if (!target) return;
+
+            const anchorId =
+                lastClickedClipIdRef.current ??
+                session.selectedClipId ??
+                targetClipId;
+            const anchor =
+                session.clips.find((c) => c.id === anchorId) ?? target;
+
+            const trackIndexById = new Map(
+                session.tracks.map((track, index) => [track.id, index]),
+            );
+            const anchorTrackIndex = trackIndexById.get(anchor.trackId);
+            const targetTrackIndex = trackIndexById.get(target.trackId);
+            if (
+                anchorTrackIndex == null ||
+                targetTrackIndex == null
+            ) {
+                setMultiSelectedClipIds([targetClipId]);
+                dispatch(setSelectedClip(targetClipId));
+                lastClickedClipIdRef.current = targetClipId;
+                return;
+            }
+
+            const minTrack = Math.min(anchorTrackIndex, targetTrackIndex);
+            const maxTrack = Math.max(anchorTrackIndex, targetTrackIndex);
+            const minStartSec = Math.min(anchor.startSec, target.startSec);
+            const maxEndSec = Math.max(
+                anchor.startSec + anchor.lengthSec,
+                target.startSec + target.lengthSec,
+            );
+
+            const selected = session.clips
+                .filter((clip) => {
+                    const trackIndex = trackIndexById.get(clip.trackId);
+                    if (
+                        trackIndex == null ||
+                        trackIndex < minTrack ||
+                        trackIndex > maxTrack
+                    ) {
+                        return false;
+                    }
+                    const clipStart = clip.startSec;
+                    const clipEnd = clip.startSec + clip.lengthSec;
+                    return clipStart >= minStartSec && clipEnd <= maxEndSec;
+                })
+                .map((clip) => clip.id);
+
+            const next = selected.length > 0 ? selected : [targetClipId];
+            setMultiSelectedClipIds(next);
+            dispatch(setSelectedClip(targetClipId));
+            lastClickedClipIdRef.current = targetClipId;
+        },
+        [dispatch, setMultiSelectedClipIds],
+    );
+
     const pasteClipsAtPlayhead = React.useCallback(() => {
         const tpl = clipClipboardRef.current;
         if (!tpl || tpl.length === 0) return;
@@ -940,6 +1002,14 @@ export const TimelinePanel: React.FC = () => {
 
                 setMultiSelectedClipIds(created);
                 void dispatch(selectClipRemote(created[0]));
+                const targetStartSec = templates.reduce(
+                    (min, t) => Math.min(min, t.startSec),
+                    Number.POSITIVE_INFINITY,
+                );
+                if (Number.isFinite(targetStartSec)) {
+                    dispatch(setplayheadSec(targetStartSec));
+                    void dispatch(seekPlayhead(targetStartSec));
+                }
 
                 if (sessionRef.current.autoCrossfadeEnabled) {
                     const allClips = (payload?.clips ?? []) as Array<{
@@ -992,7 +1062,28 @@ export const TimelinePanel: React.FC = () => {
             const inPianoRoll =
                 active?.hasAttribute("data-piano-roll-scroller") ||
                 active?.closest?.("[data-piano-roll-scroller]");
-            if (inPianoRoll) return;
+            const deferToPianoRollForSelection =
+                inPianoRoll &&
+                sessionRef.current.toolMode === "select" &&
+                (op === "selectAll" || op === "deselect");
+            if (deferToPianoRollForSelection) return;
+            if (inPianoRoll && op !== "selectAll" && op !== "deselect") {
+                return;
+            }
+
+            if (op === "selectAll") {
+                const allIds = sessionRef.current.clips.map((clip) => clip.id);
+                setMultiSelectedClipIds(allIds);
+                dispatch(setSelectedClip(allIds[0] ?? null));
+                return;
+            }
+
+            if (op === "deselect") {
+                setMultiSelectedClipIds([]);
+                dispatch(setSelectedClip(null));
+                return;
+            }
+
             if (op === "paste") {
                 pasteClipsAtPlayhead();
             }
@@ -1486,6 +1577,7 @@ export const TimelinePanel: React.FC = () => {
                                     multiSelectedSet={multiSelectedSet}
                                     trackColor={track.color || undefined}
                                     ensureSelected={(clipId) => {
+                                        lastClickedClipIdRef.current = clipId;
                                         if (
                                             multiSelectedClipIds.length === 0 ||
                                             !multiSelectedSet.has(clipId)
@@ -1494,8 +1586,10 @@ export const TimelinePanel: React.FC = () => {
                                         }
                                     }}
                                     selectClipRemote={(clipId) => {
+                                        lastClickedClipIdRef.current = clipId;
                                         void dispatch(selectClipRemote(clipId));
                                     }}
+                                    onShiftRangeSelect={selectClipRangeByRect}
                                     openContextMenu={(
                                         clipId,
                                         clientX,
