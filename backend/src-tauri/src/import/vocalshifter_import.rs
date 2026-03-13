@@ -125,7 +125,10 @@ struct ExtraCurveAccumulator {
     pan_sum: f64,
     breathiness_sum: f64,
     weight: f64,
+    /// 单独用于共振峰（formant）求平均的权重，只计入非 disabled 的点
+    formant_weight: f64,
 }
+
 
 // ─── 系统编码检测 ───
 
@@ -1097,11 +1100,6 @@ fn write_extra_curves_for_segment(
             continue;
         };
 
-        // disabled 点不贡献额外曲线数据
-        if point.disabled {
-            continue;
-        }
-
         let mut weight = 1.0;
         if fade_in_sec > 0.0 {
             let fi_end = clip_start_sec + fade_in_sec;
@@ -1120,12 +1118,16 @@ fn write_extra_curves_for_segment(
         if weight <= 0.0 {
             continue;
         }
-
-        // 共振峰偏移：FRM 已经是相对值（cents），默认为 0
+        // 共振峰偏移：仅当点未被 disabled 时贡献到 formant 统计；其他参数始终贡献
         let formant_shift = point.formant as f64;
 
         let acc = entry.entry(frame_idx).or_default();
-        acc.formant_shift_sum += formant_shift * weight;
+        // 如果点没有被 disabled，则将其计入 formant 的权重和和
+        if !point.disabled {
+            acc.formant_shift_sum += formant_shift * weight;
+            acc.formant_weight += weight;
+        }
+        // 其他参数（volume, dyn, pan, breathiness）无论 disabled 与否都应贡献
         acc.vol_sum += point.vol * weight;
         acc.dyn_orig_sum += point.dyn_orig * weight;
         acc.dyn_edit_sum += point.dyn_edit * weight;
@@ -1150,10 +1152,27 @@ fn build_extra_curves_from_accumulators(
     for (&frame_idx, acc) in acc_map {
         if frame_idx < total_frames && acc.weight > 0.0 {
             let w = acc.weight;
-            formant_shift[frame_idx] = (acc.formant_shift_sum / w) as f32;
-            volume[frame_idx] = (acc.vol_sum / w) as f32;
-            dyn_orig[frame_idx] = (acc.dyn_orig_sum / w) as f32;
-            dyn_edit[frame_idx] = (acc.dyn_edit_sum / w) as f32;
+            // 对于 formant，只使用非 disabled 点的权重进行平均
+            if acc.formant_weight > 0.0 {
+                formant_shift[frame_idx] = (acc.formant_shift_sum / acc.formant_weight) as f32;
+            } else {
+                formant_shift[frame_idx] = 0.0;
+            }
+
+            // 计算 DYN 合并：avg_dyn_edit / avg_dyn_orig，为 0 除法的情况回退为 1
+            let avg_vol = (acc.vol_sum / w) as f64;
+            let avg_dyn_orig = (acc.dyn_orig_sum / w) as f64;
+            let avg_dyn_edit = (acc.dyn_edit_sum / w) as f64;
+            let multiplier = if avg_dyn_orig.abs() < 1e-12 {
+                1.0f64
+            } else {
+                avg_dyn_edit / avg_dyn_orig
+            };
+            let merged_vol = (avg_vol * multiplier) as f32;
+
+            volume[frame_idx] = merged_vol;
+            dyn_orig[frame_idx] = (avg_dyn_orig) as f32;
+            dyn_edit[frame_idx] = (avg_dyn_edit) as f32;
             pan[frame_idx] = (acc.pan_sum / w) as f32;
             breathiness[frame_idx] = (acc.breathiness_sum / w) as f32;
         }

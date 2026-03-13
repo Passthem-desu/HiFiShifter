@@ -291,6 +291,10 @@ fn paste_clb_vslib_param(
         let val = match param_name {
             "formant_shift_cents" => {
                 // FRM 已经是相对音分偏移，默认值为 0
+                // 当点被 disabled 时，不应应用音高/共振峰偏移 -> 跳过
+                if point.disabled {
+                    continue;
+                }
                 point.formant_cents as f32
             }
             "volume" => point.volume as f32,

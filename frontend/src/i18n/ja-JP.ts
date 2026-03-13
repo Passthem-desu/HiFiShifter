@@ -21,8 +21,8 @@ export const jaJP = {
     menu_import_audio: "オーディオをインポート...",
     menu_import_reaper: "Reaper プロジェクトをインポート...",
     menu_import_vocalshifter: "VocalShifter プロジェクトをインポート...",
-    menu_paste_reaper_clipboard: "Reaper クリップボードデータを貼り付け",
-    menu_paste_vocalshifter_clipboard: "VocalShifter クリップボードデータを貼り付け",
+    menu_paste_reaper_clipboard: "Reaper クリップボードデータをペースト",
+    menu_paste_vocalshifter_clipboard: "VocalShifter クリップボードデータをペースト",
     reaper_import_skipped_header:
         "Reaper インポート時に以下のオーディオファイルがスキップされました（非対応形式またはファイルが見つかりません）：",
     menu_pick_output: "出力先を選択",
@@ -202,12 +202,12 @@ export const jaJP = {
     ctx_unmute_all: "すべてのミュートを解除",
     ctx_mute_all: "すべてミュート",
     ctx_copy_all: "すべてコピー",
-    ctx_cut_all: "すべて切り取り",
+    ctx_cut_all: "すべてカット",
     ctx_normalize_all: "すべてノーマライズ",
     ctx_delete: "削除",
     ctx_rename: "名前を変更",
     ctx_copy: "コピー",
-    ctx_cut: "切り取り",
+    ctx_cut: "カット",
     ctx_split_at_playhead: "再生ヘッドで分割",
     ctx_normalize: "ノーマライズ",
 
@@ -265,14 +265,14 @@ export const jaJP = {
     kb_track_add: "トラックを追加",
     kb_clip_delete: "クリップを削除",
     kb_clip_copy: "クリップをコピー",
-    kb_clip_cut: "クリップを切り取り",
-    kb_clip_paste: "クリップを貼り付け",
+    kb_clip_cut: "クリップをカット",
+    kb_clip_paste: "クリップをペースト",
     kb_clip_split: "クリップを分割",
     kb_clip_normalize: "クリップをノーマライズ",
     kb_group_pianoroll: "ピアノロール",
     kb_group_modifier: "修飾キー",
     kb_pianoroll_copy: "パラメータフレームをコピー",
-    kb_pianoroll_paste: "パラメータフレームを貼り付け",
+    kb_pianoroll_paste: "パラメータフレームをペースト",
     kb_pianoroll_shift_param_up: "パラメータを上へ移動（クリップ範囲）",
     kb_pianoroll_shift_param_down: "パラメータを下へ移動（クリップ範囲）",
     kb_modifier_slip_edit: "Slip 編集（クリップドラッグ中に押す）",
@@ -444,8 +444,8 @@ export const jaJP = {
     kb_edit_add_vibrato: "ビブラートを追加",
     kb_edit_quantize: "クオンタイズ",
     kb_edit_mean_quantize: "平均クオンタイズ",
-    kb_edit_paste_reaper: "Reaper クリップボードを貼り付け",
-    kb_edit_paste_vocalshifter: "VocalShifter クリップボードを貼り付け",
+    kb_edit_paste_reaper: "Reaper クリップボードをペースト",
+    kb_edit_paste_vocalshifter: "VocalShifter クリップボードをペースト",
 
     // スクロール修飾キーバインド
     kb_modifier_scroll_h: "水平スクロール（押しながらスクロール）",
@@ -472,10 +472,10 @@ export const jaJP = {
     dlg_release_ms: "リリース（ms）",
     dlg_phase_deg: "位相（°）",
 
-    // 編集メニューのコピー/切り取り/貼り付け
+    // 編集メニューのコピー/カット/ペースト
     menu_copy: "コピー",
-    menu_cut: "切り取り",
-    menu_paste: "貼り付け",
+    menu_cut: "カット",
+    menu_paste: "ペースト",
 
     // ピッチスナップ設定（ショートキー）
     pitch_snap_settings: "ピッチスナップ設定",
