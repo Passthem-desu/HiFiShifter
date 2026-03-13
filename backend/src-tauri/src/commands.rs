@@ -338,6 +338,15 @@ pub fn move_clip(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn move_clips(
+    state: State<'_, AppState>,
+    moves: Vec<crate::state::MoveClipPayload>,
+    move_linked_params: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    timeline::move_clips(state, moves, move_linked_params)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn get_clip_linked_params(
     state: State<'_, AppState>,
     clip_id: String,

@@ -71,6 +71,7 @@ export function useKeyboardShortcuts(deps: {
     multiSelectedClipIds: string[];
     setMultiSelectedClipIds: (ids: string[]) => void;
     clipClipboardRef: React.RefObject<ClipTemplate[] | null>;
+    buildClipClipboardTemplates: (ids: string[]) => Promise<ClipTemplate[]>;
     isEditableTarget: (target: EventTarget | null) => boolean;
     onNormalize: (ids: string[]) => void;
     onPaste: () => void;
@@ -82,6 +83,7 @@ export function useKeyboardShortcuts(deps: {
         multiSelectedClipIds,
         setMultiSelectedClipIds,
         clipClipboardRef,
+        buildClipClipboardTemplates,
         isEditableTarget,
         onNormalize,
         onPaste,
@@ -165,41 +167,27 @@ export function useKeyboardShortcuts(deps: {
                     if (selectedIds.length === 0) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    const clips = s.clips.filter((c) =>
-                        selectedIds.includes(c.id),
-                    );
-                    if (clips.length === 0) return;
-                    const templates = clips.map((c) => ({
-                        trackId: c.trackId,
-                        name: c.name,
-                        startSec: c.startSec,
-                        lengthSec: c.lengthSec,
-                        sourcePath: c.sourcePath,
-                        durationSec: c.durationSec,
-                        gain: c.gain,
-                        muted: c.muted,
-                        sourceStartSec: c.sourceStartSec,
-                        sourceEndSec: c.sourceEndSec,
-                        playbackRate: c.playbackRate,
-                        fadeInSec: c.fadeInSec,
-                        fadeOutSec: c.fadeOutSec,
-                        waveformPreview: s.clipWaveforms[c.id],
-                    }));
-                    (
-                        clipClipboardRef as React.MutableRefObject<
-                            ClipTemplate[] | null
-                        >
-                    ).current = templates;
-                    try {
-                        void navigator.clipboard?.writeText(
-                            JSON.stringify({
-                                type: "hifishifter.clipTemplates.v1",
-                                templates,
-                            }),
+                    void (async () => {
+                        const templates = await buildClipClipboardTemplates(
+                            selectedIds,
                         );
-                    } catch {
-                        // ignore
-                    }
+                        if (templates.length === 0) return;
+                        (
+                            clipClipboardRef as React.MutableRefObject<
+                                ClipTemplate[] | null
+                            >
+                        ).current = templates;
+                        try {
+                            void navigator.clipboard?.writeText(
+                                JSON.stringify({
+                                    type: "hifishifter.clipTemplates.v1",
+                                    templates,
+                                }),
+                            );
+                        } catch {
+                            // ignore
+                        }
+                    })();
                     return;
                 }
 
@@ -207,47 +195,31 @@ export function useKeyboardShortcuts(deps: {
                     if (selectedIds.length === 0) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    // 先复制到剪贴板
-                    const cutClips = s.clips.filter((c) =>
-                        selectedIds.includes(c.id),
-                    );
-                    if (cutClips.length === 0) return;
-                    const cutTemplates = cutClips.map((c) => ({
-                        trackId: c.trackId,
-                        name: c.name,
-                        startSec: c.startSec,
-                        lengthSec: c.lengthSec,
-                        sourcePath: c.sourcePath,
-                        durationSec: c.durationSec,
-                        gain: c.gain,
-                        muted: c.muted,
-                        sourceStartSec: c.sourceStartSec,
-                        sourceEndSec: c.sourceEndSec,
-                        playbackRate: c.playbackRate,
-                        fadeInSec: c.fadeInSec,
-                        fadeOutSec: c.fadeOutSec,
-                        waveformPreview: s.clipWaveforms[c.id],
-                    }));
-                    (
-                        clipClipboardRef as React.MutableRefObject<
-                            ClipTemplate[] | null
-                        >
-                    ).current = cutTemplates;
-                    try {
-                        void navigator.clipboard?.writeText(
-                            JSON.stringify({
-                                type: "hifishifter.clipTemplates.v1",
-                                templates: cutTemplates,
-                            }),
+                    void (async () => {
+                        const templates = await buildClipClipboardTemplates(
+                            selectedIds,
                         );
-                    } catch {
-                        // ignore
-                    }
-                    // 再删除原音频块
-                    setMultiSelectedClipIds([]);
-                    for (const id of selectedIds) {
-                        void dispatch(removeClipRemote(id));
-                    }
+                        if (templates.length === 0) return;
+                        (
+                            clipClipboardRef as React.MutableRefObject<
+                                ClipTemplate[] | null
+                            >
+                        ).current = templates;
+                        try {
+                            void navigator.clipboard?.writeText(
+                                JSON.stringify({
+                                    type: "hifishifter.clipTemplates.v1",
+                                    templates,
+                                }),
+                            );
+                        } catch {
+                            // ignore
+                        }
+                        setMultiSelectedClipIds([]);
+                        for (const id of selectedIds) {
+                            void dispatch(removeClipRemote(id));
+                        }
+                    })();
                     return;
                 }
 
@@ -282,6 +254,7 @@ export function useKeyboardShortcuts(deps: {
         sessionRef,
         setMultiSelectedClipIds,
         clipClipboardRef,
+        buildClipClipboardTemplates,
         isEditableTarget,
         keybindings,
         onNormalize,

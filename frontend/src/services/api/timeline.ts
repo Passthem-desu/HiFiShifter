@@ -147,6 +147,20 @@ export const timelineApi = {
             payload.moveLinkedParams,
         ),
 
+    moveClips: (payload: {
+        moves: Array<{
+            clipId: string;
+            startSec: number;
+            trackId?: string;
+        }>;
+        moveLinkedParams?: boolean;
+    }) =>
+        invoke<TimelineResult>(
+            "move_clips",
+            payload.moves,
+            payload.moveLinkedParams,
+        ),
+
     getClipLinkedParams: (clipId: string) =>
         invoke<{ ok: boolean; linkedParams?: LinkedParamCurves }>(
             "get_clip_linked_params",

@@ -298,6 +298,20 @@ export const moveClipRemote = createAsyncThunk(
     },
 );
 
+export const moveClipsRemote = createAsyncThunk(
+    "session/moveClipsRemote",
+    async (payload: {
+        moves: Array<{
+            clipId: string;
+            startSec: number;
+            trackId?: string;
+        }>;
+        moveLinkedParams?: boolean;
+    }) => {
+        return webApi.moveClips(payload);
+    },
+);
+
 export const setClipStateRemote = createAsyncThunk(
     "session/setClipStateRemote",
     async (payload: {

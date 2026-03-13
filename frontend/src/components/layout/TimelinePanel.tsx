@@ -1050,6 +1050,7 @@ export const TimelinePanel: React.FC = () => {
         multiSelectedClipIds,
         setMultiSelectedClipIds,
         clipClipboardRef,
+        buildClipClipboardTemplates,
         isEditableTarget,
         onNormalize: normalizeClips,
         onPaste: pasteClipsAtPlayhead,
@@ -1570,6 +1571,7 @@ export const TimelinePanel: React.FC = () => {
                                 <TrackLane
                                     key={track.id}
                                     track={track}
+                                    allTracks={s.tracks}
                                     trackClips={trackClips}
                                     rowHeight={rowHeight}
                                     pxPerSec={pxPerSec}
@@ -1949,15 +1951,14 @@ export const TimelinePanel: React.FC = () => {
                                       void (async () => {
                                           const templates =
                                               await buildClipClipboardTemplates(ids);
-                                          if (templates.length > 0) {
-                                              clipClipboardRef.current = templates;
+                                          if (templates.length === 0) return;
+                                          clipClipboardRef.current = templates;
+                                          setContextMenu(null);
+                                          setMultiSelectedClipIds([]);
+                                          for (const id of ids) {
+                                              void dispatch(removeClipRemote(id));
                                           }
                                       })();
-                                      setContextMenu(null);
-                                      setMultiSelectedClipIds([]);
-                                      for (const id of ids) {
-                                          void dispatch(removeClipRemote(id));
-                                      }
                                   }}
                                   onSplit={(clipIds) => {
                                       setContextMenu(null);

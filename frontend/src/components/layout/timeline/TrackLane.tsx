@@ -9,6 +9,7 @@ type WaveformPreview = number[] | { l: number[]; r: number[] };
 
 export const TrackLane = React.memo(function TrackLane(props: {
     track: TrackInfo;
+    allTracks: TrackInfo[];
     trackClips: ClipInfo[];
 
     rowHeight: number;
@@ -70,6 +71,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
 }) {
     const {
         track,
+        allTracks,
         trackClips,
         rowHeight,
         pxPerSec,
@@ -101,13 +103,24 @@ export const TrackLane = React.memo(function TrackLane(props: {
     const ghostClips = React.useMemo(() => {
         if (!ghostDrag) return [];
         const result: { clip: ClipInfo; ghostStartSec: number }[] = [];
+        const orderedTrackIds = allTracks.map((t) => t.id);
+        const trackIndexById = Object.fromEntries(
+            orderedTrackIds.map((id, idx) => [id, idx]),
+        ) as Record<string, number>;
         for (const clipId of ghostDrag.clipIds) {
             const initial = ghostDrag.initialById[clipId];
             if (!initial) continue;
             // 判断 ghost 是否应出现在当前轨道上
-            const ghostTrackId = ghostDrag.allowTrackMove
-                ? (ghostDrag.targetTrackId ?? initial.trackId)
-                : initial.trackId;
+            let ghostTrackId = initial.trackId;
+            if (ghostDrag.allowTrackMove) {
+                if (ghostDrag.targetTrackId == null) {
+                    ghostTrackId = initial.trackId;
+                } else {
+                    const sourceIndex = trackIndexById[initial.trackId];
+                    const targetIndex = sourceIndex + ghostDrag.targetTrackOffset;
+                    ghostTrackId = orderedTrackIds[targetIndex] ?? initial.trackId;
+                }
+            }
             if (ghostTrackId !== track.id) continue;
             // 优先从当前轨道 clips 查找，跨轨道时从全部 clips 中查找
             const clip = trackClips.find((c) => c.id === clipId)
@@ -120,7 +133,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
             });
         }
         return result;
-    }, [ghostDrag, track.id, trackClips, allClips]);
+    }, [ghostDrag, track.id, trackClips, allClips, allTracks]);
 
     return (
         <div

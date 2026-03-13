@@ -25,6 +25,7 @@ import {
     fetchSelectedTrackSummary,
     glueClipsRemote,
     moveClipRemote,
+    moveClipsRemote,
     moveTrackRemote,
     removeClipRemote,
     removeTrackRemote,
@@ -700,6 +701,7 @@ export {
     createClipsRemote,
     removeClipRemote,
     moveClipRemote,
+    moveClipsRemote,
     setClipStateRemote,
     splitClipRemote,
     glueClipsRemote,
@@ -1997,6 +1999,16 @@ const sessionSlice = createSlice({
             })
             .addCase(moveClipRemote.rejected, (state) => {
                 state.pendingMoveCount = Math.max(0, state.pendingMoveCount - 1);
+            })
+
+            .addCase(moveClipsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
             })
 
             .addCase(splitClipRemote.fulfilled, (state, action) => {

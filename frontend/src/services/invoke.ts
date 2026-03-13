@@ -218,6 +218,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 moveLinkedParams: args[3],
             };
 
+        case "move_clips":
+            return {
+                moves: args[0],
+                moveLinkedParams: args[1],
+            };
+
         case "get_clip_linked_params":
             return { clipId: args[0] };
 

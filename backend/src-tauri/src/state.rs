@@ -6,7 +6,7 @@ use crate::models::{
     TimelineClip, TimelineStatePayload, TimelineTrack,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use uuid::Uuid;
@@ -99,6 +99,15 @@ pub struct LinkedParamCurvesPayload {
     pub tension_edit: Vec<f32>,
     #[serde(default)]
     pub extra_curves: HashMap<String, Vec<f32>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveClipPayload {
+    pub clip_id: String,
+    pub start_sec: f64,
+    #[serde(default)]
+    pub track_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1379,68 +1388,136 @@ impl TimelineState {
         track_id: Option<String>,
         move_linked_params: bool,
     ) {
-        let mut end_sec: Option<f64> = None;
-        let mut moved_range: Option<(String, f64, f64, String, f64)> = None;
-        if let Some(c) = self.clips.iter_mut().find(|c| c.id == clip_id) {
-            let old_start_sec = c.start_sec;
-            let clip_length_sec = c.length_sec.max(0.0);
-            let old_track_id = c.track_id.clone();
+        self.move_clips(
+            &[MoveClipPayload {
+                clip_id: clip_id.to_string(),
+                start_sec,
+                track_id,
+            }],
+            move_linked_params,
+        );
+    }
 
-            c.start_sec = start_sec.max(0.0);
-            if let Some(tid) = track_id {
-                if self.tracks.iter().any(|t| t.id == tid) {
-                    c.track_id = tid;
-                }
-            }
-            end_sec = Some(c.start_sec + c.length_sec);
-
-            if move_linked_params {
-                moved_range = Some((
-                    old_track_id,
-                    old_start_sec,
-                    clip_length_sec,
-                    c.track_id.clone(),
-                    c.start_sec,
-                ));
-            }
-        }
-        if let Some(v) = end_sec {
-            self.ensure_project_end_sec(v);
+    pub fn move_clips(&mut self, moves: &[MoveClipPayload], move_linked_params: bool) {
+        #[derive(Debug)]
+        struct LinkedMovePlan {
+            old_root_track_id: String,
+            old_start_sec: f64,
+            clip_length_sec: f64,
+            source_extra_keys: Vec<String>,
+            new_root_track_id: String,
+            new_start_sec: f64,
+            linked_params: LinkedParamCurvesPayload,
         }
 
-        if let Some((old_track_id, old_start_sec, clip_length_sec, new_track_id, new_start_sec)) = moved_range {
-            if clip_length_sec > 0.0 {
+        #[derive(Debug)]
+        struct MovePlan {
+            clip_id: String,
+            new_track_id: String,
+            new_start_sec: f64,
+            new_end_sec: f64,
+            linked_move: Option<LinkedMovePlan>,
+        }
+
+        let mut seen_clip_ids = HashSet::new();
+        let mut plans = Vec::new();
+
+        for requested_move in moves {
+            if !seen_clip_ids.insert(requested_move.clip_id.clone()) {
+                continue;
+            }
+
+            let Some((old_track_id, old_start_sec, clip_length_sec)) = self
+                .clips
+                .iter()
+                .find(|clip| clip.id == requested_move.clip_id)
+                .map(|clip| {
+                    (
+                        clip.track_id.clone(),
+                        clip.start_sec,
+                        clip.length_sec.max(0.0),
+                    )
+                })
+            else {
+                continue;
+            };
+
+            let new_start_sec = requested_move.start_sec.max(0.0);
+            let new_track_id = requested_move
+                .track_id
+                .clone()
+                .filter(|track_id| self.tracks.iter().any(|track| track.id == *track_id))
+                .unwrap_or_else(|| old_track_id.clone());
+
+            let linked_move = if move_linked_params && clip_length_sec > 0.0 {
                 let old_root_track_id = self.resolve_root_track_id(&old_track_id);
                 let new_root_track_id = self.resolve_root_track_id(&new_track_id);
-                if let (Some(old_root_track_id), Some(new_root_track_id)) = (old_root_track_id, new_root_track_id) {
-                    let moved_across_root = old_root_track_id != new_root_track_id;
-                    let moved_in_time = (new_start_sec - old_start_sec).abs() > f64::EPSILON;
-                    if moved_across_root || moved_in_time {
+                match (old_root_track_id, new_root_track_id) {
+                    (Some(old_root_track_id), Some(new_root_track_id))
+                        if old_root_track_id != new_root_track_id
+                            || (new_start_sec - old_start_sec).abs() > f64::EPSILON =>
+                    {
                         let source_extra_keys = self
                             .params_by_root_track
                             .get(&old_root_track_id)
                             .map(|entry| entry.extra_curves.keys().cloned().collect::<Vec<_>>())
                             .unwrap_or_default();
-                        if let Some(linked_params) = self.extract_linked_params_from_root_range(
+                        self.extract_linked_params_from_root_range(
                             &old_root_track_id,
                             old_start_sec,
                             clip_length_sec,
-                        ) {
-                            self.clear_linked_params_in_root_range(
-                                &old_root_track_id,
-                                old_start_sec,
-                                clip_length_sec,
-                                Some(&source_extra_keys),
-                            );
-                            self.apply_linked_params_to_root_range(
-                                &new_root_track_id,
-                                new_start_sec,
-                                &linked_params,
-                            );
-                        }
+                        )
+                        .map(|linked_params| LinkedMovePlan {
+                            old_root_track_id,
+                            old_start_sec,
+                            clip_length_sec,
+                            source_extra_keys,
+                            new_root_track_id,
+                            new_start_sec,
+                            linked_params,
+                        })
                     }
+                    _ => None,
                 }
+            } else {
+                None
+            };
+
+            plans.push(MovePlan {
+                clip_id: requested_move.clip_id.clone(),
+                new_track_id,
+                new_start_sec,
+                new_end_sec: new_start_sec + clip_length_sec,
+                linked_move,
+            });
+        }
+
+        for plan in &plans {
+            if let Some(clip) = self.clips.iter_mut().find(|clip| clip.id == plan.clip_id) {
+                clip.start_sec = plan.new_start_sec;
+                clip.track_id = plan.new_track_id.clone();
             }
+            self.ensure_project_end_sec(plan.new_end_sec);
+        }
+
+        let linked_moves: Vec<&LinkedMovePlan> = plans
+            .iter()
+            .filter_map(|plan| plan.linked_move.as_ref())
+            .collect();
+        for linked_move in &linked_moves {
+            self.clear_linked_params_in_root_range(
+                &linked_move.old_root_track_id,
+                linked_move.old_start_sec,
+                linked_move.clip_length_sec,
+                Some(&linked_move.source_extra_keys),
+            );
+        }
+        for linked_move in linked_moves {
+            self.apply_linked_params_to_root_range(
+                &linked_move.new_root_track_id,
+                linked_move.new_start_sec,
+                &linked_move.linked_params,
+            );
         }
     }
 
@@ -1879,6 +1956,44 @@ mod tests {
         assert_eq!(&src_pitch[1..4], &[61.0, 62.0, 63.0]);
         assert_eq!(&dst_pitch[5..8], &[61.0, 62.0, 63.0]);
         assert_eq!(&dst_curve[5..8], &[10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn move_clips_moves_multiple_linked_segments_atomically() {
+        let mut tl = TimelineState::default();
+        tl.project_sec = 1.0;
+        tl.clips.push(make_clip("clip_a", "track_main", 0.005, 0.015));
+        tl.clips.push(make_clip("clip_b", "track_main", 0.025, 0.015));
+        tl.ensure_params_for_root("track_main");
+
+        let entry = tl.params_by_root_track.get_mut("track_main").unwrap();
+        entry.extra_curves.insert(
+            "formant_shift_cents".to_string(),
+            vec![
+                0.0, 10.0, 20.0, 30.0, 0.0, 40.0, 50.0, 60.0, 0.0, 0.0, 0.0, 0.0,
+            ],
+        );
+
+        tl.move_clips(
+            &[
+                MoveClipPayload {
+                    clip_id: "clip_a".to_string(),
+                    start_sec: 0.025,
+                    track_id: None,
+                },
+                MoveClipPayload {
+                    clip_id: "clip_b".to_string(),
+                    start_sec: 0.045,
+                    track_id: None,
+                },
+            ],
+            true,
+        );
+
+        let curve = &tl.params_by_root_track["track_main"].extra_curves["formant_shift_cents"];
+        assert_eq!(&curve[1..4], &[0.0, 0.0, 0.0]);
+        assert_eq!(&curve[5..8], &[10.0, 20.0, 30.0]);
+        assert_eq!(&curve[9..12], &[40.0, 50.0, 60.0]);
     }
 }
 

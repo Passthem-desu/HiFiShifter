@@ -278,6 +278,20 @@ pub(super) fn move_clip(
     payload
 }
 
+pub(super) fn move_clips(
+    state: State<'_, AppState>,
+    moves: Vec<crate::state::MoveClipPayload>,
+    move_linked_params: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.move_clips(&moves, move_linked_params.unwrap_or(false));
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    payload
+}
+
 pub(super) fn get_clip_linked_params(
     state: State<'_, AppState>,
     clip_id: String,
