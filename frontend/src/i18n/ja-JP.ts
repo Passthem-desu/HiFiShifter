@@ -330,6 +330,7 @@ export const jaJP = {
     playhead_zoom: "再生ヘッドでズーム",
     auto_scroll: "自動スクロール",
     clipboard_preview: "クリップボードプレビュー",
+    lock_param_lines: "パラメータ線をロック",
 
     // グリッド音符タイプラベル
     grid_note_normal: "通常",

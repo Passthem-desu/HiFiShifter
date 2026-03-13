@@ -327,9 +327,28 @@ pub fn move_clip(
     clip_id: String,
     start_sec: f64,
     track_id: Option<String>,
+    move_linked_params: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
-    timeline::move_clip(state, clip_id, start_sec, track_id)
+    timeline::move_clip(state, clip_id, start_sec, track_id, move_linked_params)
 }
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_clip_linked_params(
+    state: State<'_, AppState>,
+    clip_id: String,
+) -> serde_json::Value {
+    timeline::get_clip_linked_params(state, clip_id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn apply_clip_linked_params(
+    state: State<'_, AppState>,
+    clip_id: String,
+    linked_params: crate::state::LinkedParamCurvesPayload,
+) -> crate::models::TimelineStatePayload {
+    timeline::apply_clip_linked_params(state, clip_id, linked_params)
+}
+
 #[tauri::command(rename_all = "camelCase")]
 #[allow(clippy::too_many_arguments)]
 pub fn set_clip_state(

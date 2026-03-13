@@ -128,6 +128,8 @@ export interface SessionState {
     autoScrollEnabled: boolean;
     /** 剪贴板预览（在参数编辑器选区内显示剪贴板曲线预览） */
     showClipboardPreview: boolean;
+    /** 锁定参数线（移动 clip 时联动移动参数曲线） */
+    lockParamLinesEnabled: boolean;
     /** 参数编辑器拖动方向限制 */
     dragDirection: DragDirection;
 
@@ -592,7 +594,8 @@ const initialState: SessionState = {
     pitchSnapScale: "C",
     playheadZoomEnabled: false,
     autoScrollEnabled: false,
-    showClipboardPreview: false,
+    showClipboardPreview: true,
+    lockParamLinesEnabled: false,
     dragDirection: "y-only" as DragDirection,
 
     paramsEpoch: 0,
@@ -785,6 +788,9 @@ const sessionSlice = createSlice({
         },
         toggleClipboardPreview(state) {
             state.showClipboardPreview = !state.showClipboardPreview;
+        },
+        toggleLockParamLines(state) {
+            state.lockParamLinesEnabled = !state.lockParamLinesEnabled;
         },
         cycleDragDirection(state) {
             const order: DragDirection[] = ["free", "x-only", "y-only"];
@@ -1244,6 +1250,8 @@ const sessionSlice = createSlice({
                     state.autoScrollEnabled = s.autoScroll;
                 if (s.showClipboardPreview != null)
                     state.showClipboardPreview = s.showClipboardPreview;
+                if (s.lockParamLines != null)
+                    state.lockParamLinesEnabled = s.lockParamLines;
                 if (s.dragDirection != null) {
                     const validDirs = ["free", "x-only", "y-only"];
                     if (validDirs.includes(s.dragDirection))
@@ -2143,6 +2151,7 @@ export const {
     togglePlayheadZoom,
     toggleAutoScroll,
     toggleClipboardPreview,
+    toggleLockParamLines,
     cycleDragDirection,
     setDragDirection,
     setplayheadSec,

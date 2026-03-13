@@ -330,6 +330,7 @@ export const koKR = {
     playhead_zoom: "재생 헤드 기준 줌",
     auto_scroll: "자동 스크롤",
     clipboard_preview: "클립보드 미리보기",
+    lock_param_lines: "파라미터 라인 잠금",
 
     // 그리드 음표 유형 라벨
     grid_note_normal: "보통",

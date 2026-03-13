@@ -323,6 +323,7 @@ export const zhCN = {
     playhead_zoom: "基于播放光标缩放",
     auto_scroll: "自动滚屏",
     clipboard_preview: "剪贴板预览",
+    lock_param_lines: "锁定参数线",
 
     // Grid note type labels
     grid_note_normal: "标准",

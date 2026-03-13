@@ -247,10 +247,47 @@ pub(super) fn move_clip(
     clip_id: String,
     start_sec: f64,
     track_id: Option<String>,
+    move_linked_params: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
-    tl.move_clip(&clip_id, start_sec, track_id);
+    tl.move_clip(
+        &clip_id,
+        start_sec,
+        track_id,
+        move_linked_params.unwrap_or(false),
+    );
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    payload
+}
+
+pub(super) fn get_clip_linked_params(
+    state: State<'_, AppState>,
+    clip_id: String,
+) -> serde_json::Value {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    match tl.extract_clip_linked_params(&clip_id) {
+        Some(linked_params) => serde_json::json!({
+            "ok": true,
+            "linkedParams": linked_params,
+        }),
+        None => serde_json::json!({
+            "ok": false,
+            "error": "clip_not_found",
+        }),
+    }
+}
+
+pub(super) fn apply_clip_linked_params(
+    state: State<'_, AppState>,
+    clip_id: String,
+    linked_params: crate::state::LinkedParamCurvesPayload,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.apply_linked_params_to_clip(&clip_id, &linked_params);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());

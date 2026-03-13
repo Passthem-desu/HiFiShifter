@@ -330,6 +330,7 @@ export const enUS = {
     playhead_zoom: "Zoom at Playhead",
     auto_scroll: "Auto Scroll",
     clipboard_preview: "Clipboard Preview",
+    lock_param_lines: "Lock Param Lines",
 
     // Grid note type labels
     grid_note_normal: "Normal",

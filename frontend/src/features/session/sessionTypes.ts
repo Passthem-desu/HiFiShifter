@@ -55,12 +55,20 @@ export interface ClipInfo {
 
 export type WaveformPreview = number[] | { l: number[]; r: number[] };
 
+export interface LinkedParamCurves {
+    framePeriodMs: number;
+    pitchEdit: number[];
+    tensionEdit: number[];
+    extraCurves: Record<string, number[]>;
+}
+
 export type ClipTemplate = Partial<Omit<ClipInfo, "id" | "color">> & {
     trackId: string;
     name: string;
     startSec: number;
     lengthSec: number;
     waveformPreview?: WaveformPreview;
+    linkedParams?: LinkedParamCurves;
 };
 export interface AutomationPoint {
     id: string;

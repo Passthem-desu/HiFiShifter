@@ -212,6 +212,16 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 clipId: args[0],
                 startSec: args[1],
                 trackId: (args[2] ?? null) as unknown,
+                moveLinkedParams: args[3],
+            };
+
+        case "get_clip_linked_params":
+            return { clipId: args[0] };
+
+        case "apply_clip_linked_params":
+            return {
+                clipId: args[0],
+                linkedParams: args[1],
             };
 
         case "set_clip_state":

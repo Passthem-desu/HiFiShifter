@@ -79,6 +79,9 @@ export const createClipsRemote = createAsyncThunk(
         { getState, dispatch, rejectWithValue },
     ) => {
         let templates = payload.templates;
+        const shouldApplyLinkedParams =
+            (getState() as { session: SessionState }).session
+                .lockParamLinesEnabled;
 
         if (payload.options?.placeOnSelectedTrack && templates.length > 0) {
             const state = getState() as { session: SessionState };
@@ -203,11 +206,25 @@ export const createClipsRemote = createAsyncThunk(
                     );
                 }
 
+                let finalTimeline = updated as TimelineState;
+                if (shouldApplyLinkedParams && tpl.linkedParams) {
+                    const linkedApplied = await webApi.applyClipLinkedParams({
+                        clipId: createdId,
+                        linkedParams: tpl.linkedParams,
+                    });
+                    if (!(linkedApplied as { ok?: boolean }).ok) {
+                        throw new Error(
+                            (linkedApplied as { error?: { message?: string } }).error
+                                ?.message ?? "apply_clip_linked_params_failed",
+                        );
+                    }
+                    finalTimeline = linkedApplied as TimelineState;
+                }
+
                 // Keep waveform visible after cut→paste even when backend cannot
                 // reconstruct preview metadata from source_path (e.g. stale/relative path).
                 if (Array.isArray(tpl.waveformPreview)) {
-                    const updatedTimeline = updated as TimelineState;
-                    const createdClip = updatedTimeline.clips.find(
+                    const createdClip = finalTimeline.clips.find(
                         (c) => c.id === createdId,
                     );
                     if (
@@ -219,7 +236,7 @@ export const createClipsRemote = createAsyncThunk(
                     }
                 }
 
-                return { createdId, timeline: updated as TimelineState };
+                return { createdId, timeline: finalTimeline };
             }),
         ).catch((err: unknown) => {
             return rejectWithValue(
@@ -253,7 +270,12 @@ export const removeClipRemote = createAsyncThunk(
 
 export const moveClipRemote = createAsyncThunk(
     "session/moveClipRemote",
-    async (payload: { clipId: string; startSec: number; trackId?: string }) => {
+    async (payload: {
+        clipId: string;
+        startSec: number;
+        trackId?: string;
+        moveLinkedParams?: boolean;
+    }) => {
         return webApi.moveClip(payload);
     },
 );

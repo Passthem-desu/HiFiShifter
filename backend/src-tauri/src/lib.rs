@@ -173,6 +173,8 @@ pub fn run() {
             commands::set_static_param,
             commands::remove_clip,
             commands::move_clip,
+            commands::get_clip_linked_params,
+            commands::apply_clip_linked_params,
             commands::set_clip_state,
             commands::split_clip,
             commands::glue_clips,

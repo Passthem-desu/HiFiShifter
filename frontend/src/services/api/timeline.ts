@@ -1,4 +1,5 @@
 import type { TimelineResult, TrackSummaryResult } from "../../types/api";
+import type { LinkedParamCurves } from "../../features/session/sessionTypes";
 
 import { invoke } from "../invoke";
 
@@ -133,12 +134,30 @@ export const timelineApi = {
         clipId: string;
         startSec: number;
         trackId?: string;
+        moveLinkedParams?: boolean;
     }) =>
         invoke<TimelineResult>(
             "move_clip",
             payload.clipId,
             payload.startSec,
             payload.trackId,
+            payload.moveLinkedParams,
+        ),
+
+    getClipLinkedParams: (clipId: string) =>
+        invoke<{ ok: boolean; linkedParams?: LinkedParamCurves }>(
+            "get_clip_linked_params",
+            clipId,
+        ),
+
+    applyClipLinkedParams: (payload: {
+        clipId: string;
+        linkedParams: LinkedParamCurves;
+    }) =>
+        invoke<TimelineResult>(
+            "apply_clip_linked_params",
+            payload.clipId,
+            payload.linkedParams,
         ),
 
     setClipState: (payload: {

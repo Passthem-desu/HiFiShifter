@@ -19,6 +19,7 @@ import {
     setTrackStateRemote,
     togglePitchSnap,
     toggleClipboardPreview,
+    toggleLockParamLines,
     cycleDragDirection,
     persistUiSettings,
 } from "../../features/session/sessionSlice";
@@ -1692,6 +1693,19 @@ export const PianoRollPanel: React.FC = () => {
                                 <rect x="3" y="1" width="9" height="13" rx="1" stroke="currentColor" strokeWidth="1" fill="none"/>
                                 <path d="M5.5 1V2.5H9.5V1" stroke="currentColor" strokeWidth="0.8"/>
                                 <path d="M5 6L7 8L10 5" stroke="currentColor" strokeWidth="1.2" opacity="0.7"/>
+                            </svg>
+                        </IconButton>
+                        <IconButton
+                            size="1"
+                            variant={s.lockParamLinesEnabled ? "solid" : "ghost"}
+                            color="gray"
+                            title={t("lock_param_lines")}
+                            tabIndex={-1}
+                            onClick={() => { dispatch(toggleLockParamLines()); void dispatch(persistUiSettings()); }}
+                        >
+                            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect x="3" y="6" width="9" height="7" rx="1" stroke="currentColor" strokeWidth="1" fill="none"/>
+                                <path d="M5 6V4.5C5 3.12 6.12 2 7.5 2C8.88 2 10 3.12 10 4.5V6" stroke="currentColor" strokeWidth="1" fill="none"/>
                             </svg>
                         </IconButton>
                     </Flex>

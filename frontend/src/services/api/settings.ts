@@ -10,6 +10,7 @@ export interface UiSettings {
     playheadZoom: boolean;
     autoScroll: boolean;
     showClipboardPreview: boolean;
+    lockParamLines?: boolean;
     dragDirection?: string;
 }
 

@@ -174,6 +174,25 @@ export const TimelinePanel: React.FC = () => {
 
     const clipClipboardRef = useRef<ClipTemplate[] | null>(null);
 
+    const buildClipClipboardTemplates = React.useCallback(
+        async (ids: string[]) => {
+            const clips = sessionRef.current.clips.filter((c) => ids.includes(c.id));
+            return Promise.all(
+                clips.map(async (clip) => {
+                    const linkedParamsResult = await webApi.getClipLinkedParams(clip.id);
+                    return {
+                        ...clip,
+                        waveformPreview: sessionRef.current.clipWaveforms[clip.id],
+                        linkedParams: linkedParamsResult.ok
+                            ? linkedParamsResult.linkedParams
+                            : undefined,
+                    };
+                }),
+            );
+        },
+        [],
+    );
+
     const tauriDraggedPathRef = useRef<string | null>(null);
     const tauriLastDropPathRef = useRef<string | null>(null);
     const tauriDropHandledAtRef = useRef<number>(0);
@@ -1820,30 +1839,22 @@ export const TimelinePanel: React.FC = () => {
                                       setRenamingClipId(clipId);
                                   }}
                                   onCopy={(ids) => {
-                                      const templates = sessionRef.current.clips
-                                          .filter((c) => ids.includes(c.id))
-                                          .map((c) => ({
-                                              ...c,
-                                              waveformPreview:
-                                                  sessionRef.current
-                                                      .clipWaveforms[c.id],
-                                          }));
-                                      if (templates.length > 0) {
-                                          clipClipboardRef.current = templates;
-                                      }
+                                      void (async () => {
+                                          const templates =
+                                              await buildClipClipboardTemplates(ids);
+                                          if (templates.length > 0) {
+                                              clipClipboardRef.current = templates;
+                                          }
+                                      })();
                                   }}
                                   onCut={(ids) => {
-                                      const templates = sessionRef.current.clips
-                                          .filter((c) => ids.includes(c.id))
-                                          .map((c) => ({
-                                              ...c,
-                                              waveformPreview:
-                                                  sessionRef.current
-                                                      .clipWaveforms[c.id],
-                                          }));
-                                      if (templates.length > 0) {
-                                          clipClipboardRef.current = templates;
-                                      }
+                                      void (async () => {
+                                          const templates =
+                                              await buildClipClipboardTemplates(ids);
+                                          if (templates.length > 0) {
+                                              clipClipboardRef.current = templates;
+                                          }
+                                      })();
                                       setContextMenu(null);
                                       setMultiSelectedClipIds([]);
                                       for (const id of ids) {
