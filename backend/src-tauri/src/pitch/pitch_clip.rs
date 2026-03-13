@@ -109,6 +109,23 @@ pub struct CachedClipPitch {
 
 static GLOBAL_CLIP_PITCH_CACHE: OnceLock<Mutex<HashMap<String, CachedClipPitch>>> = OnceLock::new();
 static GLOBAL_CLIP_PITCH_INFLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static CLIP_PITCH_CACHE_MAX_ENTRIES: OnceLock<Option<usize>> = OnceLock::new();
+
+const DEFAULT_CLIP_PITCH_CACHE_MAX_ENTRIES: usize = 4096;
+
+fn clip_pitch_cache_max_entries() -> Option<usize> {
+    *CLIP_PITCH_CACHE_MAX_ENTRIES.get_or_init(|| {
+        let parsed = std::env::var("HIFISHIFTER_CLIP_PITCH_CACHE_MAX_ENTRIES")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<usize>().ok());
+        match parsed {
+            // 0 = disable hard limit (unbounded)
+            Some(0) => None,
+            Some(v) => Some(v.max(1)),
+            None => Some(DEFAULT_CLIP_PITCH_CACHE_MAX_ENTRIES),
+        }
+    })
+}
 
 pub(crate) fn global_cache() -> &'static Mutex<HashMap<String, CachedClipPitch>> {
     GLOBAL_CLIP_PITCH_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -322,15 +339,16 @@ fn store_clip_pitch_cache(cached: CachedClipPitch) {
     let mut cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
     cache.insert(content_key, cached);
 
-    const MAX: usize = 256;
-    if cache.len() > MAX {
-        let keys: Vec<String> = cache
-            .keys()
-            .take(cache.len().saturating_sub(MAX))
-            .cloned()
-            .collect();
-        for k in keys {
-            cache.remove(&k);
+    if let Some(max_entries) = clip_pitch_cache_max_entries() {
+        if cache.len() > max_entries {
+            let keys: Vec<String> = cache
+                .keys()
+                .take(cache.len().saturating_sub(max_entries))
+                .cloned()
+                .collect();
+            for k in keys {
+                cache.remove(&k);
+            }
         }
     }
 }

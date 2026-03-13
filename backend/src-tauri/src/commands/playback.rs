@@ -109,6 +109,23 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 // 新一轮渲染开始，清空上次的 pending_rendered_keys
                 crate::synth_clip_cache::clear_pending_rendered_keys();
 
+                // 预渲染批次保护：按本轮 clip 数动态扩容缓存，
+                // 避免同一轮中早先渲染好的条目被后续插入提前淘汰。
+                {
+                    let mut rendered_cache = crate::synth_clip_cache::global_rendered_clip_cache()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    let required = rendered_cache.len().saturating_add(clips_to_render.len());
+                    rendered_cache.ensure_capacity(required);
+                }
+                {
+                    let mut tension_cache = crate::synth_clip_cache::global_tension_rendered_clip_cache()
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    let required = clips_to_render.len().max(1);
+                    tension_cache.ensure_capacity(required);
+                }
+
                 let total = clips_to_render.len().max(1);
                 let mut rendered_count = 0u32;
                 let mut any_error = false;

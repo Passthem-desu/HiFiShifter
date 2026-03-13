@@ -311,8 +311,20 @@ pub fn compute_param_hash(
 
 // ─── 整 Clip 渲染缓存（Phase 2: Clip 级预渲染 + 实时混音）────────────────────
 
-/// 整 Clip 渲染缓存的容量上限。
-const RENDERED_CLIP_CAPACITY: usize = 128;
+/// 整 Clip 渲染缓存默认容量。
+const DEFAULT_RENDERED_CLIP_CAPACITY: usize = 1024;
+
+static RENDERED_CLIP_CAPACITY: OnceLock<usize> = OnceLock::new();
+
+fn rendered_clip_capacity() -> usize {
+    *RENDERED_CLIP_CAPACITY.get_or_init(|| {
+        std::env::var("HIFISHIFTER_RENDERED_CLIP_CACHE_CAPACITY")
+            .ok()
+            .and_then(|raw| raw.trim().parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(DEFAULT_RENDERED_CLIP_CAPACITY)
+    })
+}
 
 /// 整 Clip 渲染缓存的 key。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -419,6 +431,16 @@ impl RenderedClipCache {
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+
+    /// 确保缓存容量不小于给定值（仅增不减）。
+    pub fn ensure_capacity(&mut self, min_capacity: usize) {
+        let next = min_capacity.max(1);
+        if next > self.capacity {
+            self.capacity = next;
+            self.inner.reserve(self.capacity.saturating_sub(self.inner.len()));
+            self.order.reserve(self.capacity.saturating_sub(self.order.len()));
+        }
+    }
 }
 
 // ─── 整 Clip 渲染缓存全局实例 ─────────────────────────────────────────────────
@@ -427,10 +449,10 @@ static GLOBAL_RENDERED_CLIP_CACHE: OnceLock<Mutex<RenderedClipCache>> = OnceLock
 
 /// 获取进程级全局整 Clip 渲染缓存。
 ///
-/// 首次调用时初始化，容量为 [`RENDERED_CLIP_CAPACITY`]（128）。
+/// 首次调用时初始化，容量为 `rendered_clip_capacity()`。
 pub fn global_rendered_clip_cache() -> &'static Mutex<RenderedClipCache> {
     GLOBAL_RENDERED_CLIP_CACHE.get_or_init(|| {
-        Mutex::new(RenderedClipCache::new(RENDERED_CLIP_CAPACITY))
+        Mutex::new(RenderedClipCache::new(rendered_clip_capacity()))
     })
 }
 
@@ -702,6 +724,16 @@ impl TensionRenderedClipCache {
             }
         }
     }
+
+    /// 确保缓存容量不小于给定值（仅增不减）。
+    pub fn ensure_capacity(&mut self, min_capacity: usize) {
+        let next = min_capacity.max(1);
+        if next > self.capacity {
+            self.capacity = next;
+            self.inner.reserve(self.capacity.saturating_sub(self.inner.len()));
+            self.order.reserve(self.capacity.saturating_sub(self.order.len()));
+        }
+    }
 }
 
 static GLOBAL_TENSION_RENDERED_CLIP_CACHE: OnceLock<Mutex<TensionRenderedClipCache>> =
@@ -709,7 +741,7 @@ static GLOBAL_TENSION_RENDERED_CLIP_CACHE: OnceLock<Mutex<TensionRenderedClipCac
 
 pub fn global_tension_rendered_clip_cache() -> &'static Mutex<TensionRenderedClipCache> {
     GLOBAL_TENSION_RENDERED_CLIP_CACHE
-        .get_or_init(|| Mutex::new(TensionRenderedClipCache::new(RENDERED_CLIP_CAPACITY)))
+    .get_or_init(|| Mutex::new(TensionRenderedClipCache::new(rendered_clip_capacity())))
 }
 
 #[cfg(test)]

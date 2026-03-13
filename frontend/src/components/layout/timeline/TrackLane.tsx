@@ -1,6 +1,9 @@
 import React from "react";
 
-import type { ClipInfo, TrackInfo } from "../../../features/session/sessionTypes";
+import type {
+    ClipInfo,
+    TrackInfo,
+} from "../../../features/session/sessionTypes";
 import type { GhostDragInfo } from "./hooks/useClipDrag";
 import { ClipItem } from "./ClipItem";
 import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
@@ -15,6 +18,8 @@ export const TrackLane = React.memo(function TrackLane(props: {
     rowHeight: number;
     pxPerSec: number;
     bpm: number;
+    viewportStartSec: number;
+    viewportEndSec: number;
 
     clipWaveforms: Record<string, WaveformPreview | undefined>;
 
@@ -75,6 +80,8 @@ export const TrackLane = React.memo(function TrackLane(props: {
         trackClips,
         rowHeight,
         pxPerSec,
+        viewportStartSec,
+        viewportEndSec,
         clipWaveforms,
         altPressed,
         selectedClipId,
@@ -117,23 +124,49 @@ export const TrackLane = React.memo(function TrackLane(props: {
                     ghostTrackId = initial.trackId;
                 } else {
                     const sourceIndex = trackIndexById[initial.trackId];
-                    const targetIndex = sourceIndex + ghostDrag.targetTrackOffset;
-                    ghostTrackId = orderedTrackIds[targetIndex] ?? initial.trackId;
+                    const targetIndex =
+                        sourceIndex + ghostDrag.targetTrackOffset;
+                    ghostTrackId =
+                        orderedTrackIds[targetIndex] ?? initial.trackId;
                 }
             }
             if (ghostTrackId !== track.id) continue;
             // 优先从当前轨道 clips 查找，跨轨道时从全部 clips 中查找
-            const clip = trackClips.find((c) => c.id === clipId)
-                ?? allClips?.find((c) => c.id === clipId)
-                ?? undefined;
+            const clip =
+                trackClips.find((c) => c.id === clipId) ??
+                allClips?.find((c) => c.id === clipId) ??
+                undefined;
             if (!clip) continue;
             result.push({
                 clip,
-                ghostStartSec: Math.max(0, initial.startSec + ghostDrag.deltaSec),
+                ghostStartSec: Math.max(
+                    0,
+                    initial.startSec + ghostDrag.deltaSec,
+                ),
             });
         }
         return result;
     }, [ghostDrag, track.id, trackClips, allClips, allTracks]);
+
+    const visibleTrackClips = React.useMemo(() => {
+        const start = Number(viewportStartSec);
+        const end = Number(viewportEndSec);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+            return trackClips;
+        }
+
+        // Render a neighbor window to avoid pop-in/thrashing while zooming.
+        const viewportSec = end - start;
+        const bufferSec = Math.max(2.0, viewportSec * 0.5);
+        const minSec = start - bufferSec;
+        const maxSec = end + bufferSec;
+
+        return trackClips.filter((clip) => {
+            const clipStart = clip.startSec;
+            const clipEnd = clip.startSec + clip.lengthSec;
+            return clipEnd >= minSec && clipStart <= maxSec;
+        });
+    }, [trackClips, viewportStartSec, viewportEndSec]);
 
     return (
         <div
@@ -141,7 +174,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
             className="border-b border-qt-border relative"
             style={{ height: rowHeight }}
         >
-            {trackClips.map((clip) => {
+            {visibleTrackClips.map((clip) => {
                 const selected =
                     multiSelectedClipIds.length > 0
                         ? multiSelectedSet.has(clip.id)
@@ -175,7 +208,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         onRenameDone={onRenameDone}
                         onGainCommit={onGainCommit}
                     />
-            );
+                );
             })}
             {/* Ghost clip 预览：Ctrl+拖动复制时显示半透明副本 */}
             {ghostClips.map(({ clip, ghostStartSec }) => {
