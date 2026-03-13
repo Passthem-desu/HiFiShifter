@@ -1,6 +1,6 @@
 [package]
 name = "HiFiShifter"
-version = "1.0.2-beta.3"
+version = "0.1.0-beta.4"
 description = "A high-quality audio shifter"
 authors = ["ARounder"]
 edition = "2021"
