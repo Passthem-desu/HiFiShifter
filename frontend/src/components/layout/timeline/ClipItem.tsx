@@ -448,10 +448,12 @@ export const ClipItem: React.FC<{
             onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                if (!isInMultiSelectedSet) {
+                const keepExistingMultiSelection =
+                    multiSelectedCount > 1 && isInMultiSelectedSet;
+                if (!keepExistingMultiSelection) {
                     ensureSelected(clip.id);
+                    selectClipRemote(clip.id);
                 }
-                selectClipRemote(clip.id);
                 openContextMenu(clip.id, e.clientX, e.clientY);
             }}
             onPointerDown={(e) => {

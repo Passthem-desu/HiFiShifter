@@ -7,6 +7,7 @@ interface EditContextMenuProps {
     isPitchParam: boolean;
     onClose: () => void;
     onCopy?: () => void;
+    onCut?: () => void;
     onPaste?: () => void;
     onSelectAll?: () => void;
     onDeselect?: () => void;
@@ -27,6 +28,7 @@ export function EditContextMenu({
     isPitchParam,
     onClose,
     onCopy,
+    onCut,
     onPaste,
     onSelectAll,
     onDeselect,
@@ -88,6 +90,9 @@ export function EditContextMenu({
         >
             <div className={itemClass} onClick={() => { onCopy?.(); onClose(); }}>
                 {tAny("menu_copy")}
+            </div>
+            <div className={itemClass} onClick={() => { onCut?.(); onClose(); }}>
+                {tAny("menu_cut")}
             </div>
             <div className={itemClass} onClick={() => { onPaste?.(); onClose(); }}>
                 {tAny("menu_paste")}

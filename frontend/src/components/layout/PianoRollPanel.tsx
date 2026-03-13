@@ -2014,7 +2014,7 @@ export const PianoRollPanel: React.FC = () => {
 
                     <div
                         ref={scrollerRef}
-                        className="flex-1 bg-qt-graph-bg overflow-x-scroll overflow-y-hidden relative custom-scrollbar"
+                        className="flex-1 bg-qt-graph-bg overflow-x-scroll overflow-y-hidden relative custom-scrollbar outline-none focus:outline-none focus-visible:outline-none"
                         data-piano-roll-scroller
                         tabIndex={0}
                         onMouseDownCapture={
@@ -2090,6 +2090,7 @@ export const PianoRollPanel: React.FC = () => {
                     isPitchParam={editParam === "pitch"}
                     onClose={() => setCtxMenu(null)}
                     onCopy={() => void handleEditOp("copy")}
+                    onCut={() => void handleEditOp("cut")}
                     onPaste={() => void handleEditOp("paste")}
                     onSelectAll={() => void handleEditOp("selectAll")}
                     onDeselect={() => void handleEditOp("deselect")}

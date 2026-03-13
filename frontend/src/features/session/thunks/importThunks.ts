@@ -5,6 +5,48 @@ import type { SessionState } from "../sessionSlice";
 import { addTrackRemote, setClipStateRemote } from "./timelineThunks";
 import { computeAutoCrossfadeFromPayload } from "../../../components/layout/timeline/hooks/autoCrossfade";
 
+type RawTimelineClip = {
+    id?: string;
+    track_id?: string;
+    start_sec?: number;
+    length_sec?: number;
+    fade_in_sec?: number;
+    fade_out_sec?: number;
+};
+
+async function syncAutoCrossfadeFromLatestTimeline(args: {
+    dispatch: (action: unknown) => Promise<unknown> & { unwrap: () => Promise<unknown> };
+    getState: () => unknown;
+    newClipIds: string[];
+}) {
+    const { dispatch, getState, newClipIds } = args;
+    if (newClipIds.length === 0) {
+        return null;
+    }
+
+    const session = (getState() as { session: SessionState }).session;
+    if (!session.autoCrossfadeEnabled) {
+        return null;
+    }
+
+    const latestTimeline = await webApi.getTimelineState();
+    const allClips = ((latestTimeline as { clips?: RawTimelineClip[] }).clips ?? []);
+    const fadeUpdates = computeAutoCrossfadeFromPayload(allClips, newClipIds);
+    if (fadeUpdates.length > 0) {
+        const fadePromises = fadeUpdates.map((u) =>
+            dispatch(
+                setClipStateRemote({
+                    clipId: u.clipId,
+                    fadeInSec: u.fadeInSec,
+                    fadeOutSec: u.fadeOutSec,
+                }),
+            ).unwrap(),
+        );
+        await Promise.allSettled(fadePromises);
+    }
+    return latestTimeline;
+}
+
 const setAudioPathAction = (path: string) => ({
     type: "session/setAudioPath" as const,
     payload: path,
@@ -146,34 +188,15 @@ export const importAudioAtPosition = createAsyncThunk(
                 .map((c) => c.id)
                 .filter((id): id is string => !!id && !beforeClipIds.has(id));
 
-            // Compute and sync auto-crossfade fades from backend response data
-            // (Redux state is NOT updated yet — fulfilled reducer hasn't run)
-            if (newClipIds.length > 0) {
-                const session = (getState() as { session: SessionState }).session;
-                if (session.autoCrossfadeEnabled) {
-                    const allClips = (result.clips ?? []) as Array<{
-                        id?: string; track_id?: string; start_sec?: number;
-                        length_sec?: number; fade_in_sec?: number; fade_out_sec?: number;
-                    }>;
-                    const fadeUpdates = computeAutoCrossfadeFromPayload(allClips, newClipIds);
-                    if (fadeUpdates.length > 0) {
-                        const fadePromises = fadeUpdates.map((u) =>
-                            dispatch(
-                                setClipStateRemote({
-                                    clipId: u.clipId,
-                                    fadeInSec: u.fadeInSec,
-                                    fadeOutSec: u.fadeOutSec,
-                                }),
-                            ).unwrap(),
-                        );
-                        await Promise.allSettled(fadePromises);
-                    }
-                }
-            }
+            const latestTimeline = await syncAutoCrossfadeFromLatestTimeline({
+                dispatch: dispatch as unknown as (action: unknown) => Promise<unknown> & { unwrap: () => Promise<unknown> },
+                getState,
+                newClipIds,
+            });
 
             return {
                 ok: true,
-                imported,
+                imported: latestTimeline ?? imported,
                 newClipIds,
             };
         } finally {
@@ -244,33 +267,15 @@ export const importAudioFileAtPosition = createAsyncThunk(
                 .map((c) => c.id)
                 .filter((id): id is string => !!id && !beforeClipIds.has(id));
 
-            // Compute and sync auto-crossfade fades from backend response data
-            if (newClipIds.length > 0) {
-                const session = (getState() as { session: SessionState }).session;
-                if (session.autoCrossfadeEnabled) {
-                    const allClips = (result.clips ?? []) as Array<{
-                        id?: string; track_id?: string; start_sec?: number;
-                        length_sec?: number; fade_in_sec?: number; fade_out_sec?: number;
-                    }>;
-                    const fadeUpdates = computeAutoCrossfadeFromPayload(allClips, newClipIds);
-                    if (fadeUpdates.length > 0) {
-                        const fadePromises = fadeUpdates.map((u) =>
-                            dispatch(
-                                setClipStateRemote({
-                                    clipId: u.clipId,
-                                    fadeInSec: u.fadeInSec,
-                                    fadeOutSec: u.fadeOutSec,
-                                }),
-                            ).unwrap(),
-                        );
-                        await Promise.allSettled(fadePromises);
-                    }
-                }
-            }
+            const latestTimeline = await syncAutoCrossfadeFromLatestTimeline({
+                dispatch: dispatch as unknown as (action: unknown) => Promise<unknown> & { unwrap: () => Promise<unknown> },
+                getState,
+                newClipIds,
+            });
 
             return {
                 ok: true,
-                imported,
+                imported: latestTimeline ?? imported,
                 newClipIds,
             };
         } catch (err) {
@@ -441,31 +446,13 @@ export const importMultipleAudioAtPosition = createAsyncThunk(
             // Detect new clips from all import responses
             const newClipIds = accumulatedNewClipIds.filter((id) => !!id && !beforeClipIds.has(id));
 
-            // Sync auto-crossfade to backend within undo group using response data
-            if (newClipIds.length > 0) {
-                const session = (getState() as { session: SessionState }).session;
-                if (session.autoCrossfadeEnabled) {
-                    const allClips = (lastImported as any)?.clips ?? [] as Array<{
-                        id?: string; track_id?: string; start_sec?: number;
-                        length_sec?: number; fade_in_sec?: number; fade_out_sec?: number;
-                    }>;
-                    const fadeUpdates = computeAutoCrossfadeFromPayload(allClips, newClipIds);
-                    if (fadeUpdates.length > 0) {
-                        const fadePromises = fadeUpdates.map((u) =>
-                            dispatch(
-                                setClipStateRemote({
-                                    clipId: u.clipId,
-                                    fadeInSec: u.fadeInSec,
-                                    fadeOutSec: u.fadeOutSec,
-                                }),
-                            ).unwrap(),
-                        );
-                        await Promise.allSettled(fadePromises);
-                    }
-                }
-            }
+            const latestTimeline = await syncAutoCrossfadeFromLatestTimeline({
+                dispatch: dispatch as unknown as (action: unknown) => Promise<unknown> & { unwrap: () => Promise<unknown> },
+                getState,
+                newClipIds,
+            });
 
-            return { ok: true, imported: lastImported, newClipIds };
+            return { ok: true, imported: latestTimeline ?? lastImported, newClipIds };
         } finally {
             void webApi.endUndoGroup();
         }
@@ -603,19 +590,13 @@ export const importMultipleAudioFilesAtPosition = createAsyncThunk(
 
             const newClipIds = accumulatedNewClipIds.filter((id) => !!id && !beforeClipIds.has(id));
 
-            if (newClipIds.length > 0) {
-                const session = (getState() as { session: SessionState }).session;
-                if (session.autoCrossfadeEnabled) {
-                    const allClips = (lastImported as any)?.clips ?? [];
-                    const fadeUpdates = computeAutoCrossfadeFromPayload(allClips, newClipIds);
-                    if (fadeUpdates.length > 0) {
-                        const fadePromises = fadeUpdates.map((u) => dispatch(setClipStateRemote({ clipId: u.clipId, fadeInSec: u.fadeInSec, fadeOutSec: u.fadeOutSec })).unwrap());
-                        await Promise.allSettled(fadePromises);
-                    }
-                }
-            }
+            const latestTimeline = await syncAutoCrossfadeFromLatestTimeline({
+                dispatch: dispatch as unknown as (action: unknown) => Promise<unknown> & { unwrap: () => Promise<unknown> },
+                getState,
+                newClipIds,
+            });
 
-            return { ok: true, imported: lastImported, newClipIds };
+            return { ok: true, imported: latestTimeline ?? lastImported, newClipIds };
         } finally {
             void webApi.endUndoGroup();
         }

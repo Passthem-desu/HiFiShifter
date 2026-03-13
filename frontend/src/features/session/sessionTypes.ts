@@ -52,11 +52,15 @@ export interface ClipInfo {
     fadeInCurve: FadeCurveType;
     fadeOutCurve: FadeCurveType;
 }
+
+export type WaveformPreview = number[] | { l: number[]; r: number[] };
+
 export type ClipTemplate = Partial<Omit<ClipInfo, "id" | "color">> & {
     trackId: string;
     name: string;
     startSec: number;
     lengthSec: number;
+    waveformPreview?: WaveformPreview;
 };
 export interface AutomationPoint {
     id: string;

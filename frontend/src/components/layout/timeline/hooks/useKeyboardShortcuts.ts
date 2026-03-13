@@ -3,11 +3,7 @@ import type { AppDispatch } from "../../../../app/store";
 import { useAppSelector } from "../../../../app/hooks";
 import type { SessionState } from "../../../../features/session/sessionSlice";
 import {
-    checkpointHistory,
-    createClipsRemote,
     removeClipRemote,
-    selectClipRemote,
-    splitClipRemote,
 } from "../../../../features/session/sessionSlice";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { selectMergedKeybindings } from "../../../../features/keybindings/keybindingsSlice";
@@ -16,8 +12,6 @@ import type {
     Keybinding,
     KeybindingMap,
 } from "../../../../features/keybindings/types";
-import { applyAutoCrossfade } from "./autoCrossfade";
-import { webApi } from "../../../../services/webviewApi";
 
 /**
  * 判断 KeyboardEvent 是否匹配某个 Keybinding
@@ -78,8 +72,9 @@ export function useKeyboardShortcuts(deps: {
     setMultiSelectedClipIds: (ids: string[]) => void;
     clipClipboardRef: React.RefObject<ClipTemplate[] | null>;
     isEditableTarget: (target: EventTarget | null) => boolean;
-    autoCrossfadeEnabled: boolean;
     onNormalize: (ids: string[]) => void;
+    onPaste: () => void;
+    onSplitSelected: () => void;
 }) {
     const {
         sessionRef,
@@ -88,8 +83,9 @@ export function useKeyboardShortcuts(deps: {
         setMultiSelectedClipIds,
         clipClipboardRef,
         isEditableTarget,
-        autoCrossfadeEnabled,
         onNormalize,
+        onPaste,
+        onSplitSelected,
     } = deps;
 
     const keybindings = useAppSelector(selectMergedKeybindings);
@@ -118,13 +114,25 @@ export function useKeyboardShortcuts(deps: {
             const actionId = matchClipAction(e, keybindings);
             if (!actionId) return;
 
-            // clip.copy / clip.paste: PianoRoll 有自己的复制粘贴逻辑，焦点在其中时跳过
-            if (actionId === "clip.copy" || actionId === "clip.paste") {
+            // clip.copy / clip.cut / clip.paste: 焦点在 PianoRoll 时优先交给参数编辑器。
+            if (
+                actionId === "clip.copy" ||
+                actionId === "clip.cut" ||
+                actionId === "clip.paste"
+            ) {
                 const active = document.activeElement as HTMLElement | null;
-                if (
+                const inPianoRoll =
                     active?.hasAttribute("data-piano-roll-scroller") ||
-                    active?.closest?.("[data-piano-roll-scroller]")
-                ) {
+                    active?.closest?.("[data-piano-roll-scroller]");
+                if (inPianoRoll) {
+                    if (s.toolMode === "select") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const op = actionId.replace("clip.", "");
+                        window.dispatchEvent(
+                            new CustomEvent("hifi:editOp", { detail: { op } }),
+                        );
+                    }
                     return;
                 }
             }
@@ -175,6 +183,7 @@ export function useKeyboardShortcuts(deps: {
                         playbackRate: c.playbackRate,
                         fadeInSec: c.fadeInSec,
                         fadeOutSec: c.fadeOutSec,
+                        waveformPreview: s.clipWaveforms[c.id],
                     }));
                     (
                         clipClipboardRef as React.MutableRefObject<
@@ -217,6 +226,7 @@ export function useKeyboardShortcuts(deps: {
                         playbackRate: c.playbackRate,
                         fadeInSec: c.fadeInSec,
                         fadeOutSec: c.fadeOutSec,
+                        waveformPreview: s.clipWaveforms[c.id],
                     }));
                     (
                         clipClipboardRef as React.MutableRefObject<
@@ -242,65 +252,16 @@ export function useKeyboardShortcuts(deps: {
                 }
 
                 case "clip.paste": {
-                    const tpl = clipClipboardRef.current;
-                    if (!tpl || tpl.length === 0) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    const playhead = s.playheadSec ?? 0;
-                    const minStart = tpl
-                        .map((c) => c.startSec)
-                        .reduce(
-                            (a, b) => Math.min(a, b),
-                            Number.POSITIVE_INFINITY,
-                        );
-                    const delta =
-                        Number.isFinite(minStart) &&
-                        minStart !== Number.POSITIVE_INFINITY
-                            ? playhead - minStart
-                            : 0;
-                    const templates = tpl.map((c) => ({
-                        ...c,
-                        startSec: Math.max(0, c.startSec + delta),
-                    }));
-                    dispatch(checkpointHistory());
-                    void (async () => {
-                        await webApi.beginUndoGroup();
-                        try {
-                            const payload = await dispatch(createClipsRemote({ templates })).unwrap();
-                            const created: string[] =
-                                payload?.createdClipIds ?? [];
-                            if (!Array.isArray(created) || created.length === 0)
-                                return;
-                            setMultiSelectedClipIds(created);
-                            void dispatch(selectClipRemote(created[0]));
-                            if (autoCrossfadeEnabled) {
-                                const latestSession = sessionRef.current;
-                                if (latestSession) {
-                                    await new Promise((r) => setTimeout(r, 0));
-                                    applyAutoCrossfade(
-                                        latestSession,
-                                        created,
-                                        dispatch,
-                                    );
-                                }
-                            }
-                        } finally {
-                            void webApi.endUndoGroup();
-                        }
-                    })().catch(() => undefined);
+                    onPaste();
                     return;
                 }
 
                 case "clip.split": {
-                    const clipId = s.selectedClipId;
-                    if (!clipId) return;
                     e.preventDefault();
                     e.stopPropagation();
-                    const splitSec = Math.max(
-                        0,
-                        Number(s.playheadSec ?? 0) || 0,
-                    );
-                    void dispatch(splitClipRemote({ clipId, splitSec }));
+                    onSplitSelected();
                     return;
                 }
 
@@ -324,5 +285,7 @@ export function useKeyboardShortcuts(deps: {
         isEditableTarget,
         keybindings,
         onNormalize,
+        onPaste,
+        onSplitSelected,
     ]);
 }

@@ -5,6 +5,8 @@ import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
 import {
     addTrackRemote,
+    checkpointHistory,
+    createClipsRemote,
     removeTrackRemote,
     selectTrackRemote,
     setTrackStateRemote,
@@ -31,8 +33,10 @@ import { useClipDrag } from "./timeline/hooks/useClipDrag";
 import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
 import { useKeyboardShortcuts } from "./timeline/hooks/useKeyboardShortcuts";
+import { computeAutoCrossfadeFromPayload } from "./timeline/hooks/autoCrossfade";
 import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../features/keybindings/types";
+import { webApi } from "../../services/webviewApi";
 
 import {
     BackgroundGrid,
@@ -43,6 +47,7 @@ import {
     MAX_ROW_HEIGHT,
     MIN_PX_PER_SEC,
     MIN_ROW_HEIGHT,
+    TrackAreaContextMenu,
     TimelineScrollArea,
     TimeRuler,
     TrackLane,
@@ -567,6 +572,11 @@ export const TimelinePanel: React.FC = () => {
         y: number;
         clipId: string;
     } | null>(null);
+    const [trackAreaMenu, setTrackAreaMenu] = useState<{
+        x: number;
+        y: number;
+        trackId: string;
+    } | null>(null);
 
     /** 导入模式选择菜单 */
     const [importModeMenu, setImportModeMenu] = useState<{
@@ -852,6 +862,98 @@ export const TimelinePanel: React.FC = () => {
         [dispatch, sessionRef],
     );
 
+    const splitClipIdsAtPlayhead = React.useCallback(
+        (clipIds: string[]) => {
+            const splitSec = Math.max(0, Number(sessionRef.current.playheadSec ?? 0) || 0);
+            const eligibleIds = clipIds.filter((id) => {
+                const c = sessionRef.current.clips.find((clip) => clip.id === id);
+                if (!c) return false;
+                return splitSec >= c.startSec && splitSec <= c.startSec + c.lengthSec;
+            });
+            for (const clipId of eligibleIds) {
+                void dispatch(splitClipRemote({ clipId, splitSec }));
+            }
+            return eligibleIds;
+        },
+        [dispatch],
+    );
+
+    const splitSelectedAtPlayhead = React.useCallback(() => {
+        const selectedIds =
+            multiSelectedClipIds.length > 0
+                ? [...multiSelectedClipIds]
+                : sessionRef.current.selectedClipId
+                  ? [sessionRef.current.selectedClipId]
+                  : [];
+        if (selectedIds.length === 0) return;
+        splitClipIdsAtPlayhead(selectedIds);
+    }, [multiSelectedClipIds, splitClipIdsAtPlayhead]);
+
+    const pasteClipsAtPlayhead = React.useCallback(() => {
+        const tpl = clipClipboardRef.current;
+        if (!tpl || tpl.length === 0) return;
+
+        const playhead = sessionRef.current.playheadSec ?? 0;
+        const minStart = tpl
+            .map((c) => c.startSec)
+            .reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY);
+        const delta =
+            Number.isFinite(minStart) && minStart !== Number.POSITIVE_INFINITY
+                ? playhead - minStart
+                : 0;
+        const templates = tpl.map((c) => ({
+            ...c,
+            startSec: Math.max(0, c.startSec + delta),
+        }));
+
+        dispatch(checkpointHistory());
+        void (async () => {
+            await webApi.beginUndoGroup();
+            try {
+                const payload = await dispatch(
+                    createClipsRemote({
+                        templates,
+                        options: { placeOnSelectedTrack: true },
+                    }),
+                ).unwrap();
+                const created: string[] = payload?.createdClipIds ?? [];
+                if (!Array.isArray(created) || created.length === 0) return;
+
+                setMultiSelectedClipIds(created);
+                void dispatch(selectClipRemote(created[0]));
+
+                if (sessionRef.current.autoCrossfadeEnabled) {
+                    const allClips = (payload?.clips ?? []) as Array<{
+                        id?: string;
+                        track_id?: string;
+                        start_sec?: number;
+                        length_sec?: number;
+                        fade_in_sec?: number;
+                        fade_out_sec?: number;
+                    }>;
+                    const fadeUpdates = computeAutoCrossfadeFromPayload(
+                        allClips,
+                        created,
+                    );
+                    if (fadeUpdates.length > 0) {
+                        const fadePromises = fadeUpdates.map((u) =>
+                            dispatch(
+                                setClipStateRemote({
+                                    clipId: u.clipId,
+                                    fadeInSec: u.fadeInSec,
+                                    fadeOutSec: u.fadeOutSec,
+                                }),
+                            ).unwrap(),
+                        );
+                        await Promise.allSettled(fadePromises);
+                    }
+                }
+            } finally {
+                void webApi.endUndoGroup();
+            }
+        })().catch(() => undefined);
+    }, [dispatch, setMultiSelectedClipIds]);
+
     useKeyboardShortcuts({
         sessionRef,
         dispatch,
@@ -859,20 +961,43 @@ export const TimelinePanel: React.FC = () => {
         setMultiSelectedClipIds,
         clipClipboardRef,
         isEditableTarget,
-        autoCrossfadeEnabled: s.autoCrossfadeEnabled,
         onNormalize: normalizeClips,
+        onPaste: pasteClipsAtPlayhead,
+        onSplitSelected: splitSelectedAtPlayhead,
     });
+
     useEffect(() => {
-        if (!contextMenu) return;
+        function onEditOp(e: Event) {
+            const op = (e as CustomEvent<{ op?: string }>).detail?.op;
+            const active = document.activeElement as HTMLElement | null;
+            const inPianoRoll =
+                active?.hasAttribute("data-piano-roll-scroller") ||
+                active?.closest?.("[data-piano-roll-scroller]");
+            if (inPianoRoll) return;
+            if (op === "paste") {
+                pasteClipsAtPlayhead();
+            }
+            if (op === "split") {
+                splitSelectedAtPlayhead();
+            }
+        }
+        window.addEventListener("hifi:editOp", onEditOp as EventListener);
+        return () =>
+            window.removeEventListener("hifi:editOp", onEditOp as EventListener);
+    }, [pasteClipsAtPlayhead, splitSelectedAtPlayhead]);
+
+    useEffect(() => {
+        if (!contextMenu && !trackAreaMenu) return;
         function onAnyPointerDown(e: PointerEvent) {
             const target = e.target as HTMLElement | null;
             if (target?.closest?.("[data-hs-context-menu='1']")) return;
             setContextMenu(null);
+            setTrackAreaMenu(null);
         }
         window.addEventListener("pointerdown", onAnyPointerDown, true);
         return () =>
             window.removeEventListener("pointerdown", onAnyPointerDown, true);
-    }, [contextMenu]);
+    }, [contextMenu, trackAreaMenu]);
 
     // Auto-scroll: keep playhead visible during playback
     useEffect(() => {
@@ -1062,6 +1187,20 @@ export const TimelinePanel: React.FC = () => {
                     }}
                     onContextMenu={(e) => {
                         e.preventDefault();
+                        setContextMenu(null);
+                        const trackId = trackIdFromClientY(e.clientY);
+                        if (!trackId) {
+                            setTrackAreaMenu(null);
+                            return;
+                        }
+                        if (sessionRef.current.selectedTrackId !== trackId) {
+                            void dispatch(selectTrackRemote(trackId));
+                        }
+                        setTrackAreaMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            trackId,
+                        });
                     }}
                     onPointerDown={onSelectionRectPointerDown}
                     onDragOver={(e) => {
@@ -1205,6 +1344,15 @@ export const TimelinePanel: React.FC = () => {
                         }
                     }}
                     onPointerDownCapture={(e) => {
+                        if (e.button === 0 || e.button === 2) {
+                            const trackId = trackIdFromClientY(e.clientY);
+                            if (
+                                trackId &&
+                                trackId !== sessionRef.current.selectedTrackId
+                            ) {
+                                void dispatch(selectTrackRemote(trackId));
+                            }
+                        }
                         if (e.button !== 1) return;
                         if (isEditableTarget(e.target)) return;
                         e.preventDefault();
@@ -1213,6 +1361,7 @@ export const TimelinePanel: React.FC = () => {
                     onMouseDown={(e) => {
                         if (e.button !== 0) return;
                         setContextMenu(null);
+                        setTrackAreaMenu(null);
                         setMultiSelectedClipIds([]);
                         const scroller = scrollRef.current;
                         if (!scroller) return;
@@ -1230,6 +1379,13 @@ export const TimelinePanel: React.FC = () => {
                                 (scroller.offsetWidth - scroller.clientWidth)
                         )
                             return;
+                        const trackId = trackIdFromClientY(e.clientY);
+                        if (
+                            trackId &&
+                            trackId !== sessionRef.current.selectedTrackId
+                        ) {
+                            void dispatch(selectTrackRemote(trackId));
+                        }
                         setPlayheadFromClientX(
                             e.clientX,
                             bounds,
@@ -1326,6 +1482,7 @@ export const TimelinePanel: React.FC = () => {
                                         clientX,
                                         clientY,
                                     ) => {
+                                        setTrackAreaMenu(null);
                                         setContextMenu({
                                             x: clientX,
                                             y: clientY,
@@ -1619,6 +1776,21 @@ export const TimelinePanel: React.FC = () => {
                                   selectedClips={selectedClips}
                                   overlappingClips={overlappingFadeClips}
                                   playheadInClip={playheadInClip}
+                                  canSplitSelected={
+                                      selectedClips.some((c) => {
+                                          const splitSec = Math.max(
+                                              0,
+                                              Number(
+                                                  sessionRef.current.playheadSec ??
+                                                      0,
+                                              ) || 0,
+                                          );
+                                          return (
+                                              splitSec >= c.startSec &&
+                                              splitSec <= c.startSec + c.lengthSec
+                                          );
+                                      })
+                                  }
                                   onClose={() => setContextMenu(null)}
                                   onDelete={(ids) => {
                                       setContextMenu(null);
@@ -1650,7 +1822,12 @@ export const TimelinePanel: React.FC = () => {
                                   onCopy={(ids) => {
                                       const templates = sessionRef.current.clips
                                           .filter((c) => ids.includes(c.id))
-                                          .map((c) => ({ ...c }));
+                                          .map((c) => ({
+                                              ...c,
+                                              waveformPreview:
+                                                  sessionRef.current
+                                                      .clipWaveforms[c.id],
+                                          }));
                                       if (templates.length > 0) {
                                           clipClipboardRef.current = templates;
                                       }
@@ -1658,7 +1835,12 @@ export const TimelinePanel: React.FC = () => {
                                   onCut={(ids) => {
                                       const templates = sessionRef.current.clips
                                           .filter((c) => ids.includes(c.id))
-                                          .map((c) => ({ ...c }));
+                                          .map((c) => ({
+                                              ...c,
+                                              waveformPreview:
+                                                  sessionRef.current
+                                                      .clipWaveforms[c.id],
+                                          }));
                                       if (templates.length > 0) {
                                           clipClipboardRef.current = templates;
                                       }
@@ -1668,16 +1850,9 @@ export const TimelinePanel: React.FC = () => {
                                           void dispatch(removeClipRemote(id));
                                       }
                                   }}
-                                  onSplit={(clipId) => {
+                                  onSplit={(clipIds) => {
                                       setContextMenu(null);
-                                      void dispatch(
-                                          splitClipRemote({
-                                              clipId,
-                                              splitSec:
-                                                  sessionRef.current
-                                                      .playheadSec,
-                                          }),
-                                      );
+                                      splitClipIdsAtPlayhead(clipIds);
                                   }}
                                   onGlue={(ids) => {
                                       setContextMenu(null);
@@ -1713,6 +1888,41 @@ export const TimelinePanel: React.FC = () => {
                           );
                       })()
                     : null}
+
+                {trackAreaMenu ? (
+                    <TrackAreaContextMenu
+                        x={trackAreaMenu.x}
+                        y={trackAreaMenu.y}
+                        canPaste={
+                            Boolean(clipClipboardRef.current) &&
+                            (clipClipboardRef.current?.length ?? 0) > 0
+                        }
+                        canSplit={
+                            (multiSelectedClipIds.length > 0
+                                ? multiSelectedClipIds
+                                : sessionRef.current.selectedClipId
+                                  ? [sessionRef.current.selectedClipId]
+                                  : []
+                            ).some((id) => {
+                                const clip = sessionRef.current.clips.find(
+                                    (c) => c.id === id,
+                                );
+                                if (!clip) return false;
+                                const splitSec = Math.max(
+                                    0,
+                                    Number(sessionRef.current.playheadSec ?? 0) || 0,
+                                );
+                                return (
+                                    splitSec >= clip.startSec &&
+                                    splitSec <= clip.startSec + clip.lengthSec
+                                );
+                            })
+                        }
+                        onPaste={pasteClipsAtPlayhead}
+                        onSplit={splitSelectedAtPlayhead}
+                        onClose={() => setTrackAreaMenu(null)}
+                    />
+                ) : null}
             </Flex>
         </Flex>
     );

@@ -66,15 +66,104 @@ export const addClipOnTrack = createAsyncThunk(
 export const createClipsRemote = createAsyncThunk(
     "session/createClipsRemote",
     async (
-        payload: { templates: ClipTemplate[] },
-        { getState, rejectWithValue },
+        payload: {
+            templates: ClipTemplate[];
+            options?: {
+                /**
+                 * 粘贴时将模板按源轨道相对顺序重映射到当前选中轨道，
+                 * 并在轨道不足时自动创建新轨道。
+                 */
+                placeOnSelectedTrack?: boolean;
+            };
+        },
+        { getState, dispatch, rejectWithValue },
     ) => {
+        let templates = payload.templates;
+
+        if (payload.options?.placeOnSelectedTrack && templates.length > 0) {
+            const state = getState() as { session: SessionState };
+            const selectedTrackId = state.session.selectedTrackId;
+            const selectedTrackIndex = selectedTrackId
+                ? state.session.tracks.findIndex((t) => t.id === selectedTrackId)
+                : -1;
+
+            if (selectedTrackId && selectedTrackIndex >= 0) {
+                const trackOrder = new Map<string, number>();
+                for (let i = 0; i < state.session.tracks.length; i += 1) {
+                    trackOrder.set(state.session.tracks[i].id, i);
+                }
+
+                const sourceTrackIds = Array.from(
+                    new Set(
+                        templates
+                            .map((t) => t.trackId)
+                            .filter((id): id is string => Boolean(id)),
+                    ),
+                ).sort((a, b) => {
+                    const ai = trackOrder.get(a) ?? Number.MAX_SAFE_INTEGER;
+                    const bi = trackOrder.get(b) ?? Number.MAX_SAFE_INTEGER;
+                    if (ai !== bi) return ai - bi;
+                    return a.localeCompare(b);
+                });
+
+                const sourceGroupKeys =
+                    sourceTrackIds.length > 0 ? sourceTrackIds : ["__default__"];
+
+                let workingTracks = state.session.tracks.map((t) => ({
+                    id: t.id,
+                }));
+                const neededLastIndex =
+                    selectedTrackIndex + sourceGroupKeys.length - 1;
+
+                while (workingTracks.length - 1 < neededLastIndex) {
+                    const beforeIds = new Set(workingTracks.map((t) => t.id));
+                    const added = await dispatch(
+                        addTrackRemote({ name: undefined, parentTrackId: null }),
+                    ).unwrap();
+                    workingTracks = (added.tracks ?? []).map((t) => ({
+                        id: t.id,
+                    }));
+
+                    const createdTrackId =
+                        workingTracks.find((t) => !beforeIds.has(t.id))?.id ??
+                        added.selected_track_id ??
+                        workingTracks[workingTracks.length - 1]?.id ??
+                        null;
+
+                    if (!createdTrackId) {
+                        return rejectWithValue("add_track_failed");
+                    }
+                }
+
+                const sourceToTargetTrack = new Map<string, string>();
+                for (let i = 0; i < sourceGroupKeys.length; i += 1) {
+                    const targetTrack = workingTracks[selectedTrackIndex + i];
+                    if (!targetTrack?.id) {
+                        return rejectWithValue("add_track_failed");
+                    }
+                    sourceToTargetTrack.set(sourceGroupKeys[i], targetTrack.id);
+                }
+
+                const defaultTargetTrack =
+                    sourceToTargetTrack.get(sourceGroupKeys[0]) ?? selectedTrackId;
+                templates = templates.map((tpl) => {
+                    const key = tpl.trackId && sourceToTargetTrack.has(tpl.trackId)
+                        ? tpl.trackId
+                        : sourceGroupKeys[0];
+                    return {
+                        ...tpl,
+                        trackId: sourceToTargetTrack.get(key) ?? defaultTargetTrack,
+                    };
+                });
+            }
+        }
+
         const state0 = getState() as { session: SessionState };
         const knownIds = new Set(state0.session.clips.map((c) => c.id));
 
         // 并行创建所�?clip，提升批量操作性能
         const results = await Promise.all(
-            payload.templates.map(async (tpl) => {
+            templates.map(async (tpl) => {
                 const added = await webApi.addClip({
                     trackId: tpl.trackId,
                     name: tpl.name,
@@ -112,6 +201,22 @@ export const createClipsRemote = createAsyncThunk(
                         (updated as { error?: { message?: string } }).error?.message ??
                             "set_clip_state_failed",
                     );
+                }
+
+                // Keep waveform visible after cut→paste even when backend cannot
+                // reconstruct preview metadata from source_path (e.g. stale/relative path).
+                if (Array.isArray(tpl.waveformPreview)) {
+                    const updatedTimeline = updated as TimelineState;
+                    const createdClip = updatedTimeline.clips.find(
+                        (c) => c.id === createdId,
+                    );
+                    if (
+                        createdClip &&
+                        (!Array.isArray(createdClip.waveform_preview) ||
+                            createdClip.waveform_preview.length === 0)
+                    ) {
+                        createdClip.waveform_preview = tpl.waveformPreview;
+                    }
                 }
 
                 return { createdId, timeline: updated as TimelineState };

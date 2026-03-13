@@ -10,12 +10,15 @@ import {
     moveClipStart,
     moveClipTrack,
     selectClipRemote,
+    setClipStateRemote,
 } from "../../../../features/session/sessionSlice";
-// 已移除未使用的 setClipStateRemote 导入
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
-import { applyAutoCrossfade } from "./autoCrossfade";
+import {
+    applyAutoCrossfade,
+    computeAutoCrossfadeFromPayload,
+} from "./autoCrossfade";
 import { webApi } from "../../../../services/webviewApi";
 
 const NEW_TRACK_SENTINEL = "__hs_new_track__";
@@ -336,10 +339,30 @@ export function useClipDrag(deps: {
                             void dispatch(selectClipRemote(created[0]));
                             // 复制拖动后，尝试对新创建的 clip 应用自动交叉淡化
                             if (autoCrossfadeEnabled) {
-                                // 使用 setTimeout 确保 Redux store 已经更新
-                                await new Promise((r) => setTimeout(r, 0));
-                                const latestSession = sessionRef.current;
-                                applyAutoCrossfade(latestSession, created, dispatch);
+                                const allClips = (payload?.clips ?? []) as Array<{
+                                    id?: string;
+                                    track_id?: string;
+                                    start_sec?: number;
+                                    length_sec?: number;
+                                    fade_in_sec?: number;
+                                    fade_out_sec?: number;
+                                }>;
+                                const fadeUpdates = computeAutoCrossfadeFromPayload(
+                                    allClips,
+                                    created,
+                                );
+                                if (fadeUpdates.length > 0) {
+                                    const fadePromises = fadeUpdates.map((u) =>
+                                        dispatch(
+                                            setClipStateRemote({
+                                                clipId: u.clipId,
+                                                fadeInSec: u.fadeInSec,
+                                                fadeOutSec: u.fadeOutSec,
+                                            }),
+                                        ).unwrap(),
+                                    );
+                                    await Promise.allSettled(fadePromises);
+                                }
                             }
                         } finally {
                             void webApi.endUndoGroup();

@@ -99,13 +99,14 @@ export const ClipContextMenu: React.FC<{
     overlappingClips?: ClipInfo[];
     /** 播放头是否在 clip 范围内（用于分割按钮启用判断）*/
     playheadInClip: boolean;
+    canSplitSelected: boolean;
     onClose: () => void;
     onDelete: (ids: string[]) => void;
     onMute: (ids: string[], muted: boolean) => void;
     onRename: (clipId: string) => void;
     onCopy: (ids: string[]) => void;
     onCut: (ids: string[]) => void;
-    onSplit: (clipId: string) => void;
+    onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
     onFadeCurveChange?: (
@@ -120,6 +121,7 @@ export const ClipContextMenu: React.FC<{
     selectedClips,
     overlappingClips = [],
     playheadInClip,
+    canSplitSelected,
     onClose,
     onDelete,
     onMute,
@@ -221,6 +223,14 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                     <MenuItem
+                        label={t("ctx_split_at_playhead")}
+                        disabled={!canSplitSelected}
+                        onClick={() => {
+                            onSplit(ids);
+                            close();
+                        }}
+                    />
+                    <MenuItem
                         label={t("ctx_normalize_all")}
                         shortcut={normalizeShortcut}
                         onClick={() => {
@@ -281,7 +291,7 @@ export const ClipContextMenu: React.FC<{
                         label={t("ctx_split_at_playhead")}
                         disabled={!playheadInClip}
                         onClick={() => {
-                            onSplit(clip.id);
+                            onSplit([clip.id]);
                             close();
                         }}
                     />
