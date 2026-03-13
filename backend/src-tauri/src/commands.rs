@@ -158,6 +158,11 @@ pub fn open_audio_dialog() -> serde_json::Value {
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn open_audio_dialog_multi() -> serde_json::Value {
+    dialogs::open_audio_dialog_multi()
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn pick_output_path() -> serde_json::Value {
     dialogs::pick_output_path()
 }

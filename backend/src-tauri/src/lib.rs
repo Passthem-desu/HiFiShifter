@@ -148,6 +148,7 @@ pub fn run() {
             commands::save_project,
             commands::save_project_as,
             commands::open_audio_dialog,
+            commands::open_audio_dialog_multi,
             commands::pick_output_path,
             commands::pick_directory,
             commands::open_midi_dialog,

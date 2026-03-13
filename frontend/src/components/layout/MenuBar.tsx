@@ -18,7 +18,10 @@ import {
     saveProjectRemote,
     saveProjectAsRemote,
 } from "../../features/session/sessionSlice";
-import { importMultipleAudioFilesAtPosition } from "../../features/session/thunks/importThunks";
+import {
+    importAudioFromDialog,
+    importMultipleAudioAtPosition,
+} from "../../features/session/thunks/importThunks";
 import { fileBrowserApi } from "../../services/api/fileBrowser";
 import { useAppTheme } from "../../theme/AppThemeProvider";
 import { GlobeIcon } from "@radix-ui/react-icons";
@@ -70,6 +73,11 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const [vibratoParamRange, setVibratoParamRange] = useState<{ min: number; max: number } | undefined>(undefined);
     const [quantizeOpen, setQuantizeOpen] = useState(false);
     const [meanQuantizeOpen, setMeanQuantizeOpen] = useState(false);
+    const [menuImportMode, setMenuImportMode] = useState<{
+        audioPaths: string[];
+        trackId: string | null;
+        startSec: number;
+    } | null>(null);
 
     const isPitchParam = s.editParam === "pitch";
 
@@ -103,6 +111,33 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         window.dispatchEvent(new CustomEvent("hifi:editOp", { detail: { op, ...data } }));
     }, []);
 
+    const handleImportAudioFromMenu = useCallback(async () => {
+        try {
+            const res = await dispatch(importAudioFromDialog()).unwrap() as {
+                canceled?: boolean;
+                requiresModeChoice?: boolean;
+                audioPaths?: string[];
+                trackId?: string | null;
+                startSec?: number;
+            };
+            if (res?.canceled || !res?.requiresModeChoice) {
+                return;
+            }
+            if (!Array.isArray(res.audioPaths) || res.audioPaths.length <= 1) {
+                return;
+            }
+            setMenuImportMode({
+                audioPaths: res.audioPaths,
+                trackId: res.trackId ?? s.selectedTrackId ?? null,
+                startSec: typeof res.startSec === "number"
+                    ? res.startSec
+                    : (s.playheadSec ?? 0),
+            });
+        } catch {
+            // Error state is already handled by session thunk reducers.
+        }
+    }, [dispatch, s.playheadSec, s.selectedTrackId]);
+
     async function handleExport() {
         const outputPath = s.outputPath?.trim();
         if (!outputPath) {
@@ -121,32 +156,6 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         if (!result.ok || result.canceled || !result.path) return;
         await dispatch(exportSeparated(result.path));
     }
-
-    const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-    const [pendingFiles, setPendingFiles] = useState<File[] | null>(null);
-    const [importModalOpen, setImportModalOpen] = useState(false);
-    const [importMode, setImportMode] = useState<"across-time" | "across-tracks">("across-time");
-
-    async function handleConfirmImportFiles() {
-        if (!pendingFiles || pendingFiles.length === 0) return;
-        // Use selected track if any, otherwise null to create new track
-        const trackId = s.selectedTrackId ?? null;
-        const startSec = s.playheadSec ?? 0;
-        await dispatch(importMultipleAudioFilesAtPosition({ files: pendingFiles, mode: importMode, trackId, startSec }));
-        setPendingFiles(null);
-        setImportModalOpen(false);
-    }
-
-    function handleFilesSelected(files: FileList | null) {
-        if (!files || files.length === 0) return;
-        setPendingFiles(Array.from(files));
-        setImportModalOpen(true);
-    }
-
-    // Ensure hidden file input exists in DOM
-    React.useEffect(() => {
-        if (!fileInputRef.current) return;
-    }, [fileInputRef]);
 
     return (
         <Flex
@@ -221,11 +230,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
                     <DropdownMenu.Item
                         onSelect={() => {
-                            // trigger native file picker (allow multiple)
-                            if (fileInputRef.current) {
-                                fileInputRef.current.value = "";
-                                fileInputRef.current.click();
-                            }
+                            void handleImportAudioFromMenu();
                         }}
                     >
                         {t("menu_import_audio")} {" "}
@@ -502,36 +507,65 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 onOpenChange={setKbDialogOpen}
             />
 
-            {/* Hidden native file picker for import (multiple) */}
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*"
-                multiple
-                className="hidden"
-                onChange={(e) => handleFilesSelected(e.target.files)}
-            />
-
-            {/* Simple import settings modal */}
-            {importModalOpen && (
-                <div className="fixed inset-0 z-[9999]" onClick={() => setImportModalOpen(false)}>
+            {/* 菜单导入模式选择（多文件） */}
+            {menuImportMode && (
+                <div
+                    className="fixed inset-0 z-[9999] bg-black/35 flex items-center justify-center"
+                    onClick={() => setMenuImportMode(null)}
+                >
                     <div
-                        className="absolute bg-qt-panel border border-qt-border rounded shadow-lg py-3 px-4 min-w-[300px]"
-                        style={{ left: '50%', top: '40%', transform: 'translate(-50%, -40%)' }}
+                        className="w-[380px] max-w-[92vw] bg-qt-panel border border-qt-border rounded-md shadow-xl"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <div className="mb-2 text-sm">{tAny("import_dialog_title")}</div>
-                        <div className="mb-3">
-                            <label className="mr-3">
-                                <input type="radio" name="impMode" value="across-time" checked={importMode === 'across-time'} onChange={() => setImportMode('across-time')} /> {tAny("import_across_time")}
-                            </label>
-                            <label>
-                                <input type="radio" name="impMode" value="across-tracks" checked={importMode === 'across-tracks'} onChange={() => setImportMode('across-tracks')} /> {tAny("import_across_tracks")}
-                            </label>
+                        <div className="px-4 py-3 border-b border-qt-border">
+                            <div className="text-sm font-medium text-qt-text">
+                                {tAny("import_dialog_title") || t("menu_import_audio")}
+                            </div>
+                            <div className="mt-1 text-xs text-qt-text-muted">
+                                {menuImportMode.audioPaths.length} file(s) selected
+                            </div>
                         </div>
-                        <div className="flex justify-end gap-2">
-                            <button className="px-3 py-1 text-sm" onClick={() => { setImportModalOpen(false); setPendingFiles(null); }}>{tAny("cancel")}</button>
-                            <button className="px-3 py-1 text-sm bg-qt-primary text-white rounded" onClick={() => void handleConfirmImportFiles()}>{tAny("import")}</button>
+
+                        <div className="px-3 py-3 flex flex-col gap-2">
+                            <button
+                                className="w-full text-left px-3 py-2 rounded text-sm text-qt-text border border-qt-border hover:bg-qt-hover"
+                                onClick={() => {
+                                    const m = menuImportMode;
+                                    setMenuImportMode(null);
+                                    void dispatch(importMultipleAudioAtPosition({
+                                        audioPaths: m.audioPaths,
+                                        mode: "across-time",
+                                        trackId: m.trackId,
+                                        startSec: m.startSec,
+                                    }));
+                                }}
+                            >
+                                {t("import_across_time")}
+                            </button>
+                            <button
+                                className="w-full text-left px-3 py-2 rounded text-sm text-qt-text border border-qt-border hover:bg-qt-hover"
+                                onClick={() => {
+                                    const m = menuImportMode;
+                                    setMenuImportMode(null);
+                                    void dispatch(importMultipleAudioAtPosition({
+                                        audioPaths: m.audioPaths,
+                                        mode: "across-tracks",
+                                        trackId: m.trackId,
+                                        startSec: m.startSec,
+                                    }));
+                                }}
+                            >
+                                {t("import_across_tracks")}
+                            </button>
+                        </div>
+
+                        <div className="px-3 py-2 border-t border-qt-border flex justify-end">
+                            <button
+                                className="px-3 py-1.5 text-xs text-qt-text hover:bg-qt-hover rounded"
+                                onClick={() => setMenuImportMode(null)}
+                            >
+                                {tAny("cancel") || "Cancel"}
+                            </button>
                         </div>
                     </div>
                 </div>

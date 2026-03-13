@@ -1317,10 +1317,18 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     canceled?: boolean;
                     path?: string;
+                    requiresModeChoice?: boolean;
                     imported?: { ok?: boolean } & TimelineState;
                 };
                 if (payload.canceled) {
                     state.status = "Import canceled";
+                    return;
+                }
+                if (payload.requiresModeChoice) {
+                    if (payload.path) {
+                        state.audioPath = payload.path;
+                    }
+                    state.status = "Select import mode";
                     return;
                 }
                 if (payload.path) {
@@ -1427,6 +1435,9 @@ const sessionSlice = createSlice({
                     applyTimelineState(state, payload.imported as any);
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                        // Select all imported clips
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
                     }
                 }
             })

@@ -11,29 +11,58 @@ const setAudioPathAction = (path: string) => ({
 });
 export const importAudioFromDialog = createAsyncThunk(
     "session/importAudioFromDialog",
-    async (_, { dispatch, rejectWithValue }) => {
-        const picked = await webApi.openAudioDialog();
+    async (_, { dispatch, rejectWithValue, getState }) => {
+        const picked = await webApi.openAudioDialogMultiple();
         if (!picked.ok) {
             return rejectWithValue("open_audio_dialog_failed");
         }
-        if (picked.canceled || !picked.path) {
+        const pickedPaths = Array.isArray(picked.paths)
+            ? picked.paths.filter((p): p is string => Boolean(p))
+            : [];
+        if (picked.canceled || pickedPaths.length === 0) {
             return { ok: true, canceled: true };
         }
 
-        dispatch(setAudioPathAction(picked.path));
-        const imported = await webApi.importAudioItem(picked.path);
-        if (!(imported as { ok?: boolean }).ok) {
-            return rejectWithValue(
-                (imported as { error?: { message?: string } }).error?.message ??
-                    "import_audio_item_failed",
-            );
+        // Use current playhead position as import start and preserve playhead.
+        const state = getState() as { session: SessionState };
+        const startSec = state.session.playheadSec ?? 0;
+        const trackId = state.session.selectedTrackId ?? null;
+        const firstPath = pickedPaths[0];
+
+        dispatch(setAudioPathAction(firstPath));
+
+        if (pickedPaths.length > 1) {
+            return {
+                ok: true,
+                canceled: false,
+                path: firstPath,
+                requiresModeChoice: true,
+                audioPaths: pickedPaths,
+                trackId,
+                startSec,
+            };
         }
-        return {
-            ok: true,
-            canceled: false,
-            path: picked.path,
-            imported,
-        };
+
+        // Delegate to importAudioAtPosition so imported clips start at playhead
+        // and selection/undo handling is consistent with other import flows.
+        try {
+            const res = await dispatch(
+                importAudioAtPosition({
+                    audioPath: firstPath,
+                    trackId,
+                    startSec,
+                }),
+            ).unwrap();
+            return {
+                ok: true,
+                canceled: false,
+                path: firstPath,
+                imported: res.imported ?? res,
+                newClipIds: res.newClipIds,
+            };
+        } catch (err) {
+            return rejectWithValue(err instanceof Error ? err.message : "import_audio_item_failed");
+        }
     },
 );
 
