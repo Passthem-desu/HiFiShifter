@@ -13,6 +13,7 @@ import type {
     FadeCurveType,
     GridSize,
     PitchSnapUnit,
+    ScaleHighlightMode,
     ToolMode,
     TrackInfo,
 } from "./sessionTypes";
@@ -45,6 +46,7 @@ import {
     redoRemote,
     saveProjectAsRemote,
     saveProjectRemote,
+    setProjectBaseScaleRemote,
     undoRemote,
 } from "./thunks/projectThunks";
 
@@ -122,8 +124,10 @@ export interface SessionState {
     /** 音高吸附 */
     pitchSnapEnabled: boolean;
     pitchSnapUnit: PitchSnapUnit;
-    /** 基准音阶键名，如 "C" "Db" 等 */
-    pitchSnapScale: import("../../utils/musicalScales").ScaleKey;
+    /** 音高吸附容差（音分） */
+    pitchSnapToleranceCents: number;
+    /** 音阶高亮模式：always / off */
+    scaleHighlightMode: ScaleHighlightMode;
     /** 播放头缩放 */
     playheadZoomEnabled: boolean;
     /** 自动滚动（播放时跟随播放头） */
@@ -198,6 +202,7 @@ export interface SessionState {
         path: string | null;
         dirty: boolean;
         recent: string[];
+        baseScale: import("../../utils/musicalScales").ScaleKey;
     };
 
     busy: boolean;
@@ -460,9 +465,15 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
               path?: string | null;
               dirty?: boolean;
               recent?: string[];
+              base_scale?: string;
           }
         | undefined;
     if (project) {
+        const parsedBaseScale = (
+            SCALE_KEYS as readonly string[]
+        ).includes(String(project.base_scale ?? ""))
+            ? (project.base_scale as import("../../utils/musicalScales").ScaleKey)
+            : state.project.baseScale;
         state.project = {
             name: String(project.name ?? state.project.name ?? "Untitled"),
             path:
@@ -473,6 +484,7 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
             recent: Array.isArray(project.recent)
                 ? project.recent
                 : state.project.recent,
+            baseScale: parsedBaseScale,
         };
     }
 
@@ -595,7 +607,8 @@ const initialState: SessionState = {
     gridSnapEnabled: true,
     pitchSnapEnabled: false,
     pitchSnapUnit: "semitone",
-    pitchSnapScale: "C",
+    pitchSnapToleranceCents: 0,
+    scaleHighlightMode: "off",
     playheadZoomEnabled: false,
     autoScrollEnabled: false,
     showClipboardPreview: true,
@@ -659,6 +672,7 @@ const initialState: SessionState = {
         path: null,
         dirty: false,
         recent: [],
+        baseScale: "C",
     },
 
     busy: false,
@@ -678,6 +692,7 @@ export {
     openReaperFromDialog,
     saveProjectRemote,
     saveProjectAsRemote,
+    setProjectBaseScaleRemote,
 } from "./thunks/projectThunks";
 
 export {
@@ -776,16 +791,34 @@ const sessionSlice = createSlice({
             state.gridSnapEnabled = !state.gridSnapEnabled;
         },
         togglePitchSnap(state) {
-            state.pitchSnapEnabled = !state.pitchSnapEnabled;
+            if (!state.pitchSnapEnabled) {
+                state.pitchSnapEnabled = true;
+                state.pitchSnapUnit = "semitone";
+                return;
+            }
+            if (state.pitchSnapUnit === "semitone") {
+                state.pitchSnapUnit = "scale";
+                return;
+            }
+            state.pitchSnapEnabled = false;
+        },
+        setScaleHighlightMode(state, action: PayloadAction<ScaleHighlightMode>) {
+            state.scaleHighlightMode = action.payload;
         },
         setPitchSnapUnit(state, action: PayloadAction<PitchSnapUnit>) {
             state.pitchSnapUnit = action.payload;
         },
-        setPitchSnapScale(
+        setPitchSnapToleranceCents(state, action: PayloadAction<number>) {
+            state.pitchSnapToleranceCents = Math.max(
+                0,
+                Math.abs(Math.round(Number(action.payload) || 0)),
+            );
+        },
+        setProjectBaseScale(
             state,
             action: PayloadAction<import("../../utils/musicalScales").ScaleKey>,
         ) {
-            state.pitchSnapScale = action.payload;
+            state.project.baseScale = action.payload;
         },
         togglePlayheadZoom(state) {
             state.playheadZoomEnabled = !state.playheadZoomEnabled;
@@ -1246,12 +1279,14 @@ const sessionSlice = createSlice({
                 )
                     ? (s.pitchSnapUnit as PitchSnapUnit)
                     : "semitone";
-                // Validate pitchSnapScale
-                state.pitchSnapScale = (
-                    SCALE_KEYS as readonly string[]
-                ).includes(s.pitchSnapScale)
-                    ? (s.pitchSnapScale as typeof state.pitchSnapScale)
-                    : "C";
+                state.pitchSnapToleranceCents = Math.max(
+                    0,
+                    Math.abs(
+                        Math.round(
+                            Number(s.pitchSnapToleranceCents ?? 0) || 0,
+                        ),
+                    ),
+                );
                 state.playheadZoomEnabled = s.playheadZoom;
                 if (s.autoScroll != null)
                     state.autoScrollEnabled = s.autoScroll;
@@ -1263,6 +1298,28 @@ const sessionSlice = createSlice({
                     const validDirs = ["free", "x-only", "y-only"];
                     if (validDirs.includes(s.dragDirection))
                         state.dragDirection = s.dragDirection as DragDirection;
+                }
+                // scaleHighlightMode (optional)
+                if (s.scaleHighlightMode != null) {
+                    if (s.scaleHighlightMode === "always") {
+                        state.scaleHighlightMode = "always";
+                    } else if (s.scaleHighlightMode === "off") {
+                        state.scaleHighlightMode = "off";
+                    } else if (s.scaleHighlightMode === "onlyWhenSnapping") {
+                        // Backward compatibility for older config values.
+                        state.scaleHighlightMode = "always";
+                    }
+                }
+            })
+
+            .addCase(setProjectBaseScaleRemote.fulfilled, (state, action) => {
+                const nextScale = String(
+                    (action.payload as { project?: { base_scale?: string } })
+                        ?.project?.base_scale ?? "",
+                );
+                if ((SCALE_KEYS as readonly string[]).includes(nextScale)) {
+                    state.project.baseScale =
+                        nextScale as import("../../utils/musicalScales").ScaleKey;
                 }
             })
 
@@ -2189,8 +2246,10 @@ export const {
     toggleAutoCrossfade,
     toggleGridSnap,
     togglePitchSnap,
+    setScaleHighlightMode,
     setPitchSnapUnit,
-    setPitchSnapScale,
+    setPitchSnapToleranceCents,
+    setProjectBaseScale,
     togglePlayheadZoom,
     toggleAutoScroll,
     toggleClipboardPreview,

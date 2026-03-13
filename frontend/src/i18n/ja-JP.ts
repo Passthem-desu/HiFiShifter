@@ -368,9 +368,16 @@ export const jaJP = {
     quantize_unit: "クオンタイズ単位",
     quantize_semitone: "半音",
     quantize_scale: "スケール",
+    pitch_snap_off: "オフ",
+    pitch_snap_tolerance: "許容差（セント）",
     base_scale: "基準スケール",
 
     // 修飾キーリネーム
+        // Scale highlight setting
+        scale_highlight: "スケール強調表示",
+        scale_highlight_always: "常に",
+        scale_highlight_only_when_snapping: "スナップ時のみ",
+        scale_highlight_off: "オフ",
     kb_modifier_toggle_snap: "スナップ切替（ドラッグ中に押す）",
     hint_toggle_snap:
         "修飾キーを押してスナップ動作を切替（グリッドスナップ設定に基づきスナップ/フリー）",

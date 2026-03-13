@@ -281,6 +281,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "open_project":
             return { projectPath: args[0] };
 
+        case "set_project_base_scale":
+            return { baseScale: args[0] };
+
         case "import_vocalshifter_project":
             return { vspPath: args[0] };
 

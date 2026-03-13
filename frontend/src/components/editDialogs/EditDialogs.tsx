@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Dialog, Flex, Text, TextField, Button, Select } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
-import { SCALE_KEYS, SCALE_LABELS, type ScaleKey } from "../../utils/musicalScales";
+import type { ScaleKey } from "../../utils/musicalScales";
 
 interface Props {
     open: boolean;
@@ -46,14 +46,21 @@ export function TransposeCentsDialog({ open, onOpenChange, onConfirm }: Props) {
 interface TransposeDegreesProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    defaultScale?: ScaleKey;
     onConfirm?: (degrees: number, scale: ScaleKey) => void;
 }
 
-export function TransposeDegreesDialog({ open, onOpenChange, onConfirm }: TransposeDegreesProps) {
+export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C", onConfirm }: TransposeDegreesProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [degrees, setDegrees] = useState("3");
-    const [scale, setScale] = useState<ScaleKey>("C");
+    const [scale, setScale] = useState<ScaleKey>(defaultScale);
+
+    useEffect(() => {
+        if (open) {
+            setScale(defaultScale);
+        }
+    }, [open, defaultScale]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -69,17 +76,7 @@ export function TransposeDegreesDialog({ open, onOpenChange, onConfirm }: Transp
                             style={{ flex: 1 }}
                         />
                     </Flex>
-                    <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
-                        <Select.Root value={scale} size="2" onValueChange={(v) => setScale(v as ScaleKey)}>
-                            <Select.Trigger style={{ flex: 1 }} />
-                            <Select.Content>
-                                {SCALE_KEYS.map((k: ScaleKey) => (
-                                    <Select.Item key={k} value={k}>{SCALE_LABELS[k]}</Select.Item>
-                                ))}
-                            </Select.Content>
-                        </Select.Root>
-                    </Flex>
+                    {/* base scale is global and available in the top toolbar; removed from dialog */}
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
@@ -291,14 +288,34 @@ export function VibratoDialog({ open, onOpenChange, onConfirm, editParam, paramR
 interface QuantizeProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onConfirm?: (unit: "semitone" | "scale", scale: ScaleKey) => void;
+    defaultScale?: ScaleKey;
+    defaultToleranceCents?: number;
+    onConfirm?: (
+        unit: "semitone" | "scale",
+        scale: ScaleKey,
+        toleranceCents: number,
+    ) => void;
 }
 
-export function QuantizeDialog({ open, onOpenChange, onConfirm }: QuantizeProps) {
+export function QuantizeDialog({
+    open,
+    onOpenChange,
+    defaultScale = "C",
+    defaultToleranceCents = 0,
+    onConfirm,
+}: QuantizeProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [unit, setUnit] = useState<"semitone" | "scale">("semitone");
-    const [scale, setScale] = useState<ScaleKey>("C");
+    const [scale, setScale] = useState<ScaleKey>(defaultScale);
+    const [toleranceCents, setToleranceCents] = useState<string>(String(defaultToleranceCents));
+
+    useEffect(() => {
+        if (open) {
+            setScale(defaultScale);
+            setToleranceCents(String(defaultToleranceCents));
+        }
+    }, [open, defaultScale, defaultToleranceCents]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -315,25 +332,27 @@ export function QuantizeDialog({ open, onOpenChange, onConfirm }: QuantizeProps)
                             </Select.Content>
                         </Select.Root>
                     </Flex>
-                    {unit === "scale" && (
-                        <Flex align="center" gap="2">
-                            <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
-                            <Select.Root value={scale} size="2" onValueChange={(v) => setScale(v as ScaleKey)}>
-                                <Select.Trigger style={{ flex: 1 }} />
-                                <Select.Content>
-                                    {SCALE_KEYS.map((k: ScaleKey) => (
-                                        <Select.Item key={k} value={k}>{SCALE_LABELS[k]}</Select.Item>
-                                    ))}
-                                </Select.Content>
-                            </Select.Root>
-                        </Flex>
-                    )}
+                    {/* base scale is taken from project toolbar; removed from dialog */}
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("pitch_snap_tolerance")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            value={toleranceCents}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToleranceCents(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(unit, scale); onOpenChange(false); }}>
+                    <Button onClick={() => {
+                        const parsed = Math.abs(Math.round(Number(toleranceCents) || 0));
+                        onConfirm?.(unit, scale, parsed);
+                        onOpenChange(false);
+                    }}>
                         {tAny("ok")}
                     </Button>
                 </Flex>
@@ -345,14 +364,21 @@ export function QuantizeDialog({ open, onOpenChange, onConfirm }: QuantizeProps)
 interface MeanQuantizeProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    defaultScale?: ScaleKey;
     onConfirm?: (unit: "semitone" | "scale", scale: ScaleKey) => void;
 }
 
-export function MeanQuantizeDialog({ open, onOpenChange, onConfirm }: MeanQuantizeProps) {
+export function MeanQuantizeDialog({ open, onOpenChange, defaultScale = "C", onConfirm }: MeanQuantizeProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [unit, setUnit] = useState<"semitone" | "scale">("semitone");
-    const [scale, setScale] = useState<ScaleKey>("C");
+    const [scale, setScale] = useState<ScaleKey>(defaultScale);
+
+    useEffect(() => {
+        if (open) {
+            setScale(defaultScale);
+        }
+    }, [open, defaultScale]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -369,19 +395,7 @@ export function MeanQuantizeDialog({ open, onOpenChange, onConfirm }: MeanQuanti
                             </Select.Content>
                         </Select.Root>
                     </Flex>
-                    {unit === "scale" && (
-                        <Flex align="center" gap="2">
-                            <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
-                            <Select.Root value={scale} size="2" onValueChange={(v) => setScale(v as ScaleKey)}>
-                                <Select.Trigger style={{ flex: 1 }} />
-                                <Select.Content>
-                                    {SCALE_KEYS.map((k: ScaleKey) => (
-                                        <Select.Item key={k} value={k}>{SCALE_LABELS[k]}</Select.Item>
-                                    ))}
-                                </Select.Content>
-                            </Select.Root>
-                        </Flex>
-                    )}
+                    {/* base scale is global and controlled from the top toolbar */}
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>

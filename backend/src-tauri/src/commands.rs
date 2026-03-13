@@ -150,6 +150,14 @@ pub fn save_project_as(state: State<'_, AppState>, window: Window) -> serde_json
     project::save_project_as(state, window)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_project_base_scale(
+    state: State<'_, AppState>,
+    base_scale: String,
+) -> serde_json::Value {
+    project::set_project_base_scale(state, base_scale)
+}
+
 // ===================== dialogs =====================
 
 #[tauri::command(rename_all = "camelCase")]

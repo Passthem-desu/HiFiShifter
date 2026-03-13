@@ -131,7 +131,9 @@ export function usePianoRollInteractions(args: {
     /** 音高吸附方式 */
     pitchSnapUnit?: "semitone" | "scale";
     /** 音高吸附调式 */
-    pitchSnapScale?: import("../../../utils/musicalScales").ScaleKey;
+    projectBaseScale?: import("../../../utils/musicalScales").ScaleKey;
+    /** 音高吸附容差（音分） */
+    pitchSnapToleranceCents?: number;
     /** 快捷键映射表 */
     keybindingMap?: KeybindingMap;
     /** 参数编辑操作回调 (op: selectAll, deselect, initialize, ...) */
@@ -189,7 +191,16 @@ export function usePianoRollInteractions(args: {
         playheadZoomEnabled,
     } = args;
 
-    const { pitchSnapEnabled, pitchSnapUnit, pitchSnapScale, keybindingMap, onEditAction, dragDirection, onCycleDragDirection } = args;
+    const {
+        pitchSnapEnabled,
+        pitchSnapUnit,
+        projectBaseScale,
+        pitchSnapToleranceCents,
+        keybindingMap,
+        onEditAction,
+        dragDirection,
+        onCycleDragDirection,
+    } = args;
 
     /** Apply pitch snap to a drawn value when editParam is "pitch" and snap is enabled.
      *  When shiftHeld=true, the snap state is toggled (XOR with pitchSnapEnabled). */
@@ -197,12 +208,26 @@ export function usePianoRollInteractions(args: {
         (v: number, shiftHeld = false): number => {
             const effective = shiftHeld ? !pitchSnapEnabled : pitchSnapEnabled;
             if (!effective || editParam !== "pitch") return v;
-            if (pitchSnapUnit === "scale" && pitchSnapScale) {
-                return snapToScale(v, pitchSnapScale);
+            const snapped =
+                pitchSnapUnit === "scale" && projectBaseScale
+                    ? snapToScale(v, projectBaseScale)
+                    : snapToSemitone(v);
+            const toleranceSemitone = Math.max(
+                0,
+                Number(pitchSnapToleranceCents ?? 0) / 100,
+            );
+            if (Math.abs(v - snapped) <= toleranceSemitone) {
+                return v;
             }
-            return snapToSemitone(v);
+            return snapped + (((v - snapped) > 0 ? 1 : -1)) * toleranceSemitone;
         },
-        [pitchSnapEnabled, pitchSnapUnit, pitchSnapScale, editParam],
+        [
+            pitchSnapEnabled,
+            pitchSnapUnit,
+            projectBaseScale,
+            pitchSnapToleranceCents,
+            editParam,
+        ],
     );
 
     const pointerBeat = useCallback(

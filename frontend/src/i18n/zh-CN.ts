@@ -361,7 +361,15 @@ export const zhCN = {
     quantize_unit: "量化单位",
     quantize_semitone: "半音",
     quantize_scale: "音阶",
+    pitch_snap_off: "禁用",
+    pitch_snap_tolerance: "容差（音分）",
     base_scale: "基准音阶",
+
+    // 音阶高亮设置
+    scale_highlight: "音阶高亮",
+    scale_highlight_always: "始终",
+    scale_highlight_only_when_snapping: "仅在吸附时",
+    scale_highlight_off: "关闭",
 
     // Modifier key rename
     kb_modifier_toggle_snap: "切换吸附（拖动时按住）",

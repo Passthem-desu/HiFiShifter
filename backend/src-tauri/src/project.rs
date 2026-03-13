@@ -35,6 +35,8 @@ pub struct ProjectFile {
     pub version: u32,
     pub name: String,
     pub timeline: TimelineState,
+    #[serde(default = "default_base_scale")]
+    pub base_scale: String,
     /// 媒体文件注册表（v2 新增，旧工程反序列化时默认为空）。
     #[serde(default)]
     pub media_registry: Vec<MediaEntry>,
@@ -44,15 +46,20 @@ pub struct ProjectFile {
 }
 
 impl ProjectFile {
-    pub fn new(name: String, timeline: TimelineState) -> Self {
+    pub fn new(name: String, timeline: TimelineState, base_scale: String) -> Self {
         Self {
             version: 2,
             name,
             timeline,
+            base_scale,
             media_registry: Vec::new(),
             synth_config: SynthConfig::default(),
         }
     }
+}
+
+fn default_base_scale() -> String {
+    "C".to_string()
 }
 
 // ─── 序列化 / 反序列化 ─────────────────────────────────────────────────────────

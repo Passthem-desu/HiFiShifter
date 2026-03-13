@@ -227,6 +227,7 @@ pub struct ProjectState {
     pub path: Option<String>,
     pub dirty: bool,
     pub recent: Vec<String>,
+    pub base_scale: String,
     pub allow_close: bool,
 }
 
@@ -237,6 +238,7 @@ impl Default for ProjectState {
             path: None,
             dirty: false,
             recent: Vec::new(),
+            base_scale: "C".to_string(),
             allow_close: false,
         }
     }
@@ -774,6 +776,7 @@ impl AppState {
             path: p.path,
             dirty: p.dirty,
             recent: p.recent,
+            base_scale: p.base_scale,
         }
     }
 

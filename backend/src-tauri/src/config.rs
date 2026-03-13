@@ -15,8 +15,8 @@ pub struct UiSettings {
     pub pitch_snap: bool,
     #[serde(default = "default_pitch_snap_unit")]
     pub pitch_snap_unit: String,
-    #[serde(default = "default_pitch_snap_scale")]
-    pub pitch_snap_scale: String,
+    #[serde(default)]
+    pub pitch_snap_tolerance_cents: u32,
     #[serde(default)]
     pub playhead_zoom: bool,
     #[serde(default)]
@@ -35,9 +35,6 @@ fn default_true() -> bool {
 fn default_pitch_snap_unit() -> String {
     "semitone".to_string()
 }
-fn default_pitch_snap_scale() -> String {
-    "C".to_string()
-}
 fn default_grid_size() -> String {
     "1/4".to_string()
 }
@@ -53,7 +50,7 @@ impl Default for UiSettings {
             grid_size: default_grid_size(),
             pitch_snap: false,
             pitch_snap_unit: default_pitch_snap_unit(),
-            pitch_snap_scale: default_pitch_snap_scale(),
+            pitch_snap_tolerance_cents: 0,
             playhead_zoom: false,
             auto_scroll: false,
             show_clipboard_preview: false,

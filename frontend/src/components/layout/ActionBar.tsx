@@ -32,7 +32,9 @@ import {
     togglePlayheadZoom,
     toggleAutoScroll,
     persistUiSettings,
+    setProjectBaseScaleRemote,
 } from "../../features/session/sessionSlice";
+import { SCALE_KEYS, SCALE_LABELS } from "../../utils/musicalScales";
 import { toggleVisible } from "../../features/fileBrowser/fileBrowserSlice";
 
 export function ActionBar() {
@@ -218,6 +220,27 @@ export function ActionBar() {
                             <Select.Item value="1/16t">1/16t</Select.Item>
                             <Select.Item value="1/32t">1/32t</Select.Item>
                             <Select.Item value="1/64t">1/64t</Select.Item>
+                        </Select.Group>
+                    </Select.Content>
+                </Select.Root>
+                <Text size="1" className="text-qt-text-muted">
+                    {t("base_scale")}:
+                </Text>
+                <Select.Root
+                    value={s.project?.baseScale ?? "C"}
+                    size="1"
+                    onValueChange={(v) => {
+                        dispatch(setProjectBaseScaleRemote(v));
+                    }}
+                >
+                    <Select.Trigger style={{ backgroundColor: "var(--qt-base)" }} />
+                    <Select.Content>
+                        <Select.Group>
+                            {SCALE_KEYS.map((k) => (
+                                <Select.Item key={k} value={k}>
+                                    {SCALE_LABELS[k]}
+                                </Select.Item>
+                            ))}
                         </Select.Group>
                     </Select.Content>
                 </Select.Root>

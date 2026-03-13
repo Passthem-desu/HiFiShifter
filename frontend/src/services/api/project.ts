@@ -10,7 +10,14 @@ export const projectApi = {
             path?: string | null;
             dirty: boolean;
             recent: string[];
+            base_scale?: string;
         }>("get_project_meta"),
+
+    setProjectBaseScale: (baseScale: string) =>
+        invoke<{ ok: boolean; project?: { base_scale?: string } }>(
+            "set_project_base_scale",
+            baseScale,
+        ),
 
     newProject: () => invoke<TimelineResult>("new_project"),
 

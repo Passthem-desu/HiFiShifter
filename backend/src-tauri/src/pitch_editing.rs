@@ -870,6 +870,7 @@ mod tests {
             playhead_sec: 0.0,
             project_sec: 60.0,
             params_by_root_track: Default::default(),
+            pitch_snap_scale: "C".to_string(),
             next_track_order: 1,
         };
 

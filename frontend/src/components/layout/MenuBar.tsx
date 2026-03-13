@@ -580,6 +580,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <TransposeDegreesDialog
                 open={transposeDegreesOpen}
                 onOpenChange={setTransposeDegreesOpen}
+                defaultScale={s.project.baseScale}
                 onConfirm={(degrees, scale) => dispatchEditOp("transposeDegrees", { degrees, scale })}
             />
             <SetPitchDialog
@@ -602,11 +603,16 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <QuantizeDialog
                 open={quantizeOpen}
                 onOpenChange={setQuantizeOpen}
-                onConfirm={(unit, scale) => dispatchEditOp("quantize", { unit, scale })}
+                defaultScale={s.project.baseScale}
+                defaultToleranceCents={s.pitchSnapToleranceCents}
+                onConfirm={(unit, scale, toleranceCents) =>
+                    dispatchEditOp("quantize", { unit, scale, toleranceCents })
+                }
             />
             <MeanQuantizeDialog
                 open={meanQuantizeOpen}
                 onOpenChange={setMeanQuantizeOpen}
+                defaultScale={s.project.baseScale}
                 onConfirm={(unit, scale) => dispatchEditOp("meanQuantize", { unit, scale })}
             />
         </Flex>

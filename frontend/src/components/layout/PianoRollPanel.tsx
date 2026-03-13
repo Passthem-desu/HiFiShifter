@@ -18,6 +18,7 @@ import {
     setEditParam,
     setTrackStateRemote,
     togglePitchSnap,
+    setScaleHighlightMode,
     toggleClipboardPreview,
     toggleLockParamLines,
     cycleDragDirection,
@@ -29,11 +30,8 @@ import { getWaveformColors } from "../../theme/waveformColors";
 import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
 import type { ParamFramesPayload } from "../../types/api";
-import {
-    snapToScale,
-    snapToSemitone,
-    SCALE_NOTES,
-} from "../../utils/musicalScales";
+import { snapToScale, snapToSemitone, SCALE_NOTES } from "../../utils/musicalScales";
+import { isModifierActive } from "../../features/keybindings/keybindingsSlice";
 import type { ScaleKey } from "../../utils/musicalScales";
 import {
     pasteReaperClipboard,
@@ -103,6 +101,27 @@ export const PianoRollPanel: React.FC = () => {
         selectKeybinding(state, "modifier.scrollVertical"),
     );
     const mergedKeybindings = useAppSelector(selectMergedKeybindings);
+    // 是否按住切换吸附的修饰键（临时切换吸附时用于高亮显示）
+    const [snapToggleHeld, setSnapToggleHeld] = useState(false);
+
+    useEffect(() => {
+        const kb = mergedKeybindings["modifier.clipNoSnap"];
+        if (!kb) return;
+        const onKey = (e: KeyboardEvent) => {
+            const active = isModifierActive(kb, e as any);
+            setSnapToggleHeld(active);
+        };
+        window.addEventListener("keydown", onKey as EventListener);
+        window.addEventListener("keyup", onKey as EventListener);
+        // also track blur to clear state
+        const onBlur = () => setSnapToggleHeld(false);
+        window.addEventListener("blur", onBlur);
+        return () => {
+            window.removeEventListener("keydown", onKey as EventListener);
+            window.removeEventListener("keyup", onKey as EventListener);
+            window.removeEventListener("blur", onBlur);
+        };
+    }, [mergedKeybindings]);
     const { mode: themeMode } = useAppTheme();
     const waveformColors = useMemo(
         () => getWaveformColors(themeMode),
@@ -431,14 +450,11 @@ export const PianoRollPanel: React.FC = () => {
     const activeSecondaryParamId = useMemo(() => {
         const next = getActiveSecondaryParamId({
             editParam,
-            processorParamIds: processorParams.map((p) => p.id),
+            processorParamIds: processorParamsRef.current.map((p) => p.id as ParamName),
             secondaryParamVisible,
         });
-        if (next === "pitch" && !pitchEnabled) {
-            return null;
-        }
         return next;
-    }, [editParam, processorParams, secondaryParamVisible, pitchEnabled]);
+    }, [editParam, processorParams, secondaryParamVisible]);
 
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
     const contentWidth = Math.max(8, Math.ceil(s.projectSec * pxPerSec));
@@ -863,6 +879,11 @@ export const PianoRollPanel: React.FC = () => {
         invalidate();
     }, [detectedPitchCurves, invalidate]);
 
+    // Ensure pitch-snap related changes immediately redraw
+    useEffect(() => {
+        invalidate();
+    }, [s.pitchSnapEnabled, s.pitchSnapUnit, s.project.baseScale, s.scaleHighlightMode, snapToggleHeld, invalidate]);
+
     // 剪贴板预览开关变化时立即重绘
     useEffect(() => {
         invalidate();
@@ -899,6 +920,12 @@ export const PianoRollPanel: React.FC = () => {
             clipboardPreview: s.showClipboardPreview
                 ? clipboardRef.current
                 : null,
+            // pitch snap visual helpers
+            pitchSnapUnit: s.pitchSnapUnit,
+            projectBaseScale: s.project.baseScale,
+            scaleHighlightMode: s.scaleHighlightMode,
+            toolMode: s.toolMode,
+            snapToggleHeld: snapToggleHeld,
         });
     };
 
@@ -959,7 +986,8 @@ export const PianoRollPanel: React.FC = () => {
         playheadZoomEnabled: s.playheadZoomEnabled,
         pitchSnapEnabled: s.pitchSnapEnabled,
         pitchSnapUnit: s.pitchSnapUnit,
-        pitchSnapScale: s.pitchSnapScale,
+        projectBaseScale: s.project.baseScale,
+        pitchSnapToleranceCents: s.pitchSnapToleranceCents,
         keybindingMap: mergedKeybindings,
         onEditAction: stableEditAction,
         dragDirection: s.dragDirection,
@@ -1305,6 +1333,7 @@ export const PianoRollPanel: React.FC = () => {
                     const degrees = Number(data?.degrees ?? 0);
                     const scale = (data?.scale as string) ?? "chromatic";
                     if (degrees === 0) return;
+                    // project base scale is controlled from toolbar; do not change it here
                     const res = await paramsApi.getParamFrames(
                         rootTrackId,
                         editParam,
@@ -1494,6 +1523,11 @@ export const PianoRollPanel: React.FC = () => {
                 case "quantize": {
                     const unit = (data?.unit as string) ?? "semitone";
                     const scale = (data?.scale as string) ?? "chromatic";
+                    const toleranceCents = Math.abs(
+                        Math.round(Number(data?.toleranceCents ?? 0) || 0),
+                    );
+                    const toleranceSemitone = toleranceCents / 100;
+                    // project base scale is controlled from toolbar; do not change it here
                     const res = await paramsApi.getParamFrames(
                         rootTrackId,
                         editParam,
@@ -1511,12 +1545,25 @@ export const PianoRollPanel: React.FC = () => {
                             ? vals.map((v) =>
                                   editParam === "pitch" && v === 0
                                       ? 0
-                                      : snapToSemitone(v),
+                                      : (() => {
+                                          const snapped = snapToSemitone(v);
+                                          return Math.abs(v - snapped) <= toleranceSemitone
+                                              ? v
+                                              : snapped + ((v - snapped) > 0 ? 1 : -1) * toleranceSemitone;
+                                      })(),
                               )
                             : vals.map((v) =>
                                   editParam === "pitch" && v === 0
                                       ? 0
-                                      : snapToScale(v, scale as ScaleKey),
+                                      : (() => {
+                                          const snapped = snapToScale(
+                                              v,
+                                              scale as ScaleKey,
+                                          );
+                                          return Math.abs(v - snapped) <= toleranceSemitone
+                                              ? v
+                                              : snapped + ((v - snapped) > 0 ? 1 : -1) * toleranceSemitone;
+                                      })(),
                               );
                     await paramsApi.setParamFrames(
                         rootTrackId,
@@ -1681,7 +1728,13 @@ export const PianoRollPanel: React.FC = () => {
                             size="1"
                             variant={s.pitchSnapEnabled ? "solid" : "ghost"}
                             color="gray"
-                            title={t("pitch_snap")}
+                            title={`${t("pitch_snap")}: ${
+                                s.pitchSnapEnabled
+                                    ? s.pitchSnapUnit === "semitone"
+                                        ? tAny("quantize_semitone")
+                                        : tAny("quantize_scale")
+                                    : tAny("pitch_snap_off")
+                            }`}
                             tabIndex={-1}
                             onClick={() => { dispatch(togglePitchSnap()); void dispatch(persistUiSettings()); }}
                             onContextMenu={(e) => {
@@ -1689,10 +1742,56 @@ export const PianoRollPanel: React.FC = () => {
                                 setPitchSnapOpen(true);
                             }}
                         >
-                            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M10 2V10.5C10 11.88 8.88 13 7.5 13C6.12 13 5 11.88 5 10.5C5 9.12 6.12 8 7.5 8C8.16 8 8.77 8.26 9.22 8.68" stroke="currentColor" strokeWidth="1.2" fill="none"/>
-                                <path d="M3 4.5H7M3 7.5H6" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
-                            </svg>
+                            {!s.pitchSnapEnabled ? (
+                                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M3 12L12 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                                    <path d="M10 2V10.5C10 11.88 8.88 13 7.5 13C6.12 13 5 11.88 5 10.5C5 9.12 6.12 8 7.5 8" stroke="currentColor" strokeWidth="1" opacity="0.6"/>
+                                </svg>
+                            ) : s.pitchSnapUnit === "semitone" ? (
+                                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M3 5.5H12M3 9.5H12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                                    <circle cx="7.5" cy="7.5" r="4.2" stroke="currentColor" strokeWidth="1" opacity="0.7"/>
+                                </svg>
+                            ) : (
+                                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M2.5 10.5L5.5 4.5L8.5 10.5L11.5 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <circle cx="2.5" cy="10.5" r="1" fill="currentColor"/>
+                                    <circle cx="5.5" cy="4.5" r="1" fill="currentColor"/>
+                                    <circle cx="8.5" cy="10.5" r="1" fill="currentColor"/>
+                                    <circle cx="11.5" cy="6" r="1" fill="currentColor"/>
+                                </svg>
+                            )}
+                        </IconButton>
+                        <IconButton
+                            size="1"
+                            variant={s.scaleHighlightMode === "always" ? "solid" : "ghost"}
+                            color="gray"
+                            title={tAny("scale_highlight")}
+                            tabIndex={-1}
+                            onClick={() => {
+                                dispatch(
+                                    setScaleHighlightMode(
+                                        s.scaleHighlightMode === "always"
+                                            ? "off"
+                                            : "always",
+                                    ),
+                                );
+                                void dispatch(persistUiSettings());
+                            }}
+                        >
+                            {s.scaleHighlightMode === "always" ? (
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <circle cx="5" cy="9" r="2.2" fill="currentColor"/>
+                                    <path d="M7 4V8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                                    <path d="M7 4L11 3.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                                </svg>
+                            ) : (
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <circle cx="5" cy="9" r="2.2" stroke="currentColor" strokeWidth="1" fill="none"/>
+                                    <path d="M7 4V8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                                    <path d="M7 4L11 3.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                                </svg>
+                            )}
                         </IconButton>
                         <IconButton
                             size="1"

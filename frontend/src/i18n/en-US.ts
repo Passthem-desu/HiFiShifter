@@ -368,7 +368,15 @@ export const enUS = {
     quantize_unit: "Quantize Unit",
     quantize_semitone: "Semitone",
     quantize_scale: "Scale",
+    pitch_snap_off: "Off",
+    pitch_snap_tolerance: "Tolerance (cents)",
     base_scale: "Base Scale",
+
+    // Scale highlight setting
+    scale_highlight: "Scale Highlight",
+    scale_highlight_always: "Always",
+    scale_highlight_only_when_snapping: "Only When Snapping",
+    scale_highlight_off: "Off",
 
     // Modifier key rename
     kb_modifier_toggle_snap: "Toggle Snap (hold while dragging)",

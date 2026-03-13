@@ -8,6 +8,7 @@ import {
     processWaveformPeaks,
     renderWaveformCanvas,
 } from "../../../utils/waveformRenderer";
+import { SCALE_NOTES } from "../../../utils/musicalScales";
 
 /** 为数值轴选择"好看"的刻度步长 */
 function niceAxisStep(range: number, targetCount: number): number {
@@ -236,6 +237,12 @@ export function drawPianoRoll(args: {
         framePeriodMs: number;
         values: number[];
     } | null;
+    // pitch snap visual helpers
+    pitchSnapUnit?: "semitone" | "scale";
+    projectBaseScale?: import("../../../utils/musicalScales").ScaleKey | null;
+    toolMode?: string;
+    snapToggleHeld?: boolean;
+    scaleHighlightMode?: import("../../../features/session/sessionTypes").ScaleHighlightMode;
 }) {
     const {
         axisCanvas,
@@ -488,12 +495,27 @@ export function drawPianoRoll(args: {
         const max = min + span;
         const startMidi = clamp(Math.floor(min), absMin, absMax);
         const endMidi = clamp(Math.ceil(max), absMin, absMax);
+        const highlightActive = (() => {
+            if (!args.projectBaseScale) return false;
+            const mode = args.scaleHighlightMode ?? "off";
+            if (mode === "off") return false;
+            return mode === "always";
+        })();
+
         for (let midi = startMidi; midi <= endMidi; midi += 1) {
             const y = valueToY("pitch", midi + 0.5, h);
             const pc = ((midi % 12) + 12) % 12;
-            ctx.strokeStyle =
-                pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
-            ctx.lineWidth = 1;
+            const isScaleNote = highlightActive
+                ? (SCALE_NOTES[args.projectBaseScale ?? "C"] || []).includes(pc)
+                : false;
+
+            if (isScaleNote) {
+                ctx.strokeStyle = isDark ? "rgba(255,200,80,0.22)" : "rgba(200,120,20,0.22)";
+                ctx.lineWidth = 2;
+            } else {
+                ctx.strokeStyle = pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
+                ctx.lineWidth = 1;
+            }
             ctx.beginPath();
             ctx.moveTo(0, y + 0.5);
             ctx.lineTo(w, y + 0.5);

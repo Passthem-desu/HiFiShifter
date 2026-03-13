@@ -14,6 +14,7 @@ pub struct ProjectMetaPayload {
     pub path: Option<String>,
     pub dirty: bool,
     pub recent: Vec<String>,
+    pub base_scale: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -147,6 +147,7 @@ pub fn run() {
             commands::open_project,
             commands::save_project,
             commands::save_project_as,
+            commands::set_project_base_scale,
             commands::open_audio_dialog,
             commands::open_audio_dialog_multi,
             commands::pick_output_path,

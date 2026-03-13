@@ -1,5 +1,6 @@
 export type ToolMode = "draw" | "select" | "line";
 export type PitchSnapUnit = "semitone" | "scale";
+export type ScaleHighlightMode = "always" | "off";
 export type DragDirection = "free" | "x-only" | "y-only";
 export type FadeCurveType =
     | "linear"

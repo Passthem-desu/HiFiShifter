@@ -64,6 +64,17 @@ export const saveProjectAsRemote = createAsyncThunk(
     },
 );
 
+export const setProjectBaseScaleRemote = createAsyncThunk(
+    "session/setProjectBaseScaleRemote",
+    async (baseScale: string, { rejectWithValue }) => {
+        const res = await webApi.setProjectBaseScale(baseScale);
+        if (!res || res.ok === false) {
+            return rejectWithValue("set_project_base_scale_failed");
+        }
+        return res;
+    },
+);
+
 export const openVocalShifterFromDialog = createAsyncThunk(
     "session/openVocalShifterFromDialog",
     async (_, { rejectWithValue }) => {

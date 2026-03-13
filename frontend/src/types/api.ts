@@ -66,6 +66,7 @@ export interface ProjectMeta {
     path?: string | null;
     dirty: boolean;
     recent: string[];
+    base_scale?: string;
 }
 
 export interface TimelineState {

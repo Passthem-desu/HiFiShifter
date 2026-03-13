@@ -7,6 +7,16 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{State, Window};
 
+fn normalize_scale_key(raw: &str) -> String {
+    const SCALE_KEYS: [&str; 12] = [
+        "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B",
+    ];
+    if SCALE_KEYS.contains(&raw) {
+        return raw.to_string();
+    }
+    "C".to_string()
+}
+
 use super::common::ok_bool;
 use super::core::{get_timeline_state, get_timeline_state_from_ref};
 
@@ -29,8 +39,12 @@ pub(crate) fn save_project_to_path_inner(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
+    let base_scale = {
+        let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        normalize_scale_key(&p.base_scale)
+    };
     let tl_rel = make_paths_relative(tl, &path);
-    let pf = ProjectFile::new(name.clone(), tl_rel);
+    let pf = ProjectFile::new(name.clone(), tl_rel, base_scale);
     // 使用 MessagePack 格式保存（v2），体积更小、解析更快。
     let bytes = rmp_serde::to_vec_named(&pf).map_err(|e| e.to_string())?;
     fs::write(&path, bytes).map_err(|e| e.to_string())?;
@@ -81,6 +95,7 @@ pub(super) fn new_project(state: State<'_, AppState>, window: Window) -> crate::
         p.name = "Untitled".to_string();
         p.path = None;
         p.dirty = false;
+        p.base_scale = "C".to_string();
     }
     update_window_title(&window, "Untitled", false);
     get_timeline_state(state)
@@ -138,6 +153,7 @@ pub(super) fn open_project(
         p.name = project_name_from_path(&path);
         p.path = Some(project_path.clone());
         p.dirty = false;
+        p.base_scale = normalize_scale_key(&pf.base_scale);
         // recent list (in-memory)
         p.recent.retain(|x| x != &project_path);
         p.recent.insert(0, project_path.clone());
@@ -210,4 +226,34 @@ fn save_project_to_path(state: State<'_, AppState>, window: Window, project_path
 pub(super) fn close_window(window: Window) -> serde_json::Value {
     let _ = window.close();
     ok_bool()
+}
+
+pub(super) fn set_project_base_scale(
+    state: State<'_, AppState>,
+    base_scale: String,
+) -> serde_json::Value {
+    let normalized = normalize_scale_key(&base_scale);
+    let (name, changed, was_clean) = {
+        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        if p.base_scale == normalized {
+            return serde_json::json!({ "ok": true, "base_scale": p.base_scale });
+        }
+        let was_clean = !p.dirty;
+        p.base_scale = normalized.clone();
+        p.dirty = true;
+        (p.name.clone(), true, was_clean)
+    };
+
+    if changed && was_clean {
+        if let Some(handle) = state.app_handle.get() {
+            use tauri::Manager;
+            if let Some(win) = handle.get_webview_window("main") {
+                let title = format!("HiFiShifter - {}*", name);
+                let _ = win.set_title(&title);
+            }
+        }
+    }
+
+    let payload = state.project_meta_payload();
+    serde_json::json!({ "ok": true, "project": payload })
 }

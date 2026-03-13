@@ -368,7 +368,15 @@ export const koKR = {
     quantize_unit: "퀀타이즈 단위",
     quantize_semitone: "반음",
     quantize_scale: "스케일",
+    pitch_snap_off: "끔",
+    pitch_snap_tolerance: "허용 오차(센트)",
     base_scale: "기준 스케일",
+
+    // Scale highlight setting
+    scale_highlight: "스케일 하이라이트",
+    scale_highlight_always: "항상",
+    scale_highlight_only_when_snapping: "스냅 시만",
+    scale_highlight_off: "끄기",
 
     // 수정 키 리네임
     kb_modifier_toggle_snap: "스냅 전환 (드래그 중 누르기)",
