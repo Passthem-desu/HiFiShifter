@@ -106,6 +106,7 @@ export const koKR = {
     breath_gain_label: "브레스 게인",
     hifigan_tension_label: "텐션",
     formant_shift_label: "포먼트 시프트",
+    hifigan_volume_label: "볼륨",
     switch_on: "켜짐",
     switch_off: "꺼짐",
     points_help: "더블 클릭으로 추가 · 드래그로 이동 · 우클릭으로 삭제",
@@ -219,6 +220,7 @@ export const koKR = {
     clip_gain_drag_hint:
         "위아래로 드래그하여 게인 조절 / 더블 클릭으로 수치 입력",
     track_change_color: "트랙 색상 변경",
+    track_clone: "트랙 복제",
     color_blue: "파랑",
     color_purple: "보라",
     color_green: "초록",

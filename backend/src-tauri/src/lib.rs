@@ -160,6 +160,7 @@ pub fn run() {
             commands::import_audio_bytes,
             commands::add_track,
             commands::remove_track,
+            commands::duplicate_track,
             commands::move_track,
             commands::set_track_state,
             commands::select_track,

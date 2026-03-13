@@ -21,6 +21,7 @@ import {
     addClipOnTrack,
     addTrackRemote,
     createClipsRemote,
+    duplicateTrackRemote,
     fetchSelectedTrackSummary,
     glueClipsRemote,
     moveClipRemote,
@@ -690,6 +691,7 @@ export {
 export {
     addTrackRemote,
     removeTrackRemote,
+    duplicateTrackRemote,
     moveTrackRemote,
     selectTrackRemote,
     setProjectLengthRemote,
@@ -2096,6 +2098,16 @@ const sessionSlice = createSlice({
             })
 
             .addCase(removeTrackRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
+            })
+
+            .addCase(duplicateTrackRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;

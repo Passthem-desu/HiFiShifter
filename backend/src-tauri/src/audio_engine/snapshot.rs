@@ -378,6 +378,22 @@ pub(crate) fn build_snapshot(
             })
             .unwrap_or((None, 5.0));
 
+        let (volume_curve, volume_curve_frame_period_ms) = processor_params
+            .and_then(|(_, _, frame_period_ms, renderer_id, _, extra_curves, _)| {
+                if renderer_id == "nsf_hifigan_onnx" {
+                    Some((
+                        extra_curves
+                            .get("hifigan_volume")
+                            .cloned()
+                            .map(std::sync::Arc::new),
+                        frame_period_ms,
+                    ))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or((None, 5.0));
+
         // ── 查询整 Clip 渲染缓存 ───────────────────────────────────────────
         // 改法 C+D：优先从 pending_rendered_keys 查找渲染线程传递的 cache_key，
         // 消除双重 hash 计算导致的不一致问题（采样率竞态、浮点精度差异等）。
@@ -523,6 +539,8 @@ pub(crate) fn build_snapshot(
             breath_noise_pcm,
             breath_curve,
             breath_curve_frame_period_ms,
+            volume_curve,
+            volume_curve_frame_period_ms,
             needs_synthesis,
         });    }
 
@@ -599,6 +617,8 @@ pub(crate) fn build_snapshot_for_file(
             breath_noise_pcm: None,
             breath_curve: None,
             breath_curve_frame_period_ms: 5.0,
+            volume_curve: None,
+            volume_curve_frame_period_ms: 5.0,
             needs_synthesis: false,
         }]),
     }

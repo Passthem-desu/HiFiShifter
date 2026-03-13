@@ -106,6 +106,7 @@ export const enUS = {
     breath_gain_label: "Breath Gain",
     hifigan_tension_label: "Tension",
     formant_shift_label: "Formant Shift",
+    hifigan_volume_label: "Volume",
     switch_on: "On",
     switch_off: "Off",
     points_help: "Double click add · Drag move · Right click delete",
@@ -219,6 +220,7 @@ export const enUS = {
     clip_gain_drag_hint:
         "Drag up/down to adjust gain / Double-click to enter precise value",
     track_change_color: "Change track color",
+    track_clone: "Clone Track",
     color_blue: "Blue",
     color_purple: "Purple",
     color_green: "Green",

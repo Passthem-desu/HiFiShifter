@@ -21,6 +21,13 @@ export const removeTrackRemote = createAsyncThunk(
     },
 );
 
+export const duplicateTrackRemote = createAsyncThunk(
+    "session/duplicateTrackRemote",
+    async (trackId: string) => {
+        return webApi.duplicateTrack(trackId);
+    },
+);
+
 export const moveTrackRemote = createAsyncThunk(
     "session/moveTrackRemote",
     async (payload: {

@@ -1006,6 +1006,130 @@ impl TimelineState {
         id
     }
 
+    /// 克隆轨道：
+    /// - 普通子轨道：创建新子轨道（同 parent），克隆所有 clip
+    /// - 根轨道：创建整个轨道组（根 + 后代），克隆所有 clip + params_by_root_track
+    pub fn duplicate_track(&mut self, track_id: &str) -> Vec<String> {
+        use std::collections::HashMap;
+
+        let source = match self.tracks.iter().find(|t| t.id == track_id) {
+            Some(t) => t.clone(),
+            None => return vec![],
+        };
+
+        let is_root = source.parent_id.is_none();
+
+        if is_root {
+            // ── 根轨道：收集整棵子树 ──
+            let mut all_ids = vec![track_id.to_string()];
+            let mut idx = 0;
+            while idx < all_ids.len() {
+                let cur = all_ids[idx].clone();
+                for child in self
+                    .tracks
+                    .iter()
+                    .filter(|t| t.parent_id.as_deref() == Some(cur.as_str()))
+                    .map(|t| t.id.clone())
+                    .collect::<Vec<_>>()
+                {
+                    all_ids.push(child);
+                }
+                idx += 1;
+                if idx > 4096 { break; }
+            }
+
+            // old_id → new_id 映射
+            let id_map: HashMap<String, String> = all_ids
+                .iter()
+                .map(|old| (old.clone(), new_id("track")))
+                .collect();
+
+            let mut new_track_ids = Vec::new();
+
+            // 克隆轨道
+            for old_id in &all_ids {
+                let src_track = match self.tracks.iter().find(|t| &t.id == old_id) {
+                    Some(t) => t,
+                    None => continue,
+                };
+                let new_tid = id_map[old_id].clone();
+                let new_parent = src_track
+                    .parent_id
+                    .as_ref()
+                    .and_then(|pid| id_map.get(pid))
+                    .cloned();
+
+                let order = self.next_track_order;
+                self.next_track_order += 1;
+
+                let mut cloned = src_track.clone();
+                cloned.id = new_tid.clone();
+                cloned.parent_id = new_parent;
+                cloned.order = order;
+                // 根轨道名称加 " (Copy)" 后缀
+                if old_id == track_id {
+                    cloned.name = format!("{} (Copy)", cloned.name);
+                }
+                self.tracks.push(cloned);
+                new_track_ids.push(new_tid);
+            }
+
+            // 克隆所有 clip
+            let clips_to_clone: Vec<Clip> = self
+                .clips
+                .iter()
+                .filter(|c| all_ids.contains(&c.track_id))
+                .cloned()
+                .collect();
+            for clip in clips_to_clone {
+                let new_cid = new_id("clip");
+                let new_tid = id_map[&clip.track_id].clone();
+                let mut cloned = clip;
+                cloned.id = new_cid;
+                cloned.track_id = new_tid;
+                self.clips.push(cloned);
+            }
+
+            // 克隆 params_by_root_track
+            let new_root_id = id_map[track_id].clone();
+            if let Some(params) = self.params_by_root_track.get(track_id).cloned() {
+                self.params_by_root_track.insert(new_root_id.clone(), params);
+            }
+
+            self.selected_track_id = Some(new_root_id);
+            new_track_ids
+        } else {
+            // ── 普通子轨道：只克隆单个轨道 + 其 clip ──
+            let order = self.next_track_order;
+            self.next_track_order += 1;
+            let new_tid = new_id("track");
+
+            let mut cloned = source.clone();
+            cloned.id = new_tid.clone();
+            cloned.name = format!("{} (Copy)", cloned.name);
+            cloned.order = order;
+            self.tracks.push(cloned);
+
+            // 克隆 clip
+            let clips_to_clone: Vec<Clip> = self
+                .clips
+                .iter()
+                .filter(|c| c.track_id == track_id)
+                .cloned()
+                .collect();
+            for clip in clips_to_clone {
+                let new_cid = new_id("clip");
+                let mut cloned = clip;
+                cloned.id = new_cid;
+                cloned.track_id = new_tid.clone();
+                self.clips.push(cloned);
+            }
+
+            self.selected_track_id = Some(new_tid.clone());
+            vec![new_tid]
+        }
+    }
+
     fn reorder_siblings(&mut self, track_id: &str, target_index: usize) {
         let parent_id = self
             .tracks

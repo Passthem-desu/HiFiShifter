@@ -168,6 +168,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "remove_track":
             return { trackId: args[0] };
 
+        case "duplicate_track":
+            return { trackId: args[0] };
+
         case "move_track":
             return {
                 trackId: args[0],
