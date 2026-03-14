@@ -16,6 +16,7 @@ import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
 import {
     setEditParam,
+    setEdgeSmoothnessPercent,
     setTrackStateRemote,
     togglePitchSnap,
     setScaleHighlightMode,
@@ -30,7 +31,13 @@ import { getWaveformColors } from "../../theme/waveformColors";
 import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
 import type { ParamFramesPayload } from "../../types/api";
-import { snapToScale, snapToSemitone, SCALE_NOTES } from "../../utils/musicalScales";
+import {
+    degreeInputToScaleSteps,
+    snapToScale,
+    snapToSemitone,
+    transposePitchByScaleSteps,
+} from "../../utils/musicalScales";
+import { computeAnchoredHorizontalZoom } from "../../utils/horizontalZoom";
 import { isModifierActive } from "../../features/keybindings/keybindingsSlice";
 import type { ScaleKey } from "../../utils/musicalScales";
 import {
@@ -103,6 +110,8 @@ export const PianoRollPanel: React.FC = () => {
     const mergedKeybindings = useAppSelector(selectMergedKeybindings);
     // 是否按住切换吸附的修饰键（临时切换吸附时用于高亮显示）
     const [snapToggleHeld, setSnapToggleHeld] = useState(false);
+    // 仅在参数编辑实际操作期间（选择拖拽/绘制）参与临时吸附视觉切换
+    const [snapGestureActive, setSnapGestureActive] = useState(false);
 
     useEffect(() => {
         const kb = mergedKeybindings["modifier.clipNoSnap"];
@@ -127,6 +136,11 @@ export const PianoRollPanel: React.FC = () => {
         () => getWaveformColors(themeMode),
         [themeMode],
     );
+
+    const effectivePitchSnapVisual =
+        snapGestureActive && snapToggleHeld
+            ? !s.pitchSnapEnabled
+            : s.pitchSnapEnabled;
 
     // Task 6.3: 集成 useAsyncPitchRefresh Hook
     const asyncRefresh = useAsyncPitchRefresh();
@@ -183,6 +197,10 @@ export const PianoRollPanel: React.FC = () => {
     const scrollLeftRef = useRef(scrollLeft);
     const pxPerBeatRef = useRef(pxPerBeat);
     const pxPerSecRef = useRef(pxPerSec);
+    const keyboardZoomPendingRef = useRef<{
+        nextScale: number;
+        nextScrollLeft: number;
+    } | null>(null);
 
     // BPM 变化时，按比例调�?scrollLeft，保持视口中心点的秒数不�?
     // scrollLeft_new = scrollLeft_old × (bpm_old / bpm_new)
@@ -206,6 +224,65 @@ export const PianoRollPanel: React.FC = () => {
         pxPerSecRef.current = pxPerSec;
         localStorage.setItem("hifishifter.paramPxPerSec", String(pxPerSec));
     }, [pxPerBeat, pxPerSec]);
+
+    useLayoutEffect(() => {
+        const pending = keyboardZoomPendingRef.current;
+        if (!pending) return;
+        if (Math.abs(pending.nextScale - pxPerSec) > 1e-9) return;
+        const scroller = scrollerRef.current;
+        if (!scroller) return;
+
+        keyboardZoomPendingRef.current = null;
+        scroller.scrollLeft = pending.nextScrollLeft;
+        syncScrollLeft(scroller);
+    }, [pxPerSec]);
+
+    useEffect(() => {
+        function onZoomFocused(e: Event) {
+            const active = document.activeElement as HTMLElement | null;
+            const inPianoRoll =
+                active?.hasAttribute("data-piano-roll-scroller") ||
+                active?.closest?.("[data-piano-roll-scroller]") ||
+                document.body.getAttribute("data-hs-focus-window") === "pianoRoll";
+            if (!inPianoRoll) return;
+
+            const factor = Number(
+                (e as CustomEvent<{ factor?: number }>).detail?.factor ?? 1,
+            );
+            if (!Number.isFinite(factor) || factor <= 0) return;
+
+            const scroller = scrollerRef.current;
+            if (!scroller) return;
+
+            const zoom = computeAnchoredHorizontalZoom({
+                currentScale: pxPerSecRef.current,
+                factor,
+                minScale: MIN_PX_PER_SEC,
+                maxScale: MAX_PX_PER_SEC,
+                scrollLeft: scroller.scrollLeft,
+                viewportWidth: scroller.clientWidth,
+                anchorSec: Number(s.playheadSec ?? 0) || 0,
+                contentSec: s.projectSec,
+            });
+            if (!zoom) return;
+
+            keyboardZoomPendingRef.current = {
+                nextScale: zoom.nextScale,
+                nextScrollLeft: zoom.nextScrollLeft,
+            };
+            setPxPerSec(zoom.nextScale);
+        }
+
+        window.addEventListener(
+            "hifi:zoomTimelineFocus",
+            onZoomFocused as EventListener,
+        );
+        return () =>
+            window.removeEventListener(
+                "hifi:zoomTimelineFocus",
+                onZoomFocused as EventListener,
+            );
+    }, [s.playheadSec, s.projectSec]);
 
     const setPxPerBeatImmediate = useCallback(
         (next: number) => {
@@ -995,6 +1072,13 @@ export const PianoRollPanel: React.FC = () => {
             dispatch(cycleDragDirection());
             void dispatch(persistUiSettings());
         }, [dispatch]),
+        edgeSmoothnessPercent: s.edgeSmoothnessPercent,
+        onPitchSnapGestureActiveChange: useCallback(
+            (active: boolean) => {
+                setSnapGestureActive(active);
+            },
+            [],
+        ),
     });
 
     const onScrollerWheelNative = interactions.onScrollerWheelNative;
@@ -1332,7 +1416,8 @@ export const PianoRollPanel: React.FC = () => {
                 case "transposeDegrees": {
                     const degrees = Number(data?.degrees ?? 0);
                     const scale = (data?.scale as string) ?? "chromatic";
-                    if (degrees === 0) return;
+                    const degreeSteps = degreeInputToScaleSteps(degrees);
+                    if (degreeSteps === 0) return;
                     // project base scale is controlled from toolbar; do not change it here
                     const res = await paramsApi.getParamFrames(
                         rootTrackId,
@@ -1346,52 +1431,23 @@ export const PianoRollPanel: React.FC = () => {
                     const vals = (payload.edit ?? []).map(
                         (v) => Number(v) || 0,
                     );
-                    const scaleNotes =
-                        SCALE_NOTES[scale as ScaleKey] ?? SCALE_NOTES["C"];
+
                     const transposed =
                         editParam === "pitch"
                             ? vals.map((midi) => {
                                   if (midi === 0) return 0;
-                                  const semitone = Math.round(midi) % 12;
-                                  const idx = scaleNotes.indexOf(semitone);
-                                  if (idx >= 0) {
-                                      const newIdx = idx + degrees;
-                                      const octShift = Math.floor(
-                                          newIdx / scaleNotes.length,
-                                      );
-                                      const noteIdx =
-                                          ((newIdx % scaleNotes.length) +
-                                              scaleNotes.length) %
-                                          scaleNotes.length;
-                                      return (
-                                          Math.floor(midi / 12) * 12 +
-                                          scaleNotes[noteIdx] +
-                                          octShift * 12 +
-                                          (midi - Math.round(midi))
-                                      );
-                                  }
-                                  return midi + degrees;
+                                  return transposePitchByScaleSteps(
+                                      midi,
+                                      degreeSteps,
+                                      scale as ScaleKey,
+                                  );
                               })
                             : vals.map((midi) => {
-                                  const semitone = Math.round(midi) % 12;
-                                  const idx = scaleNotes.indexOf(semitone);
-                                  if (idx >= 0) {
-                                      const newIdx = idx + degrees;
-                                      const octShift = Math.floor(
-                                          newIdx / scaleNotes.length,
-                                      );
-                                      const noteIdx =
-                                          ((newIdx % scaleNotes.length) +
-                                              scaleNotes.length) %
-                                          scaleNotes.length;
-                                      return (
-                                          Math.floor(midi / 12) * 12 +
-                                          scaleNotes[noteIdx] +
-                                          octShift * 12 +
-                                          (midi - Math.round(midi))
-                                      );
-                                  }
-                                  return midi + degrees;
+                                  return transposePitchByScaleSteps(
+                                      midi,
+                                      degreeSteps,
+                                      scale as ScaleKey,
+                                  );
                               });
                     await paramsApi.setParamFrames(
                         rootTrackId,
@@ -1726,10 +1782,10 @@ export const PianoRollPanel: React.FC = () => {
                         </IconButton>
                         <IconButton
                             size="1"
-                            variant={s.pitchSnapEnabled ? "solid" : "ghost"}
+                            variant={effectivePitchSnapVisual ? "solid" : "ghost"}
                             color="gray"
                             title={`${t("pitch_snap")}: ${
-                                s.pitchSnapEnabled
+                                effectivePitchSnapVisual
                                     ? s.pitchSnapUnit === "semitone"
                                         ? tAny("quantize_semitone")
                                         : tAny("quantize_scale")
@@ -1742,7 +1798,7 @@ export const PianoRollPanel: React.FC = () => {
                                 setPitchSnapOpen(true);
                             }}
                         >
-                            {!s.pitchSnapEnabled ? (
+                            {!effectivePitchSnapVisual ? (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M3 12L12 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                                     <path d="M10 2V10.5C10 11.88 8.88 13 7.5 13C6.12 13 5 11.88 5 10.5C5 9.12 6.12 8 7.5 8" stroke="currentColor" strokeWidth="1" opacity="0.6"/>
@@ -1820,6 +1876,30 @@ export const PianoRollPanel: React.FC = () => {
                                 <path d="M5 6V4.5C5 3.12 6.12 2 7.5 2C8.88 2 10 3.12 10 4.5V6" stroke="currentColor" strokeWidth="1" fill="none"/>
                             </svg>
                         </IconButton>
+                        <Flex align="center" gap="1" ml="2">
+                            <Text size="1">{tAny("edge_smoothness")}:</Text>
+                            <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={1}
+                                value={Math.round(s.edgeSmoothnessPercent)}
+                                onChange={(e) => {
+                                    const next = Number(e.currentTarget.value);
+                                    dispatch(setEdgeSmoothnessPercent(next));
+                                }}
+                                onPointerUp={() => {
+                                    void dispatch(persistUiSettings());
+                                }}
+                                onKeyUp={() => {
+                                    void dispatch(persistUiSettings());
+                                }}
+                                style={{ width: 120 }}
+                            />
+                            <Text size="1" style={{ minWidth: 36, textAlign: "right" }}>
+                                {Math.round(s.edgeSmoothnessPercent)}%
+                            </Text>
+                        </Flex>
                     </Flex>
                 </Flex>
 
@@ -2135,7 +2215,10 @@ export const PianoRollPanel: React.FC = () => {
                         secPerBeat={secPerBeat}
                         playheadSec={s.playheadSec}
                         contentRef={rulerContentRef}
-                        onMouseDown={interactions.onRulerMouseDown}
+                        onMouseDown={(e) => {
+                            document.body.setAttribute("data-hs-focus-window", "pianoRoll");
+                            interactions.onRulerMouseDown(e);
+                        }}
                     />
 
                     <div
@@ -2143,8 +2226,14 @@ export const PianoRollPanel: React.FC = () => {
                         className="flex-1 bg-qt-graph-bg overflow-x-scroll overflow-y-hidden relative custom-scrollbar outline-none focus:outline-none focus-visible:outline-none"
                         data-piano-roll-scroller
                         tabIndex={0}
+                        onFocus={() => {
+                            document.body.setAttribute("data-hs-focus-window", "pianoRoll");
+                        }}
                         onMouseDownCapture={
-                            interactions.onScrollerMouseDownCapture
+                            (e) => {
+                                document.body.setAttribute("data-hs-focus-window", "pianoRoll");
+                                interactions.onScrollerMouseDownCapture(e);
+                            }
                         }
                         onAuxClick={interactions.onScrollerAuxClick}
                         onScroll={interactions.onScrollerScroll}

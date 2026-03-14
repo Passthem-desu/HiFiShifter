@@ -255,6 +255,10 @@ export const jaJP = {
     kb_playback_toggle: "再生 / 一時停止",
     kb_playback_stop: "再生 / 停止",
     kb_playback_focus_cursor: "再生カーソルにフォーカス",
+    kb_playback_seek_left: "再生カーソルを左へ移動",
+    kb_playback_seek_right: "再生カーソルを右へ移動",
+    kb_timeline_zoom_in: "タイムラインを横方向に拡大（フォーカス中のビュー）",
+    kb_timeline_zoom_out: "タイムラインを横方向に縮小（フォーカス中のビュー）",
     kb_edit_undo: "元に戻す",
     kb_edit_redo: "やり直す",
     kb_project_new: "新規プロジェクト",
@@ -333,6 +337,7 @@ export const jaJP = {
     auto_scroll: "自動スクロール",
     clipboard_preview: "クリップボードプレビュー",
     lock_param_lines: "パラメータ線をロック",
+    edge_smoothness: "平滑度",
 
     // グリッド音符タイプラベル
     grid_note_normal: "通常",

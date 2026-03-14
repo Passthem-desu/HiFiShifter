@@ -14,6 +14,7 @@ export interface UiSettings {
     showClipboardPreview: boolean;
     lockParamLines?: boolean;
     dragDirection?: string;
+    smoothnessPercent?: number;
 }
 
 export const settingsApi = {

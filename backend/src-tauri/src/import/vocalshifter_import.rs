@@ -34,8 +34,15 @@ const VSP_PITCH_TO_MIDI: f64 = 1.0 / 100.0;
 /// 每个 Ctrp 调音点固定间隔（秒）
 const CTRP_FRAME_PERIOD: f64 = 0.005;
 
-/// Time 标记分段平滑重叠（秒）
-const SEGMENT_OVERLAP_SEC: f64 = 0.005;
+/// Time 标记分段平滑重叠上限（秒）
+const SEGMENT_OVERLAP_MAX_SEC: f64 = 0.1;
+
+/// 相邻分段过渡长度：取两段中较短者的 50%，并限制在上限内。
+fn segment_overlap_sec(left_timeline_sec: f64, right_timeline_sec: f64) -> f64 {
+    (left_timeline_sec.max(0.0) * 0.5)
+        .min(right_timeline_sec.max(0.0) * 0.5)
+        .min(SEGMENT_OVERLAP_MAX_SEC * 0.5)
+}
 
 /// HiFiShifter 支持的音频格式扩展名
 const SUPPORTED_AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3", "ogg", "m4a"];
@@ -540,7 +547,6 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
             let mut sorted: Vec<(bool, i32)> = algos.map(|s| s.iter().copied().collect()).unwrap_or_default();
             sorted.sort();
             for (is_world, synth_mode) in sorted {
-                let suffix = algo_pair_suffix(is_world, synth_mode);
                 let id = new_track_id();
                 let algo = if is_world {
                     PitchAnalysisAlgo::WorldDll
@@ -549,7 +555,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 };
                 hs_tracks.push(Track {
                     id: id.clone(),
-                    name: format!("{}{}", vsp_track.name, suffix),
+                    name: vsp_track.name.clone(),
                     parent_id: None,
                     order: track_order,
                     muted: vsp_track.muted,
@@ -700,6 +706,16 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         if time_markers.len() >= 3 {
             // 非线性拉伸：拆分为多个子剪辑
             let seg_count = time_markers.len() - 1;
+            let mut segment_clip_indices: Vec<usize> = Vec::with_capacity(seg_count);
+            let mut segment_actual_pre_tl: Vec<f64> = Vec::with_capacity(seg_count);
+            let mut segment_actual_post_tl: Vec<f64> = Vec::with_capacity(seg_count);
+            let seg_timeline_durations: Vec<f64> = (0..seg_count)
+                .map(|i| {
+                    let m_start = &time_markers[i];
+                    let m_end = &time_markers[i + 1];
+                    ((m_end.new_pos - m_start.new_pos) / sample_rate).max(0.001)
+                })
+                .collect();
             for seg_idx in 0..seg_count {
                 let m_start = &time_markers[seg_idx];
                 let m_end = &time_markers[seg_idx + 1];
@@ -710,14 +726,17 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
 
                 let new_start = m_start.new_pos / sample_rate;
                 let new_end = m_end.new_pos / sample_rate;
-                let new_dur = (new_end - new_start).max(0.001);
+                let new_dur = seg_timeline_durations[seg_idx];
 
                 let rate = (src_dur / new_dur) as f32;
 
-                // 在分割边界处增加 0.01s 重叠，并配合淡入淡出实现平滑过渡。
-                let want_pre_tl = if seg_idx > 0 { SEGMENT_OVERLAP_SEC } else { 0.0 };
+                let want_pre_tl = if seg_idx > 0 {
+                    segment_overlap_sec(seg_timeline_durations[seg_idx - 1], new_dur)
+                } else {
+                    0.0
+                };
                 let want_post_tl = if seg_idx + 1 < seg_count {
-                    SEGMENT_OVERLAP_SEC
+                    segment_overlap_sec(new_dur, seg_timeline_durations[seg_idx + 1])
                 } else {
                     0.0
                 };
@@ -732,23 +751,13 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
 
                 let clip_start = item_start_sec + new_start - actual_pre_tl;
                 let clip_length = (new_dur + actual_pre_tl + actual_post_tl).max(0.001);
-                let fade_in = if seg_idx > 0 {
-                    actual_pre_tl.min(SEGMENT_OVERLAP_SEC)
-                } else {
-                    0.0
-                };
-                let fade_out = if seg_idx + 1 < seg_count {
-                    actual_post_tl.min(SEGMENT_OVERLAP_SEC)
-                } else {
-                    0.0
-                };
-
                 let clip_id = new_clip_id();
                 let clip_name = Path::new(&audio_path)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("Audio")
                     .to_string();
+                let clip_index = hs_clips.len();
 
                 hs_clips.push(Clip {
                     id: clip_id.clone(),
@@ -771,13 +780,16 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     source_start_sec: seg_src_start,
                     source_end_sec: seg_src_end,
                     playback_rate: rate.clamp(0.1, 10.0),
-                    fade_in_sec: fade_in,
-                    fade_out_sec: fade_out,
+                    fade_in_sec: 0.0,
+                    fade_out_sec: 0.0,
                     fade_in_curve: String::new(),
                     fade_out_curve: String::new(),
                     extra_curves: None,
                     extra_params: None,
                 });
+                segment_clip_indices.push(clip_index);
+                segment_actual_pre_tl.push(actual_pre_tl);
+                segment_actual_post_tl.push(actual_post_tl);
 
                 // 写入 pitch 数据（源时间范围内的 Ctrp 点）
                 write_pitch_data_for_segment(
@@ -787,8 +799,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     seg_src_end,
                     clip_start,
                     rate64,
-                    fade_in,
-                    fade_out,
+                    0.0,
+                    0.0,
                     &mut pitch_data_by_track,
                 );
 
@@ -801,11 +813,32 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                         seg_src_end,
                         clip_start,
                         rate64,
-                        fade_in,
-                        fade_out,
+                        0.0,
+                        0.0,
                         &mut extra_curve_data_by_track,
                     );
                 }
+            }
+
+            for seg_idx in 0..seg_count {
+                let clip_idx = segment_clip_indices[seg_idx];
+                let Some(clip) = hs_clips.get_mut(clip_idx) else {
+                    continue;
+                };
+                let fade_in = if seg_idx > 0 {
+                    (segment_actual_pre_tl[seg_idx] + segment_actual_post_tl[seg_idx - 1])
+                        .min(clip.length_sec.max(0.0))
+                } else {
+                    0.0
+                };
+                let fade_out = if seg_idx + 1 < seg_count {
+                    (segment_actual_post_tl[seg_idx] + segment_actual_pre_tl[seg_idx + 1])
+                        .min(clip.length_sec.max(0.0))
+                } else {
+                    0.0
+                };
+                clip.fade_in_sec = fade_in;
+                clip.fade_out_sec = fade_out;
             }
         } else {
             // 线性拉伸或无拉伸
@@ -1355,6 +1388,16 @@ pub fn import_vsp_clipboard(
         if time_markers.len() >= 3 {
             // 非线性拉伸：拆分为多个子剪辑
             let seg_count = time_markers.len() - 1;
+            let mut segment_clip_indices: Vec<usize> = Vec::with_capacity(seg_count);
+            let mut segment_actual_pre_tl: Vec<f64> = Vec::with_capacity(seg_count);
+            let mut segment_actual_post_tl: Vec<f64> = Vec::with_capacity(seg_count);
+            let seg_timeline_durations: Vec<f64> = (0..seg_count)
+                .map(|i| {
+                    let m_start = &time_markers[i];
+                    let m_end = &time_markers[i + 1];
+                    ((m_end.new_pos - m_start.new_pos) / sample_rate).max(0.001)
+                })
+                .collect();
             for seg_idx in 0..seg_count {
                 let m_start = &time_markers[seg_idx];
                 let m_end = &time_markers[seg_idx + 1];
@@ -1365,13 +1408,17 @@ pub fn import_vsp_clipboard(
 
                 let new_start = m_start.new_pos / sample_rate;
                 let new_end = m_end.new_pos / sample_rate;
-                let new_dur = (new_end - new_start).max(0.001);
+                let new_dur = seg_timeline_durations[seg_idx];
 
                 let rate = (src_dur / new_dur) as f32;
 
-                let want_pre_tl = if seg_idx > 0 { SEGMENT_OVERLAP_SEC } else { 0.0 };
+                let want_pre_tl = if seg_idx > 0 {
+                    segment_overlap_sec(seg_timeline_durations[seg_idx - 1], new_dur)
+                } else {
+                    0.0
+                };
                 let want_post_tl = if seg_idx + 1 < seg_count {
-                    SEGMENT_OVERLAP_SEC
+                    segment_overlap_sec(new_dur, seg_timeline_durations[seg_idx + 1])
                 } else {
                     0.0
                 };
@@ -1387,23 +1434,13 @@ pub fn import_vsp_clipboard(
 
                 let clip_start = item_start_sec + new_start - actual_pre_tl;
                 let clip_length = (new_dur + actual_pre_tl + actual_post_tl).max(0.001);
-                let fade_in = if seg_idx > 0 {
-                    actual_pre_tl.min(SEGMENT_OVERLAP_SEC)
-                } else {
-                    0.0
-                };
-                let fade_out = if seg_idx + 1 < seg_count {
-                    actual_post_tl.min(SEGMENT_OVERLAP_SEC)
-                } else {
-                    0.0
-                };
-
                 let clip_id = new_clip_id();
                 let clip_name = Path::new(&audio_path)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("Audio")
                     .to_string();
+                let clip_index = hs_clips.len();
 
                 hs_clips.push(Clip {
                     id: clip_id.clone(),
@@ -1426,13 +1463,16 @@ pub fn import_vsp_clipboard(
                     source_start_sec: seg_src_start,
                     source_end_sec: seg_src_end,
                     playback_rate: rate.clamp(0.1, 10.0),
-                    fade_in_sec: fade_in,
-                    fade_out_sec: fade_out,
+                    fade_in_sec: 0.0,
+                    fade_out_sec: 0.0,
                     fade_in_curve: String::new(),
                     fade_out_curve: String::new(),
                     extra_curves: None,
                     extra_params: None,
                 });
+                segment_clip_indices.push(clip_index);
+                segment_actual_pre_tl.push(actual_pre_tl);
+                segment_actual_post_tl.push(actual_post_tl);
 
                 write_pitch_data_for_segment(
                     &target_track_id,
@@ -1441,8 +1481,8 @@ pub fn import_vsp_clipboard(
                     seg_src_end,
                     clip_start,
                     rate64,
-                    fade_in,
-                    fade_out,
+                    0.0,
+                    0.0,
                     &mut pitch_data_by_track,
                 );
 
@@ -1454,11 +1494,32 @@ pub fn import_vsp_clipboard(
                         seg_src_end,
                         clip_start,
                         rate64,
-                        fade_in,
-                        fade_out,
+                        0.0,
+                        0.0,
                         &mut extra_curve_data_by_track,
                     );
                 }
+            }
+
+            for seg_idx in 0..seg_count {
+                let clip_idx = segment_clip_indices[seg_idx];
+                let Some(clip) = hs_clips.get_mut(clip_idx) else {
+                    continue;
+                };
+                let fade_in = if seg_idx > 0 {
+                    (segment_actual_pre_tl[seg_idx] + segment_actual_post_tl[seg_idx - 1])
+                        .min(clip.length_sec.max(0.0))
+                } else {
+                    0.0
+                };
+                let fade_out = if seg_idx + 1 < seg_count {
+                    (segment_actual_post_tl[seg_idx] + segment_actual_pre_tl[seg_idx + 1])
+                        .min(clip.length_sec.max(0.0))
+                } else {
+                    0.0
+                };
+                clip.fade_in_sec = fade_in;
+                clip.fade_out_sec = fade_out;
             }
         } else {
             // 线性拉伸或无拉伸
@@ -1690,7 +1751,6 @@ fn import_vsp_clipboard_selected_tracks(
             let mut sorted: Vec<(bool, i32)> = algo_pairs.into_iter().collect();
             sorted.sort();
             for (is_world, synth_mode) in sorted {
-                let suffix = algo_pair_suffix(is_world, synth_mode);
                 let algo = if is_world {
                     PitchAnalysisAlgo::WorldDll
                 } else {
@@ -1700,7 +1760,7 @@ fn import_vsp_clipboard_selected_tracks(
                 let color_idx = (ordered_track_ids.len() + hs_tracks.len()) % TRACK_COLORS.len();
                 hs_tracks.push(Track {
                     id: id.clone(),
-                    name: format!("{}{}", vsp_track.name, suffix),
+                    name: vsp_track.name.clone(),
                     parent_id: None,
                     order: track_order,
                     muted: vsp_track.muted,
@@ -1800,6 +1860,16 @@ fn import_vsp_clipboard_selected_tracks(
 
         if time_markers.len() >= 3 {
             let seg_count = time_markers.len() - 1;
+            let mut segment_clip_indices: Vec<usize> = Vec::with_capacity(seg_count);
+            let mut segment_actual_pre_tl: Vec<f64> = Vec::with_capacity(seg_count);
+            let mut segment_actual_post_tl: Vec<f64> = Vec::with_capacity(seg_count);
+            let seg_timeline_durations: Vec<f64> = (0..seg_count)
+                .map(|i| {
+                    let m_start = &time_markers[i];
+                    let m_end = &time_markers[i + 1];
+                    ((m_end.new_pos - m_start.new_pos) / sample_rate).max(0.001)
+                })
+                .collect();
             for seg_idx in 0..seg_count {
                 let m_start = &time_markers[seg_idx];
                 let m_end = &time_markers[seg_idx + 1];
@@ -1810,14 +1880,18 @@ fn import_vsp_clipboard_selected_tracks(
 
                 let new_start = m_start.new_pos / sample_rate;
                 let new_end = m_end.new_pos / sample_rate;
-                let new_dur = (new_end - new_start).max(0.001);
+                let new_dur = seg_timeline_durations[seg_idx];
 
                 let rate = (src_dur / new_dur) as f32;
                 let rate64 = (rate as f64).max(0.0001);
 
-                let want_pre_tl = if seg_idx > 0 { SEGMENT_OVERLAP_SEC } else { 0.0 };
+                let want_pre_tl = if seg_idx > 0 {
+                    segment_overlap_sec(seg_timeline_durations[seg_idx - 1], new_dur)
+                } else {
+                    0.0
+                };
                 let want_post_tl = if seg_idx + 1 < seg_count {
-                    SEGMENT_OVERLAP_SEC
+                    segment_overlap_sec(new_dur, seg_timeline_durations[seg_idx + 1])
                 } else {
                     0.0
                 };
@@ -1832,23 +1906,13 @@ fn import_vsp_clipboard_selected_tracks(
 
                 let clip_start = item_start_sec + new_start - actual_pre_tl;
                 let clip_length = (new_dur + actual_pre_tl + actual_post_tl).max(0.001);
-                let fade_in = if seg_idx > 0 {
-                    actual_pre_tl.min(SEGMENT_OVERLAP_SEC)
-                } else {
-                    0.0
-                };
-                let fade_out = if seg_idx + 1 < seg_count {
-                    actual_post_tl.min(SEGMENT_OVERLAP_SEC)
-                } else {
-                    0.0
-                };
-
                 let clip_id = new_clip_id();
                 let clip_name = Path::new(&audio_path)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("Audio")
                     .to_string();
+                let clip_index = hs_clips.len();
 
                 hs_clips.push(Clip {
                     id: clip_id.clone(),
@@ -1871,13 +1935,16 @@ fn import_vsp_clipboard_selected_tracks(
                     source_start_sec: seg_src_start,
                     source_end_sec: seg_src_end,
                     playback_rate: rate.clamp(0.1, 10.0),
-                    fade_in_sec: fade_in,
-                    fade_out_sec: fade_out,
+                    fade_in_sec: 0.0,
+                    fade_out_sec: 0.0,
                     fade_in_curve: String::new(),
                     fade_out_curve: String::new(),
                     extra_curves: None,
                     extra_params: None,
                 });
+                segment_clip_indices.push(clip_index);
+                segment_actual_pre_tl.push(actual_pre_tl);
+                segment_actual_post_tl.push(actual_post_tl);
 
                 write_pitch_data_for_segment(
                     &track_id,
@@ -1886,8 +1953,8 @@ fn import_vsp_clipboard_selected_tracks(
                     seg_src_end,
                     clip_start,
                     rate64,
-                    fade_in,
-                    fade_out,
+                    0.0,
+                    0.0,
                     &mut pitch_data_by_track,
                 );
 
@@ -1899,11 +1966,32 @@ fn import_vsp_clipboard_selected_tracks(
                         seg_src_end,
                         clip_start,
                         rate64,
-                        fade_in,
-                        fade_out,
+                        0.0,
+                        0.0,
                         &mut extra_curve_data_by_track,
                     );
                 }
+            }
+
+            for seg_idx in 0..seg_count {
+                let clip_idx = segment_clip_indices[seg_idx];
+                let Some(clip) = hs_clips.get_mut(clip_idx) else {
+                    continue;
+                };
+                let fade_in = if seg_idx > 0 {
+                    (segment_actual_pre_tl[seg_idx] + segment_actual_post_tl[seg_idx - 1])
+                        .min(clip.length_sec.max(0.0))
+                } else {
+                    0.0
+                };
+                let fade_out = if seg_idx + 1 < seg_count {
+                    (segment_actual_post_tl[seg_idx] + segment_actual_pre_tl[seg_idx + 1])
+                        .min(clip.length_sec.max(0.0))
+                } else {
+                    0.0
+                };
+                clip.fade_in_sec = fade_in;
+                clip.fade_out_sec = fade_out;
             }
         } else {
             let (rate, clip_length) = if time_markers.len() == 2 {

@@ -29,7 +29,12 @@ import { matchesKeybinding } from "../../../features/keybindings/useKeybindings"
 import { ACTION_META } from "../../../features/keybindings/defaultKeybindings";
 import type { Keybinding } from "../../../features/keybindings/types";
 import type { KeybindingMap, ActionId } from "../../../features/keybindings/types";
-import { snapToScale, snapToSemitone } from "../../../utils/musicalScales";
+import {
+    scaleStepDeltaBetween,
+    snapToScale,
+    snapToSemitone,
+    transposePitchByScaleSteps,
+} from "../../../utils/musicalScales";
 
 type CanvasCursor = "default" | "crosshair" | "grab" | "grabbing";
 
@@ -142,6 +147,10 @@ export function usePianoRollInteractions(args: {
     dragDirection?: "free" | "x-only" | "y-only";
     /** 切换拖动方向的回调 */
     onCycleDragDirection?: () => void;
+    /** 选区拖拽时边缘平滑度（0-100%） */
+    edgeSmoothnessPercent?: number;
+    /** 选择拖拽/绘制进行中时，用于临时切换吸附按钮视觉 */
+    onPitchSnapGestureActiveChange?: (active: boolean) => void;
 }) {
     const {
         dispatch,
@@ -200,7 +209,68 @@ export function usePianoRollInteractions(args: {
         onEditAction,
         dragDirection,
         onCycleDragDirection,
+        edgeSmoothnessPercent,
+        onPitchSnapGestureActiveChange,
     } = args;
+
+    const applyEdgeSmoothingToDense = useCallback(
+        (
+            editedDense: number[],
+            editedStartIdx: number,
+            editedLen: number,
+        ) => {
+            const strength = clamp(Number(edgeSmoothnessPercent) || 0, 0, 100);
+            if (strength <= 0 || editedLen <= 1) return;
+
+            const maxTransitionFrames = Math.floor(editedLen / 2);
+            if (maxTransitionFrames <= 0) return;
+
+            const transitionFrames = Math.round(
+                (strength / 100) * maxTransitionFrames,
+            );
+            if (transitionFrames <= 0) return;
+
+            const snapshot = editedDense.slice();
+            const maxIdx = snapshot.length - 1;
+            if (maxIdx < 1) return;
+
+            const startIdx = clamp(editedStartIdx, 0, maxIdx);
+            const endIdx = clamp(editedStartIdx + editedLen - 1, 0, maxIdx);
+            const halfSpan = transitionFrames / 2;
+            if (halfSpan <= 0) return;
+
+            // 左边界：以边界为中心，在 [P-half, P+half] 内从选区外过渡到选区内。
+            if (startIdx > 0) {
+                const left = Math.max(0, Math.floor(startIdx - halfSpan));
+                const right = Math.min(maxIdx, Math.ceil(startIdx + halfSpan));
+                const span = Math.max(1e-9, 2 * halfSpan);
+                for (let idx = left; idx <= right; idx++) {
+                    const t = clamp((idx - (startIdx - halfSpan)) / span, 0, 1);
+                    const outsideIdx = Math.min(startIdx - 1, idx);
+                    const insideIdx = Math.max(startIdx, idx);
+                    const outsideVal = snapshot[outsideIdx] ?? editedDense[idx];
+                    const insideVal = snapshot[insideIdx] ?? editedDense[idx];
+                    editedDense[idx] = outsideVal + (insideVal - outsideVal) * t;
+                }
+            }
+
+            // 右边界：以边界为中心，在 [Q-half, Q+half] 内从选区内过渡到选区外。
+            if (endIdx < maxIdx) {
+                const left = Math.max(0, Math.floor(endIdx - halfSpan));
+                const right = Math.min(maxIdx, Math.ceil(endIdx + halfSpan));
+                const span = Math.max(1e-9, 2 * halfSpan);
+                for (let idx = left; idx <= right; idx++) {
+                    const t = clamp((idx - (endIdx - halfSpan)) / span, 0, 1);
+                    const insideIdx = Math.min(endIdx, idx);
+                    const outsideIdx = Math.max(endIdx + 1, idx);
+                    const insideVal = snapshot[insideIdx] ?? editedDense[idx];
+                    const outsideVal = snapshot[outsideIdx] ?? editedDense[idx];
+                    editedDense[idx] = insideVal + (outsideVal - insideVal) * t;
+                }
+            }
+        },
+        [edgeSmoothnessPercent],
+    );
 
     /** Apply pitch snap to a drawn value when editParam is "pitch" and snap is enabled.
      *  When shiftHeld=true, the snap state is toggled (XOR with pitchSnapEnabled). */
@@ -868,9 +938,14 @@ export function usePianoRollInteractions(args: {
                                 ensureLiveEditBase(pv);
                                 if (liveEditActiveRef)
                                     liveEditActiveRef.current = true;
+                                if (editParam === "pitch") {
+                                    onPitchSnapGestureActiveChange?.(true);
+                                }
 
                                 // 用闭包变量记录最新 X/Y 偏移量
                                 let lastValueDelta = 0;
+                                let lastScaleStepDelta = 0;
+                                let useScaleDegreeTranspose = false;
                                 let lastFrameDelta = 0; // 帧偏移（整数）
                                 // 使用闭包变量跟踪当前拖动方向（可通过右键切换）
                                 let currentDragDir = dragDirection ?? "y-only";
@@ -885,8 +960,26 @@ export function usePianoRollInteractions(args: {
                                     const noSnapKb = keybindingMap?.["modifier.clipNoSnap" as ActionId];
                                     const snapToggled = noSnapKb ? isModifierActive(noSnapKb, ev) : false;
                                     const effectiveSnap = snapToggled ? !pitchSnapEnabled : pitchSnapEnabled;
-                                    if (effectiveSnap && editParam === "pitch") {
-                                        rawValueDelta = Math.round(rawValueDelta);
+                                    const yDragEnabled = currentDragDir !== "x-only";
+                                    if (effectiveSnap && editParam === "pitch" && yDragEnabled) {
+                                        if (pitchSnapUnit === "scale" && projectBaseScale) {
+                                            useScaleDegreeTranspose = true;
+                                            lastScaleStepDelta = scaleStepDeltaBetween(
+                                                startMouseVal,
+                                                currentVal,
+                                                projectBaseScale,
+                                            );
+                                            rawValueDelta = 0;
+                                        } else {
+                                            useScaleDegreeTranspose = false;
+                                            rawValueDelta = Math.round(rawValueDelta);
+                                        }
+                                    } else {
+                                        useScaleDegreeTranspose = false;
+                                        if (!yDragEnabled) {
+                                            lastScaleStepDelta = 0;
+                                            rawValueDelta = 0;
+                                        }
                                     }
 
                                     // 计算 X 方向帧偏移
@@ -898,7 +991,7 @@ export function usePianoRollInteractions(args: {
                                     );
 
                                     // 应用拖动方向限制
-                                    lastValueDelta = currentDragDir === "x-only" ? 0 : rawValueDelta;
+                                    lastValueDelta = yDragEnabled ? rawValueDelta : 0;
                                     lastFrameDelta = currentDragDir === "y-only" ? 0 : rawFrameDelta;
 
                                     const pvNow = paramViewRef.current;
@@ -952,7 +1045,6 @@ export function usePianoRollInteractions(args: {
                                                 ? pvNow.orig[globalIdx]
                                                 : 0;
                                     }
-
                                     // 再将选区值写入新位置（覆盖 orig）
                                     for (let i = 0; i < selLen; i++) {
                                         const targetFrame =
@@ -965,11 +1057,36 @@ export function usePianoRollInteractions(args: {
                                             denseIdx >= 0 &&
                                             denseIdx < overallLen
                                         ) {
-                                            dense[denseIdx] =
-                                                (origValues[i] ?? 0) +
-                                                lastValueDelta;
+                                            const orig = origValues[i] ?? 0;
+                                            if (
+                                                useScaleDegreeTranspose &&
+                                                editParam === "pitch" &&
+                                                projectBaseScale
+                                            ) {
+                                                dense[denseIdx] =
+                                                    orig === 0
+                                                        ? 0
+                                                        : transposePitchByScaleSteps(
+                                                              orig,
+                                                              lastScaleStepDelta,
+                                                              projectBaseScale,
+                                                          );
+                                            } else {
+                                                dense[denseIdx] =
+                                                    orig + lastValueDelta;
+                                            }
                                         }
                                     }
+
+                                    const movedStartDenseIdx = Math.round(
+                                        (newDenseStart - overallMinFrame) /
+                                            stride,
+                                    );
+                                    applyEdgeSmoothingToDense(
+                                        dense,
+                                        movedStartDenseIdx,
+                                        selLen,
+                                    );
 
                                     applyDenseToLiveEdit(
                                         pvNow,
@@ -1062,7 +1179,6 @@ export function usePianoRollInteractions(args: {
                                                     ? pvNow.orig[globalIdx]
                                                     : 0;
                                         }
-
                                         // 再将偏移后的选区值写入新位置
                                         for (let i = 0; i < selLen; i++) {
                                             const targetFrame =
@@ -1076,11 +1192,36 @@ export function usePianoRollInteractions(args: {
                                                 denseIdx >= 0 &&
                                                 denseIdx < overallLen
                                             ) {
-                                                finalDense[denseIdx] =
-                                                    (origValues[i] ?? 0) +
-                                                    lastValueDelta;
+                                                const orig = origValues[i] ?? 0;
+                                                if (
+                                                    useScaleDegreeTranspose &&
+                                                    editParam === "pitch" &&
+                                                    projectBaseScale
+                                                ) {
+                                                    finalDense[denseIdx] =
+                                                        orig === 0
+                                                            ? 0
+                                                            : transposePitchByScaleSteps(
+                                                                  orig,
+                                                                  lastScaleStepDelta,
+                                                                  projectBaseScale,
+                                                              );
+                                                } else {
+                                                    finalDense[denseIdx] =
+                                                        orig + lastValueDelta;
+                                                }
                                             }
                                         }
+
+                                        const movedStartDenseIdx = Math.round(
+                                            (newDenseStart - overallMinFrame) /
+                                                stride,
+                                        );
+                                        applyEdgeSmoothingToDense(
+                                            finalDense,
+                                            movedStartDenseIdx,
+                                            selLen,
+                                        );
 
                                         // 立即同步更新本地 paramView state
                                         const nextEdit = pvNow.edit.slice();
@@ -1131,6 +1272,9 @@ export function usePianoRollInteractions(args: {
                                     } else {
                                         if (liveEditActiveRef)
                                             liveEditActiveRef.current = false;
+                                    }
+                                    if (editParam === "pitch") {
+                                        onPitchSnapGestureActiveChange?.(false);
                                     }
                                     setCanvasCursor("grab");
                                     invalidate();
@@ -1196,6 +1340,9 @@ export function usePianoRollInteractions(args: {
             const mode: StrokeMode = e.button === 2 ? "restore" : "draw";
             if (e.button !== 0 && e.button !== 2) return;
             setCanvasCursor(getDefaultCanvasCursor());
+            if (editParam === "pitch") {
+                onPitchSnapGestureActiveChange?.(true);
+            }
             const pv = paramViewRef.current;
             if (pv) ensureLiveEditBase(pv);
             const fp = paramView?.framePeriodMs ?? 5;
@@ -1283,6 +1430,9 @@ export function usePianoRollInteractions(args: {
                     window.removeEventListener("pointerup", onUp);
                     window.removeEventListener("pointercancel", onUp);
                     invalidate();
+                    if (editParam === "pitch") {
+                        onPitchSnapGestureActiveChange?.(false);
+                    }
                     void commitStroke(st.points, st.mode);
                 };
 
@@ -1355,6 +1505,9 @@ export function usePianoRollInteractions(args: {
                     window.removeEventListener("pointerup", onUp);
                     window.removeEventListener("pointercancel", onUp);
                     invalidate();
+                    if (editParam === "pitch") {
+                        onPitchSnapGestureActiveChange?.(false);
+                    }
                     void commitStroke(st.points, st.mode);
                 };
 
@@ -1388,7 +1541,12 @@ export function usePianoRollInteractions(args: {
             pointerValue,
             strokeRef,
             applyDenseToLiveEdit,
+            applyEdgeSmoothingToDense,
             commitStroke,
+            onPitchSnapGestureActiveChange,
+            pitchSnapEnabled,
+            pitchSnapUnit,
+            projectBaseScale,
         ],
     );
 

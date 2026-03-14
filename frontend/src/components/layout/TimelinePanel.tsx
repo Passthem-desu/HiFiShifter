@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Flex } from "@radix-ui/themes";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
@@ -27,10 +27,12 @@ import {
     splitClipRemote,
     setMultiSelectedClipIds as setMultiSelectedClipIdsAction,
     setSelectedClip,
+    setSelectedClipPreservingTrack,
 } from "../../features/session/sessionSlice";
 
 import type { ClipTemplate } from "../../features/session/sessionTypes";
 import { dbToGain } from "./timeline/math";
+import { computeAnchoredHorizontalZoom } from "../../utils/horizontalZoom";
 import { useClipDrag } from "./timeline/hooks/useClipDrag";
 import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
@@ -80,6 +82,20 @@ export const TimelinePanel: React.FC = () => {
     const lastClickedClipIdRef = useRef<string | null>(null);
 
     const [scrollLeft, setScrollLeft] = useState(0);
+    const [pxPerSec, setPxPerSec] = useState(() => {
+        const stored = Number(localStorage.getItem("hifishifter.pxPerSec"));
+        return Number.isFinite(stored) && stored > 0
+            ? Math.min(MAX_PX_PER_SEC, Math.max(MIN_PX_PER_SEC, stored))
+            : DEFAULT_PX_PER_SEC;
+    });
+    const pxPerSecRef = useRef(pxPerSec);
+    useEffect(() => {
+        pxPerSecRef.current = pxPerSec;
+    }, [pxPerSec]);
+    const keyboardZoomPendingRef = useRef<{
+        nextScale: number;
+        nextScrollLeft: number;
+    } | null>(null);
     const [viewportWidth, setViewportWidth] = useState(0);
     useEffect(() => {
         scrollLeftRef.current = scrollLeft;
@@ -133,12 +149,18 @@ export const TimelinePanel: React.FC = () => {
                 : action;
         syncScrollLeft(next);
     };
-    const [pxPerSec, setPxPerSec] = useState(() => {
-        const stored = Number(localStorage.getItem("hifishifter.pxPerSec"));
-        return Number.isFinite(stored) && stored > 0
-            ? Math.min(MAX_PX_PER_SEC, Math.max(MIN_PX_PER_SEC, stored))
-            : DEFAULT_PX_PER_SEC;
-    });
+
+    useLayoutEffect(() => {
+        const pending = keyboardZoomPendingRef.current;
+        if (!pending) return;
+        if (Math.abs(pending.nextScale - pxPerSec) > 1e-9) return;
+        const scroller = scrollRef.current;
+        if (!scroller) return;
+
+        keyboardZoomPendingRef.current = null;
+        scroller.scrollLeft = pending.nextScrollLeft;
+        syncScrollLeft(pending.nextScrollLeft);
+    }, [pxPerSec]);
     // 渲染时根据 BPM 计算 pxPerBeat，仅用于网格/标尺渲染
     // pxPerBeat = pxPerSec × secPerBeat = pxPerSec × (60 / bpm)
     const secPerBeat = 60 / Math.max(1, s.bpm);
@@ -784,6 +806,62 @@ export const TimelinePanel: React.FC = () => {
         [beatFromClientX, dispatch],
     );
 
+    const startDeferredPlayheadSeek = React.useCallback(
+        (args: {
+            startClientX: number;
+            startClientY: number;
+            getBounds: () => DOMRect | null;
+            getScrollLeft: () => number;
+        }) => {
+            const { startClientX, startClientY, getBounds, getScrollLeft } = args;
+            let moved = false;
+            let lastSec = 0;
+
+            const updateAt = (clientX: number, commit: boolean) => {
+                const bounds = getBounds();
+                if (!bounds) return null;
+                const sec = setPlayheadFromClientX(
+                    clientX,
+                    bounds,
+                    getScrollLeft(),
+                    commit,
+                );
+                return sec;
+            };
+
+            const onMove = (ev: MouseEvent) => {
+                const dx = ev.clientX - startClientX;
+                const dy = ev.clientY - startClientY;
+                if (!moved && dx * dx + dy * dy >= 9) {
+                    moved = true;
+                }
+                if (!moved) return;
+                const sec = updateAt(ev.clientX, false);
+                if (sec != null) lastSec = sec;
+            };
+
+            const onEnd = (ev: MouseEvent) => {
+                window.removeEventListener("mousemove", onMove, true);
+                window.removeEventListener("mouseup", onEnd, true);
+                window.removeEventListener("mouseleave", onEnd, true);
+
+                if (!moved) {
+                    updateAt(ev.clientX, true);
+                    return;
+                }
+
+                const sec = updateAt(ev.clientX, false);
+                const finalSec = sec == null ? lastSec : sec;
+                void dispatch(seekPlayhead(finalSec));
+            };
+
+            window.addEventListener("mousemove", onMove, true);
+            window.addEventListener("mouseup", onEnd, true);
+            window.addEventListener("mouseleave", onEnd, true);
+        },
+        [dispatch, setPlayheadFromClientX],
+    );
+
     const ensureTrackLaneSelected = React.useCallback(
         (clipId: string) => {
             lastClickedClipIdRef.current = clipId;
@@ -959,6 +1037,31 @@ export const TimelinePanel: React.FC = () => {
         }
         if (el.isContentEditable) return true;
         if (el.closest?.('input,textarea,select,[contenteditable="true"]')) {
+            return true;
+        }
+        return false;
+    }
+
+    function isPointerOnNativeScrollbar(
+        scroller: HTMLDivElement,
+        clientX: number,
+        clientY: number,
+    ): boolean {
+        const bounds = scroller.getBoundingClientRect();
+        const horizontalScrollbarHeight =
+            scroller.offsetHeight - scroller.clientHeight;
+        if (
+            horizontalScrollbarHeight > 0 &&
+            clientY > bounds.bottom - horizontalScrollbarHeight
+        ) {
+            return true;
+        }
+        const verticalScrollbarWidth =
+            scroller.offsetWidth - scroller.clientWidth;
+        if (
+            verticalScrollbarWidth > 0 &&
+            clientX > bounds.right - verticalScrollbarWidth
+        ) {
             return true;
         }
         return false;
@@ -1261,7 +1364,7 @@ export const TimelinePanel: React.FC = () => {
             if (op === "selectAll") {
                 const allIds = sessionRef.current.clips.map((clip) => clip.id);
                 setMultiSelectedClipIds(allIds);
-                dispatch(setSelectedClip(allIds[0] ?? null));
+                dispatch(setSelectedClipPreservingTrack(allIds[0] ?? null));
                 return;
             }
 
@@ -1285,6 +1388,76 @@ export const TimelinePanel: React.FC = () => {
                 onEditOp as EventListener,
             );
     }, [pasteClipsAtPlayhead, splitSelectedAtPlayhead]);
+
+    useEffect(() => {
+        function onNudge(e: Event) {
+            const direction = Number(
+                (e as CustomEvent<{ direction?: number }>).detail?.direction ?? 0,
+            );
+            if (!direction) return;
+            const stepSec =
+                gridStepBeats(sessionRef.current.grid) *
+                (60 / Math.max(1, sessionRef.current.bpm));
+            const current = Number(sessionRef.current.playheadSec ?? 0) || 0;
+            const next = Math.max(0, current + Math.sign(direction) * stepSec);
+            dispatch(setplayheadSec(next));
+            void dispatch(seekPlayhead(next));
+        }
+
+        window.addEventListener("hifi:nudgePlayhead", onNudge as EventListener);
+        return () =>
+            window.removeEventListener(
+                "hifi:nudgePlayhead",
+                onNudge as EventListener,
+            );
+    }, [dispatch]);
+
+    useEffect(() => {
+        function onZoomFocused(e: Event) {
+            const active = document.activeElement as HTMLElement | null;
+            const inTimeline =
+                active?.hasAttribute("data-timeline-scroller") ||
+                active?.closest?.("[data-timeline-scroller]") ||
+                document.body.getAttribute("data-hs-focus-window") === "timeline";
+            if (!inTimeline) return;
+
+            const factor = Number(
+                (e as CustomEvent<{ factor?: number }>).detail?.factor ?? 1,
+            );
+            if (!Number.isFinite(factor) || factor <= 0) return;
+
+            const scroller = scrollRef.current;
+            if (!scroller) return;
+
+            const zoom = computeAnchoredHorizontalZoom({
+                currentScale: pxPerSecRef.current,
+                factor,
+                minScale: MIN_PX_PER_SEC,
+                maxScale: MAX_PX_PER_SEC,
+                scrollLeft: scroller.scrollLeft,
+                viewportWidth: scroller.clientWidth,
+                anchorSec: Number(sessionRef.current.playheadSec ?? 0) || 0,
+                contentSec: sessionRef.current.projectSec,
+            });
+            if (!zoom) return;
+
+            keyboardZoomPendingRef.current = {
+                nextScale: zoom.nextScale,
+                nextScrollLeft: zoom.nextScrollLeft,
+            };
+            setPxPerSec(zoom.nextScale);
+        }
+
+        window.addEventListener(
+            "hifi:zoomTimelineFocus",
+            onZoomFocused as EventListener,
+        );
+        return () =>
+            window.removeEventListener(
+                "hifi:zoomTimelineFocus",
+                onZoomFocused as EventListener,
+            );
+    }, []);
 
     useEffect(() => {
         if (!contextMenu && !trackAreaMenu) return;
@@ -1444,17 +1617,18 @@ export const TimelinePanel: React.FC = () => {
                     contentRef={rulerContentRef}
                     onMouseDown={(e) => {
                         if (e.button !== 0) return;
+                        document.body.setAttribute("data-hs-focus-window", "timeline");
                         const scroller = scrollRef.current;
                         if (!scroller) return;
                         const bounds = (
                             e.currentTarget as HTMLDivElement
                         ).getBoundingClientRect();
-                        setPlayheadFromClientX(
-                            e.clientX,
-                            bounds,
-                            scroller.scrollLeft,
-                            true,
-                        );
+                        startDeferredPlayheadSeek({
+                            startClientX: e.clientX,
+                            startClientY: e.clientY,
+                            getBounds: () => bounds,
+                            getScrollLeft: () => scroller.scrollLeft,
+                        });
                     }}
                 />
 
@@ -1473,6 +1647,7 @@ export const TimelinePanel: React.FC = () => {
                     playheadSec={s.playheadSec}
                     playheadZoomEnabled={s.playheadZoomEnabled}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"
+                    data-timeline-scroller
                     onScroll={(e) => {
                         const el = e.currentTarget as HTMLDivElement;
                         if (trackListScrollRef.current) {
@@ -1648,6 +1823,18 @@ export const TimelinePanel: React.FC = () => {
                         }
                     }}
                     onPointerDownCapture={(e) => {
+                        document.body.setAttribute("data-hs-focus-window", "timeline");
+                        const scroller = scrollRef.current;
+                        if (
+                            scroller &&
+                            isPointerOnNativeScrollbar(
+                                scroller,
+                                e.clientX,
+                                e.clientY,
+                            )
+                        ) {
+                            return;
+                        }
                         if (e.button === 0 || e.button === 2) {
                             const trackId = trackIdFromClientY(e.clientY);
                             if (
@@ -1669,18 +1856,13 @@ export const TimelinePanel: React.FC = () => {
                         setMultiSelectedClipIds([]);
                         const scroller = scrollRef.current;
                         if (!scroller) return;
-                        const bounds = scroller.getBoundingClientRect();
                         // Ignore clicks on the native scrollbar region
                         if (
-                            e.clientY >
-                            bounds.bottom -
-                                (scroller.offsetHeight - scroller.clientHeight)
-                        )
-                            return;
-                        if (
-                            e.clientX >
-                            bounds.right -
-                                (scroller.offsetWidth - scroller.clientWidth)
+                            isPointerOnNativeScrollbar(
+                                scroller,
+                                e.clientX,
+                                e.clientY,
+                            )
                         )
                             return;
                         const trackId = trackIdFromClientY(e.clientY);
@@ -1690,12 +1872,18 @@ export const TimelinePanel: React.FC = () => {
                         ) {
                             void dispatch(selectTrackRemote(trackId));
                         }
-                        setPlayheadFromClientX(
-                            e.clientX,
-                            bounds,
-                            scroller.scrollLeft,
-                            true,
-                        );
+                        startDeferredPlayheadSeek({
+                            startClientX: e.clientX,
+                            startClientY: e.clientY,
+                            getBounds: () => {
+                                const cur = scrollRef.current;
+                                return cur ? cur.getBoundingClientRect() : null;
+                            },
+                            getScrollLeft: () => {
+                                const cur = scrollRef.current;
+                                return cur ? cur.scrollLeft : scroller.scrollLeft;
+                            },
+                        });
                     }}
                 >
                     {/* Track Lanes */}
@@ -1831,16 +2019,14 @@ export const TimelinePanel: React.FC = () => {
                                 e.stopPropagation();
                                 const scroller = scrollRef.current;
                                 if (!scroller) return;
+                                const startX = e.clientX;
+                                const startY = e.clientY;
+                                let moved = false;
                                 const bounds = scroller.getBoundingClientRect();
-                                const beat = setPlayheadFromClientX(
-                                    e.clientX,
-                                    bounds,
-                                    scroller.scrollLeft,
-                                    false,
-                                );
+                                const initialSec = s.playheadSec;
                                 playheadDragRef.current = {
                                     pointerId: e.pointerId,
-                                    lastBeat: beat,
+                                    lastBeat: initialSec,
                                 };
                                 (
                                     e.currentTarget as HTMLDivElement
@@ -1856,6 +2042,12 @@ export const TimelinePanel: React.FC = () => {
                                     ) {
                                         return;
                                     }
+                                    const dx = ev.clientX - startX;
+                                    const dy = ev.clientY - startY;
+                                    if (!moved && dx * dx + dy * dy >= 9) {
+                                        moved = true;
+                                    }
+                                    if (!moved) return;
                                     const currentBounds =
                                         currentScroller.getBoundingClientRect();
                                     drag.lastBeat = setPlayheadFromClientX(
@@ -1871,6 +2063,14 @@ export const TimelinePanel: React.FC = () => {
                                     if (!drag || drag.pointerId !== e.pointerId)
                                         return;
                                     playheadDragRef.current = null;
+                                    if (!moved) {
+                                        drag.lastBeat = setPlayheadFromClientX(
+                                            startX,
+                                            bounds,
+                                            scroller!.scrollLeft,
+                                            false,
+                                        );
+                                    }
                                     void dispatch(seekPlayhead(drag.lastBeat));
                                     window.removeEventListener(
                                         "pointermove",

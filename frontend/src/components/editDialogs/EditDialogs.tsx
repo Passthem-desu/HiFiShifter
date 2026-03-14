@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Dialog, Flex, Text, TextField, Button, Select } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
 import type { ScaleKey } from "../../utils/musicalScales";
+import { SCALE_KEYS, SCALE_LABELS } from "../../utils/musicalScales";
 
 interface Props {
     open: boolean;
@@ -68,7 +69,8 @@ export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C",
                 <Dialog.Title>{tAny("menu_transpose_degrees")}</Dialog.Title>
                 <Flex direction="column" gap="3" mt="3">
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 80 }}>{tAny("transpose_degrees_amount")}</Text>                        <TextField.Root
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("transpose_degrees_amount")}</Text>
+                        <TextField.Root
                             size="2"
                             type="number"
                             value={degrees}
@@ -76,7 +78,19 @@ export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C",
                             style={{ flex: 1 }}
                         />
                     </Flex>
-                    {/* base scale is global and available in the top toolbar; removed from dialog */}
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
+                        <Select.Root value={scale} size="2" onValueChange={(v) => setScale(v as ScaleKey)}>
+                            <Select.Trigger style={{ flex: 1 }} />
+                            <Select.Content>
+                                {SCALE_KEYS.map((k) => (
+                                    <Select.Item key={k} value={k}>
+                                        {SCALE_LABELS[k]}
+                                    </Select.Item>
+                                ))}
+                            </Select.Content>
+                        </Select.Root>
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
@@ -321,7 +335,21 @@ export function QuantizeDialog({
                             </Select.Content>
                         </Select.Root>
                     </Flex>
-                    {/* base scale is taken from project toolbar; removed from dialog */}
+                    {unit === "scale" && (
+                        <Flex align="center" gap="2">
+                            <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
+                            <Select.Root value={scale} size="2" onValueChange={(v) => setScale(v as ScaleKey)}>
+                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Content>
+                                    {SCALE_KEYS.map((k) => (
+                                        <Select.Item key={k} value={k}>
+                                            {SCALE_LABELS[k]}
+                                        </Select.Item>
+                                    ))}
+                                </Select.Content>
+                            </Select.Root>
+                        </Flex>
+                    )}
                     <Flex align="center" gap="2">
                         <Text size="2" style={{ minWidth: 80 }}>{tAny("pitch_snap_tolerance")}</Text>
                         <TextField.Root
@@ -384,7 +412,21 @@ export function MeanQuantizeDialog({ open, onOpenChange, defaultScale = "C", onC
                             </Select.Content>
                         </Select.Root>
                     </Flex>
-                    {/* base scale is global and controlled from the top toolbar */}
+                    {unit === "scale" && (
+                        <Flex align="center" gap="2">
+                            <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
+                            <Select.Root value={scale} size="2" onValueChange={(v) => setScale(v as ScaleKey)}>
+                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Content>
+                                    {SCALE_KEYS.map((k) => (
+                                        <Select.Item key={k} value={k}>
+                                            {SCALE_LABELS[k]}
+                                        </Select.Item>
+                                    ))}
+                                </Select.Content>
+                            </Select.Root>
+                        </Flex>
+                    )}
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>

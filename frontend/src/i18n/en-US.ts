@@ -255,6 +255,10 @@ export const enUS = {
     kb_playback_toggle: "Play / Pause",
     kb_playback_stop: "Play / Stop",
     kb_playback_focus_cursor: "Focus Playback Cursor",
+    kb_playback_seek_left: "Move Playhead Left",
+    kb_playback_seek_right: "Move Playhead Right",
+    kb_timeline_zoom_in: "Zoom Timeline In (Focused View)",
+    kb_timeline_zoom_out: "Zoom Timeline Out (Focused View)",
     kb_edit_undo: "Undo",
     kb_edit_redo: "Redo",
     kb_project_new: "New Project",
@@ -333,6 +337,7 @@ export const enUS = {
     auto_scroll: "Auto Scroll",
     clipboard_preview: "Clipboard Preview",
     lock_param_lines: "Lock Param Lines",
+    edge_smoothness: "Smoothness",
 
     // Grid note type labels
     grid_note_normal: "Normal",

@@ -255,6 +255,10 @@ export const koKR = {
     kb_playback_toggle: "재생 / 일시 정지",
     kb_playback_stop: "재생 / 정지",
     kb_playback_focus_cursor: "재생 커서로 이동",
+    kb_playback_seek_left: "재생 커서를 왼쪽으로 이동",
+    kb_playback_seek_right: "재생 커서를 오른쪽으로 이동",
+    kb_timeline_zoom_in: "타임라인 가로 확대 (포커스된 뷰)",
+    kb_timeline_zoom_out: "타임라인 가로 축소 (포커스된 뷰)",
     kb_edit_undo: "실행 취소",
     kb_edit_redo: "다시 실행",
     kb_project_new: "새 프로젝트",
@@ -333,6 +337,7 @@ export const koKR = {
     auto_scroll: "자동 스크롤",
     clipboard_preview: "클립보드 미리보기",
     lock_param_lines: "파라미터 라인 잠금",
+    edge_smoothness: "스무딩",
 
     // 그리드 음표 유형 라벨
     grid_note_normal: "보통",

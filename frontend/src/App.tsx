@@ -561,6 +561,34 @@ function AppInner() {
                 case "playback.focusCursor":
                     window.dispatchEvent(new CustomEvent("hifi:focusCursor"));
                     break;
+                case "playback.seekLeft":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:nudgePlayhead", {
+                            detail: { direction: -1 },
+                        }),
+                    );
+                    break;
+                case "playback.seekRight":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:nudgePlayhead", {
+                            detail: { direction: 1 },
+                        }),
+                    );
+                    break;
+                case "timeline.zoomIn":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:zoomTimelineFocus", {
+                            detail: { factor: 1.1 },
+                        }),
+                    );
+                    break;
+                case "timeline.zoomOut":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:zoomTimelineFocus", {
+                            detail: { factor: 0.9 },
+                        }),
+                    );
+                    break;
                 case "edit.undo":
                     void dispatch(undoRemote());
                     break;

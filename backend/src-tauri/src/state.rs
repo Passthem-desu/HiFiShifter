@@ -1713,6 +1713,75 @@ impl TimelineState {
         glued.start_sec = start;
         glued.length_sec = (end - start).max(0.01);
 
+        // Render selected clips into one baked audio file so glue includes all selected data,
+        // not only the first clip's source payload.
+        let selected_id_set: HashSet<String> = selected
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+
+        let temp_glue_path = crate::temp_manager::hifishifter_temp_dir()
+            .map(|dir| dir.join(format!("glue_{}.wav", Uuid::new_v4().simple())));
+
+        if let Ok(glue_path) = temp_glue_path {
+            let mut render_timeline = self.clone();
+            render_timeline
+                .clips
+                .retain(|c| selected_id_set.contains(&c.id));
+
+            for tr in &mut render_timeline.tracks {
+                if tr.id == track_id {
+                    tr.muted = false;
+                    tr.solo = false;
+                    tr.volume = 1.0;
+                } else {
+                    tr.muted = true;
+                    tr.solo = false;
+                    tr.volume = 0.0;
+                }
+            }
+
+            let render_result = crate::mixdown::render_mixdown_wav(
+                &render_timeline,
+                &glue_path,
+                crate::mixdown::MixdownOptions {
+                    sample_rate: 44_100,
+                    start_sec: start,
+                    end_sec: Some(end),
+                    stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+                    apply_pitch_edit: true,
+                    export_format: crate::mixdown::ExportFormat::Wav32f,
+                    quality_preset: crate::mixdown::QualityPreset::Export,
+                },
+            );
+
+            if render_result.is_ok() {
+                let info = try_read_wav_info(&glue_path, 4096);
+                let rendered_duration_sec = info
+                    .as_ref()
+                    .map(|v| v.duration_sec)
+                    .unwrap_or(glued.length_sec);
+
+                glued.source_path = Some(glue_path.to_string_lossy().to_string());
+                glued.duration_sec = Some(rendered_duration_sec);
+                glued.duration_frames = info.as_ref().map(|v| v.total_frames);
+                glued.source_sample_rate = info.as_ref().map(|v| v.sample_rate);
+                glued.waveform_preview = info.map(|v| v.waveform_preview);
+                glued.source_start_sec = 0.0;
+                glued.source_end_sec = rendered_duration_sec;
+                glued.playback_rate = 1.0;
+                glued.gain = 1.0;
+                glued.muted = false;
+                glued.fade_in_sec = 0.0;
+                glued.fade_out_sec = 0.0;
+                glued.fade_in_curve = default_fade_curve();
+                glued.fade_out_curve = default_fade_curve();
+                glued.extra_curves = None;
+                glued.extra_params = None;
+                glued.pitch_range = Some(PitchRange { min: -24.0, max: 24.0 });
+            }
+        }
+
         self.clips.retain(|c| !clip_ids.contains(&c.id));
         self.clips.push(glued.clone());
         self.selected_clip_id = Some(glued.id);

@@ -8,6 +8,10 @@ export type ActionId =
     | "playback.toggle" // 播放/暂停
     | "playback.stop" // 停止播放
     | "playback.focusCursor" // 聚焦播放光标
+    | "playback.seekLeft" // 播放光标左移
+    | "playback.seekRight" // 播放光标右移
+    | "timeline.zoomIn" // 焦点时间轴横向放大
+    | "timeline.zoomOut" // 焦点时间轴横向缩小
     // 编辑
     | "edit.undo" // 撤销
     | "edit.redo" // 重做

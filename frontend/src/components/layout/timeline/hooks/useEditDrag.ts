@@ -11,6 +11,7 @@ import {
     setClipStateRemote,
     setClipSourceRange,
 } from "../../../../features/session/sessionSlice";
+import { applyAutoCrossfade } from "./autoCrossfade";
 import { clamp, gainToDb, dbToGain } from "../math";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
@@ -217,20 +218,33 @@ export function useEditDrag(deps: {
             const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
             if (!clipNow) return;
 
+            let persistPromise: Promise<unknown> | null = null;
             if (drag.type === "trim_left") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, sourceStartSec: clipNow.sourceStartSec }));
+                persistPromise = dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, sourceStartSec: clipNow.sourceStartSec })).unwrap();
             } else if (drag.type === "trim_right") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, sourceEndSec: clipNow.sourceEndSec }));
+                persistPromise = dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, sourceEndSec: clipNow.sourceEndSec })).unwrap();
             } else if (drag.type === "stretch_left") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate }));
+                persistPromise = dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate })).unwrap();
             } else if (drag.type === "stretch_right") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate }));
+                persistPromise = dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate })).unwrap();
             } else if (drag.type === "fade_in") {
                 void dispatch(setClipStateRemote({ clipId: drag.clipId, fadeInSec: clipNow.fadeInSec }));
             } else if (drag.type === "fade_out") {
                 void dispatch(setClipStateRemote({ clipId: drag.clipId, fadeOutSec: clipNow.fadeOutSec }));
             } else if (drag.type === "gain") {
                 void dispatch(setClipStateRemote({ clipId: drag.clipId, gain: clipNow.gain }));
+            }
+
+            const shouldApplyAutoCrossfade =
+                sessionRef.current.autoCrossfadeEnabled &&
+                (drag.type === "trim_left" ||
+                    drag.type === "trim_right" ||
+                    drag.type === "stretch_left" ||
+                    drag.type === "stretch_right");
+            if (shouldApplyAutoCrossfade) {
+                void Promise.resolve(persistPromise).finally(() => {
+                    void applyAutoCrossfade(sessionRef.current, [drag.clipId], dispatch);
+                });
             }
 
             window.removeEventListener("pointermove", onMove);

@@ -24,6 +24,7 @@ import {
     fetchSelectedTrackSummary,
     glueClipsRemote,
     moveClipRemote,
+    moveClipsRemote,
     moveTrackRemote,
     removeClipRemote,
     removeTrackRemote,
@@ -91,6 +92,7 @@ import {
     setTrackStateRemote,
 } from "./thunks/trackThunks";
 import { markProjectDirty } from "./sessionDirtyState";
+import { resolveTrackIdForClipSelection } from "./selectionFocus";
 
 export type {
     AutomationPoint,
@@ -136,6 +138,9 @@ export interface SessionState {
     showClipboardPreview: boolean;
     /** 参数编辑器拖动方向限制 */
     dragDirection: DragDirection;
+
+    /** 参数编辑器选区拖拽时的边缘平滑度（0-100%） */
+    edgeSmoothnessPercent: number;
 
     /** 在粘贴/创建时是否锁定参数线以应用 linked params */
     lockParamLinesEnabled: boolean;
@@ -642,6 +647,7 @@ const initialState: SessionState = {
     autoScrollEnabled: false,
     showClipboardPreview: false,
     dragDirection: "y-only" as DragDirection,
+    edgeSmoothnessPercent: 0,
     lockParamLinesEnabled: false,
 
     paramsEpoch: 0,
@@ -862,6 +868,9 @@ const sessionSlice = createSlice({
         setDragDirection(state, action: PayloadAction<DragDirection>) {
             state.dragDirection = action.payload;
         },
+        setEdgeSmoothnessPercent(state, action: PayloadAction<number>) {
+            state.edgeSmoothnessPercent = clamp(Number(action.payload) || 0, 0, 100);
+        },
         setplayheadSec(state, action: PayloadAction<number>) {
             state.playheadSec = Math.max(0, action.payload);
         },
@@ -887,11 +896,18 @@ const sessionSlice = createSlice({
             state.selectedClipId = action.payload;
             state.selectedPointId = null;
             if (action.payload) {
-                const selectedClip = state.clips.find(
-                    (clip) => clip.id === action.payload,
-                );
-                state.selectedTrackId =
-                    selectedClip?.trackId ?? state.selectedTrackId;
+                state.selectedTrackId = resolveTrackIdForClipSelection({
+                    currentTrackId: state.selectedTrackId,
+                    clips: state.clips,
+                    clipId: action.payload,
+                });
+                ensureClipAutomation(state, action.payload);
+            }
+        },
+        setSelectedClipPreservingTrack(state, action: PayloadAction<string | null>) {
+            state.selectedClipId = action.payload;
+            state.selectedPointId = null;
+            if (action.payload) {
                 ensureClipAutomation(state, action.payload);
             }
         },
@@ -1311,10 +1327,24 @@ const sessionSlice = createSlice({
                     state.autoScrollEnabled = s.autoScroll;
                 if (s.showClipboardPreview != null)
                     state.showClipboardPreview = s.showClipboardPreview;
+                if ((s as any).lockParamLines != null)
+                    state.lockParamLinesEnabled = Boolean(
+                        (s as any).lockParamLines,
+                    );
                 if (s.dragDirection != null) {
                     const validDirs = ["free", "x-only", "y-only"];
                     if (validDirs.includes(s.dragDirection))
                         state.dragDirection = s.dragDirection as DragDirection;
+                }
+                const smoothness =
+                    (s as any).smoothnessPercent ??
+                    (s as any).edgeSmoothnessPercent;
+                if (smoothness != null) {
+                    state.edgeSmoothnessPercent = clamp(
+                        Number(smoothness) || 0,
+                        0,
+                        100,
+                    );
                 }
             })
 
@@ -2090,6 +2120,16 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload);
             })
 
+            .addCase(moveClipsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
+            })
+
             .addCase(splitClipRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2259,6 +2299,7 @@ export const {
     toggleClipboardPreview,
     cycleDragDirection,
     setDragDirection,
+    setEdgeSmoothnessPercent,
     setplayheadSec,
     setModelDir,
     setAudioPath,
@@ -2270,6 +2311,7 @@ export const {
     setScaleHighlightMode,
     toggleLockParamLines,
     setSelectedClip,
+    setSelectedClipPreservingTrack,
     setMultiSelectedClipIds,
     moveClipStart,
     moveClipTrack,

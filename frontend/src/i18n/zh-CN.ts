@@ -250,6 +250,10 @@ export const zhCN = {
     kb_playback_toggle: "播放 / 暂停",
     kb_playback_stop: "播放 / 停止",
     kb_playback_focus_cursor: "聚焦播放光标",
+    kb_playback_seek_left: "播放光标左移",
+    kb_playback_seek_right: "播放光标右移",
+    kb_timeline_zoom_in: "时间轴水平放大（当前焦点窗口）",
+    kb_timeline_zoom_out: "时间轴水平缩小（当前焦点窗口）",
     kb_edit_undo: "撤销",
     kb_edit_redo: "重做",
     kb_project_new: "新建工程",
@@ -326,6 +330,7 @@ export const zhCN = {
     auto_scroll: "自动滚屏",
     clipboard_preview: "剪贴板预览",
     lock_param_lines: "锁定参数线",
+    edge_smoothness: "平滑度",
 
     // Grid note type labels
     grid_note_normal: "标准",

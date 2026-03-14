@@ -41,6 +41,7 @@ export const persistUiSettings = createAsyncThunk(
             showClipboardPreview: s.showClipboardPreview,
             lockParamLines: s.lockParamLinesEnabled,
             dragDirection: s.dragDirection,
+            smoothnessPercent: s.edgeSmoothnessPercent,
         });
     },
 );

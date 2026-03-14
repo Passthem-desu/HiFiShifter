@@ -17,6 +17,10 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "playback.toggle": { key: "space" },
     "playback.stop": { key: "enter" }, // Play/Stop: 播放/停止（停止时回到起始位置）
     "playback.focusCursor": { key: "\\" }, // 聚焦播放光标
+    "playback.seekLeft": { key: "arrowleft" },
+    "playback.seekRight": { key: "arrowright" },
+    "timeline.zoomIn": { key: "arrowup" },
+    "timeline.zoomOut": { key: "arrowdown" },
 
     // 编辑
     "edit.undo": { key: "z", ctrl: true },
@@ -100,6 +104,24 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     "playback.focusCursor": {
         labelKey: "kb_playback_focus_cursor",
         group: "playback",
+    },
+    "playback.seekLeft": {
+        labelKey: "kb_playback_seek_left",
+        group: "playback",
+    },
+    "playback.seekRight": {
+        labelKey: "kb_playback_seek_right",
+        group: "playback",
+    },
+    "timeline.zoomIn": {
+        labelKey: "kb_timeline_zoom_in",
+        group: "playback",
+        scopedContext: "timelineFocus",
+    },
+    "timeline.zoomOut": {
+        labelKey: "kb_timeline_zoom_out",
+        group: "playback",
+        scopedContext: "timelineFocus",
     },
 
     "edit.undo": { labelKey: "kb_edit_undo", group: "edit" },

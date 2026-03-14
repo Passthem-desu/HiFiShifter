@@ -27,6 +27,8 @@ pub struct UiSettings {
     pub lock_param_lines: bool,
     #[serde(default = "default_drag_direction")]
     pub drag_direction: String,
+    #[serde(default, alias = "edgeSmoothnessPercent")]
+    pub smoothness_percent: u32,
 }
 
 fn default_true() -> bool {
@@ -56,6 +58,7 @@ impl Default for UiSettings {
             show_clipboard_preview: true,
             lock_param_lines: true,
             drag_direction: default_drag_direction(),
+            smoothness_percent: 0,
         }
     }
 }
