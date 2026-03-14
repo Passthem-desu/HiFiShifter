@@ -24,9 +24,8 @@ import {
     stopAudioPlayback,
     setBpm,
     updateTransportBpm,
-    setBeats,
     setToolMode,
-    setGrid,
+    setProjectTimelineSettingsRemote,
     toggleAutoCrossfade,
     toggleGridSnap,
     togglePlayheadZoom,
@@ -166,7 +165,12 @@ export function ActionBar() {
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                             const v = Number(e.target.value);
                             if (!Number.isFinite(v)) return;
-                            dispatch(setBeats(v));
+                            void dispatch(
+                                setProjectTimelineSettingsRemote({
+                                    beatsPerBar: v,
+                                    gridSize: s.grid,
+                                }),
+                            );
                         }}
                         style={{
                             width: 42,
@@ -185,7 +189,14 @@ export function ActionBar() {
                 <Select.Root
                     value={s.grid}
                     size="1"
-                    onValueChange={(v) => dispatch(setGrid(v as typeof s.grid))}
+                    onValueChange={(v) => {
+                        void dispatch(
+                            setProjectTimelineSettingsRemote({
+                                beatsPerBar: s.beats,
+                                gridSize: v,
+                            }),
+                        );
+                    }}
                 >
                     <Select.Trigger
                         style={{ backgroundColor: "var(--qt-base)" }}
@@ -380,8 +391,12 @@ onClick={() => dispatch(playOriginal())}
                     y={gridSnapMenuPos.y}
                     currentGrid={s.grid}
                     onSelect={(grid) => {
-                        dispatch(setGrid(grid as typeof s.grid));
-                        void dispatch(persistUiSettings());
+                        void dispatch(
+                            setProjectTimelineSettingsRemote({
+                                beatsPerBar: s.beats,
+                                gridSize: grid,
+                            }),
+                        );
                         setGridSnapMenuPos(null);
                     }}
                     onClose={() => setGridSnapMenuPos(null)}

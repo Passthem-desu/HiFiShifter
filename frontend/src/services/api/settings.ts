@@ -6,6 +6,7 @@ export interface UiSettings {
     gridSize?: string;
     pitchSnap: boolean;
     pitchSnapUnit: string;
+    pitchSnapScale?: string;
     pitchSnapToleranceCents?: number;
     scaleHighlightMode?: string;
     playheadZoom: boolean;

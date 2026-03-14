@@ -11,6 +11,8 @@ export const projectApi = {
             dirty: boolean;
             recent: string[];
             base_scale?: string;
+            beats_per_bar?: number;
+            grid_size?: string;
         }>("get_project_meta"),
 
     setProjectBaseScale: (baseScale: string) =>
@@ -18,6 +20,12 @@ export const projectApi = {
             "set_project_base_scale",
             baseScale,
         ),
+
+    setProjectTimelineSettings: (beatsPerBar: number, gridSize: string) =>
+        invoke<{
+            ok: boolean;
+            project?: { beats_per_bar?: number; grid_size?: string; dirty?: boolean };
+        }>("set_project_timeline_settings", beatsPerBar, gridSize),
 
     newProject: () => invoke<TimelineResult>("new_project"),
 

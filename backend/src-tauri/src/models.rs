@@ -15,6 +15,8 @@ pub struct ProjectMetaPayload {
     pub dirty: bool,
     pub recent: Vec<String>,
     pub base_scale: String,
+    pub beats_per_bar: u32,
+    pub grid_size: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -75,6 +75,23 @@ export const setProjectBaseScaleRemote = createAsyncThunk(
     },
 );
 
+export const setProjectTimelineSettingsRemote = createAsyncThunk(
+    "session/setProjectTimelineSettingsRemote",
+    async (
+        payload: { beatsPerBar: number; gridSize: string },
+        { rejectWithValue },
+    ) => {
+        const res = await webApi.setProjectTimelineSettings(
+            payload.beatsPerBar,
+            payload.gridSize,
+        );
+        if (!res || res.ok === false) {
+            return rejectWithValue("set_project_timeline_settings_failed");
+        }
+        return res;
+    },
+);
+
 export const openVocalShifterFromDialog = createAsyncThunk(
     "session/openVocalShifterFromDialog",
     async (_, { rejectWithValue }) => {

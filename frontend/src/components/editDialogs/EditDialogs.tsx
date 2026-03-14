@@ -196,17 +196,6 @@ export function VibratoDialog({ open, onOpenChange, onConfirm, editParam, paramR
     const [release, setRelease] = useState("50");
     const [phase, setPhase] = useState("0");
 
-    // 当弹窗打开时重置为默认值
-    useEffect(() => {
-        if (open) {
-            setAmplitude(defaultAmplitude);
-            setRate("5.5");
-            setAttack("50");
-            setRelease("50");
-            setPhase("0");
-        }
-    }, [open, defaultAmplitude]);
-
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
             <Dialog.Content style={{ maxWidth: 380 }} onKeyDown={(e) => e.stopPropagation()}>

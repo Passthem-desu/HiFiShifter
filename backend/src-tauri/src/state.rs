@@ -228,6 +228,8 @@ pub struct ProjectState {
     pub dirty: bool,
     pub recent: Vec<String>,
     pub base_scale: String,
+    pub beats_per_bar: u32,
+    pub grid_size: String,
     pub allow_close: bool,
 }
 
@@ -239,6 +241,8 @@ impl Default for ProjectState {
             dirty: false,
             recent: Vec::new(),
             base_scale: "C".to_string(),
+            beats_per_bar: 4,
+            grid_size: "1/4".to_string(),
             allow_close: false,
         }
     }
@@ -777,6 +781,8 @@ impl AppState {
             dirty: p.dirty,
             recent: p.recent,
             base_scale: p.base_scale,
+            beats_per_bar: p.beats_per_bar,
+            grid_size: p.grid_size,
         }
     }
 

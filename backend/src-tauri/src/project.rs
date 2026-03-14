@@ -37,6 +37,10 @@ pub struct ProjectFile {
     pub timeline: TimelineState,
     #[serde(default = "default_base_scale")]
     pub base_scale: String,
+    #[serde(default = "default_beats_per_bar")]
+    pub beats_per_bar: u32,
+    #[serde(default = "default_grid_size")]
+    pub grid_size: String,
     /// 媒体文件注册表（v2 新增，旧工程反序列化时默认为空）。
     #[serde(default)]
     pub media_registry: Vec<MediaEntry>,
@@ -46,12 +50,20 @@ pub struct ProjectFile {
 }
 
 impl ProjectFile {
-    pub fn new(name: String, timeline: TimelineState, base_scale: String) -> Self {
+    pub fn new(
+        name: String,
+        timeline: TimelineState,
+        base_scale: String,
+        beats_per_bar: u32,
+        grid_size: String,
+    ) -> Self {
         Self {
             version: 2,
             name,
             timeline,
             base_scale,
+            beats_per_bar,
+            grid_size,
             media_registry: Vec::new(),
             synth_config: SynthConfig::default(),
         }
@@ -60,6 +72,14 @@ impl ProjectFile {
 
 fn default_base_scale() -> String {
     "C".to_string()
+}
+
+fn default_beats_per_bar() -> u32 {
+    4
+}
+
+fn default_grid_size() -> String {
+    "1/4".to_string()
 }
 
 // ─── 序列化 / 反序列化 ─────────────────────────────────────────────────────────
@@ -112,4 +132,50 @@ pub fn resolve_paths_relative(mut tl: TimelineState, project_path: &Path) -> Tim
         }
     }
     tl
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_file_roundtrip_preserves_timeline_settings() {
+        let pf = ProjectFile::new(
+            "demo".to_string(),
+            TimelineState::default(),
+            "C".to_string(),
+            7,
+            "1/8t".to_string(),
+        );
+
+        let bytes = rmp_serde::to_vec_named(&pf).expect("serialize project file");
+        let loaded = load_project_file(&bytes).expect("load project file");
+
+        assert_eq!(loaded.beats_per_bar, 7);
+        assert_eq!(loaded.grid_size, "1/8t");
+    }
+
+    #[test]
+    fn project_file_back_compat_defaults_timeline_settings() {
+        let json = r#"{
+            "version": 1,
+            "name": "legacy",
+            "timeline": {
+                "tracks": [],
+                "clips": [],
+                "selected_track_id": null,
+                "selected_clip_id": null,
+                "bpm": 120.0,
+                "playhead_sec": 0.0,
+                "project_sec": 32.0,
+                "params_by_root_track": {},
+                "next_track_order": 1
+            },
+            "base_scale": "C"
+        }"#;
+
+        let loaded = load_project_file(json.as_bytes()).expect("load legacy project file");
+        assert_eq!(loaded.beats_per_bar, 4);
+        assert_eq!(loaded.grid_size, "1/4");
+    }
 }

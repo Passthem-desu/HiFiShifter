@@ -17,6 +17,22 @@ fn normalize_scale_key(raw: &str) -> String {
     "C".to_string()
 }
 
+fn normalize_beats_per_bar(raw: u32) -> u32 {
+    raw.clamp(1, 32)
+}
+
+fn normalize_grid_size(raw: &str) -> String {
+    const VALID: [&str; 21] = [
+        "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64", "1/1d", "1/2d", "1/4d",
+        "1/8d", "1/16d", "1/32d", "1/64d", "1/1t", "1/2t", "1/4t", "1/8t", "1/16t", "1/32t",
+        "1/64t",
+    ];
+    if VALID.contains(&raw) {
+        return raw.to_string();
+    }
+    "1/4".to_string()
+}
+
 use super::common::ok_bool;
 use super::core::{get_timeline_state, get_timeline_state_from_ref};
 
@@ -39,12 +55,16 @@ pub(crate) fn save_project_to_path_inner(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let base_scale = {
+    let (base_scale, beats_per_bar, grid_size) = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-        normalize_scale_key(&p.base_scale)
+        (
+            normalize_scale_key(&p.base_scale),
+            normalize_beats_per_bar(p.beats_per_bar),
+            normalize_grid_size(&p.grid_size),
+        )
     };
     let tl_rel = make_paths_relative(tl, &path);
-    let pf = ProjectFile::new(name.clone(), tl_rel, base_scale);
+    let pf = ProjectFile::new(name.clone(), tl_rel, base_scale, beats_per_bar, grid_size);
     // 使用 MessagePack 格式保存（v2），体积更小、解析更快。
     let bytes = rmp_serde::to_vec_named(&pf).map_err(|e| e.to_string())?;
     fs::write(&path, bytes).map_err(|e| e.to_string())?;
@@ -96,6 +116,8 @@ pub(super) fn new_project(state: State<'_, AppState>, window: Window) -> crate::
         p.path = None;
         p.dirty = false;
         p.base_scale = "C".to_string();
+        p.beats_per_bar = 4;
+        p.grid_size = "1/4".to_string();
     }
     update_window_title(&window, "Untitled", false);
     get_timeline_state(state)
@@ -154,6 +176,8 @@ pub(super) fn open_project(
         p.path = Some(project_path.clone());
         p.dirty = false;
         p.base_scale = normalize_scale_key(&pf.base_scale);
+        p.beats_per_bar = normalize_beats_per_bar(pf.beats_per_bar);
+        p.grid_size = normalize_grid_size(&pf.grid_size);
         // recent list (in-memory)
         p.recent.retain(|x| x != &project_path);
         p.recent.insert(0, project_path.clone());
@@ -256,4 +280,38 @@ pub(super) fn set_project_base_scale(
 
     let payload = state.project_meta_payload();
     serde_json::json!({ "ok": true, "project": payload })
+}
+
+pub(super) fn set_project_timeline_settings(
+    state: State<'_, AppState>,
+    beats_per_bar: u32,
+    grid_size: String,
+) -> serde_json::Value {
+    let normalized_beats = normalize_beats_per_bar(beats_per_bar);
+    let normalized_grid = normalize_grid_size(&grid_size);
+
+    let (name, changed, was_clean) = {
+        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        let changed = p.beats_per_bar != normalized_beats || p.grid_size != normalized_grid;
+        if !changed {
+            return serde_json::json!({ "ok": true, "project": state.project_meta_payload() });
+        }
+        let was_clean = !p.dirty;
+        p.beats_per_bar = normalized_beats;
+        p.grid_size = normalized_grid;
+        p.dirty = true;
+        (p.name.clone(), true, was_clean)
+    };
+
+    if changed && was_clean {
+        if let Some(handle) = state.app_handle.get() {
+            use tauri::Manager;
+            if let Some(win) = handle.get_webview_window("main") {
+                let title = format!("HiFiShifter - {}*", name);
+                let _ = win.set_title(&title);
+            }
+        }
+    }
+
+    serde_json::json!({ "ok": true, "project": state.project_meta_payload() })
 }

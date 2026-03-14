@@ -5,7 +5,7 @@
 use crate::audio_utils::try_read_audio_header_only;
 use crate::models::PitchRange;
 use crate::reaper_parser::{
-    self, ReaperData, ReaperEnvelope,  ReaperItem,
+    self, ReaperData, ReaperEnvelope, ReaperItem, ReaperTrack,
     stretch_segments_from_markers,
 };
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
@@ -54,6 +54,7 @@ fn convert_volume(vol: f64) -> f32 {
 pub struct ReaperImportResult {
     pub timeline: TimelineState,
     pub skipped_files: Vec<String>,
+    pub beats_per_bar: u32,
 }
 
 /// 导入 Reaper 工程文件（.rpp）。
@@ -229,7 +230,50 @@ fn convert_reaper_items_to_existing_tracks(
     Ok(ReaperImportResult {
         timeline,
         skipped_files,
+        beats_per_bar: data.tempo.as_ref().map(|t| t.beats_per_bar).unwrap_or(4),
     })
+}
+
+// ─── 轨道层级辅助函数 ───
+
+/// 根据 ISBUS 字段计算每条 Reaper 轨道的深度。
+///
+/// 层级公式：L[0] = 0，L[i] = max(0, L[i-1] + isbus[i-1][1])
+/// 其中 isbus[i][1] 是第 i 条轨道的 ISBUS 第二个数值。
+fn compute_track_depths(tracks: &[ReaperTrack]) -> Vec<i32> {
+    let mut depths = Vec::with_capacity(tracks.len());
+    let mut current_depth: i32 = 0;
+    for track in tracks {
+        depths.push(current_depth);
+        let delta = track.isbus.get(1).copied().unwrap_or(0);
+        current_depth = (current_depth + delta).max(0);
+    }
+    depths
+}
+
+/// 根据深度列表和轨道 ID 列表，为每条轨道分配父轨道 ID。
+///
+/// 使用栈算法：当轨道深度为 D 时，弹出栈中深度 >= D 的条目，
+/// 栈顶即为父轨道（深度为 D-1）。
+fn compute_parent_ids(depths: &[i32], track_ids: &[String]) -> Vec<Option<String>> {
+    let mut parent_ids = Vec::with_capacity(depths.len());
+    // 栈中存储 (depth, track_index)
+    let mut stack: Vec<(i32, usize)> = Vec::new();
+
+    for (i, &depth) in depths.iter().enumerate() {
+        // 弹出深度 >= 当前深度的元素
+        while let Some(&(d, _)) = stack.last() {
+            if d >= depth {
+                stack.pop();
+            } else {
+                break;
+            }
+        }
+        let parent_id = stack.last().map(|&(_, idx)| track_ids[idx].clone());
+        parent_ids.push(parent_id);
+        stack.push((depth, i));
+    }
+    parent_ids
 }
 
 /// 将含有 Track 信息的 Reaper 数据转换为完整 TimelineState。
@@ -248,8 +292,13 @@ fn convert_reaper_data(
         std::collections::HashMap<usize, PitchFrameAccumulator>,
     > = std::collections::HashMap::new();
 
-    for reaper_track in &data.tracks {
-        let track_id = new_track_id();
+    // 预分配 UUID、计算深度和父子关系（两道步）
+    let track_ids: Vec<String> = (0..data.tracks.len()).map(|_| new_track_id()).collect();
+    let depths = compute_track_depths(&data.tracks);
+    let parent_ids = compute_parent_ids(&depths, &track_ids);
+
+    for (i, reaper_track) in data.tracks.iter().enumerate() {
+        let track_id = &track_ids[i];
         let volume = if !reaper_track.vol_pan.is_empty() {
             convert_volume(reaper_track.vol_pan[0])
         } else {
@@ -258,11 +307,6 @@ fn convert_reaper_data(
         let muted = reaper_track.mute_solo.first().copied().unwrap_or(0) != 0;
         let solo = reaper_track.mute_solo.get(1).copied().unwrap_or(0) != 0;
 
-        let has_audio_items = reaper_track.items.iter().any(|item| {
-            let take = item.active_take();
-            take.source.as_ref().map(|s| !s.file_path.is_empty()).unwrap_or(false)
-        });
-
         hs_tracks.push(Track {
             id: track_id.clone(),
             name: if reaper_track.name.is_empty() {
@@ -270,7 +314,7 @@ fn convert_reaper_data(
             } else {
                 reaper_track.name.clone()
             },
-            parent_id: None,
+            parent_id: parent_ids[i].clone(),
             order: track_order,
             muted,
             solo,
@@ -286,7 +330,7 @@ fn convert_reaper_data(
         for item in &reaper_track.items {
             process_item(
                 item,
-                &track_id,
+                track_id,
                 base_dir,
                 0.0, // .rpp 导入不做时间偏移
                 &mut hs_clips,
@@ -342,12 +386,15 @@ fn convert_reaper_data(
         }
     }
 
+    // 从解析的 TEMPO 中获取 BPM（无则默认 120）
+    let bpm = data.tempo.as_ref().map(|t| t.bpm).unwrap_or(120.0);
+
     let timeline = TimelineState {
         tracks: hs_tracks,
         clips: hs_clips,
         selected_track_id: None,
         selected_clip_id: None,
-        bpm: 120.0,
+        bpm,
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
@@ -357,6 +404,7 @@ fn convert_reaper_data(
     Ok(ReaperImportResult {
         timeline,
         skipped_files,
+        beats_per_bar: data.tempo.as_ref().map(|t| t.beats_per_bar).unwrap_or(4),
     })
 }
 

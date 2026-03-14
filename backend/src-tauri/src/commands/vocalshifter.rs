@@ -111,7 +111,8 @@ pub(super) fn import_vocalshifter_project(
 
     // 更新工程元信息
     {
-        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        let p = &mut *state.project.lock().unwrap_or_else(|e| e.into_inner());
+        p.beats_per_bar = result.beats_per_bar.clamp(1, 32);
         update_window_title(window, &p.name, p.dirty);
     }
 

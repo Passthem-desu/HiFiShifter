@@ -11,9 +11,21 @@ pub struct ReaperData {
     pub tracks: Vec<ReaperTrack>,
     pub is_track_data: bool,
     pub tempo_envelope: Option<ReaperTempoEnvelope>,
+    /// 工程 BPM 与拍号信息（从 TEMPO 行解析）。
+    pub tempo: Option<ReaperTempo>,
     /// 每个 track 相对于首个 track 的轨道偏移量（由 TRACKSKIP 累计得出）。
     /// 与 tracks 等长，tracks[0] 的 offset 始终为 0。
     pub track_offsets: Vec<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReaperTempo {
+    /// 工程 BPM 值
+    pub bpm: f64,
+    /// 每小节拍数（拍号分子）
+    pub beats_per_bar: u32,
+    /// 基准音符（4 = 四分音符，8 = 八分音符等）
+    pub beat_note: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +36,9 @@ pub struct ReaperTrack {
     pub mute_solo: Vec<i32>,   // [mute, solo, ...]
     pub iphase: bool,
     pub envelopes: Vec<ReaperEnvelope>,
+    /// ISBUS 参数：[type, delta]，delta 决定下一条轨道的层级变化量。
+    /// 例如 ISBUS 1 1 表示下一条轨道深度 +1（成为子轨道），ISBUS 2 -1 表示 -1。
+    pub isbus: Vec<i32>,
 }
 
 impl Default for ReaperTrack {
@@ -35,6 +50,7 @@ impl Default for ReaperTrack {
             mute_solo: vec![0, 0, 0],
             iphase: false,
             envelopes: Vec::new(),
+            isbus: vec![0, 0],
         }
     }
 }
@@ -504,6 +520,21 @@ fn parse_data_block(block: &Block) -> ReaperData {
     let mut cumulative_track_offset: usize = 0;
     let mut pending_offset: usize = 0;
 
+    // 扫描当前块的直接行，提取 TEMPO
+    for line in &block.lines {
+        let tokens = split_tokens(line);
+        if tokens.is_empty() {
+            continue;
+        }
+        if tokens[0].to_uppercase() == "TEMPO" && tokens.len() >= 4 {
+            data.tempo = Some(ReaperTempo {
+                bpm: parse_double(&tokens[1]),
+                beats_per_bar: tokens[2].parse::<u32>().unwrap_or(4),
+                beat_note: tokens[3].parse::<u32>().unwrap_or(4),
+            });
+        }
+    }
+
     for child in &block.children {
         let block_type = child.block_type();
 
@@ -596,6 +627,7 @@ fn parse_track_block(block: &Block) -> ReaperTrack {
             "VOLPAN" => track.vol_pan = parse_double_array(&tokens),
             "MUTESOLO" => track.mute_solo = parse_int_array(&tokens),
             "IPHASE" if tokens.len() >= 2 => track.iphase = parse_double(&tokens[1]) != 0.0,
+            "ISBUS" => track.isbus = parse_int_array(&tokens),
             _ => {}
         }
     }

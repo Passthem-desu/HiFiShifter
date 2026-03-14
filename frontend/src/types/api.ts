@@ -67,6 +67,8 @@ export interface ProjectMeta {
     dirty: boolean;
     recent: string[];
     base_scale?: string;
+    beats_per_bar?: number;
+    grid_size?: string;
 }
 
 export interface TimelineState {

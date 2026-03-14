@@ -32,7 +32,6 @@ export const persistUiSettings = createAsyncThunk(
         return settingsApi.saveUiSettings({
             autoCrossfade: s.autoCrossfadeEnabled,
             gridSnap: s.gridSnapEnabled,
-            gridSize: s.grid,
             pitchSnap: s.pitchSnapEnabled,
             pitchSnapUnit: s.pitchSnapUnit,
             pitchSnapToleranceCents: s.pitchSnapToleranceCents,

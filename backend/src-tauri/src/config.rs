@@ -53,7 +53,7 @@ impl Default for UiSettings {
             pitch_snap_tolerance_cents: 0,
             playhead_zoom: false,
             auto_scroll: false,
-            show_clipboard_preview: false,
+            show_clipboard_preview: true,
             lock_param_lines: true,
             drag_direction: default_drag_direction(),
         }

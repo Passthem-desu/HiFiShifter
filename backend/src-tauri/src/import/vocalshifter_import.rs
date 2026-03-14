@@ -106,6 +106,7 @@ struct VspTimeMarker {
 pub struct VspImportResult {
     pub timeline: TimelineState,
     pub skipped_files: Vec<String>,
+    pub beats_per_bar: u32,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -968,6 +969,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
     Ok(VspImportResult {
         timeline,
         skipped_files,
+        beats_per_bar: project.time_sig_num.clamp(1, 32) as u32,
     })
 }
 
@@ -1617,6 +1619,7 @@ pub fn import_vsp_clipboard(
     Ok(VspImportResult {
         timeline,
         skipped_files,
+        beats_per_bar: project.time_sig_num.clamp(1, 32) as u32,
     })
 }
 
@@ -2055,6 +2058,7 @@ fn import_vsp_clipboard_selected_tracks(
     Ok(VspImportResult {
         timeline,
         skipped_files,
+        beats_per_bar: project.time_sig_num.clamp(1, 32) as u32,
     })
 }
 

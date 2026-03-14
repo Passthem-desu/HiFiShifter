@@ -13,7 +13,6 @@ import type {
     FadeCurveType,
     GridSize,
     PitchSnapUnit,
-    ScaleHighlightMode,
     ToolMode,
     TrackInfo,
 } from "./sessionTypes";
@@ -22,11 +21,9 @@ import {
     addClipOnTrack,
     addTrackRemote,
     createClipsRemote,
-    duplicateTrackRemote,
     fetchSelectedTrackSummary,
     glueClipsRemote,
     moveClipRemote,
-    moveClipsRemote,
     moveTrackRemote,
     removeClipRemote,
     removeTrackRemote,
@@ -47,6 +44,7 @@ import {
     saveProjectAsRemote,
     saveProjectRemote,
     setProjectBaseScaleRemote,
+    setProjectTimelineSettingsRemote,
     undoRemote,
 } from "./thunks/projectThunks";
 
@@ -124,20 +122,23 @@ export interface SessionState {
     /** 音高吸附 */
     pitchSnapEnabled: boolean;
     pitchSnapUnit: PitchSnapUnit;
-    /** 音高吸附容差（音分） */
+    /** 音高吸附容差（分）用于微调吸附强度 */
     pitchSnapToleranceCents: number;
-    /** 音阶高亮模式：always / off */
-    scaleHighlightMode: ScaleHighlightMode;
+    /** 基准音阶键名，如 "C" "Db" 等 */
+    pitchSnapScale: import("../../utils/musicalScales").ScaleKey;
+    /** 音阶高亮模式：始终 / 关闭 */
+    scaleHighlightMode: "always" | "off";
     /** 播放头缩放 */
     playheadZoomEnabled: boolean;
     /** 自动滚动（播放时跟随播放头） */
     autoScrollEnabled: boolean;
     /** 剪贴板预览（在参数编辑器选区内显示剪贴板曲线预览） */
     showClipboardPreview: boolean;
-    /** 锁定参数线（移动 clip 时联动移动参数曲线） */
-    lockParamLinesEnabled: boolean;
     /** 参数编辑器拖动方向限制 */
     dragDirection: DragDirection;
+
+    /** 在粘贴/创建时是否锁定参数线以应用 linked params */
+    lockParamLinesEnabled: boolean;
 
     // Monotonic bump token for invalidating parameter curve caches.
     // - Not included in undo/redo snapshots.
@@ -203,6 +204,8 @@ export interface SessionState {
         dirty: boolean;
         recent: string[];
         baseScale: import("../../utils/musicalScales").ScaleKey;
+        beatsPerBar: number;
+        gridSize: GridSize;
     };
 
     busy: boolean;
@@ -211,8 +214,6 @@ export interface SessionState {
     lastResult?: unknown;
     vocalShifterSkippedFilesDialog: string[] | null;
     reaperSkippedFilesDialog: string[] | null;
-    /** 正在进行中的 moveClipRemote 调用数量，用于防止多块拖动松开时的闪烁 */
-    pendingMoveCount: number;
 }
 
 interface StateSnapshot {
@@ -466,14 +467,37 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
               dirty?: boolean;
               recent?: string[];
               base_scale?: string;
+              beats_per_bar?: number;
+              grid_size?: string;
           }
         | undefined;
     if (project) {
-        const parsedBaseScale = (
-            SCALE_KEYS as readonly string[]
-        ).includes(String(project.base_scale ?? ""))
-            ? (project.base_scale as import("../../utils/musicalScales").ScaleKey)
-            : state.project.baseScale;
+        const nextBaseScaleRaw = String(
+            project.base_scale ?? state.project.baseScale,
+        );
+        const nextBaseScale = (SCALE_KEYS as readonly string[]).includes(
+            nextBaseScaleRaw,
+        )
+            ? (nextBaseScaleRaw as typeof state.project.baseScale)
+            : "C";
+        const nextBeatsPerBar = clamp(
+            Number(project.beats_per_bar ?? state.project.beatsPerBar),
+            1,
+            32,
+        );
+        const nextGridSizeRaw = String(
+            project.grid_size ?? state.project.gridSize,
+        );
+        const nextGridSize = (
+            [
+                "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
+                "1/1d", "1/2d", "1/4d", "1/8d", "1/16d", "1/32d", "1/64d",
+                "1/1t", "1/2t", "1/4t", "1/8t", "1/16t", "1/32t", "1/64t",
+            ] as const
+        ).includes(nextGridSizeRaw as any)
+            ? (nextGridSizeRaw as GridSize)
+            : "1/4";
+
         state.project = {
             name: String(project.name ?? state.project.name ?? "Untitled"),
             path:
@@ -484,8 +508,12 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
             recent: Array.isArray(project.recent)
                 ? project.recent
                 : state.project.recent,
-            baseScale: parsedBaseScale,
+            baseScale: nextBaseScale,
+            beatsPerBar: nextBeatsPerBar,
+            gridSize: nextGridSize,
         };
+        state.beats = nextBeatsPerBar;
+        state.grid = nextGridSize;
     }
 
     const availableClipIds = new Set(state.clips.map((clip) => clip.id));
@@ -607,13 +635,14 @@ const initialState: SessionState = {
     gridSnapEnabled: true,
     pitchSnapEnabled: false,
     pitchSnapUnit: "semitone",
-    pitchSnapToleranceCents: 0,
-    scaleHighlightMode: "off",
+    pitchSnapScale: "C",
+    pitchSnapToleranceCents: 25,
+    scaleHighlightMode: "always",
     playheadZoomEnabled: false,
     autoScrollEnabled: false,
-    showClipboardPreview: true,
-    lockParamLinesEnabled: false,
+    showClipboardPreview: false,
     dragDirection: "y-only" as DragDirection,
+    lockParamLinesEnabled: false,
 
     paramsEpoch: 0,
 
@@ -673,13 +702,14 @@ const initialState: SessionState = {
         dirty: false,
         recent: [],
         baseScale: "C",
+        beatsPerBar: 4,
+        gridSize: "1/4",
     },
 
     busy: false,
     status: "Ready",
     vocalShifterSkippedFilesDialog: null,
     reaperSkippedFilesDialog: null,
-    pendingMoveCount: 0,
 };
 
 export {
@@ -693,6 +723,7 @@ export {
     saveProjectRemote,
     saveProjectAsRemote,
     setProjectBaseScaleRemote,
+    setProjectTimelineSettingsRemote,
 } from "./thunks/projectThunks";
 
 export {
@@ -707,7 +738,6 @@ export {
 export {
     addTrackRemote,
     removeTrackRemote,
-    duplicateTrackRemote,
     moveTrackRemote,
     selectTrackRemote,
     setProjectLengthRemote,
@@ -717,6 +747,7 @@ export {
     removeClipRemote,
     moveClipRemote,
     moveClipsRemote,
+    duplicateTrackRemote,
     setClipStateRemote,
     splitClipRemote,
     glueClipsRemote,
@@ -791,46 +822,37 @@ const sessionSlice = createSlice({
             state.gridSnapEnabled = !state.gridSnapEnabled;
         },
         togglePitchSnap(state) {
-            if (!state.pitchSnapEnabled) {
-                state.pitchSnapEnabled = true;
-                state.pitchSnapUnit = "semitone";
-                return;
-            }
-            if (state.pitchSnapUnit === "semitone") {
-                state.pitchSnapUnit = "scale";
-                return;
-            }
-            state.pitchSnapEnabled = false;
-        },
-        setScaleHighlightMode(state, action: PayloadAction<ScaleHighlightMode>) {
-            state.scaleHighlightMode = action.payload;
+            state.pitchSnapEnabled = !state.pitchSnapEnabled;
         },
         setPitchSnapUnit(state, action: PayloadAction<PitchSnapUnit>) {
             state.pitchSnapUnit = action.payload;
         },
-        setPitchSnapToleranceCents(state, action: PayloadAction<number>) {
-            state.pitchSnapToleranceCents = Math.max(
-                0,
-                Math.abs(Math.round(Number(action.payload) || 0)),
-            );
-        },
-        setProjectBaseScale(
+        setPitchSnapScale(
             state,
             action: PayloadAction<import("../../utils/musicalScales").ScaleKey>,
         ) {
-            state.project.baseScale = action.payload;
+            state.pitchSnapScale = action.payload;
+        },
+        setPitchSnapToleranceCents(state, action: PayloadAction<number>) {
+            state.pitchSnapToleranceCents = clamp(action.payload, 0, 1000);
+        },
+        setScaleHighlightMode(
+            state,
+            action: PayloadAction<"always" | "off">,
+        ) {
+            state.scaleHighlightMode = action.payload;
         },
         togglePlayheadZoom(state) {
             state.playheadZoomEnabled = !state.playheadZoomEnabled;
+        },
+        toggleLockParamLines(state) {
+            state.lockParamLinesEnabled = !state.lockParamLinesEnabled;
         },
         toggleAutoScroll(state) {
             state.autoScrollEnabled = !state.autoScrollEnabled;
         },
         toggleClipboardPreview(state) {
             state.showClipboardPreview = !state.showClipboardPreview;
-        },
-        toggleLockParamLines(state) {
-            state.lockParamLinesEnabled = !state.lockParamLinesEnabled;
         },
         cycleDragDirection(state) {
             const order: DragDirection[] = ["free", "x-only", "y-only"];
@@ -1270,7 +1292,6 @@ const sessionSlice = createSlice({
                 const s = action.payload;
                 state.autoCrossfadeEnabled = s.autoCrossfade;
                 state.gridSnapEnabled = s.gridSnap;
-                if (s.gridSize) state.grid = s.gridSize as GridSize;
                 state.pitchSnapEnabled = s.pitchSnap;
                 // Validate pitchSnapUnit
                 const validUnits: PitchSnapUnit[] = ["semitone", "scale"];
@@ -1279,47 +1300,21 @@ const sessionSlice = createSlice({
                 )
                     ? (s.pitchSnapUnit as PitchSnapUnit)
                     : "semitone";
-                state.pitchSnapToleranceCents = Math.max(
-                    0,
-                    Math.abs(
-                        Math.round(
-                            Number(s.pitchSnapToleranceCents ?? 0) || 0,
-                        ),
-                    ),
-                );
+                // Validate pitchSnapScale
+                state.pitchSnapScale = (
+                    SCALE_KEYS as readonly string[]
+                ).includes((s as any).pitchSnapScale)
+                    ? ((s as any).pitchSnapScale as typeof state.pitchSnapScale)
+                    : "C";
                 state.playheadZoomEnabled = s.playheadZoom;
                 if (s.autoScroll != null)
                     state.autoScrollEnabled = s.autoScroll;
                 if (s.showClipboardPreview != null)
                     state.showClipboardPreview = s.showClipboardPreview;
-                if (s.lockParamLines != null)
-                    state.lockParamLinesEnabled = s.lockParamLines;
                 if (s.dragDirection != null) {
                     const validDirs = ["free", "x-only", "y-only"];
                     if (validDirs.includes(s.dragDirection))
                         state.dragDirection = s.dragDirection as DragDirection;
-                }
-                // scaleHighlightMode (optional)
-                if (s.scaleHighlightMode != null) {
-                    if (s.scaleHighlightMode === "always") {
-                        state.scaleHighlightMode = "always";
-                    } else if (s.scaleHighlightMode === "off") {
-                        state.scaleHighlightMode = "off";
-                    } else if (s.scaleHighlightMode === "onlyWhenSnapping") {
-                        // Backward compatibility for older config values.
-                        state.scaleHighlightMode = "always";
-                    }
-                }
-            })
-
-            .addCase(setProjectBaseScaleRemote.fulfilled, (state, action) => {
-                const nextScale = String(
-                    (action.payload as { project?: { base_scale?: string } })
-                        ?.project?.base_scale ?? "",
-                );
-                if ((SCALE_KEYS as readonly string[]).includes(nextScale)) {
-                    state.project.baseScale =
-                        nextScale as import("../../utils/musicalScales").ScaleKey;
                 }
             })
 
@@ -1389,18 +1384,10 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     canceled?: boolean;
                     path?: string;
-                    requiresModeChoice?: boolean;
                     imported?: { ok?: boolean } & TimelineState;
                 };
                 if (payload.canceled) {
                     state.status = "Import canceled";
-                    return;
-                }
-                if (payload.requiresModeChoice) {
-                    if (payload.path) {
-                        state.audioPath = payload.path;
-                    }
-                    state.status = "Select import mode";
                     return;
                 }
                 if (payload.path) {
@@ -1507,9 +1494,6 @@ const sessionSlice = createSlice({
                     applyTimelineState(state, payload.imported as any);
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
-                        // Select all imported clips
-                        state.multiSelectedClipIds = payload.newClipIds;
-                        state.selectedClipId = payload.newClipIds[0] ?? null;
                     }
                 }
             })
@@ -1997,6 +1981,64 @@ const sessionSlice = createSlice({
                 state.status = "Save As failed";
             })
 
+            .addCase(setProjectBaseScaleRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                    project?: { base_scale?: string; dirty?: boolean };
+                };
+                if (!payload.ok) {
+                    return;
+                }
+                const next = payload.project?.base_scale;
+                if (next && (SCALE_KEYS as readonly string[]).includes(next)) {
+                    state.project.baseScale = next as typeof state.project.baseScale;
+                }
+                if (typeof payload.project?.dirty === "boolean") {
+                    state.project.dirty = payload.project.dirty;
+                }
+            })
+
+            .addCase(
+                setProjectTimelineSettingsRemote.fulfilled,
+                (state, action) => {
+                    const payload = action.payload as {
+                        ok?: boolean;
+                        project?: {
+                            beats_per_bar?: number;
+                            grid_size?: string;
+                            dirty?: boolean;
+                        };
+                    };
+                    if (!payload.ok) {
+                        return;
+                    }
+                    const beats = clamp(
+                        Number(payload.project?.beats_per_bar ?? state.beats),
+                        1,
+                        32,
+                    );
+                    const gridRaw = String(
+                        payload.project?.grid_size ?? state.grid,
+                    );
+                    const valid = (
+                        [
+                            "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
+                            "1/1d", "1/2d", "1/4d", "1/8d", "1/16d", "1/32d", "1/64d",
+                            "1/1t", "1/2t", "1/4t", "1/8t", "1/16t", "1/32t", "1/64t",
+                        ] as const
+                    ).includes(gridRaw as any);
+                    const grid = (valid ? gridRaw : "1/4") as GridSize;
+
+                    state.beats = beats;
+                    state.grid = grid;
+                    state.project.beatsPerBar = beats;
+                    state.project.gridSize = grid;
+                    if (typeof payload.project?.dirty === "boolean") {
+                        state.project.dirty = payload.project.dirty;
+                    }
+                },
+            )
+
             .addCase(addClipOnTrack.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2038,27 +2080,7 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload);
             })
 
-            .addCase(moveClipRemote.pending, (state) => {
-                state.pendingMoveCount += 1;
-            })
             .addCase(moveClipRemote.fulfilled, (state, action) => {
-                state.pendingMoveCount = Math.max(0, state.pendingMoveCount - 1);
-                const payload = action.payload as {
-                    ok?: boolean;
-                } & TimelineState;
-                if (!payload.ok) {
-                    return;
-                }
-                // 仅在所有并发移动操作都完成后才刷新状态，避免多块拖动松开时的闪烁
-                if (state.pendingMoveCount === 0) {
-                    applyTimelineState(state, payload);
-                }
-            })
-            .addCase(moveClipRemote.rejected, (state) => {
-                state.pendingMoveCount = Math.max(0, state.pendingMoveCount - 1);
-            })
-
-            .addCase(moveClipsRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;
@@ -2106,10 +2128,7 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
-                // 选中 clip 不应移动播放光标
-                const savedPlayheadSec = state.playheadSec;
                 applyTimelineState(state, payload);
-                state.playheadSec = savedPlayheadSec;
             })
 
             .addCase(setTrackStateRemote.fulfilled, (state, action) => {
@@ -2176,16 +2195,6 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload);
             })
 
-            .addCase(duplicateTrackRemote.fulfilled, (state, action) => {
-                const payload = action.payload as {
-                    ok?: boolean;
-                } & TimelineState;
-                if (!payload.ok) {
-                    return;
-                }
-                applyTimelineState(state, payload);
-            })
-
             .addCase(moveTrackRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2203,10 +2212,7 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
-                // 切换轨道不应移动播放光标，保留前端当前位置以防止闪烁
-                const savedPlayheadSec = state.playheadSec;
                 applyTimelineState(state, payload);
-                state.playheadSec = savedPlayheadSec;
             })
 
             .addCase(setProjectLengthRemote.fulfilled, (state, action) => {
@@ -2246,14 +2252,11 @@ export const {
     toggleAutoCrossfade,
     toggleGridSnap,
     togglePitchSnap,
-    setScaleHighlightMode,
     setPitchSnapUnit,
-    setPitchSnapToleranceCents,
-    setProjectBaseScale,
+    setPitchSnapScale,
     togglePlayheadZoom,
     toggleAutoScroll,
     toggleClipboardPreview,
-    toggleLockParamLines,
     cycleDragDirection,
     setDragDirection,
     setplayheadSec,
@@ -2263,6 +2266,9 @@ export const {
     setPitchShift,
     closeVocalShifterSkippedFilesDialog,
     closeReaperSkippedFilesDialog,
+    setPitchSnapToleranceCents,
+    setScaleHighlightMode,
+    toggleLockParamLines,
     setSelectedClip,
     setMultiSelectedClipIds,
     moveClipStart,

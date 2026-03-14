@@ -158,6 +158,15 @@ pub fn set_project_base_scale(
     project::set_project_base_scale(state, base_scale)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_project_timeline_settings(
+    state: State<'_, AppState>,
+    beats_per_bar: u32,
+    grid_size: String,
+) -> serde_json::Value {
+    project::set_project_timeline_settings(state, beats_per_bar, grid_size)
+}
+
 // ===================== dialogs =====================
 
 #[tauri::command(rename_all = "camelCase")]
