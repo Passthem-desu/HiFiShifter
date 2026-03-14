@@ -49,6 +49,10 @@ type CachedEntry = {
 const clipPeaksCache = new Map<string, CachedEntry>();
 const clipPeaksInflight = new Map<string, Promise<CachedEntry | null>>();
 const CLIP_PEAKS_CACHE_LIMIT = 128;
+const PEAKS_COLUMNS_PER_SEC = 512;
+const PEAKS_COLUMNS_MIN = 96;
+const PEAKS_COLUMNS_MAX = 65536;
+const PEAKS_COLUMNS_QUANT = 32;
 
 /** 量化秒数，减少重复请�?*/
 function qsec(x: number, step = 0.005): number {
@@ -56,10 +60,24 @@ function qsec(x: number, step = 0.005): number {
     return Math.round(x / step) * step;
 }
 
+function targetColumnsForClip(clip: ClipInfo): number {
+    const lengthSec = Math.max(0, Number(clip.lengthSec ?? 0) || 0);
+    // Use fixed density (columns/sec) so total columns scale with clip length.
+    const estimated = Math.round(lengthSec * PEAKS_COLUMNS_PER_SEC);
+    const clamped = Math.max(PEAKS_COLUMNS_MIN, Math.min(PEAKS_COLUMNS_MAX, estimated || PEAKS_COLUMNS_MIN));
+    return Math.max(
+        PEAKS_COLUMNS_MIN,
+        Math.min(
+            PEAKS_COLUMNS_MAX,
+            Math.round(clamped / PEAKS_COLUMNS_QUANT) * PEAKS_COLUMNS_QUANT,
+        ),
+    );
+}
+
 /** �?clip 信息转换�?peaks 请求参数 */
 function buildClipPeaksRequest(
     clip: ClipInfo,
-    widthPx: number,
+    targetColumns: number,
 ): {
     sourcePath: string;
     startSec: number;
@@ -92,9 +110,10 @@ function buildClipPeaksRequest(
     const startSecQ = 0;
     const durSecQ = Math.max(0.005, qsec(durationSec));
 
-    // columns �?64 量化，与 ClipItem 保持一�?
-    const rawCols = Math.max(16, Math.min(8192, Math.floor(widthPx)));
-    const columns = Math.max(16, Math.min(8192, Math.round(rawCols / 64) * 64));
+    const columns = Math.max(
+        PEAKS_COLUMNS_MIN,
+        Math.min(PEAKS_COLUMNS_MAX, Math.round(targetColumns)),
+    );
 
     const cacheKey = `${sourcePath}|${startSecQ.toFixed(3)}|${durSecQ.toFixed(3)}|${columns}`;
 
@@ -150,7 +169,10 @@ export function useClipsPeaksForPianoRoll(args: {
                     );
                 })
                 .map((clip) => {
-                    const req = buildClipPeaksRequest(clip, 1024);
+                    const req = buildClipPeaksRequest(
+                        clip,
+                        targetColumnsForClip(clip),
+                    );
                     return req ? `${clip.id}:${req.cacheKey}` : null;
                 })
                 .filter(Boolean)
@@ -183,8 +205,11 @@ export function useClipsPeaksForPianoRoll(args: {
         }> = [];
 
         for (const clip of visibleClips) {
-            // 使用固定列数�?024）请�?peaks，与 lengthSec 解耦，避免 trim 时重复请�?
-            const req = buildClipPeaksRequest(clip, 1024);
+            // 列数按 clip 时长自适应，长 clip 提升精度，同时保持请求上限。
+            const req = buildClipPeaksRequest(
+                clip,
+                targetColumnsForClip(clip),
+            );
             if (!req) continue;
 
             const cached = lruGet(clipPeaksCache, req.cacheKey);

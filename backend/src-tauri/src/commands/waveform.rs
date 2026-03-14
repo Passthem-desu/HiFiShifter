@@ -4,6 +4,9 @@ use tauri::State;
 
 use super::common::guard_waveform_command;
 
+const WAVEFORM_COLUMNS_MIN: usize = 16;
+const WAVEFORM_COLUMNS_MAX: usize = 65_536;
+
 // ===================== waveform peaks =====================
 
 
@@ -17,7 +20,7 @@ pub(super) fn get_waveform_peaks_segment(
     columns: usize,
 ) -> waveform::WaveformPeaksSegmentPayload {
     let hop = 256usize;
-    let cols = columns.clamp(16, 8192);
+    let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
 
     let peaks = match state.get_or_compute_waveform_peaks(&source_path, hop) {
         Ok(p) => p,
@@ -125,7 +128,7 @@ pub(super) fn get_root_mix_waveform_peaks_segment(
             c.muted = false;
         }
 
-        let cols = columns.clamp(16, 8192);
+        let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
         let opts = crate::mixdown::MixdownOptions {
             sample_rate: 44100,
             start_sec,
@@ -267,7 +270,7 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
             c.muted = false;
         }
 
-        let cols = columns.clamp(16, 8192);
+        let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
         let opts = crate::mixdown::MixdownOptions {
             sample_rate: 44100,
             start_sec,

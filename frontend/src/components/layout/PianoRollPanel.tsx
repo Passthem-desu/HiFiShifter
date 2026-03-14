@@ -77,6 +77,7 @@ import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext"
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 import { coreApi } from "../../services/api/core";
 import { EditContextMenu } from "../editDialogs/EditContextMenu";
+import { getDynamicProjectSec } from "../../features/session/projectBoundary";
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -456,8 +457,13 @@ export const PianoRollPanel: React.FC = () => {
         return next;
     }, [editParam, processorParams, secondaryParamVisible]);
 
+    const dynamicProjectSec = useMemo(
+        () => getDynamicProjectSec(s.clips),
+        [s.clips],
+    );
+
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
-    const contentWidth = Math.max(8, Math.ceil(s.projectSec * pxPerSec));
+    const contentWidth = Math.max(1, Math.ceil(dynamicProjectSec * pxPerSec));
 
     const scrollerRef = useRef<HTMLDivElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1116,7 +1122,7 @@ export const PianoRollPanel: React.FC = () => {
 
             if (op === "selectAll") {
                 if (s.toolMode !== "select") return;
-                const totalBeats = s.projectSec / secPerBeat;
+                const totalBeats = dynamicProjectSec / secPerBeat;
                 selectionRef.current = { aBeat: 0, bBeat: totalBeats };
                 setSelectionUi({ aBeat: 0, bBeat: totalBeats });
                 invalidate();
@@ -1625,7 +1631,7 @@ export const PianoRollPanel: React.FC = () => {
             editParam,
             paramView?.framePeriodMs,
             secPerBeat,
-            s.projectSec,
+            dynamicProjectSec,
             bumpRefreshToken,
             invalidate,
         ],
@@ -2113,7 +2119,7 @@ export const PianoRollPanel: React.FC = () => {
                             );
                             const totalBeats = Math.max(
                                 1,
-                                Math.ceil(s.projectSec / secPerBeat),
+                                Math.ceil(dynamicProjectSec / secPerBeat),
                             );
                             const result: Array<{
                                 beat: number;

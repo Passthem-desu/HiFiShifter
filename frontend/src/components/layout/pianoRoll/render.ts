@@ -580,6 +580,8 @@ export function drawPianoRoll(args: {
             height: h,
             fillColor: waveformColors.fill,
             strokeColor: waveformColors.stroke,
+            mode: "stroke-jitter",
+            strokeWidth: 1,
             barWidth: 1.5,
             centerY: h * 0.5,
             amplitude: h * 0.5,

@@ -10,7 +10,7 @@ import { sliceWaveformSamples } from "./clipWaveform";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
 import { useClipWaveformPeaks } from "./clip/useClipWaveformPeaks";
-import { renderWaveformSvg } from "../../../utils/waveformRenderer";
+import WaveformCanvas from "../../waveform/WaveformCanvas";
 import { useAppTheme } from "../../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../../theme/waveformColors";
 
@@ -281,10 +281,7 @@ export const ClipItem = React.memo(function ClipItem({
             : quantizeCols(widthForPath);
 
         const w = renderCols;
-        const totalH = 24;
-        // 单 band 全高布局，波形顶满 clip body
-        const centerY = totalH / 2;
-        const halfH = totalH / 2; // 波形占满整个 viewBox 高度
+        const totalH = Math.max(1, bodyHeight);
 
         // 使用 peaks.cycleLenSecTimeline（稳定值）作为 fade 增益的映射基准，
         // 而非 clip.lengthSec（trim 拖动时持续变化导致波形拉伸）。
@@ -298,7 +295,6 @@ export const ClipItem = React.memo(function ClipItem({
         const fadeOutCurve: FadeCurveType = clip.fadeOutCurve ?? "sine";
 
         // 统一样式：从主题配置读取波形颜色
-        const fill = waveformColors.fill;
         const stroke = waveformColors.stroke;
         // preview 状态用降低 opacity 表示加载中，不使用虚�?
         const waveformOpacity = peaks?.isPreview ? 0.6 : 1.0;
@@ -371,44 +367,59 @@ export const ClipItem = React.memo(function ClipItem({
             fadeWindowEndSec,
         );
 
-        // 使用共享渲染函数生成 SVG 路径（单 band 全高）
-        const pathD = renderWaveformSvg(
-            {
-                min: faded.min,
-                max: faded.max,
-                timestamps: [], // 空数组表示使用均匀分布
-                stride: 1,
-            },
-            {
-                width: w,
-                height: totalH,
-                centerY,
-                halfHeight: halfH,
-                amplitudeScale: 1.0, // 振幅已在 applyFadeGainToPeaks 中处理
-            },
-        );
-        if (!pathD) return null;
+        // 使用 Canvas 绘制单条细线（不填充内部），并基于 faded 数据计算稳定的 clipPeak
+        const canvasWidthPx = peaks?.ok
+            ? Math.max(1, Math.floor((peaks.cycleLenSecTimeline || 0) * pxPerSec))
+            : Math.max(1, Math.floor(width));
+
+        const TILE_THRESHOLD = 4096;
+
+        // compute clip-level absolute peak from faded envelope (already includes ampScale)
+        let clipPeakAbs = 0;
+        for (let i = 0; i < faded.min.length; i++) {
+            const a = Math.abs(faded.min[i] ?? 0);
+            const b = Math.abs(faded.max[i] ?? 0);
+            if (a > clipPeakAbs) clipPeakAbs = a;
+            if (b > clipPeakAbs) clipPeakAbs = b;
+        }
+
+        // If very wide, switch to tileMode which requests per-tile segments and
+        // uses a worker to downsample on the background thread.
+        if (canvasWidthPx > TILE_THRESHOLD && clip.sourcePath) {
+            return (
+                <div style={{ width: canvasWidthPx, height: totalH }}>
+                    <WaveformCanvas
+                        targetWidthPx={canvasWidthPx}
+                        heightPx={totalH}
+                        stroke={stroke}
+                        strokeWidth={1}
+                        opacity={waveformOpacity}
+                        clipPeak={clipPeakAbs}
+                        tileMode={true}
+                        sourcePath={clip.sourcePath}
+                        sourceStartOffsetSec={Number(clip.sourceStartSec ?? 0) || 0}
+                        cycleLenSecTimeline={peaks?.cycleLenSecTimeline}
+                        pxPerSec={pxPerSec}
+                        playbackRate={Number(clip.playbackRate ?? 1) || 1}
+                    />
+                </div>
+            );
+        }
+
+        // Default single-pass render
         return (
-            <svg
-                viewBox={`0 0 ${w} ${totalH}`}
-                preserveAspectRatio="none"
-                style={{
-                    width: "100%",
-                    height: "100%",
-                    opacity: waveformOpacity,
-                    flexShrink: 0,
-                }}
-            >
-                <path
-                    d={pathD}
-                    fill={fill}
+            <div style={{ width: canvasWidthPx, height: totalH }}>
+                <WaveformCanvas
+                    min={faded.min}
+                    max={faded.max}
+                    targetWidthPx={canvasWidthPx}
+                    heightPx={totalH}
                     stroke={stroke}
-                    strokeWidth="1"
-                    vectorEffect="non-scaling-stroke"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
+                    strokeWidth={1}
+                    opacity={waveformOpacity}
+                    clipPeak={clipPeakAbs}
                 />
-            </svg>
+            </div>
         );
     }, [
         clipForWaveform,
@@ -426,6 +437,8 @@ export const ClipItem = React.memo(function ClipItem({
         waveform,
         waveformAmpScale,
         waveformVisualAmpScale,
+        pxPerSec,
+        rowHeight,
     ]);
 
     // 波形 SVG 固定宽度 = source 可用窗口的 timeline 像素宽度。

@@ -87,6 +87,10 @@ export interface CanvasRenderOptions {
     fillColor?: string;
     /** 描边颜色 */
     strokeColor?: string;
+    /** 渲染模式：'bars'（默认填充条）|'stroke'（边缘线）|'stroke-jitter'（交替抖动细线） */
+    mode?: "bars" | "stroke" | "stroke-jitter";
+    /** 描边宽度（像素） */
+    strokeWidth?: number;
     /** 竖条宽度（像素） */
     barWidth?: number;
     /** 中心 Y 坐标（默认 height * 0.5） */
@@ -238,8 +242,10 @@ export function renderWaveformCanvas(
         width,
         height,
         fillColor = "rgba(255,255,255,0.2)",
-        strokeColor: _strokeColor = "rgba(255,255,255,0.7)",
+        strokeColor = "rgba(255,255,255,0.7)",
         barWidth: _barWidth = 1.5,
+        mode = "bars",
+        strokeWidth = 1,
     } = options;
 
     const centerY = options.centerY ?? height * 0.5;
@@ -250,41 +256,48 @@ export function renderWaveformCanvas(
     if (n === 0) return;
 
     // 使用均匀分布 x 坐标：第一个点在 x=0，最后一个点在 x=width
-    // 避免因 timestamps 中心点偏移（midIdx = i+0.5）导致的波形位置误差
-    const xOf = (i: number) =>
-        n <= 1 ? 0 : (i / (n - 1)) * width;
+    const xOf = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * width);
 
-    // 绘制连续折线路径（类似 SVG 的闭合路径）
-    ctx.beginPath();
-
-    // 1. 正向遍历 max 值，绘制上边缘折线
-    for (let i = 0; i < n; i++) {
-        const x = xOf(i);
-        const ma = max[i] ?? 0;
-        const y = centerY - ma * amplitude;
-
-        if (i === 0) {
-            ctx.moveTo(x, y);
-        } else {
+    if (mode === "bars") {
+        // 原有填充行为：构建闭合路径并填充
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const x = xOf(i);
+            const ma = max[i] ?? 0;
+            const y = centerY - ma * amplitude;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        for (let i = n - 1; i >= 0; i--) {
+            const x = xOf(i);
+            const mi = min[i] ?? 0;
+            const y = centerY - mi * amplitude;
             ctx.lineTo(x, y);
         }
+        ctx.closePath();
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+        return;
     }
 
-    // 2. 反向遍历 min 值，绘制下边缘折线
-    for (let i = n - 1; i >= 0; i--) {
+    // stroke 或 stroke-jitter: 仅绘制一条细线（无填充），在 visual 上呈现快速上下抖动
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
         const x = xOf(i);
-        const mi = min[i] ?? 0;
-        const y = centerY - mi * amplitude;
-
-        ctx.lineTo(x, y);
+        const top = max[i] ?? 0;
+        const bot = min[i] ?? 0;
+        // jitter: 在包络内交替采样，产生快速上下抖动的线条
+        const t = mode === "stroke-jitter" ? (i % 2 === 0 ? 0.25 : 0.75) : 0.5;
+        const v = top + (bot - top) * t;
+        const y = centerY - v * amplitude;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
     }
-
-    // 3. 闭合路径
-    ctx.closePath();
-
-    // 4. 填充路径
-    ctx.fillStyle = fillColor;
-    ctx.fill();
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = strokeWidth;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.stroke();
 }
 
 /**

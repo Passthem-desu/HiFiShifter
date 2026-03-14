@@ -64,6 +64,10 @@ const peaksSegmentInflight = new Map<
     Promise<WaveformPeaksSegmentPayload>
 >();
 const PEAKS_CACHE_LIMIT = 256;
+const WAVEFORM_COLUMNS_PER_SEC = 1024;
+const WAVEFORM_COLUMNS_MIN = 96;
+const WAVEFORM_COLUMNS_MAX = 65536;
+const WAVEFORM_COLUMNS_QUANT = 32;
 const SS_KEY_PREFIX = "hs_peaks_v1|";
 const SS_CACHE_LIMIT = 512;
 
@@ -170,7 +174,7 @@ export function useClipWaveformPeaks(args: {
 }) {
     const {
         clip,
-        widthPx,
+        widthPx: _widthPx,
         altPressed = false,
         hasWaveformPreview,
     } = args;
@@ -219,14 +223,20 @@ export function useClipWaveformPeaks(args: {
         const startSecQ = qsec(startSec);
         const segmentLenSecQ = Math.max(quantStepSec, qsec(segmentLenSec));
 
-        // Request columns in coarse steps so trim drags don't spam unique requests.
-        // We render at the current pixel width anyway (interpolated), so request resolution
-        // only needs to be "good enough" and stable.
-        // rawColumns 按 SVG 实际宽度（覆盖整个 source 文件）计算，而非按 clip 可见区域宽度。
-        // 否则只有 widthPx 那么多列却要覆盖更长的 durationSec，每列间距更大，波形变瘦。
-        const svgWidthRatio = desiredLenSrc > 1e-9 ? durationSec / desiredLenSrc : 1;
-        const rawColumns = clamp(Math.floor(widthPx * svgWidthRatio), 16, 8192);
-        const outColumns = clamp(Math.round(rawColumns / 64) * 64, 16, 8192);
+        // Request columns by seconds density (columns per second), so longer clips
+        // always carry proportionally more detail regardless viewport zoom.
+        const secondsBasedColumns = durationSec * WAVEFORM_COLUMNS_PER_SEC;
+        const rawColumns = clamp(
+            Math.round(secondsBasedColumns),
+            WAVEFORM_COLUMNS_MIN,
+            WAVEFORM_COLUMNS_MAX,
+        );
+        const outColumns = clamp(
+            Math.round(rawColumns / WAVEFORM_COLUMNS_QUANT) *
+                WAVEFORM_COLUMNS_QUANT,
+            WAVEFORM_COLUMNS_MIN,
+            WAVEFORM_COLUMNS_MAX,
+        );
         const segmentColumns = altPressed
             ? clamp(Math.round(outColumns / 4), 16, 2048)
             : outColumns;
@@ -248,7 +258,7 @@ export function useClipWaveformPeaks(args: {
             cycleLenSecTimeline,
         };
     // 注意：不依赖 bpm，波形内容基于秒域计算，BPM 变化不影响波形显示
-    }, [altPressed, clip, widthPx]);
+    }, [altPressed, clip]);
 
     const [peaks, setPeaks] = React.useState<PeaksRenderState | null>(null);
 
@@ -282,7 +292,11 @@ export function useClipWaveformPeaks(args: {
             segMax: number[],
             isPreview: boolean,
         ): PeaksRenderState => {
-            const outCols = clamp(Math.floor(outColumns), 16, 8192);
+            const outCols = clamp(
+                Math.floor(outColumns),
+                WAVEFORM_COLUMNS_MIN,
+                WAVEFORM_COLUMNS_MAX,
+            );
             const segCols = Math.min(segMin.length, segMax.length);
             const segLen = Math.max(1e-9, Number(segmentLenSecTimeline) || 0);
             const denom = Math.max(1, outCols - 1);

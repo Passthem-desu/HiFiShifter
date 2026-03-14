@@ -57,10 +57,13 @@ const TimeRulerMarks = React.memo(function TimeRulerMarks({
             {visibleBars.map((m) => (
                 <div
                     key={m.beat}
-                    className="absolute top-0 bottom-0 text-[10px] text-qt-text-muted pt-1"
+                    className="absolute top-0 bottom-0 text-[10px] text-qt-text pt-1"
                     style={{ left: m.beat * secPerBeat * pxPerSec }}
                 >
-                    <div className="pl-1 border-l border-qt-border h-2">
+                    <div
+                        className="pl-1 h-2"
+                        style={{ borderLeft: "1px solid var(--qt-graph-grid-strong)" }}
+                    >
                         {m.label}
                     </div>
                 </div>
