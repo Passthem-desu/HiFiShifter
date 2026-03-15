@@ -133,7 +133,7 @@ cargo tauri dev
 | 保存                         | Ctrl + S                        |
 | 另存为                       | Ctrl + Shift + S                |
 | 导出音频                     | Ctrl + E                        |
-| 模式切换（选择/绘制/直线）    | Tab  /  Shift + Tab             |
+| 模式切换（选择/绘制）         | Tab                             |
 | 删除选中剪辑                 | Delete / Backspace              |
 | 复制选中剪辑（应用内剪贴板） | Ctrl + C                        |
 | 粘贴到播放头位置             | Ctrl + V                        |
@@ -239,7 +239,7 @@ cargo tauri dev
 ## 文档
 
 - [开发手册](DEVELOPMENT_zh.md)
-- [使用手册](USER_MANUAL_zh.md)
+- [使用手册](USERMANUAL.md)
 - [更新计划](todo.md)
 
 ## 致谢

@@ -156,7 +156,7 @@ This mechanism is abstracted: when adding new parameters, only need to implement
 | Save | Ctrl + S |
 | Save As | Ctrl + Shift + S |
 | Export audio | Ctrl + E |
-| Mode Toggle (Select/Draw/Line) | Tab  /  Shift + Tab |
+| Mode Toggle (Select/Draw) | Tab |
 | Delete selected clips | Delete / Backspace |
 | Copy selected clips (internal clipboard) | Ctrl + C |
 | Paste at playhead position | Ctrl + V |
@@ -262,7 +262,7 @@ Detailed implementation see [DEVELOPMENT.md - Pitch analysis performance optimiz
 ## Documentation
 
 - [Development Manual](DEVELOPMENT.md)
-- [User Manual](USER_MANUAL.md)
+- [User Manual](USERMANUAL.md)
 - [Update Plan](todo.md)
 
 ## Acknowledgments
