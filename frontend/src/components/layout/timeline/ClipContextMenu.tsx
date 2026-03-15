@@ -106,6 +106,7 @@ export const ClipContextMenu: React.FC<{
     onRename: (clipId: string) => void;
     onCopy: (ids: string[]) => void;
     onCut: (ids: string[]) => void;
+    onReplace: (ids: string[]) => void;
     onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
@@ -128,6 +129,7 @@ export const ClipContextMenu: React.FC<{
     onRename,
     onCopy,
     onCut,
+    onReplace,
     onSplit,
     onGlue,
     onNormalize,
@@ -223,6 +225,13 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                     <MenuItem
+                        label={t("ctx_replace_all")}
+                        onClick={() => {
+                            onReplace(ids);
+                            close();
+                        }}
+                    />
+                    <MenuItem
                         label={t("ctx_split_at_playhead")}
                         disabled={!canSplitSelected}
                         onClick={() => {
@@ -284,6 +293,13 @@ export const ClipContextMenu: React.FC<{
                         label={t("ctx_cut")}
                         onClick={() => {
                             onCut([clip.id]);
+                            close();
+                        }}
+                    />
+                    <MenuItem
+                        label={t("ctx_replace")}
+                        onClick={() => {
+                            onReplace([clip.id]);
                             close();
                         }}
                     />

@@ -157,6 +157,15 @@ pub(super) fn open_project(
     };
 
     pf.timeline = resolve_paths_relative(pf.timeline, &path);
+    let missing_files: Vec<String> = pf
+        .timeline
+        .clips
+        .iter()
+        .filter_map(|clip| clip.source_path.clone())
+        .filter(|sp| !sp.trim().is_empty() && !std::path::Path::new(sp).exists())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     // 旧项目兼容迁移：source_end_sec == 0.0 曾表示"到源文件末尾"，
     // 新语义要求它是真实的结束时间，此处自动修正为 duration_sec 或 length_sec。
     for clip in &mut pf.timeline.clips {
@@ -195,7 +204,11 @@ pub(super) fn open_project(
         }
     }
 
-    get_timeline_state(state)
+    let mut payload = get_timeline_state(state);
+    if !missing_files.is_empty() {
+        payload.missing_files = Some(missing_files);
+    }
+    payload
 }
 
 

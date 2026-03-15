@@ -80,6 +80,8 @@ export interface TimelineState {
     playhead_sec: number;
     project_sec?: number;
     project?: ProjectMeta;
+    missing_files?: string[];
+    skipped_files?: string[];
 }
 
 export interface TimelineResult {
@@ -92,6 +94,8 @@ export interface TimelineResult {
     playhead_sec: number;
     project_sec?: number;
     project?: ProjectMeta;
+    missing_files?: string[];
+    skipped_files?: string[];
 }
 
 export interface TrackSummaryResult {

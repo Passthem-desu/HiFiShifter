@@ -972,6 +972,7 @@ impl TimelineState {
             playhead_sec: self.playhead_sec,
             project_sec: Some(self.project_sec),
             project: None,
+            missing_files: None,
         }
     }
 
@@ -1888,6 +1889,57 @@ impl TimelineState {
             c.source_sample_rate = source_sample_rate;
             c.waveform_preview = waveform_preview;
         }
+    }
+
+    pub fn replace_clip_sources(
+        &mut self,
+        clip_ids: &[String],
+        new_source_path: &str,
+        replace_same_source: bool,
+    ) -> usize {
+        if clip_ids.is_empty() || new_source_path.trim().is_empty() {
+            return 0;
+        }
+
+        let target_id_set: HashSet<&str> = clip_ids.iter().map(|id| id.as_str()).collect();
+        let mut old_source_set: HashSet<String> = HashSet::new();
+        for clip in &self.clips {
+            if target_id_set.contains(clip.id.as_str()) {
+                if let Some(path) = clip.source_path.as_ref() {
+                    old_source_set.insert(path.clone());
+                }
+            }
+        }
+
+        let info = try_read_wav_info(Path::new(new_source_path), 4096);
+        let duration_sec = info.as_ref().map(|v| v.duration_sec);
+        let duration_frames = info.as_ref().map(|v| v.total_frames);
+        let source_sample_rate = info.as_ref().map(|v| v.sample_rate);
+        let waveform_preview = info.map(|v| v.waveform_preview);
+
+        let mut changed = 0usize;
+        for clip in &mut self.clips {
+            let direct_match = target_id_set.contains(clip.id.as_str());
+            let same_source_match = replace_same_source
+                && clip
+                    .source_path
+                    .as_ref()
+                    .map(|p| old_source_set.contains(p))
+                    .unwrap_or(false);
+
+            if !direct_match && !same_source_match {
+                continue;
+            }
+
+            clip.source_path = Some(new_source_path.to_string());
+            clip.duration_sec = duration_sec;
+            clip.duration_frames = duration_frames;
+            clip.source_sample_rate = source_sample_rate;
+            clip.waveform_preview = waveform_preview.clone();
+            changed += 1;
+        }
+
+        changed
     }
 }
 

@@ -1,4 +1,9 @@
-import type { ParamName, ParamViewSegment, ValueViewport } from "./types";
+import type {
+    ParamMorphOverlay,
+    ParamName,
+    ParamViewSegment,
+    ValueViewport,
+} from "./types";
 import type { ClipPeaksEntry } from "./useClipsPeaksForPianoRoll";
 import { clamp } from "../timeline";
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./constants";
@@ -191,6 +196,78 @@ function drawCurveTimed(args: {
     ctx.stroke();
 }
 
+function drawParamMorphOverlay(args: {
+    ctx: CanvasRenderingContext2D;
+    overlay: ParamMorphOverlay;
+    editParam: ParamName;
+    framePeriodMs: number;
+    visibleStartSec: number;
+    visibleDurSec: number;
+    w: number;
+    h: number;
+    valueToY: (param: ParamName, v: number, h: number) => number;
+    isDark: boolean;
+}) {
+    const {
+        ctx,
+        overlay,
+        editParam,
+        framePeriodMs,
+        visibleStartSec,
+        visibleDurSec,
+        w,
+        h,
+        valueToY,
+        isDark,
+    } = args;
+    const fp = Math.max(1e-6, framePeriodMs);
+    const points = overlay.points.slice().sort((a, b) => a.frame - b.frame);
+    if (points.length !== 4) return;
+
+    const lineColor = isDark
+        ? "rgba(255, 210, 95, 0.9)"
+        : "rgba(160, 90, 10, 0.9)";
+    const fillColor = isDark
+        ? "rgba(255, 210, 95, 0.22)"
+        : "rgba(160, 90, 10, 0.18)";
+
+    const toCanvasX = (frame: number) => {
+        const sec = framesToTime(frame, fp);
+        return timeToPixel(sec, visibleStartSec, visibleDurSec, w);
+    };
+
+    ctx.save();
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    for (let i = 0; i < points.length; i += 1) {
+        const p = points[i];
+        const mappedValue = editParam === "pitch" ? p.value + 0.5 : p.value;
+        const x = toCanvasX(p.frame);
+        const y = valueToY(editParam, mappedValue, h);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (const p of points) {
+        const mappedValue = editParam === "pitch" ? p.value + 0.5 : p.value;
+        const x = toCanvasX(p.frame);
+        const y = valueToY(editParam, mappedValue, h);
+        const radius = p.kind === "left" || p.kind === "right" ? 4 : 5;
+        ctx.fillStyle = fillColor;
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
 /**
  * per-clip 检测音高曲线（来自后端 clip_pitch_data 事件），
  * 在参数面板 pitch 视图中作为参考线渲染。
@@ -243,6 +320,7 @@ export function drawPianoRoll(args: {
     toolMode?: string;
     snapToggleHeld?: boolean;
     scaleHighlightMode?: import("../../../features/session/sessionTypes").ScaleHighlightMode;
+    paramMorphOverlay?: ParamMorphOverlay | null;
 }) {
     const {
         axisCanvas,
@@ -272,6 +350,7 @@ export function drawPianoRoll(args: {
         detectedPitchCurves,
         isDark = true,
         clipboardPreview,
+        paramMorphOverlay,
     } = args;
 
     // 主题颜色查找表
@@ -836,6 +915,21 @@ export function drawPianoRoll(args: {
             }
             ctx.stroke();
             ctx.restore();
+        }
+
+        if (paramMorphOverlay) {
+            drawParamMorphOverlay({
+                ctx,
+                overlay: paramMorphOverlay,
+                editParam,
+                framePeriodMs: paramView.framePeriodMs,
+                visibleStartSec,
+                visibleDurSec,
+                w,
+                h,
+                valueToY,
+                isDark,
+            });
         }
     }
 

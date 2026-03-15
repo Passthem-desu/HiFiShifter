@@ -370,6 +370,25 @@ pub(super) fn set_clip_state(
     payload
 }
 
+pub(super) fn replace_clip_source(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+    new_source_path: String,
+    replace_same_source: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.replace_clip_sources(
+        &clip_ids,
+        &new_source_path,
+        replace_same_source.unwrap_or(false),
+    );
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    payload
+}
+
 
 
 

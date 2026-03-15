@@ -81,6 +81,9 @@ pub struct TimelineStatePayload {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectMetaPayload>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_files: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]

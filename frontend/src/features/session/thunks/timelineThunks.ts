@@ -334,6 +334,17 @@ export const setClipStateRemote = createAsyncThunk(
     },
 );
 
+export const replaceClipSourceRemote = createAsyncThunk(
+    "session/replaceClipSourceRemote",
+    async (payload: {
+        clipIds: string[];
+        newSourcePath: string;
+        replaceSameSource?: boolean;
+    }) => {
+        return webApi.replaceClipSource(payload);
+    },
+);
+
 export const splitClipRemote = createAsyncThunk(
     "session/splitClipRemote",
     async (payload: { clipId: string; splitSec: number }) => {

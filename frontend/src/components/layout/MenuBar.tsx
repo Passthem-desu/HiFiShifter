@@ -575,18 +575,37 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <TransposeCentsDialog
                 open={transposeCentsOpen}
                 onOpenChange={setTransposeCentsOpen}
-                onConfirm={(cents) => dispatchEditOp("transposeCents", { cents })}
+                defaultSmoothness={s.edgeSmoothnessPercent}
+                onConfirm={(cents, edgeSmoothnessPercent) =>
+                    dispatchEditOp("transposeCents", {
+                        cents,
+                        edgeSmoothnessPercent,
+                    })
+                }
             />
             <TransposeDegreesDialog
                 open={transposeDegreesOpen}
                 onOpenChange={setTransposeDegreesOpen}
                 defaultScale={s.project.baseScale}
-                onConfirm={(degrees, scale) => dispatchEditOp("transposeDegrees", { degrees, scale })}
+                defaultSmoothness={s.edgeSmoothnessPercent}
+                onConfirm={(degrees, scale, edgeSmoothnessPercent) =>
+                    dispatchEditOp("transposeDegrees", {
+                        degrees,
+                        scale,
+                        edgeSmoothnessPercent,
+                    })
+                }
             />
             <SetPitchDialog
                 open={setPitchOpen}
                 onOpenChange={setSetPitchOpen}
-                onConfirm={(midiNote) => dispatchEditOp("setPitch", { midiNote })}
+                defaultSmoothness={s.edgeSmoothnessPercent}
+                onConfirm={(midiNote, edgeSmoothnessPercent) =>
+                    dispatchEditOp("setPitch", {
+                        midiNote,
+                        edgeSmoothnessPercent,
+                    })
+                }
             />
             <SmoothDialog
                 open={smoothOpen}

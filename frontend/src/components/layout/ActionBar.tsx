@@ -11,8 +11,6 @@ import {
 import {
     PlayIcon,
     StopIcon,
-    CursorArrowIcon,
-    Pencil1Icon,
 } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
@@ -24,7 +22,6 @@ import {
     stopAudioPlayback,
     setBpm,
     updateTransportBpm,
-    setToolMode,
     setProjectTimelineSettingsRemote,
     toggleAutoCrossfade,
     toggleGridSnap,
@@ -82,44 +79,6 @@ export function ActionBar() {
             gap="3"
             className="h-8 bg-qt-window border-b border-qt-border px-1 text-qt-text flex-nowrap overflow-x-auto overflow-y-hidden min-w-0 custom-scrollbar"
         >
-            {/* Mode & Param Group */}
-            <Flex align="center" gap="1" className="shrink-0">
-                <IconButton
-                    size="1"
-                    variant={s.toolMode === "select" ? "solid" : "ghost"}
-                    color="gray"
-                    title={t("select")}
-                    tabIndex={-1}
-                    onClick={() => dispatch(setToolMode("select"))}
-                >
-                    <CursorArrowIcon />
-                </IconButton>
-                <IconButton
-                    size="1"
-                    variant={s.toolMode === "draw" ? "solid" : "ghost"}
-                    color="gray"
-                    title={t("draw")}
-                    tabIndex={-1}
-                    onClick={() => dispatch(setToolMode("draw"))}
-                >
-                    <Pencil1Icon />
-                </IconButton>
-                <IconButton
-                    size="1"
-                    variant={s.toolMode === "line" ? "solid" : "ghost"}
-                    color="gray"
-                    title={tAny("line")}
-                    tabIndex={-1}
-                    onClick={() => dispatch(setToolMode("line"))}
-                >
-                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <line x1="2" y1="13" x2="13" y2="2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                    </svg>
-                </IconButton>
-            </Flex>
-
-
-
             {/* BPM & Time */}
             <Flex align="center" gap="2" className="shrink-0">
                 <Text size="1" className="text-qt-text-muted">

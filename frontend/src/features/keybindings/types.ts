@@ -48,12 +48,13 @@ export type ActionId =
     | "pianoRoll.paste" // PianoRoll 内粘贴参数帧
     | "pianoRoll.shiftParamUp" // 选中 clip 参数线整体上移
     | "pianoRoll.shiftParamDown" // 选中 clip 参数线整体下移
+    | "pianoRoll.shiftParamUpSelection" // 参数编辑器选择范围内参数线上移
+    | "pianoRoll.shiftParamDownSelection" // 参数编辑器选择范围内参数线下移
     // 模式切换
     | "mode.toggle" // 模式切换（正向）
-    | "mode.toggleReverse" // 模式切换（反向）
     | "mode.selectTool" // 切换到选择工具
     | "mode.drawTool" // 切换到绘制工具
-    | "mode.lineTool" // 切换到直线工具
+    | "mode.lineTool" // 切换到直线/颤音工具
     // 修饰键行为
     | "modifier.clipSlipEdit" // 拖动 clip 时进入 slip edit
     | "modifier.clipStretch" // clip 边缘拖动时从 trim 变为 stretch
@@ -62,6 +63,10 @@ export type ActionId =
     | "modifier.pianoRollVerticalZoom" // PianoRoll Ctrl+滚轮垂直缩放
     | "modifier.scrollHorizontal" // 按住+滚轮水平滚动
     | "modifier.scrollVertical" // 按住+滚轮竖直滚动
+    | "modifier.paramMorph" // 参数编辑器形变模式（按住）
+    | "modifier.paramFineAdjust" // 参数微调（按住）
+    | "modifier.vibratoAmplitudeAdjust" // 颤音绘制时滚轮调振幅
+    | "modifier.vibratoFrequencyAdjust" // 颤音绘制时滚轮调频率
     // 快速搜索
     | "quickSearch.open" // 打开快速搜索弹窗
     | "quickSearch.navigate.up" // 快速搜索：向上切换候选项

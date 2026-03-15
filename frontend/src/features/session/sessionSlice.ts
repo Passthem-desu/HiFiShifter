@@ -8,12 +8,15 @@ import type {
     AutomationPoint,
     ClipInfo,
     ClipTemplate,
+    DrawToolMode,
     DragDirection,
+    DrawDragDirection,
     EditParam,
     FadeCurveType,
     GridSize,
     PitchSnapUnit,
     ToolMode,
+    ToolModeGroup,
     TrackInfo,
 } from "./sessionTypes";
 
@@ -28,6 +31,7 @@ import {
     moveTrackRemote,
     removeClipRemote,
     removeTrackRemote,
+    replaceClipSourceRemote,
     selectClipRemote,
     selectTrackRemote,
     setClipStateRemote,
@@ -98,11 +102,14 @@ export type {
     AutomationPoint,
     ClipInfo,
     ClipTemplate,
+    DrawToolMode,
     DragDirection,
+    DrawDragDirection,
     EditParam,
     FadeCurveType,
     GridSize,
     ToolMode,
+    ToolModeGroup,
     TrackInfo,
 };
 
@@ -111,6 +118,8 @@ type WaveformPreview = number[] | { l: number[]; r: number[] };
 
 export interface SessionState {
     toolMode: ToolMode;
+    toolModeGroup: ToolModeGroup;
+    drawToolMode: DrawToolMode;
     editParam: EditParam;
     bpm: number;
     beats: number;
@@ -136,8 +145,12 @@ export interface SessionState {
     autoScrollEnabled: boolean;
     /** 剪贴板预览（在参数编辑器选区内显示剪贴板曲线预览） */
     showClipboardPreview: boolean;
-    /** 参数编辑器拖动方向限制 */
-    dragDirection: DragDirection;
+    /** 参数编辑器（选择工具）拖动方向限制 */
+    selectDragDirection: DragDirection;
+    /** 参数编辑器（绘制工具）拖动方向限制 */
+    drawDragDirection: DrawDragDirection;
+    /** 参数编辑器（直线/颤音工具）拖动方向限制 */
+    lineVibratoDragDirection: DrawDragDirection;
 
     /** 参数编辑器选区拖拽时的边缘平滑度（0-100%） */
     edgeSmoothnessPercent: number;
@@ -630,6 +643,8 @@ function upsertImportedClip(
 
 const initialState: SessionState = {
     toolMode: "draw",
+    toolModeGroup: "draw",
+    drawToolMode: "draw",
     editParam: "pitch",
     bpm: 120,
     beats: 4,
@@ -641,12 +656,14 @@ const initialState: SessionState = {
     pitchSnapEnabled: false,
     pitchSnapUnit: "semitone",
     pitchSnapScale: "C",
-    pitchSnapToleranceCents: 25,
+    pitchSnapToleranceCents: 0,
     scaleHighlightMode: "always",
     playheadZoomEnabled: false,
     autoScrollEnabled: false,
     showClipboardPreview: false,
-    dragDirection: "y-only" as DragDirection,
+    selectDragDirection: "y-only" as DragDirection,
+    drawDragDirection: "free" as DrawDragDirection,
+    lineVibratoDragDirection: "free" as DrawDragDirection,
     edgeSmoothnessPercent: 0,
     lockParamLinesEnabled: false,
 
@@ -755,6 +772,7 @@ export {
     moveClipsRemote,
     duplicateTrackRemote,
     setClipStateRemote,
+    replaceClipSourceRemote,
     splitClipRemote,
     glueClipsRemote,
     selectClipRemote,
@@ -807,6 +825,12 @@ const sessionSlice = createSlice({
                 pushHistory(state);
             }
             state.toolMode = action.payload;
+            if (action.payload === "select") {
+                state.toolModeGroup = "select";
+            } else {
+                state.toolModeGroup = "draw";
+                state.drawToolMode = action.payload;
+            }
         },
         setEditParam(state, action: PayloadAction<EditParam>) {
             state.editParam = action.payload;
@@ -860,13 +884,48 @@ const sessionSlice = createSlice({
         toggleClipboardPreview(state) {
             state.showClipboardPreview = !state.showClipboardPreview;
         },
-        cycleDragDirection(state) {
-            const order: DragDirection[] = ["free", "x-only", "y-only"];
-            const idx = order.indexOf(state.dragDirection);
-            state.dragDirection = order[(idx + 1) % order.length];
+        cycleDragDirection(
+            state,
+            action: PayloadAction<"select" | "draw" | "vibrato">,
+        ) {
+            if (action.payload === "select") {
+                const order: DragDirection[] = ["free", "x-only", "y-only"];
+                const idx = order.indexOf(state.selectDragDirection);
+                state.selectDragDirection = order[(idx + 1) % order.length];
+                return;
+            }
+            const order: DrawDragDirection[] = ["free", "x-only"];
+            if (action.payload === "draw") {
+                const idx = order.indexOf(state.drawDragDirection);
+                state.drawDragDirection = order[(idx + 1) % order.length];
+                return;
+            }
+            const idx = order.indexOf(state.lineVibratoDragDirection);
+            state.lineVibratoDragDirection = order[(idx + 1) % order.length];
         },
-        setDragDirection(state, action: PayloadAction<DragDirection>) {
-            state.dragDirection = action.payload;
+        setDragDirection(
+            state,
+            action: PayloadAction<{
+                tool: "select" | "draw" | "vibrato";
+                direction: DragDirection | DrawDragDirection;
+            }>,
+        ) {
+            const { tool, direction } = action.payload;
+            if (tool === "select") {
+                if (["free", "x-only", "y-only"].includes(direction)) {
+                    state.selectDragDirection = direction as DragDirection;
+                }
+                return;
+            }
+            if (tool === "draw") {
+                if (["free", "x-only"].includes(direction)) {
+                    state.drawDragDirection = direction as DrawDragDirection;
+                }
+                return;
+            }
+            if (["free", "x-only"].includes(direction)) {
+                state.lineVibratoDragDirection = direction as DrawDragDirection;
+            }
         },
         setEdgeSmoothnessPercent(state, action: PayloadAction<number>) {
             state.edgeSmoothnessPercent = clamp(Number(action.payload) || 0, 0, 100);
@@ -1322,19 +1381,43 @@ const sessionSlice = createSlice({
                 ).includes((s as any).pitchSnapScale)
                     ? ((s as any).pitchSnapScale as typeof state.pitchSnapScale)
                     : "C";
+                // Load pitch snap tolerance (cents) if present in saved settings
+                if ((s as any).pitchSnapToleranceCents != null) {
+                    state.pitchSnapToleranceCents = clamp(
+                        Number((s as any).pitchSnapToleranceCents) || 0,
+                        0,
+                        1000,
+                    );
+                }
                 state.playheadZoomEnabled = s.playheadZoom;
                 if (s.autoScroll != null)
                     state.autoScrollEnabled = s.autoScroll;
                 if (s.showClipboardPreview != null)
                     state.showClipboardPreview = s.showClipboardPreview;
+                if (s.scaleHighlightMode != null)
+                    state.scaleHighlightMode = s.scaleHighlightMode === "always" ? "always" : "off";
                 if ((s as any).lockParamLines != null)
                     state.lockParamLinesEnabled = Boolean(
                         (s as any).lockParamLines,
                     );
-                if (s.dragDirection != null) {
+                const legacyDir = (s as any).dragDirection;
+                if (legacyDir != null) {
                     const validDirs = ["free", "x-only", "y-only"];
-                    if (validDirs.includes(s.dragDirection))
-                        state.dragDirection = s.dragDirection as DragDirection;
+                    if (validDirs.includes(legacyDir)) {
+                        state.selectDragDirection = legacyDir as DragDirection;
+                    }
+                }
+                const selectDir = (s as any).selectDragDirection;
+                if (selectDir != null && ["free", "x-only", "y-only"].includes(selectDir)) {
+                    state.selectDragDirection = selectDir as DragDirection;
+                }
+                const drawDir = (s as any).drawDragDirection;
+                if (drawDir != null && ["free", "x-only"].includes(drawDir)) {
+                    state.drawDragDirection = drawDir as DrawDragDirection;
+                }
+                const lineVibratoDir = (s as any).lineVibratoDragDirection;
+                if (lineVibratoDir != null && ["free", "x-only"].includes(lineVibratoDir)) {
+                    state.lineVibratoDragDirection = lineVibratoDir as DrawDragDirection;
                 }
                 const smoothness =
                     (s as any).smoothnessPercent ??
@@ -2152,6 +2235,16 @@ const sessionSlice = createSlice({
             })
 
             .addCase(setClipStateRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
+            })
+
+            .addCase(replaceClipSourceRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;

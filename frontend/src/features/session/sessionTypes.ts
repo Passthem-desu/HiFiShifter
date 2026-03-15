@@ -1,7 +1,10 @@
-export type ToolMode = "draw" | "select" | "line";
+export type DrawToolMode = "draw" | "line" | "vibrato";
+export type ToolModeGroup = "select" | "draw";
+export type ToolMode = "select" | DrawToolMode;
 export type PitchSnapUnit = "semitone" | "scale";
 export type ScaleHighlightMode = "always" | "off";
 export type DragDirection = "free" | "x-only" | "y-only";
+export type DrawDragDirection = "free" | "x-only";
 export type FadeCurveType =
     | "linear"
     | "sine"

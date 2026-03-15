@@ -14,6 +14,9 @@ export interface UiSettings {
     showClipboardPreview: boolean;
     lockParamLines?: boolean;
     dragDirection?: string;
+    selectDragDirection?: string;
+    drawDragDirection?: string;
+    lineVibratoDragDirection?: string;
     smoothnessPercent?: number;
 }
 

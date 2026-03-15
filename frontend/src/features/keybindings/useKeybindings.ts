@@ -66,6 +66,7 @@ function findMatchingAction(
 
     // 先检查有修饰键的绑定
     for (const [actionId, kb] of entries) {
+        if (kb.modifierOnly) continue;
         if (kb.ctrl || kb.shift || kb.alt) {
             if (matchesKeybinding(e, kb)) {
                 const ctx = ACTION_META[actionId]?.scopedContext;
@@ -76,6 +77,7 @@ function findMatchingAction(
     }
     // 再检查无修饰键的绑定
     for (const [actionId, kb] of entries) {
+        if (kb.modifierOnly) continue;
         if (!kb.ctrl && !kb.shift && !kb.alt) {
             if (matchesKeybinding(e, kb)) {
                 const ctx = ACTION_META[actionId]?.scopedContext;
@@ -154,7 +156,9 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
                 if (
                     matchedAction?.startsWith("pianoRoll.") &&
                     matchedAction !== "pianoRoll.shiftParamUp" &&
-                    matchedAction !== "pianoRoll.shiftParamDown"
+                    matchedAction !== "pianoRoll.shiftParamDown" &&
+                    matchedAction !== "pianoRoll.shiftParamUpSelection" &&
+                    matchedAction !== "pianoRoll.shiftParamDownSelection"
                 ) {
                     return;
                 }

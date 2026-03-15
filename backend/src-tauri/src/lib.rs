@@ -180,6 +180,7 @@ pub fn run() {
             commands::get_clip_linked_params,
             commands::apply_clip_linked_params,
             commands::set_clip_state,
+            commands::replace_clip_source,
             commands::split_clip,
             commands::glue_clips,
             commands::select_clip,

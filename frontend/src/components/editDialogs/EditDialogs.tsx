@@ -3,17 +3,28 @@ import { Dialog, Flex, Text, TextField, Button, Select } from "@radix-ui/themes"
 import { useI18n } from "../../i18n/I18nProvider";
 import type { ScaleKey } from "../../utils/musicalScales";
 import { SCALE_KEYS, SCALE_LABELS } from "../../utils/musicalScales";
+import { useAppSelector } from "../../app/hooks";
+import {
+    isModifierActive,
+    selectKeybinding,
+} from "../../features/keybindings/keybindingsSlice";
 
 interface Props {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onConfirm?: (cents: number) => void;
+    defaultSmoothness?: number;
+    onConfirm?: (cents: number, edgeSmoothnessPercent: number) => void;
 }
 
-export function TransposeCentsDialog({ open, onOpenChange, onConfirm }: Props) {
+export function TransposeCentsDialog({ open, onOpenChange, defaultSmoothness = 0, onConfirm }: Props) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [cents, setCents] = useState("0");
+    const [smoothness, setSmoothness] = useState(String(Math.round(defaultSmoothness)));
+
+    useEffect(() => {
+        if (open) setSmoothness(String(Math.round(defaultSmoothness)));
+    }, [open, defaultSmoothness]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -30,12 +41,33 @@ export function TransposeCentsDialog({ open, onOpenChange, onConfirm }: Props) {
                             style={{ flex: 1 }}
                         />
                     </Flex>
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("edge_smoothness")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={smoothness}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSmoothness(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                        <Text size="1" color="gray">%</Text>
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(Number(cents) || 0); onOpenChange(false); }}>
+                    <Button
+                        onClick={() => {
+                            onConfirm?.(
+                                Number(cents) || 0,
+                                Math.max(0, Math.min(100, Number(smoothness) || 0)),
+                            );
+                            onOpenChange(false);
+                        }}
+                    >
                         {tAny("ok")}
                     </Button>
                 </Flex>
@@ -48,20 +80,23 @@ interface TransposeDegreesProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     defaultScale?: ScaleKey;
-    onConfirm?: (degrees: number, scale: ScaleKey) => void;
+    defaultSmoothness?: number;
+    onConfirm?: (degrees: number, scale: ScaleKey, edgeSmoothnessPercent: number) => void;
 }
 
-export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C", onConfirm }: TransposeDegreesProps) {
+export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C", defaultSmoothness = 0, onConfirm }: TransposeDegreesProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [degrees, setDegrees] = useState("3");
     const [scale, setScale] = useState<ScaleKey>(defaultScale);
+    const [smoothness, setSmoothness] = useState(String(Math.round(defaultSmoothness)));
 
     useEffect(() => {
         if (open) {
             setScale(defaultScale);
+            setSmoothness(String(Math.round(defaultSmoothness)));
         }
-    }, [open, defaultScale]);
+    }, [open, defaultScale, defaultSmoothness]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -91,12 +126,34 @@ export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C",
                             </Select.Content>
                         </Select.Root>
                     </Flex>
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("edge_smoothness")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={smoothness}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSmoothness(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                        <Text size="1" color="gray">%</Text>
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(Number(degrees) || 0, scale); onOpenChange(false); }}>
+                    <Button
+                        onClick={() => {
+                            onConfirm?.(
+                                Number(degrees) || 0,
+                                scale,
+                                Math.max(0, Math.min(100, Number(smoothness) || 0)),
+                            );
+                            onOpenChange(false);
+                        }}
+                    >
                         {tAny("ok")}
                     </Button>
                 </Flex>
@@ -108,13 +165,19 @@ export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C",
 interface SetPitchProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onConfirm?: (midiNote: number) => void;
+    defaultSmoothness?: number;
+    onConfirm?: (midiNote: number, edgeSmoothnessPercent: number) => void;
 }
 
-export function SetPitchDialog({ open, onOpenChange, onConfirm }: SetPitchProps) {
+export function SetPitchDialog({ open, onOpenChange, defaultSmoothness = 0, onConfirm }: SetPitchProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [note, setNote] = useState("60"); // C4
+    const [smoothness, setSmoothness] = useState(String(Math.round(defaultSmoothness)));
+
+    useEffect(() => {
+        if (open) setSmoothness(String(Math.round(defaultSmoothness)));
+    }, [open, defaultSmoothness]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -131,12 +194,33 @@ export function SetPitchDialog({ open, onOpenChange, onConfirm }: SetPitchProps)
                             style={{ flex: 1 }}
                         />
                     </Flex>
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 100 }}>{tAny("edge_smoothness")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={smoothness}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSmoothness(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                        <Text size="1" color="gray">%</Text>
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(Number(note) || 60); onOpenChange(false); }}>
+                    <Button
+                        onClick={() => {
+                            onConfirm?.(
+                                Number(note) || 60,
+                                Math.max(0, Math.min(100, Number(smoothness) || 0)),
+                            );
+                            onOpenChange(false);
+                        }}
+                    >
                         {tAny("ok")}
                     </Button>
                 </Flex>
@@ -154,7 +238,14 @@ interface SmoothProps {
 export function SmoothDialog({ open, onOpenChange, onConfirm }: SmoothProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
-    const [strength, setStrength] = useState("50");
+    const [strength, setStrength] = useState(50);
+    const paramFineAdjustKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.paramFineAdjust"),
+    );
+
+    useEffect(() => {
+        if (open) setStrength(50);
+    }, [open]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -162,22 +253,42 @@ export function SmoothDialog({ open, onOpenChange, onConfirm }: SmoothProps) {
                 <Dialog.Title>{tAny("menu_smooth")}</Dialog.Title>
                 <Flex direction="column" gap="3" mt="3">
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 100 }}>{tAny("dlg_strength")}</Text>
-                        <TextField.Root
-                            size="2"
-                            type="number"
-                            value={strength}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStrength(e.target.value)}
+                        <Text size="2" style={{ minWidth: 72 }}>{tAny("dlg_strength")}</Text>
+                        <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={Math.round(strength)}
+                            onWheel={(e) => {
+                                e.preventDefault();
+                                const fine = isModifierActive(
+                                    paramFineAdjustKb,
+                                    e.nativeEvent,
+                                );
+                                const step = fine ? 1 : 5;
+                                const dir = e.deltaY < 0 ? 1 : -1;
+                                const next = Math.max(
+                                    0,
+                                    Math.min(100, Math.round(strength) + dir * step),
+                                );
+                                setStrength(next);
+                            }}
+                            onChange={(e) => {
+                                setStrength(Number(e.currentTarget.value) || 0);
+                            }}
                             style={{ flex: 1 }}
                         />
-                        <Text size="1" color="gray">%</Text>
+                        <Text size="1" style={{ minWidth: 40, textAlign: "right" }}>
+                            {Math.round(strength)}%
+                        </Text>
                     </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(Number(strength) || 50); onOpenChange(false); }}>
+                    <Button onClick={() => { onConfirm?.(Math.max(0, Math.min(100, Math.round(strength)))); onOpenChange(false); }}>
                         {tAny("ok")}
                     </Button>
                 </Flex>

@@ -417,6 +417,21 @@ pub fn set_clip_state(
         color,
     )
 }
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn replace_clip_source(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+    new_source_path: String,
+    replace_same_source: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    timeline::replace_clip_source(
+        state,
+        clip_ids,
+        new_source_path,
+        replace_same_source,
+    )
+}
 #[tauri::command(rename_all = "camelCase")]
 pub fn split_clip(
     state: State<'_, AppState>,

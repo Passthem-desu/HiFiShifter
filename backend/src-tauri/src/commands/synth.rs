@@ -190,7 +190,7 @@ pub(super) fn save_synthesized(state: State<'_, AppState>, output_path: String) 
 /// 按 root track 分轨导出音频到指定目录。
 ///
 /// 每个 root track（`parent_id == None` 的轨道）以及它的所有子轨道的音频
-/// 会被混缩成一个独立的 WAV 文件，文件名为 `{track_name}.wav`。
+/// 会被混缩成一个独立的 WAV 文件，文件名为 `{TrackIndex}_{TrackName}.wav`。
 pub(super) fn save_separated(state: State<'_, AppState>, output_dir: String) -> serde_json::Value {
     let out_dir = Path::new(&output_dir);
     if !out_dir.exists() {
@@ -246,12 +246,22 @@ pub(super) fn save_separated(state: State<'_, AppState>, output_dir: String) -> 
     }
 
     let mut results = Vec::new();
+    let export_roots: Vec<&crate::state::Track> = root_tracks
+        .iter()
+        .copied()
+        .filter(|t| !t.muted)
+        .collect();
 
-    for root in &root_tracks {
-        // muted 的根轨道不导出
-        if root.muted {
-            continue;
+    let index_width = {
+        let count = export_roots.len();
+        if count <= 1 {
+            1
+        } else {
+            (count - 1).to_string().len()
         }
+    };
+
+    for (track_idx, root) in export_roots.iter().enumerate() {
 
         let included = collect_descendants(&timeline.tracks, &root.id);
 
@@ -263,11 +273,17 @@ pub(super) fn save_separated(state: State<'_, AppState>, output_dir: String) -> 
         sub_tl.clips.retain(|c| active_track_ids.contains(c.track_id.as_str()));
 
         let safe_name = sanitize_filename(&root.name);
-        let file_name = if safe_name.is_empty() {
-            format!("track_{}.wav", root.id)
+        let normalized_name = if safe_name.is_empty() {
+            format!("track_{}", root.id)
         } else {
-            format!("{}.wav", safe_name)
+            safe_name
         };
+        let file_name = format!(
+            "{:0width$}_{}.wav",
+            track_idx,
+            normalized_name,
+            width = index_width,
+        );
         let out_path = out_dir.join(&file_name);
 
         let opts = crate::mixdown::MixdownOptions {

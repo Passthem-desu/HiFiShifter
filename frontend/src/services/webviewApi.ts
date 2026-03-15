@@ -99,6 +99,7 @@ export const webApi = {
     getClipLinkedParams: timelineApi.getClipLinkedParams,
     applyClipLinkedParams: timelineApi.applyClipLinkedParams,
     setClipState: timelineApi.setClipState,
+    replaceClipSource: timelineApi.replaceClipSource,
     splitClip: timelineApi.splitClip,
     glueClips: timelineApi.glueClips,
     selectClip: timelineApi.selectClip,

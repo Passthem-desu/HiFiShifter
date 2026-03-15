@@ -251,6 +251,13 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 color: args[13],
             };
 
+        case "replace_clip_source":
+            return {
+                clipIds: args[0],
+                newSourcePath: args[1],
+                replaceSameSource: args[2],
+            };
+
         case "split_clip":
             return { clipId: args[0], splitSec: args[1] };
 

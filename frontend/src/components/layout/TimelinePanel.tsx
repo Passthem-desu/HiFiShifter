@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Flex } from "@radix-ui/themes";
+import { Flex, Dialog, Button, Text } from "@radix-ui/themes";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
@@ -20,6 +20,7 @@ import {
     importAudioFileAtPosition,
     importMultipleAudioAtPosition,
     setClipStateRemote,
+    replaceClipSourceRemote,
     setClipGain,
     setClipFades,
     glueClipsRemote,
@@ -97,6 +98,8 @@ export const TimelinePanel: React.FC = () => {
         nextScrollLeft: number;
     } | null>(null);
     const [viewportWidth, setViewportWidth] = useState(0);
+    const [sameSourceConfirmOpen, setSameSourceConfirmOpen] = useState(false);
+    const sameSourceConfirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
     useEffect(() => {
         scrollLeftRef.current = scrollLeft;
     }, [scrollLeft]);
@@ -1165,6 +1168,52 @@ export const TimelinePanel: React.FC = () => {
             }
         },
         [dispatch, sessionRef],
+    );
+
+    const replaceClipSources = React.useCallback(
+        async (ids: string[]) => {
+            const selected = sessionRef.current.clips.filter((c) =>
+                ids.includes(c.id),
+            );
+            if (selected.length === 0) return;
+
+            const picked = await webApi.openAudioDialog();
+            if (!picked.ok || picked.canceled || !picked.path) return;
+
+            const selectedSourcePaths = new Set(
+                selected
+                    .map((c) => c.sourcePath)
+                    .filter((v): v is string => Boolean(v && v.trim().length)),
+            );
+
+            let replaceSameSource = false;
+            if (selectedSourcePaths.size > 0) {
+                const hasOtherClipsWithSameSource =
+                    sessionRef.current.clips.some(
+                        (clip) =>
+                            !ids.includes(clip.id) &&
+                            Boolean(
+                                clip.sourcePath &&
+                                    selectedSourcePaths.has(clip.sourcePath),
+                            ),
+                    );
+                if (hasOtherClipsWithSameSource) {
+                    replaceSameSource = await new Promise<boolean>((resolve) => {
+                        sameSourceConfirmResolverRef.current = resolve;
+                        setSameSourceConfirmOpen(true);
+                    });
+                }
+            }
+
+            await dispatch(
+                replaceClipSourceRemote({
+                    clipIds: ids,
+                    newSourcePath: picked.path,
+                    replaceSameSource,
+                }),
+            );
+        },
+        [dispatch, t],
     );
 
     const splitClipIdsAtPlayhead = React.useCallback(
@@ -2314,6 +2363,9 @@ export const TimelinePanel: React.FC = () => {
                                           }
                                       })();
                                   }}
+                                  onReplace={(ids) => {
+                                      void replaceClipSources(ids);
+                                  }}
                                   onSplit={(clipIds) => {
                                       setContextMenu(null);
                                       splitClipIdsAtPlayhead(clipIds);
@@ -2386,6 +2438,52 @@ export const TimelinePanel: React.FC = () => {
                         onClose={() => setTrackAreaMenu(null)}
                     />
                 ) : null}
+
+                <Dialog.Root
+                    open={sameSourceConfirmOpen}
+                    onOpenChange={(open) => {
+                        setSameSourceConfirmOpen(open);
+                        if (!open && sameSourceConfirmResolverRef.current) {
+                            sameSourceConfirmResolverRef.current(false);
+                            sameSourceConfirmResolverRef.current = null;
+                        }
+                    }}
+                >
+                    <Dialog.Content maxWidth="480px">
+                        <Dialog.Title>{t("ctx_replace")}</Dialog.Title>
+                        <Dialog.Description>
+                            <Text size="2">
+                                {t("clip_replace_same_source_confirm" as any)}
+                            </Text>
+                        </Dialog.Description>
+                        <Flex justify="end" gap="2" mt="4">
+                            <Button
+                                variant="soft"
+                                color="gray"
+                                onClick={() => {
+                                    setSameSourceConfirmOpen(false);
+                                    if (sameSourceConfirmResolverRef.current) {
+                                        sameSourceConfirmResolverRef.current(false);
+                                        sameSourceConfirmResolverRef.current = null;
+                                    }
+                                }}
+                            >
+                                {t("cancel")}
+                            </Button>
+                            <Button
+                                onClick={() => {
+                                    setSameSourceConfirmOpen(false);
+                                    if (sameSourceConfirmResolverRef.current) {
+                                        sameSourceConfirmResolverRef.current(true);
+                                        sameSourceConfirmResolverRef.current = null;
+                                    }
+                                }}
+                            >
+                                {t("ok")}
+                            </Button>
+                        </Flex>
+                    </Dialog.Content>
+                </Dialog.Root>
             </Flex>
         </Flex>
     );

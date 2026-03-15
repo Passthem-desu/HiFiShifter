@@ -27,6 +27,12 @@ pub struct UiSettings {
     pub lock_param_lines: bool,
     #[serde(default = "default_drag_direction")]
     pub drag_direction: String,
+    #[serde(default = "default_drag_direction")]
+    pub select_drag_direction: String,
+    #[serde(default = "default_draw_drag_direction")]
+    pub draw_drag_direction: String,
+    #[serde(default = "default_draw_drag_direction")]
+    pub line_vibrato_drag_direction: String,
     #[serde(default, alias = "edgeSmoothnessPercent")]
     pub smoothness_percent: u32,
 }
@@ -43,6 +49,9 @@ fn default_grid_size() -> String {
 fn default_drag_direction() -> String {
     "y-only".to_string()
 }
+fn default_draw_drag_direction() -> String {
+    "free".to_string()
+}
 
 impl Default for UiSettings {
     fn default() -> Self {
@@ -58,6 +67,9 @@ impl Default for UiSettings {
             show_clipboard_preview: true,
             lock_param_lines: true,
             drag_direction: default_drag_direction(),
+            select_drag_direction: default_drag_direction(),
+            draw_drag_direction: default_draw_drag_direction(),
+            line_vibrato_drag_direction: default_draw_drag_direction(),
             smoothness_percent: 0,
         }
     }
