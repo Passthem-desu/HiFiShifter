@@ -384,6 +384,17 @@ export const zhCN = {
     pitch_snap_off: "禁用",
     pitch_snap_tolerance: "容差（音分）",
     base_scale: "基准音阶",
+    custom_scale_label: "自定义音阶",
+    custom_scale_action: "自定义...",
+    custom_scale_dialog_title: "自定义音阶",
+    custom_scale_template: "模板",
+    custom_scale_name: "名称",
+    custom_scale_notes: "音阶音级",
+    custom_scale_save_apply: "保存并应用",
+    custom_scale_default_name: "自定义音阶",
+    custom_scale_short: "自定义",
+    project_scale_prefix: "工程音阶",
+    project_scale_generic: "工程音阶",
 
     // 音阶高亮设置
     scale_highlight: "音阶高亮",
@@ -435,7 +446,7 @@ export const zhCN = {
 
     // Smooth dialog
     smooth_title: "平滑化",
-    smooth_strength: "强度",
+    smooth_strength: "平滑度",
 
     // Add vibrato dialog
     vibrato_title: "添加颤音",
@@ -479,7 +490,8 @@ export const zhCN = {
 
     // Dialog field labels
     dlg_midi_note: "MIDI 音符",
-    dlg_strength: "强度",
+    dlg_strength: "平滑度",
+    dlg_smoothness: "平滑度",
     dlg_depth_cents: "振幅（音分）",
     dlg_amplitude_cents: "振幅（音分）",
     dlg_amplitude: "振幅",

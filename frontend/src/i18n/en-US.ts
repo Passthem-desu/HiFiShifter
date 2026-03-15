@@ -392,6 +392,17 @@ export const enUS = {
     pitch_snap_off: "Off",
     pitch_snap_tolerance: "Tolerance (cents)",
     base_scale: "Base Scale",
+    custom_scale_label: "Custom Scale",
+    custom_scale_action: "Customize...",
+    custom_scale_dialog_title: "Custom Scale",
+    custom_scale_template: "Template",
+    custom_scale_name: "Name",
+    custom_scale_notes: "Scale Notes",
+    custom_scale_save_apply: "Save and Apply",
+    custom_scale_default_name: "Custom Scale",
+    custom_scale_short: "Custom",
+    project_scale_prefix: "Project Scale",
+    project_scale_generic: "Project Scale",
 
     // Scale highlight setting
     scale_highlight: "Scale Highlight",
@@ -443,7 +454,7 @@ export const enUS = {
 
     // Smooth dialog
     smooth_title: "Smooth",
-    smooth_strength: "Strength",
+    smooth_strength: "Smoothness",
 
     // Add vibrato dialog
     vibrato_title: "Add Vibrato",
@@ -487,7 +498,8 @@ export const enUS = {
 
     // Dialog field labels
     dlg_midi_note: "MIDI Note",
-    dlg_strength: "Strength",
+    dlg_strength: "Smoothness",
+    dlg_smoothness: "Smoothness",
     dlg_depth_cents: "Amplitude (cents)",
     dlg_amplitude_cents: "Amplitude (cents)",
     dlg_amplitude: "Amplitude",

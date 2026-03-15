@@ -120,6 +120,20 @@ export const setProjectBaseScaleRemote = createAsyncThunk(
     },
 );
 
+export const setProjectCustomScaleRemote = createAsyncThunk(
+    "session/setProjectCustomScaleRemote",
+    async (
+        customScale: { id: string; name: string; notes: number[] },
+        { rejectWithValue },
+    ) => {
+        const res = await webApi.setProjectCustomScale(customScale);
+        if (!res || res.ok === false) {
+            return rejectWithValue("set_project_custom_scale_failed");
+        }
+        return res;
+    },
+);
+
 export const setProjectTimelineSettingsRemote = createAsyncThunk(
     "session/setProjectTimelineSettingsRemote",
     async (

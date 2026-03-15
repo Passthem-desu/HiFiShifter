@@ -13,7 +13,8 @@ import {
     processWaveformPeaks,
     renderWaveformCanvas,
 } from "../../../utils/waveformRenderer";
-import { SCALE_NOTES } from "../../../utils/musicalScales";
+import { resolveScaleNotes } from "../../../utils/musicalScales";
+import type { ScaleLike } from "../../../utils/musicalScales";
 
 /** 为数值轴选择"好看"的刻度步长 */
 function niceAxisStep(range: number, targetCount: number): number {
@@ -316,7 +317,7 @@ export function drawPianoRoll(args: {
     } | null;
     // pitch snap visual helpers
     pitchSnapUnit?: "semitone" | "scale";
-    projectBaseScale?: import("../../../utils/musicalScales").ScaleKey | null;
+    projectScale?: ScaleLike | null;
     toolMode?: string;
     snapToggleHeld?: boolean;
     scaleHighlightMode?: import("../../../features/session/sessionTypes").ScaleHighlightMode;
@@ -575,17 +576,20 @@ export function drawPianoRoll(args: {
         const startMidi = clamp(Math.floor(min), absMin, absMax);
         const endMidi = clamp(Math.ceil(max), absMin, absMax);
         const highlightActive = (() => {
-            if (!args.projectBaseScale) return false;
+            if (!args.projectScale) return false;
             const mode = args.scaleHighlightMode ?? "off";
             if (mode === "off") return false;
             return mode === "always";
         })();
+        const projectScaleNotes = args.projectScale
+            ? resolveScaleNotes(args.projectScale)
+            : [];
 
         for (let midi = startMidi; midi <= endMidi; midi += 1) {
             const y = valueToY("pitch", midi + 0.5, h);
             const pc = ((midi % 12) + 12) % 12;
             const isScaleNote = highlightActive
-                ? (SCALE_NOTES[args.projectBaseScale ?? "C"] || []).includes(pc)
+                ? projectScaleNotes.includes(pc)
                 : false;
 
             if (isScaleNote) {

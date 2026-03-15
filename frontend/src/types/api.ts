@@ -67,6 +67,12 @@ export interface ProjectMeta {
     dirty: boolean;
     recent: string[];
     base_scale?: string;
+    use_custom_scale?: boolean;
+    custom_scale?: {
+        id: string;
+        name: string;
+        notes: number[];
+    } | null;
     beats_per_bar?: number;
     grid_size?: string;
 }

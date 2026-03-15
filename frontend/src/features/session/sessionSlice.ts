@@ -49,6 +49,7 @@ import {
     saveProjectAsRemote,
     saveProjectRemote,
     setProjectBaseScaleRemote,
+    setProjectCustomScaleRemote,
     setProjectTimelineSettingsRemote,
     undoRemote,
 } from "./thunks/projectThunks";
@@ -82,6 +83,8 @@ import {
 } from "./thunks/audioThunks";
 
 import { SCALE_KEYS } from "../../utils/musicalScales";
+import type { CustomScalePreset } from "../../utils/customScales";
+import { sanitizeCustomScalePreset } from "../../utils/customScales";
 import {
     importAudioAtPosition,
     importAudioFileAtPosition,
@@ -216,12 +219,15 @@ export interface SessionState {
 
     historyPast: StateSnapshot[];
     historyFuture: StateSnapshot[];
+    customScalePresets: CustomScalePreset[];
     project: {
         name: string;
         path: string | null;
         dirty: boolean;
         recent: string[];
         baseScale: import("../../utils/musicalScales").ScaleKey;
+        useCustomScale: boolean;
+        customScale: CustomScalePreset | null;
         beatsPerBar: number;
         gridSize: GridSize;
     };
@@ -485,6 +491,12 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
               dirty?: boolean;
               recent?: string[];
               base_scale?: string;
+              use_custom_scale?: boolean;
+              custom_scale?: {
+                  id?: string;
+                  name?: string;
+                  notes?: number[];
+              } | null;
               beats_per_bar?: number;
               grid_size?: string;
           }
@@ -527,6 +539,10 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
                 ? project.recent
                 : state.project.recent,
             baseScale: nextBaseScale,
+            useCustomScale: Boolean(project.use_custom_scale),
+            customScale: project.custom_scale
+                ? sanitizeCustomScalePreset(project.custom_scale)
+                : null,
             beatsPerBar: nextBeatsPerBar,
             gridSize: nextGridSize,
         };
@@ -719,12 +735,15 @@ const initialState: SessionState = {
 
     historyPast: [],
     historyFuture: [],
+    customScalePresets: [],
     project: {
         name: "Untitled",
         path: null,
         dirty: false,
         recent: [],
         baseScale: "C",
+        useCustomScale: false,
+        customScale: null,
         beatsPerBar: 4,
         gridSize: "1/4",
     },
@@ -746,6 +765,7 @@ export {
     saveProjectRemote,
     saveProjectAsRemote,
     setProjectBaseScaleRemote,
+    setProjectCustomScaleRemote,
     setProjectTimelineSettingsRemote,
 } from "./thunks/projectThunks";
 
@@ -871,6 +891,20 @@ const sessionSlice = createSlice({
             action: PayloadAction<"always" | "off">,
         ) {
             state.scaleHighlightMode = action.payload;
+        },
+        upsertCustomScalePreset(
+            state,
+            action: PayloadAction<CustomScalePreset>,
+        ) {
+            const incoming = sanitizeCustomScalePreset(action.payload);
+            const idx = state.customScalePresets.findIndex(
+                (preset) => preset.id === incoming.id,
+            );
+            if (idx >= 0) {
+                state.customScalePresets[idx] = incoming;
+            } else {
+                state.customScalePresets.push(incoming);
+            }
         },
         togglePlayheadZoom(state) {
             state.playheadZoomEnabled = !state.playheadZoomEnabled;
@@ -1428,6 +1462,12 @@ const sessionSlice = createSlice({
                         0,
                         100,
                     );
+                }
+                if (Array.isArray((s as any).customScalePresets)) {
+                    state.customScalePresets = (s as any).customScalePresets
+                        .map((preset: unknown) =>
+                            sanitizeCustomScalePreset(preset as Partial<CustomScalePreset>),
+                        );
                 }
             })
 
@@ -2097,7 +2137,16 @@ const sessionSlice = createSlice({
             .addCase(setProjectBaseScaleRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
-                    project?: { base_scale?: string; dirty?: boolean };
+                    project?: {
+                        base_scale?: string;
+                        use_custom_scale?: boolean;
+                        custom_scale?: {
+                            id?: string;
+                            name?: string;
+                            notes?: number[];
+                        } | null;
+                        dirty?: boolean;
+                    };
                 };
                 if (!payload.ok) {
                     return;
@@ -2105,6 +2154,41 @@ const sessionSlice = createSlice({
                 const next = payload.project?.base_scale;
                 if (next && (SCALE_KEYS as readonly string[]).includes(next)) {
                     state.project.baseScale = next as typeof state.project.baseScale;
+                }
+                if (typeof payload.project?.use_custom_scale === "boolean") {
+                    state.project.useCustomScale = payload.project.use_custom_scale;
+                }
+                if (payload.project?.custom_scale != null) {
+                    state.project.customScale = payload.project.custom_scale
+                        ? sanitizeCustomScalePreset(payload.project.custom_scale)
+                        : null;
+                }
+                if (typeof payload.project?.dirty === "boolean") {
+                    state.project.dirty = payload.project.dirty;
+                }
+            })
+
+            .addCase(setProjectCustomScaleRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                    project?: {
+                        use_custom_scale?: boolean;
+                        custom_scale?: {
+                            id?: string;
+                            name?: string;
+                            notes?: number[];
+                        } | null;
+                        dirty?: boolean;
+                    };
+                };
+                if (!payload.ok) return;
+                if (typeof payload.project?.use_custom_scale === "boolean") {
+                    state.project.useCustomScale = payload.project.use_custom_scale;
+                }
+                if (payload.project?.custom_scale != null) {
+                    state.project.customScale = payload.project.custom_scale
+                        ? sanitizeCustomScalePreset(payload.project.custom_scale)
+                        : null;
                 }
                 if (typeof payload.project?.dirty === "boolean") {
                     state.project.dirty = payload.project.dirty;
@@ -2402,6 +2486,7 @@ export const {
     closeReaperSkippedFilesDialog,
     setPitchSnapToleranceCents,
     setScaleHighlightMode,
+    upsertCustomScalePreset,
     toggleLockParamLines,
     setSelectedClip,
     setSelectedClipPreservingTrack,

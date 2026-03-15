@@ -58,6 +58,7 @@ export const webApi = {
     saveProject: projectApi.saveProject,
     saveProjectAs: projectApi.saveProjectAs,
     setProjectBaseScale: projectApi.setProjectBaseScale,
+    setProjectCustomScale: projectApi.setProjectCustomScale,
     setProjectTimelineSettings: projectApi.setProjectTimelineSettings,
 
     openVocalShifterDialog: projectApi.openVocalShifterDialog,

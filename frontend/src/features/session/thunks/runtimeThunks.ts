@@ -45,6 +45,7 @@ export const persistUiSettings = createAsyncThunk(
             drawDragDirection: s.drawDragDirection,
             lineVibratoDragDirection: s.lineVibratoDragDirection,
             smoothnessPercent: s.edgeSmoothnessPercent,
+            customScalePresets: s.customScalePresets,
         });
     },
 );

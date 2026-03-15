@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::project::CustomScale;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -15,6 +16,9 @@ pub struct ProjectMetaPayload {
     pub dirty: bool,
     pub recent: Vec<String>,
     pub base_scale: String,
+    pub use_custom_scale: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_scale: Option<CustomScale>,
     pub beats_per_bar: u32,
     pub grid_size: String,
 }

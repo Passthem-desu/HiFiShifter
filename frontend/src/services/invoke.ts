@@ -291,6 +291,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "set_project_base_scale":
             return { baseScale: args[0] };
 
+        case "set_project_custom_scale":
+            return { customScale: args[0] };
+
         case "set_project_timeline_settings":
             return { beatsPerBar: args[0], gridSize: args[1] };
 

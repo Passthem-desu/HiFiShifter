@@ -80,23 +80,39 @@ interface TransposeDegreesProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     defaultScale?: ScaleKey;
+    defaultUseProjectScale?: boolean;
+    projectScaleLabel?: string;
     defaultSmoothness?: number;
-    onConfirm?: (degrees: number, scale: ScaleKey, edgeSmoothnessPercent: number) => void;
+    onConfirm?: (
+        degrees: number,
+        scaleValue: string,
+        edgeSmoothnessPercent: number,
+    ) => void;
 }
 
-export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C", defaultSmoothness = 0, onConfirm }: TransposeDegreesProps) {
+export function TransposeDegreesDialog({
+    open,
+    onOpenChange,
+    defaultScale = "C",
+    defaultUseProjectScale = true,
+    projectScaleLabel,
+    defaultSmoothness = 0,
+    onConfirm,
+}: TransposeDegreesProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [degrees, setDegrees] = useState("3");
-    const [scale, setScale] = useState<ScaleKey>(defaultScale);
+    const [scaleValue, setScaleValue] = useState<string>(
+        defaultUseProjectScale ? "__project__" : defaultScale,
+    );
     const [smoothness, setSmoothness] = useState(String(Math.round(defaultSmoothness)));
 
     useEffect(() => {
         if (open) {
-            setScale(defaultScale);
+            setScaleValue(defaultUseProjectScale ? "__project__" : defaultScale);
             setSmoothness(String(Math.round(defaultSmoothness)));
         }
-    }, [open, defaultScale, defaultSmoothness]);
+    }, [open, defaultScale, defaultSmoothness, defaultUseProjectScale]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -115,9 +131,13 @@ export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C",
                     </Flex>
                     <Flex align="center" gap="2">
                         <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
-                        <Select.Root value={scale} size="2" onValueChange={(v) => setScale(v as ScaleKey)}>
+                        <Select.Root value={scaleValue} size="2" onValueChange={setScaleValue}>
                             <Select.Trigger style={{ flex: 1 }} />
                             <Select.Content>
+                                <Select.Item value="__project__">
+                                    {projectScaleLabel ?? tAny("project_scale_generic")}
+                                </Select.Item>
+                                <Select.Separator />
                                 {SCALE_KEYS.map((k) => (
                                     <Select.Item key={k} value={k}>
                                         {SCALE_LABELS[k]}
@@ -148,7 +168,7 @@ export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C",
                         onClick={() => {
                             onConfirm?.(
                                 Number(degrees) || 0,
-                                scale,
+                                scaleValue,
                                 Math.max(0, Math.min(100, Number(smoothness) || 0)),
                             );
                             onOpenChange(false);
@@ -232,10 +252,11 @@ export function SetPitchDialog({ open, onOpenChange, defaultSmoothness = 0, onCo
 interface SmoothProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    defaultSmoothness?: number;
     onConfirm?: (strength: number) => void;
 }
 
-export function SmoothDialog({ open, onOpenChange, onConfirm }: SmoothProps) {
+export function SmoothDialog({ open, onOpenChange, defaultSmoothness = 50, onConfirm }: SmoothProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [strength, setStrength] = useState(50);
@@ -244,8 +265,8 @@ export function SmoothDialog({ open, onOpenChange, onConfirm }: SmoothProps) {
     );
 
     useEffect(() => {
-        if (open) setStrength(50);
-    }, [open]);
+        if (open) setStrength(Math.max(0, Math.min(100, Math.round(defaultSmoothness))));
+    }, [open, defaultSmoothness]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -253,7 +274,7 @@ export function SmoothDialog({ open, onOpenChange, onConfirm }: SmoothProps) {
                 <Dialog.Title>{tAny("menu_smooth")}</Dialog.Title>
                 <Flex direction="column" gap="3" mt="3">
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 72 }}>{tAny("dlg_strength")}</Text>
+                        <Text size="2" style={{ minWidth: 72 }}>{tAny("dlg_smoothness")}</Text>
                         <input
                             type="range"
                             min={0}
@@ -403,10 +424,12 @@ interface QuantizeProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     defaultScale?: ScaleKey;
+    defaultUseProjectScale?: boolean;
+    projectScaleLabel?: string;
     defaultToleranceCents?: number;
     onConfirm?: (
         unit: "semitone" | "scale",
-        scale: ScaleKey,
+        scaleValue: string,
         toleranceCents: number,
     ) => void;
 }
@@ -415,21 +438,25 @@ export function QuantizeDialog({
     open,
     onOpenChange,
     defaultScale = "C",
+    defaultUseProjectScale = true,
+    projectScaleLabel,
     defaultToleranceCents = 0,
     onConfirm,
 }: QuantizeProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [unit, setUnit] = useState<"semitone" | "scale">("semitone");
-    const [scale, setScale] = useState<ScaleKey>(defaultScale);
+    const [scaleValue, setScaleValue] = useState<string>(
+        defaultUseProjectScale ? "__project__" : defaultScale,
+    );
     const [toleranceCents, setToleranceCents] = useState<string>(String(defaultToleranceCents));
 
     useEffect(() => {
         if (open) {
-            setScale(defaultScale);
+            setScaleValue(defaultUseProjectScale ? "__project__" : defaultScale);
             setToleranceCents(String(defaultToleranceCents));
         }
-    }, [open, defaultScale, defaultToleranceCents]);
+    }, [open, defaultScale, defaultToleranceCents, defaultUseProjectScale]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -449,9 +476,13 @@ export function QuantizeDialog({
                     {unit === "scale" && (
                         <Flex align="center" gap="2">
                             <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
-                            <Select.Root value={scale} size="2" onValueChange={(v) => setScale(v as ScaleKey)}>
+                            <Select.Root value={scaleValue} size="2" onValueChange={setScaleValue}>
                                 <Select.Trigger style={{ flex: 1 }} />
                                 <Select.Content>
+                                    <Select.Item value="__project__">
+                                        {projectScaleLabel ?? tAny("project_scale_generic")}
+                                    </Select.Item>
+                                    <Select.Separator />
                                     {SCALE_KEYS.map((k) => (
                                         <Select.Item key={k} value={k}>
                                             {SCALE_LABELS[k]}
@@ -478,7 +509,7 @@ export function QuantizeDialog({
                     </Dialog.Close>
                     <Button onClick={() => {
                         const parsed = Math.abs(Math.round(Number(toleranceCents) || 0));
-                        onConfirm?.(unit, scale, parsed);
+                        onConfirm?.(unit, scaleValue, parsed);
                         onOpenChange(false);
                     }}>
                         {tAny("ok")}
@@ -493,20 +524,39 @@ interface MeanQuantizeProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     defaultScale?: ScaleKey;
-    onConfirm?: (unit: "semitone" | "scale", scale: ScaleKey) => void;
+    defaultUseProjectScale?: boolean;
+    projectScaleLabel?: string;
+    defaultToleranceCents?: number;
+    onConfirm?: (
+        unit: "semitone" | "scale",
+        scaleValue: string,
+        toleranceCents: number,
+    ) => void;
 }
 
-export function MeanQuantizeDialog({ open, onOpenChange, defaultScale = "C", onConfirm }: MeanQuantizeProps) {
+export function MeanQuantizeDialog({
+    open,
+    onOpenChange,
+    defaultScale = "C",
+    defaultUseProjectScale = true,
+    projectScaleLabel,
+    defaultToleranceCents = 0,
+    onConfirm,
+}: MeanQuantizeProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [unit, setUnit] = useState<"semitone" | "scale">("semitone");
-    const [scale, setScale] = useState<ScaleKey>(defaultScale);
+    const [scaleValue, setScaleValue] = useState<string>(
+        defaultUseProjectScale ? "__project__" : defaultScale,
+    );
+    const [toleranceCents, setToleranceCents] = useState<string>(String(defaultToleranceCents));
 
     useEffect(() => {
         if (open) {
-            setScale(defaultScale);
+            setScaleValue(defaultUseProjectScale ? "__project__" : defaultScale);
+            setToleranceCents(String(defaultToleranceCents));
         }
-    }, [open, defaultScale]);
+    }, [open, defaultScale, defaultToleranceCents, defaultUseProjectScale]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -526,9 +576,13 @@ export function MeanQuantizeDialog({ open, onOpenChange, defaultScale = "C", onC
                     {unit === "scale" && (
                         <Flex align="center" gap="2">
                             <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
-                            <Select.Root value={scale} size="2" onValueChange={(v) => setScale(v as ScaleKey)}>
+                            <Select.Root value={scaleValue} size="2" onValueChange={setScaleValue}>
                                 <Select.Trigger style={{ flex: 1 }} />
                                 <Select.Content>
+                                    <Select.Item value="__project__">
+                                        {projectScaleLabel ?? tAny("project_scale_generic")}
+                                    </Select.Item>
+                                    <Select.Separator />
                                     {SCALE_KEYS.map((k) => (
                                         <Select.Item key={k} value={k}>
                                             {SCALE_LABELS[k]}
@@ -538,12 +592,26 @@ export function MeanQuantizeDialog({ open, onOpenChange, defaultScale = "C", onC
                             </Select.Root>
                         </Flex>
                     )}
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("pitch_snap_tolerance")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            value={toleranceCents}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToleranceCents(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(unit, scale); onOpenChange(false); }}>
+                    <Button onClick={() => {
+                        const parsed = Math.abs(Math.round(Number(toleranceCents) || 0));
+                        onConfirm?.(unit, scaleValue, parsed);
+                        onOpenChange(false);
+                    }}>
                         {tAny("ok")}
                     </Button>
                 </Flex>

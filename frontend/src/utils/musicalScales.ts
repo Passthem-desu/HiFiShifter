@@ -21,6 +21,7 @@ export const SCALE_KEYS = [
 ] as const;
 
 export type ScaleKey = (typeof SCALE_KEYS)[number];
+export type ScaleLike = ScaleKey | readonly number[];
 
 /**
  * Human-readable label for each scale (major/minor pair).
@@ -60,11 +61,38 @@ export const SCALE_NOTES: Record<ScaleKey, number[]> = {
     B:  [11, 1, 3, 4, 6, 8, 10],
 };
 
+function normalizePitchClasses(notes: readonly number[]): number[] {
+    const unique = new Set<number>();
+    for (const n of notes) {
+        if (!Number.isFinite(n)) continue;
+        const pc = ((Math.round(n) % 12) + 12) % 12;
+        unique.add(pc);
+    }
+    const out = Array.from(unique).sort((a, b) => a - b);
+    return out.length > 0 ? out : [...SCALE_NOTES.C];
+}
+
+export function isScaleKey(value: string): value is ScaleKey {
+    return (SCALE_KEYS as readonly string[]).includes(value);
+}
+
+export function normalizeCustomScaleNotes(notes: readonly number[]): number[] {
+    return normalizePitchClasses(notes);
+}
+
+export function resolveScaleNotes(scale: ScaleLike): number[] {
+    if (Array.isArray(scale)) {
+        return normalizePitchClasses(scale);
+    }
+    const key = scale as ScaleKey;
+    return SCALE_NOTES[key] ?? SCALE_NOTES.C;
+}
+
 /**
  * Snap a MIDI note number to the nearest note in the given scale.
  */
-export function snapToScale(midiNote: number, scale: ScaleKey): number {
-    const notes = SCALE_NOTES[scale];
+export function snapToScale(midiNote: number, scale: ScaleLike): number {
+    const notes = resolveScaleNotes(scale);
     // const pitchClass = ((midiNote % 12) + 12) % 12; // 已删除未使用变量
     const octave = Math.floor(midiNote / 12);
 
@@ -126,8 +154,8 @@ export function degreeInputToScaleSteps(inputDegrees: number): number {
  * For non-C keys, wrapped notes are lifted by +12 to keep degree order monotonic.
  * Example Db major raw [1,3,5,6,8,10,0] => [1,3,5,6,8,10,12]
  */
-function orderedScaleSemitoneOffsets(scale: ScaleKey): number[] {
-    const raw = SCALE_NOTES[scale] ?? SCALE_NOTES.C;
+function orderedScaleSemitoneOffsets(scale: ScaleLike): number[] {
+    const raw = resolveScaleNotes(scale);
     if (raw.length === 0) return [];
     const out: number[] = [];
     let prev = -Infinity;
@@ -140,7 +168,7 @@ function orderedScaleSemitoneOffsets(scale: ScaleKey): number[] {
     return out;
 }
 
-function scaleDegreeToMidi(absDegree: number, scale: ScaleKey): number {
+function scaleDegreeToMidi(absDegree: number, scale: ScaleLike): number {
     const offsets = orderedScaleSemitoneOffsets(scale);
     const degreeCount = offsets.length;
     if (degreeCount === 0) return 0;
@@ -152,7 +180,7 @@ function scaleDegreeToMidi(absDegree: number, scale: ScaleKey): number {
 
 function getScaleDegreeAnchorsAroundMidi(
     midi: number,
-    scale: ScaleKey,
+    scale: ScaleLike,
 ): { lower: ScaleDegreeAnchor; upper: ScaleDegreeAnchor; ratio: number } {
     const offsets = orderedScaleSemitoneOffsets(scale);
     const degreeCount = offsets.length;
@@ -202,7 +230,7 @@ function getScaleDegreeAnchorsAroundMidi(
 
 function nearestScaleAnchor(
     midi: number,
-    scale: ScaleKey,
+    scale: ScaleLike,
 ): { absDegree: number; baseMidi: number; residual: number } {
     const offsets = orderedScaleSemitoneOffsets(scale);
     const degreeCount = offsets.length;
@@ -241,7 +269,7 @@ function nearestScaleAnchor(
 export function transposePitchByScaleSteps(
     midi: number,
     degreeSteps: number,
-    scale: ScaleKey,
+    scale: ScaleLike,
 ): number {
     if (!Number.isFinite(midi) || !Number.isFinite(degreeSteps)) return midi;
     if (degreeSteps === 0) return midi;
@@ -275,7 +303,7 @@ export function transposePitchByScaleSteps(
 export function scaleStepDeltaBetween(
     fromMidi: number,
     toMidi: number,
-    scale: ScaleKey,
+    scale: ScaleLike,
 ): number {
     if (!Number.isFinite(fromMidi) || !Number.isFinite(toMidi)) return 0;
     const from = nearestScaleAnchor(fromMidi, scale);

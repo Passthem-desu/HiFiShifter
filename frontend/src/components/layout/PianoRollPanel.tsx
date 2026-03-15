@@ -40,13 +40,14 @@ import { paramsApi } from "../../services/api/params";
 import type { ParamFramesPayload } from "../../types/api";
 import {
     degreeInputToScaleSteps,
+    isScaleKey,
     snapToScale,
     snapToSemitone,
     transposePitchByScaleSteps,
 } from "../../utils/musicalScales";
 import { computeAnchoredHorizontalZoom } from "../../utils/horizontalZoom";
 import { isModifierActive } from "../../features/keybindings/keybindingsSlice";
-import type { ScaleKey } from "../../utils/musicalScales";
+import type { ScaleLike } from "../../utils/musicalScales";
 import {
     pasteReaperClipboard,
     pasteVocalShifterClipboard,
@@ -99,6 +100,13 @@ export const PianoRollPanel: React.FC = () => {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const s = useAppSelector((state: RootState) => state.session);
+    const effectiveProjectScale = useMemo<ScaleLike>(
+        () =>
+            s.project.useCustomScale && s.project.customScale
+                ? s.project.customScale.notes
+                : s.project.baseScale,
+        [s.project.baseScale, s.project.customScale, s.project.useCustomScale],
+    );
     const editParam = s.editParam as ParamName;
     // pitchSnapOpen 已在顶部工具栏 JSX 内声明和使用，无需重复声明
     const pianoRollCopyKb = useAppSelector((state) =>
@@ -1038,7 +1046,7 @@ export const PianoRollPanel: React.FC = () => {
     // Ensure pitch-snap related changes immediately redraw
     useEffect(() => {
         invalidate();
-    }, [s.pitchSnapEnabled, s.pitchSnapUnit, s.project.baseScale, s.scaleHighlightMode, snapToggleHeld, invalidate]);
+    }, [s.pitchSnapEnabled, s.pitchSnapUnit, effectiveProjectScale, s.scaleHighlightMode, snapToggleHeld, invalidate]);
 
     // 剪贴板预览开关变化时立即重绘
     useEffect(() => {
@@ -1078,7 +1086,7 @@ export const PianoRollPanel: React.FC = () => {
                 : null,
             // pitch snap visual helpers
             pitchSnapUnit: s.pitchSnapUnit,
-            projectBaseScale: s.project.baseScale,
+            projectScale: effectiveProjectScale,
             scaleHighlightMode: s.scaleHighlightMode,
             toolMode: s.toolMode,
             snapToggleHeld: snapToggleHeld,
@@ -1149,7 +1157,7 @@ export const PianoRollPanel: React.FC = () => {
         playheadZoomEnabled: s.playheadZoomEnabled,
         pitchSnapEnabled: s.pitchSnapEnabled,
         pitchSnapUnit: s.pitchSnapUnit,
-        projectBaseScale: s.project.baseScale,
+        projectScale: effectiveProjectScale,
         pitchSnapToleranceCents: s.pitchSnapToleranceCents,
         keybindingMap: mergedKeybindings,
         onEditAction: stableEditAction,
@@ -1636,7 +1644,11 @@ export const PianoRollPanel: React.FC = () => {
                 }
                 case "transposeDegrees": {
                     const degrees = Number(data?.degrees ?? 0);
-                    const scale = (data?.scale as string) ?? "chromatic";
+                    const scaleToken = String(data?.scale ?? "__project__");
+                    const scale: ScaleLike =
+                        scaleToken === "__project__"
+                            ? effectiveProjectScale
+                            : (isScaleKey(scaleToken) ? scaleToken : "C");
                     const degreeSteps = degreeInputToScaleSteps(degrees);
                     if (degreeSteps === 0) return;
                     await applySelectionEditWithEdgeSmoothing(
@@ -1648,14 +1660,14 @@ export const PianoRollPanel: React.FC = () => {
                                           : transposePitchByScaleSteps(
                                                 midi,
                                                 degreeSteps,
-                                                scale as ScaleKey,
+                                                scale,
                                             ),
                                   )
                                 : vals.map((midi) =>
                                       transposePitchByScaleSteps(
                                           midi,
                                           degreeSteps,
-                                          scale as ScaleKey,
+                                          scale,
                                       ),
                                   ),
                         Number(data?.edgeSmoothnessPercent),
@@ -1794,7 +1806,11 @@ export const PianoRollPanel: React.FC = () => {
                 }
                 case "quantize": {
                     const unit = (data?.unit as string) ?? "semitone";
-                    const scale = (data?.scale as string) ?? "chromatic";
+                    const scaleToken = String(data?.scale ?? "__project__");
+                    const scale: ScaleLike =
+                        scaleToken === "__project__"
+                            ? effectiveProjectScale
+                            : (isScaleKey(scaleToken) ? scaleToken : "C");
                     const toleranceCents = Math.abs(
                         Math.round(Number(data?.toleranceCents ?? 0) || 0),
                     );
@@ -1830,7 +1846,7 @@ export const PianoRollPanel: React.FC = () => {
                                       : (() => {
                                           const snapped = snapToScale(
                                               v,
-                                              scale as ScaleKey,
+                                              scale,
                                           );
                                           return Math.abs(v - snapped) <= toleranceSemitone
                                               ? v
@@ -1849,7 +1865,15 @@ export const PianoRollPanel: React.FC = () => {
                 }
                 case "meanQuantize": {
                     const unit = (data?.unit as string) ?? "semitone";
-                    const scale = (data?.scale as string) ?? "chromatic";
+                    const scaleToken = String(data?.scale ?? "__project__");
+                    const scale: ScaleLike =
+                        scaleToken === "__project__"
+                            ? effectiveProjectScale
+                            : (isScaleKey(scaleToken) ? scaleToken : "C");
+                    const toleranceCents = Math.abs(
+                        Math.round(Number(data?.toleranceCents ?? 0) || 0),
+                    );
+                    const toleranceSemitone = toleranceCents / 100;
                     const res = await paramsApi.getParamFrames(
                         rootTrackId,
                         editParam,
@@ -1874,12 +1898,23 @@ export const PianoRollPanel: React.FC = () => {
                     const quantizedAvg =
                         unit === "semitone"
                             ? snapToSemitone(avg)
-                            : snapToScale(avg, scale as ScaleKey);
+                            : snapToScale(avg, scale);
                     const delta = quantizedAvg - avg;
                     const result =
                         editParam === "pitch"
-                            ? vals.map((v) => (v === 0 ? 0 : v + delta))
-                            : vals.map((v) => v + delta);
+                            ? vals.map((v) => {
+                                  if (v === 0) return 0;
+                                  const moved = v + delta;
+                                  return Math.abs(moved - v) <= toleranceSemitone
+                                      ? v
+                                      : moved + ((v - moved) > 0 ? 1 : -1) * toleranceSemitone;
+                              })
+                            : vals.map((v) => {
+                                  const moved = v + delta;
+                                  return Math.abs(moved - v) <= toleranceSemitone
+                                      ? v
+                                      : moved + ((v - moved) > 0 ? 1 : -1) * toleranceSemitone;
+                              });
                     await paramsApi.setParamFrames(
                         rootTrackId,
                         editParam,
@@ -1899,6 +1934,7 @@ export const PianoRollPanel: React.FC = () => {
             secPerBeat,
             s.projectSec,
             s.edgeSmoothnessPercent,
+            effectiveProjectScale,
             bumpRefreshToken,
             invalidate,
         ],

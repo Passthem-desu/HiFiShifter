@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use crate::project::CustomScale;
 
 /// UI 设置（持久化到 app_config.json）
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -35,6 +36,10 @@ pub struct UiSettings {
     pub line_vibrato_drag_direction: String,
     #[serde(default, alias = "edgeSmoothnessPercent")]
     pub smoothness_percent: u32,
+    #[serde(default = "default_scale_highlight_mode")]
+    pub scale_highlight_mode: String,
+    #[serde(default)]
+    pub custom_scale_presets: Vec<CustomScale>,
 }
 
 fn default_true() -> bool {
@@ -51,6 +56,10 @@ fn default_drag_direction() -> String {
 }
 fn default_draw_drag_direction() -> String {
     "free".to_string()
+}
+
+fn default_scale_highlight_mode() -> String {
+    "off".to_string()
 }
 
 impl Default for UiSettings {
@@ -71,6 +80,8 @@ impl Default for UiSettings {
             draw_drag_direction: default_draw_drag_direction(),
             line_vibrato_drag_direction: default_draw_drag_direction(),
             smoothness_percent: 0,
+            scale_highlight_mode: default_scale_highlight_mode(),
+            custom_scale_presets: Vec::new(),
         }
     }
 }

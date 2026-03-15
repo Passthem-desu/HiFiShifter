@@ -39,6 +39,7 @@ import {
     snapToSemitone,
     transposePitchByScaleSteps,
 } from "../../../utils/musicalScales";
+import type { ScaleLike } from "../../../utils/musicalScales";
 
 type CanvasCursor =
     | "default"
@@ -155,8 +156,8 @@ export function usePianoRollInteractions(args: {
     pitchSnapEnabled?: boolean;
     /** 音高吸附方式 */
     pitchSnapUnit?: "semitone" | "scale";
-    /** 音高吸附调式 */
-    projectBaseScale?: import("../../../utils/musicalScales").ScaleKey;
+    /** 音高吸附调式（支持内置与自定义） */
+    projectScale?: ScaleLike;
     /** 音高吸附容差（音分） */
     pitchSnapToleranceCents?: number;
     /** 快捷键映射表 */
@@ -233,7 +234,7 @@ export function usePianoRollInteractions(args: {
     const {
         pitchSnapEnabled,
         pitchSnapUnit,
-        projectBaseScale,
+        projectScale,
         pitchSnapToleranceCents,
         keybindingMap,
         onEditAction,
@@ -623,8 +624,8 @@ export function usePianoRollInteractions(args: {
             const effective = shiftHeld ? !pitchSnapEnabled : pitchSnapEnabled;
             if (!effective || editParam !== "pitch") return v;
             const snapped =
-                pitchSnapUnit === "scale" && projectBaseScale
-                    ? snapToScale(v, projectBaseScale)
+                pitchSnapUnit === "scale" && projectScale
+                    ? snapToScale(v, projectScale)
                     : snapToSemitone(v);
             const toleranceSemitone = Math.max(
                 0,
@@ -638,7 +639,7 @@ export function usePianoRollInteractions(args: {
         [
             pitchSnapEnabled,
             pitchSnapUnit,
-            projectBaseScale,
+            projectScale,
             pitchSnapToleranceCents,
             editParam,
         ],
@@ -1980,12 +1981,12 @@ export function usePianoRollInteractions(args: {
                                     const effectiveSnap = snapToggled ? !pitchSnapEnabled : pitchSnapEnabled;
                                     const yDragEnabled = currentDragDir !== "x-only";
                                     if (effectiveSnap && editParam === "pitch" && yDragEnabled) {
-                                        if (pitchSnapUnit === "scale" && projectBaseScale) {
+                                        if (pitchSnapUnit === "scale" && projectScale) {
                                             useScaleDegreeTranspose = true;
                                             lastScaleStepDelta = scaleStepDeltaBetween(
                                                 startMouseVal,
                                                 currentVal,
-                                                projectBaseScale,
+                                                projectScale,
                                             );
                                             rawValueDelta = 0;
                                         } else {
@@ -2091,7 +2092,7 @@ export function usePianoRollInteractions(args: {
                                             if (
                                                 useScaleDegreeTranspose &&
                                                 editParam === "pitch" &&
-                                                projectBaseScale
+                                                projectScale
                                             ) {
                                                 dense[denseIdx] =
                                                     orig === 0
@@ -2099,7 +2100,7 @@ export function usePianoRollInteractions(args: {
                                                         : transposePitchByScaleSteps(
                                                               orig,
                                                               lastScaleStepDelta,
-                                                              projectBaseScale,
+                                                              projectScale,
                                                           );
                                             } else {
                                                 dense[denseIdx] =
@@ -2246,7 +2247,7 @@ export function usePianoRollInteractions(args: {
                                                 if (
                                                     useScaleDegreeTranspose &&
                                                     editParam === "pitch" &&
-                                                    projectBaseScale
+                                                    projectScale
                                                 ) {
                                                     finalDense[denseIdx] =
                                                         orig === 0
@@ -2254,7 +2255,7 @@ export function usePianoRollInteractions(args: {
                                                             : transposePitchByScaleSteps(
                                                                   orig,
                                                                   lastScaleStepDelta,
-                                                                  projectBaseScale,
+                                                                  projectScale,
                                                               );
                                                 } else {
                                                     finalDense[denseIdx] =
@@ -2737,7 +2738,7 @@ export function usePianoRollInteractions(args: {
             onPitchSnapGestureActiveChange,
             pitchSnapEnabled,
             pitchSnapUnit,
-            projectBaseScale,
+            projectScale,
             paramFineAdjustKb,
             pxPerBeatRef,
             scrollLeftRef,

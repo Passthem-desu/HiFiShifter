@@ -392,6 +392,17 @@ export const koKR = {
     pitch_snap_off: "끔",
     pitch_snap_tolerance: "허용 오차(센트)",
     base_scale: "기준 스케일",
+    custom_scale_label: "커스텀 스케일",
+    custom_scale_action: "사용자 정의...",
+    custom_scale_dialog_title: "커스텀 스케일",
+    custom_scale_template: "템플릿",
+    custom_scale_name: "이름",
+    custom_scale_notes: "스케일 음",
+    custom_scale_save_apply: "저장 후 적용",
+    custom_scale_default_name: "커스텀 스케일",
+    custom_scale_short: "커스텀",
+    project_scale_prefix: "프로젝트 스케일",
+    project_scale_generic: "프로젝트 스케일",
 
     // Scale highlight setting
     scale_highlight: "스케일 하이라이트",
@@ -443,7 +454,7 @@ export const koKR = {
 
     // 스무딩 다이얼로그
     smooth_title: "스무딩",
-    smooth_strength: "강도",
+    smooth_strength: "스무딩 강도",
 
     // 비브라토 추가 다이얼로그
     vibrato_title: "비브라토 추가",
@@ -487,7 +498,8 @@ export const koKR = {
 
     // 다이얼로그 필드 라벨
     dlg_midi_note: "MIDI 노트",
-    dlg_strength: "강도",
+    dlg_strength: "스무딩 강도",
+    dlg_smoothness: "스무딩 강도",
     dlg_depth_cents: "진폭 (센트)",
     dlg_amplitude_cents: "진폭 (센트)",
     dlg_amplitude: "진폭",

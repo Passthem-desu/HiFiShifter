@@ -5,6 +5,7 @@ use crate::models::{
     ModelConfig, ModelConfigPayload, PitchRange, ProjectMetaPayload, RuntimeInfoPayload,
     TimelineClip, TimelineStatePayload, TimelineTrack,
 };
+use crate::project::CustomScale;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -228,6 +229,8 @@ pub struct ProjectState {
     pub dirty: bool,
     pub recent: Vec<String>,
     pub base_scale: String,
+    pub use_custom_scale: bool,
+    pub custom_scale: Option<CustomScale>,
     pub beats_per_bar: u32,
     pub grid_size: String,
     pub allow_close: bool,
@@ -241,6 +244,8 @@ impl Default for ProjectState {
             dirty: false,
             recent: Vec::new(),
             base_scale: "C".to_string(),
+            use_custom_scale: false,
+            custom_scale: None,
             beats_per_bar: 4,
             grid_size: "1/4".to_string(),
             allow_close: false,
@@ -781,6 +786,8 @@ impl AppState {
             dirty: p.dirty,
             recent: p.recent,
             base_scale: p.base_scale,
+            use_custom_scale: p.use_custom_scale,
+            custom_scale: p.custom_scale,
             beats_per_bar: p.beats_per_bar,
             grid_size: p.grid_size,
         }

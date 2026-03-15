@@ -392,6 +392,17 @@ export const jaJP = {
     pitch_snap_off: "オフ",
     pitch_snap_tolerance: "許容差（セント）",
     base_scale: "基準スケール",
+    custom_scale_label: "カスタムスケール",
+    custom_scale_action: "カスタマイズ...",
+    custom_scale_dialog_title: "カスタムスケール",
+    custom_scale_template: "テンプレート",
+    custom_scale_name: "名前",
+    custom_scale_notes: "スケール音",
+    custom_scale_save_apply: "保存して適用",
+    custom_scale_default_name: "カスタムスケール",
+    custom_scale_short: "カスタム",
+    project_scale_prefix: "プロジェクトスケール",
+    project_scale_generic: "プロジェクトスケール",
 
     // 修飾キーリネーム
         // Scale highlight setting
@@ -442,7 +453,7 @@ export const jaJP = {
 
     // スムージングダイアログ
     smooth_title: "スムージング",
-    smooth_strength: "強度",
+    smooth_strength: "スムーズ度",
 
     // ビブラート追加ダイアログ
     vibrato_title: "ビブラートを追加",
@@ -486,7 +497,8 @@ export const jaJP = {
 
     // ダイアログフィールドラベル
     dlg_midi_note: "MIDI ノート",
-    dlg_strength: "強度",
+    dlg_strength: "スムーズ度",
+    dlg_smoothness: "スムーズ度",
     dlg_depth_cents: "振幅（セント）",
     dlg_amplitude_cents: "振幅（セント）",
     dlg_amplitude: "振幅",
