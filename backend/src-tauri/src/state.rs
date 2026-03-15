@@ -5,6 +5,7 @@ use crate::models::{
     ModelConfig, ModelConfigPayload, PitchRange, ProjectMetaPayload, RuntimeInfoPayload,
     TimelineClip, TimelineStatePayload, TimelineTrack,
 };
+use crate::project::CustomScale;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -228,6 +229,8 @@ pub struct ProjectState {
     pub dirty: bool,
     pub recent: Vec<String>,
     pub base_scale: String,
+    pub use_custom_scale: bool,
+    pub custom_scale: Option<CustomScale>,
     pub beats_per_bar: u32,
     pub grid_size: String,
     pub allow_close: bool,
@@ -241,6 +244,8 @@ impl Default for ProjectState {
             dirty: false,
             recent: Vec::new(),
             base_scale: "C".to_string(),
+            use_custom_scale: false,
+            custom_scale: None,
             beats_per_bar: 4,
             grid_size: "1/4".to_string(),
             allow_close: false,
@@ -781,6 +786,8 @@ impl AppState {
             dirty: p.dirty,
             recent: p.recent,
             base_scale: p.base_scale,
+            use_custom_scale: p.use_custom_scale,
+            custom_scale: p.custom_scale,
             beats_per_bar: p.beats_per_bar,
             grid_size: p.grid_size,
         }
@@ -972,6 +979,7 @@ impl TimelineState {
             playhead_sec: self.playhead_sec,
             project_sec: Some(self.project_sec),
             project: None,
+            missing_files: None,
         }
     }
 
@@ -1713,6 +1721,75 @@ impl TimelineState {
         glued.start_sec = start;
         glued.length_sec = (end - start).max(0.01);
 
+        // Render selected clips into one baked audio file so glue includes all selected data,
+        // not only the first clip's source payload.
+        let selected_id_set: HashSet<String> = selected
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+
+        let temp_glue_path = crate::temp_manager::hifishifter_temp_dir()
+            .map(|dir| dir.join(format!("glue_{}.wav", Uuid::new_v4().simple())));
+
+        if let Ok(glue_path) = temp_glue_path {
+            let mut render_timeline = self.clone();
+            render_timeline
+                .clips
+                .retain(|c| selected_id_set.contains(&c.id));
+
+            for tr in &mut render_timeline.tracks {
+                if tr.id == track_id {
+                    tr.muted = false;
+                    tr.solo = false;
+                    tr.volume = 1.0;
+                } else {
+                    tr.muted = true;
+                    tr.solo = false;
+                    tr.volume = 0.0;
+                }
+            }
+
+            let render_result = crate::mixdown::render_mixdown_wav(
+                &render_timeline,
+                &glue_path,
+                crate::mixdown::MixdownOptions {
+                    sample_rate: 44_100,
+                    start_sec: start,
+                    end_sec: Some(end),
+                    stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+                    apply_pitch_edit: true,
+                    export_format: crate::mixdown::ExportFormat::Wav32f,
+                    quality_preset: crate::mixdown::QualityPreset::Export,
+                },
+            );
+
+            if render_result.is_ok() {
+                let info = try_read_wav_info(&glue_path, 4096);
+                let rendered_duration_sec = info
+                    .as_ref()
+                    .map(|v| v.duration_sec)
+                    .unwrap_or(glued.length_sec);
+
+                glued.source_path = Some(glue_path.to_string_lossy().to_string());
+                glued.duration_sec = Some(rendered_duration_sec);
+                glued.duration_frames = info.as_ref().map(|v| v.total_frames);
+                glued.source_sample_rate = info.as_ref().map(|v| v.sample_rate);
+                glued.waveform_preview = info.map(|v| v.waveform_preview);
+                glued.source_start_sec = 0.0;
+                glued.source_end_sec = rendered_duration_sec;
+                glued.playback_rate = 1.0;
+                glued.gain = 1.0;
+                glued.muted = false;
+                glued.fade_in_sec = 0.0;
+                glued.fade_out_sec = 0.0;
+                glued.fade_in_curve = default_fade_curve();
+                glued.fade_out_curve = default_fade_curve();
+                glued.extra_curves = None;
+                glued.extra_params = None;
+                glued.pitch_range = Some(PitchRange { min: -24.0, max: 24.0 });
+            }
+        }
+
         self.clips.retain(|c| !clip_ids.contains(&c.id));
         self.clips.push(glued.clone());
         self.selected_clip_id = Some(glued.id);
@@ -1819,6 +1896,57 @@ impl TimelineState {
             c.source_sample_rate = source_sample_rate;
             c.waveform_preview = waveform_preview;
         }
+    }
+
+    pub fn replace_clip_sources(
+        &mut self,
+        clip_ids: &[String],
+        new_source_path: &str,
+        replace_same_source: bool,
+    ) -> usize {
+        if clip_ids.is_empty() || new_source_path.trim().is_empty() {
+            return 0;
+        }
+
+        let target_id_set: HashSet<&str> = clip_ids.iter().map(|id| id.as_str()).collect();
+        let mut old_source_set: HashSet<String> = HashSet::new();
+        for clip in &self.clips {
+            if target_id_set.contains(clip.id.as_str()) {
+                if let Some(path) = clip.source_path.as_ref() {
+                    old_source_set.insert(path.clone());
+                }
+            }
+        }
+
+        let info = try_read_wav_info(Path::new(new_source_path), 4096);
+        let duration_sec = info.as_ref().map(|v| v.duration_sec);
+        let duration_frames = info.as_ref().map(|v| v.total_frames);
+        let source_sample_rate = info.as_ref().map(|v| v.sample_rate);
+        let waveform_preview = info.map(|v| v.waveform_preview);
+
+        let mut changed = 0usize;
+        for clip in &mut self.clips {
+            let direct_match = target_id_set.contains(clip.id.as_str());
+            let same_source_match = replace_same_source
+                && clip
+                    .source_path
+                    .as_ref()
+                    .map(|p| old_source_set.contains(p))
+                    .unwrap_or(false);
+
+            if !direct_match && !same_source_match {
+                continue;
+            }
+
+            clip.source_path = Some(new_source_path.to_string());
+            clip.duration_sec = duration_sec;
+            clip.duration_frames = duration_frames;
+            clip.source_sample_rate = source_sample_rate;
+            clip.waveform_preview = waveform_preview.clone();
+            changed += 1;
+        }
+
+        changed
     }
 }
 

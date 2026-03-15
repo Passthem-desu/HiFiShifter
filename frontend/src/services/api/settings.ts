@@ -14,6 +14,15 @@ export interface UiSettings {
     showClipboardPreview: boolean;
     lockParamLines?: boolean;
     dragDirection?: string;
+    selectDragDirection?: string;
+    drawDragDirection?: string;
+    lineVibratoDragDirection?: string;
+    smoothnessPercent?: number;
+    customScalePresets?: Array<{
+        id: string;
+        name: string;
+        notes: number[];
+    }>;
 }
 
 export const settingsApi = {

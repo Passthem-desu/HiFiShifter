@@ -150,6 +150,17 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
         }
     }, [open]);
 
+    useEffect(() => {
+        if (open) {
+            document.body.setAttribute("data-quick-search-open", "1");
+        } else {
+            document.body.removeAttribute("data-quick-search-open");
+        }
+        return () => {
+            document.body.removeAttribute("data-quick-search-open");
+        };
+    }, [open]);
+
     // 点击外部关闭由全屏遮罩层处理，见 render 部分
 
     // 搜索逻辑（带防抖）

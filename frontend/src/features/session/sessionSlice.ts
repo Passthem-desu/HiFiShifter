@@ -8,12 +8,15 @@ import type {
     AutomationPoint,
     ClipInfo,
     ClipTemplate,
+    DrawToolMode,
     DragDirection,
+    DrawDragDirection,
     EditParam,
     FadeCurveType,
     GridSize,
     PitchSnapUnit,
     ToolMode,
+    ToolModeGroup,
     TrackInfo,
 } from "./sessionTypes";
 
@@ -24,9 +27,11 @@ import {
     fetchSelectedTrackSummary,
     glueClipsRemote,
     moveClipRemote,
+    moveClipsRemote,
     moveTrackRemote,
     removeClipRemote,
     removeTrackRemote,
+    replaceClipSourceRemote,
     selectClipRemote,
     selectTrackRemote,
     setClipStateRemote,
@@ -44,6 +49,7 @@ import {
     saveProjectAsRemote,
     saveProjectRemote,
     setProjectBaseScaleRemote,
+    setProjectCustomScaleRemote,
     setProjectTimelineSettingsRemote,
     undoRemote,
 } from "./thunks/projectThunks";
@@ -77,6 +83,8 @@ import {
 } from "./thunks/audioThunks";
 
 import { SCALE_KEYS } from "../../utils/musicalScales";
+import type { CustomScalePreset } from "../../utils/customScales";
+import { sanitizeCustomScalePreset } from "../../utils/customScales";
 import {
     importAudioAtPosition,
     importAudioFileAtPosition,
@@ -91,16 +99,20 @@ import {
     setTrackStateRemote,
 } from "./thunks/trackThunks";
 import { markProjectDirty } from "./sessionDirtyState";
+import { resolveTrackIdForClipSelection } from "./selectionFocus";
 
 export type {
     AutomationPoint,
     ClipInfo,
     ClipTemplate,
+    DrawToolMode,
     DragDirection,
+    DrawDragDirection,
     EditParam,
     FadeCurveType,
     GridSize,
     ToolMode,
+    ToolModeGroup,
     TrackInfo,
 };
 
@@ -109,6 +121,8 @@ type WaveformPreview = number[] | { l: number[]; r: number[] };
 
 export interface SessionState {
     toolMode: ToolMode;
+    toolModeGroup: ToolModeGroup;
+    drawToolMode: DrawToolMode;
     editParam: EditParam;
     bpm: number;
     beats: number;
@@ -134,8 +148,15 @@ export interface SessionState {
     autoScrollEnabled: boolean;
     /** 剪贴板预览（在参数编辑器选区内显示剪贴板曲线预览） */
     showClipboardPreview: boolean;
-    /** 参数编辑器拖动方向限制 */
-    dragDirection: DragDirection;
+    /** 参数编辑器（选择工具）拖动方向限制 */
+    selectDragDirection: DragDirection;
+    /** 参数编辑器（绘制工具）拖动方向限制 */
+    drawDragDirection: DrawDragDirection;
+    /** 参数编辑器（直线/颤音工具）拖动方向限制 */
+    lineVibratoDragDirection: DrawDragDirection;
+
+    /** 参数编辑器选区拖拽时的边缘平滑度（0-100%） */
+    edgeSmoothnessPercent: number;
 
     /** 在粘贴/创建时是否锁定参数线以应用 linked params */
     lockParamLinesEnabled: boolean;
@@ -198,12 +219,15 @@ export interface SessionState {
 
     historyPast: StateSnapshot[];
     historyFuture: StateSnapshot[];
+    customScalePresets: CustomScalePreset[];
     project: {
         name: string;
         path: string | null;
         dirty: boolean;
         recent: string[];
         baseScale: import("../../utils/musicalScales").ScaleKey;
+        useCustomScale: boolean;
+        customScale: CustomScalePreset | null;
         beatsPerBar: number;
         gridSize: GridSize;
     };
@@ -467,6 +491,12 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
               dirty?: boolean;
               recent?: string[];
               base_scale?: string;
+              use_custom_scale?: boolean;
+              custom_scale?: {
+                  id?: string;
+                  name?: string;
+                  notes?: number[];
+              } | null;
               beats_per_bar?: number;
               grid_size?: string;
           }
@@ -509,6 +539,10 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
                 ? project.recent
                 : state.project.recent,
             baseScale: nextBaseScale,
+            useCustomScale: Boolean(project.use_custom_scale),
+            customScale: project.custom_scale
+                ? sanitizeCustomScalePreset(project.custom_scale)
+                : null,
             beatsPerBar: nextBeatsPerBar,
             gridSize: nextGridSize,
         };
@@ -625,6 +659,8 @@ function upsertImportedClip(
 
 const initialState: SessionState = {
     toolMode: "draw",
+    toolModeGroup: "draw",
+    drawToolMode: "draw",
     editParam: "pitch",
     bpm: 120,
     beats: 4,
@@ -636,12 +672,15 @@ const initialState: SessionState = {
     pitchSnapEnabled: false,
     pitchSnapUnit: "semitone",
     pitchSnapScale: "C",
-    pitchSnapToleranceCents: 25,
+    pitchSnapToleranceCents: 0,
     scaleHighlightMode: "always",
     playheadZoomEnabled: false,
     autoScrollEnabled: false,
     showClipboardPreview: false,
-    dragDirection: "y-only" as DragDirection,
+    selectDragDirection: "y-only" as DragDirection,
+    drawDragDirection: "free" as DrawDragDirection,
+    lineVibratoDragDirection: "free" as DrawDragDirection,
+    edgeSmoothnessPercent: 0,
     lockParamLinesEnabled: false,
 
     paramsEpoch: 0,
@@ -696,12 +735,15 @@ const initialState: SessionState = {
 
     historyPast: [],
     historyFuture: [],
+    customScalePresets: [],
     project: {
         name: "Untitled",
         path: null,
         dirty: false,
         recent: [],
         baseScale: "C",
+        useCustomScale: false,
+        customScale: null,
         beatsPerBar: 4,
         gridSize: "1/4",
     },
@@ -723,6 +765,7 @@ export {
     saveProjectRemote,
     saveProjectAsRemote,
     setProjectBaseScaleRemote,
+    setProjectCustomScaleRemote,
     setProjectTimelineSettingsRemote,
 } from "./thunks/projectThunks";
 
@@ -749,6 +792,7 @@ export {
     moveClipsRemote,
     duplicateTrackRemote,
     setClipStateRemote,
+    replaceClipSourceRemote,
     splitClipRemote,
     glueClipsRemote,
     selectClipRemote,
@@ -801,6 +845,12 @@ const sessionSlice = createSlice({
                 pushHistory(state);
             }
             state.toolMode = action.payload;
+            if (action.payload === "select") {
+                state.toolModeGroup = "select";
+            } else {
+                state.toolModeGroup = "draw";
+                state.drawToolMode = action.payload;
+            }
         },
         setEditParam(state, action: PayloadAction<EditParam>) {
             state.editParam = action.payload;
@@ -842,6 +892,20 @@ const sessionSlice = createSlice({
         ) {
             state.scaleHighlightMode = action.payload;
         },
+        upsertCustomScalePreset(
+            state,
+            action: PayloadAction<CustomScalePreset>,
+        ) {
+            const incoming = sanitizeCustomScalePreset(action.payload);
+            const idx = state.customScalePresets.findIndex(
+                (preset) => preset.id === incoming.id,
+            );
+            if (idx >= 0) {
+                state.customScalePresets[idx] = incoming;
+            } else {
+                state.customScalePresets.push(incoming);
+            }
+        },
         togglePlayheadZoom(state) {
             state.playheadZoomEnabled = !state.playheadZoomEnabled;
         },
@@ -854,13 +918,51 @@ const sessionSlice = createSlice({
         toggleClipboardPreview(state) {
             state.showClipboardPreview = !state.showClipboardPreview;
         },
-        cycleDragDirection(state) {
-            const order: DragDirection[] = ["free", "x-only", "y-only"];
-            const idx = order.indexOf(state.dragDirection);
-            state.dragDirection = order[(idx + 1) % order.length];
+        cycleDragDirection(
+            state,
+            action: PayloadAction<"select" | "draw" | "vibrato">,
+        ) {
+            if (action.payload === "select") {
+                const order: DragDirection[] = ["free", "x-only", "y-only"];
+                const idx = order.indexOf(state.selectDragDirection);
+                state.selectDragDirection = order[(idx + 1) % order.length];
+                return;
+            }
+            const order: DrawDragDirection[] = ["free", "x-only"];
+            if (action.payload === "draw") {
+                const idx = order.indexOf(state.drawDragDirection);
+                state.drawDragDirection = order[(idx + 1) % order.length];
+                return;
+            }
+            const idx = order.indexOf(state.lineVibratoDragDirection);
+            state.lineVibratoDragDirection = order[(idx + 1) % order.length];
         },
-        setDragDirection(state, action: PayloadAction<DragDirection>) {
-            state.dragDirection = action.payload;
+        setDragDirection(
+            state,
+            action: PayloadAction<{
+                tool: "select" | "draw" | "vibrato";
+                direction: DragDirection | DrawDragDirection;
+            }>,
+        ) {
+            const { tool, direction } = action.payload;
+            if (tool === "select") {
+                if (["free", "x-only", "y-only"].includes(direction)) {
+                    state.selectDragDirection = direction as DragDirection;
+                }
+                return;
+            }
+            if (tool === "draw") {
+                if (["free", "x-only"].includes(direction)) {
+                    state.drawDragDirection = direction as DrawDragDirection;
+                }
+                return;
+            }
+            if (["free", "x-only"].includes(direction)) {
+                state.lineVibratoDragDirection = direction as DrawDragDirection;
+            }
+        },
+        setEdgeSmoothnessPercent(state, action: PayloadAction<number>) {
+            state.edgeSmoothnessPercent = clamp(Number(action.payload) || 0, 0, 100);
         },
         setplayheadSec(state, action: PayloadAction<number>) {
             state.playheadSec = Math.max(0, action.payload);
@@ -887,11 +989,18 @@ const sessionSlice = createSlice({
             state.selectedClipId = action.payload;
             state.selectedPointId = null;
             if (action.payload) {
-                const selectedClip = state.clips.find(
-                    (clip) => clip.id === action.payload,
-                );
-                state.selectedTrackId =
-                    selectedClip?.trackId ?? state.selectedTrackId;
+                state.selectedTrackId = resolveTrackIdForClipSelection({
+                    currentTrackId: state.selectedTrackId,
+                    clips: state.clips,
+                    clipId: action.payload,
+                });
+                ensureClipAutomation(state, action.payload);
+            }
+        },
+        setSelectedClipPreservingTrack(state, action: PayloadAction<string | null>) {
+            state.selectedClipId = action.payload;
+            state.selectedPointId = null;
+            if (action.payload) {
                 ensureClipAutomation(state, action.payload);
             }
         },
@@ -1306,15 +1415,59 @@ const sessionSlice = createSlice({
                 ).includes((s as any).pitchSnapScale)
                     ? ((s as any).pitchSnapScale as typeof state.pitchSnapScale)
                     : "C";
+                // Load pitch snap tolerance (cents) if present in saved settings
+                if ((s as any).pitchSnapToleranceCents != null) {
+                    state.pitchSnapToleranceCents = clamp(
+                        Number((s as any).pitchSnapToleranceCents) || 0,
+                        0,
+                        1000,
+                    );
+                }
                 state.playheadZoomEnabled = s.playheadZoom;
                 if (s.autoScroll != null)
                     state.autoScrollEnabled = s.autoScroll;
                 if (s.showClipboardPreview != null)
                     state.showClipboardPreview = s.showClipboardPreview;
-                if (s.dragDirection != null) {
+                if (s.scaleHighlightMode != null)
+                    state.scaleHighlightMode = s.scaleHighlightMode === "always" ? "always" : "off";
+                if ((s as any).lockParamLines != null)
+                    state.lockParamLinesEnabled = Boolean(
+                        (s as any).lockParamLines,
+                    );
+                const legacyDir = (s as any).dragDirection;
+                if (legacyDir != null) {
                     const validDirs = ["free", "x-only", "y-only"];
-                    if (validDirs.includes(s.dragDirection))
-                        state.dragDirection = s.dragDirection as DragDirection;
+                    if (validDirs.includes(legacyDir)) {
+                        state.selectDragDirection = legacyDir as DragDirection;
+                    }
+                }
+                const selectDir = (s as any).selectDragDirection;
+                if (selectDir != null && ["free", "x-only", "y-only"].includes(selectDir)) {
+                    state.selectDragDirection = selectDir as DragDirection;
+                }
+                const drawDir = (s as any).drawDragDirection;
+                if (drawDir != null && ["free", "x-only"].includes(drawDir)) {
+                    state.drawDragDirection = drawDir as DrawDragDirection;
+                }
+                const lineVibratoDir = (s as any).lineVibratoDragDirection;
+                if (lineVibratoDir != null && ["free", "x-only"].includes(lineVibratoDir)) {
+                    state.lineVibratoDragDirection = lineVibratoDir as DrawDragDirection;
+                }
+                const smoothness =
+                    (s as any).smoothnessPercent ??
+                    (s as any).edgeSmoothnessPercent;
+                if (smoothness != null) {
+                    state.edgeSmoothnessPercent = clamp(
+                        Number(smoothness) || 0,
+                        0,
+                        100,
+                    );
+                }
+                if (Array.isArray((s as any).customScalePresets)) {
+                    state.customScalePresets = (s as any).customScalePresets
+                        .map((preset: unknown) =>
+                            sanitizeCustomScalePreset(preset as Partial<CustomScalePreset>),
+                        );
                 }
             })
 
@@ -1984,7 +2137,16 @@ const sessionSlice = createSlice({
             .addCase(setProjectBaseScaleRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
-                    project?: { base_scale?: string; dirty?: boolean };
+                    project?: {
+                        base_scale?: string;
+                        use_custom_scale?: boolean;
+                        custom_scale?: {
+                            id?: string;
+                            name?: string;
+                            notes?: number[];
+                        } | null;
+                        dirty?: boolean;
+                    };
                 };
                 if (!payload.ok) {
                     return;
@@ -1992,6 +2154,41 @@ const sessionSlice = createSlice({
                 const next = payload.project?.base_scale;
                 if (next && (SCALE_KEYS as readonly string[]).includes(next)) {
                     state.project.baseScale = next as typeof state.project.baseScale;
+                }
+                if (typeof payload.project?.use_custom_scale === "boolean") {
+                    state.project.useCustomScale = payload.project.use_custom_scale;
+                }
+                if (payload.project?.custom_scale != null) {
+                    state.project.customScale = payload.project.custom_scale
+                        ? sanitizeCustomScalePreset(payload.project.custom_scale)
+                        : null;
+                }
+                if (typeof payload.project?.dirty === "boolean") {
+                    state.project.dirty = payload.project.dirty;
+                }
+            })
+
+            .addCase(setProjectCustomScaleRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                    project?: {
+                        use_custom_scale?: boolean;
+                        custom_scale?: {
+                            id?: string;
+                            name?: string;
+                            notes?: number[];
+                        } | null;
+                        dirty?: boolean;
+                    };
+                };
+                if (!payload.ok) return;
+                if (typeof payload.project?.use_custom_scale === "boolean") {
+                    state.project.useCustomScale = payload.project.use_custom_scale;
+                }
+                if (payload.project?.custom_scale != null) {
+                    state.project.customScale = payload.project.custom_scale
+                        ? sanitizeCustomScalePreset(payload.project.custom_scale)
+                        : null;
                 }
                 if (typeof payload.project?.dirty === "boolean") {
                     state.project.dirty = payload.project.dirty;
@@ -2090,6 +2287,16 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload);
             })
 
+            .addCase(moveClipsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
+            })
+
             .addCase(splitClipRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2112,6 +2319,16 @@ const sessionSlice = createSlice({
             })
 
             .addCase(setClipStateRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
+            })
+
+            .addCase(replaceClipSourceRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;
@@ -2259,6 +2476,7 @@ export const {
     toggleClipboardPreview,
     cycleDragDirection,
     setDragDirection,
+    setEdgeSmoothnessPercent,
     setplayheadSec,
     setModelDir,
     setAudioPath,
@@ -2268,8 +2486,10 @@ export const {
     closeReaperSkippedFilesDialog,
     setPitchSnapToleranceCents,
     setScaleHighlightMode,
+    upsertCustomScalePreset,
     toggleLockParamLines,
     setSelectedClip,
+    setSelectedClipPreservingTrack,
     setMultiSelectedClipIds,
     moveClipStart,
     moveClipTrack,

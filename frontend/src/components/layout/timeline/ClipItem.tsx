@@ -434,6 +434,69 @@ export const ClipItem = React.memo(function ClipItem({
         ? peaks.cycleLenSecTimeline * pxPerSec
         : width;
 
+    const startDeferredFadeEditDrag = React.useCallback(
+        (
+            e: React.PointerEvent<HTMLDivElement>,
+            type: "fade_in" | "fade_out",
+        ) => {
+            e.preventDefault();
+            e.stopPropagation();
+            clearContextMenu();
+
+            if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                ensureSelected(clip.id);
+            }
+            selectClipRemote(clip.id);
+
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const pointerId = e.pointerId;
+            const targetEl = e.currentTarget as HTMLElement;
+            let dragStarted = false;
+
+            const onMove = (ev: PointerEvent) => {
+                if (ev.pointerId !== pointerId || dragStarted) return;
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                if (dx * dx + dy * dy < 9) return;
+                dragStarted = true;
+                startEditDrag(
+                    {
+                        button: 0,
+                        pointerId,
+                        currentTarget: targetEl,
+                    } as unknown as React.PointerEvent,
+                    clip.id,
+                    type,
+                );
+            };
+
+            const onEnd = (ev: PointerEvent) => {
+                if (ev.pointerId !== pointerId) return;
+                window.removeEventListener("pointermove", onMove, true);
+                window.removeEventListener("pointerup", onEnd, true);
+                window.removeEventListener("pointercancel", onEnd, true);
+                if (!dragStarted) {
+                    seekFromClientX(ev.clientX, true);
+                }
+            };
+
+            window.addEventListener("pointermove", onMove, true);
+            window.addEventListener("pointerup", onEnd, true);
+            window.addEventListener("pointercancel", onEnd, true);
+        },
+        [
+            clearContextMenu,
+            clip.id,
+            ensureSelected,
+            isInMultiSelectedSet,
+            multiSelectedCount,
+            seekFromClientX,
+            selectClipRemote,
+            startEditDrag,
+        ],
+    );
+
     return (
         <div
             data-hs-clip-item="1"
@@ -529,6 +592,7 @@ export const ClipItem = React.memo(function ClipItem({
                 isInMultiSelectedSet={isInMultiSelectedSet}
                 ensureSelected={ensureSelected}
                 selectClipRemote={selectClipRemote}
+                seekFromClientX={seekFromClientX}
                 startEditDrag={startEditDrag}
             />
 
@@ -569,16 +633,7 @@ export const ClipItem = React.memo(function ClipItem({
                         className="absolute left-[10px] top-0 w-[20px] h-[20px] z-[55]"
                         style={{ cursor: "nwse-resize" }}
                         onPointerDown={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (
-                                multiSelectedCount === 0 ||
-                                !isInMultiSelectedSet
-                            ) {
-                                ensureSelected(clip.id);
-                            }
-                            selectClipRemote(clip.id);
-                            startEditDrag(e, clip.id, "fade_in");
+                            startDeferredFadeEditDrag(e, "fade_in");
                         }}
                         title={t("fade_in")}
                     />
@@ -587,16 +642,7 @@ export const ClipItem = React.memo(function ClipItem({
                         className="absolute right-[10px] top-0 w-[20px] h-[20px] z-[55]"
                         style={{ cursor: "nesw-resize" }}
                         onPointerDown={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (
-                                multiSelectedCount === 0 ||
-                                !isInMultiSelectedSet
-                            ) {
-                                ensureSelected(clip.id);
-                            }
-                            selectClipRemote(clip.id);
-                            startEditDrag(e, clip.id, "fade_out");
+                            startDeferredFadeEditDrag(e, "fade_out");
                         }}
                         title={t("fade_out")}
                     />
@@ -612,16 +658,7 @@ export const ClipItem = React.memo(function ClipItem({
                                 ),
                             }}
                             onPointerDown={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                if (
-                                    multiSelectedCount === 0 ||
-                                    !isInMultiSelectedSet
-                                ) {
-                                    ensureSelected(clip.id);
-                                }
-                                selectClipRemote(clip.id);
-                                startEditDrag(e, clip.id, "fade_in");
+                                startDeferredFadeEditDrag(e, "fade_in");
                             }}
                             title={t("fade_in")}
                         >
@@ -646,16 +683,7 @@ export const ClipItem = React.memo(function ClipItem({
                                 ),
                             }}
                             onPointerDown={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                if (
-                                    multiSelectedCount === 0 ||
-                                    !isInMultiSelectedSet
-                                ) {
-                                    ensureSelected(clip.id);
-                                }
-                                selectClipRemote(clip.id);
-                                startEditDrag(e, clip.id, "fade_out");
+                                startDeferredFadeEditDrag(e, "fade_out");
                             }}
                             title={t("fade_out")}
                         >

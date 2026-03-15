@@ -18,8 +18,17 @@ const SUPPORTED_AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3", "ogg", "m4a"];
 /// 帧周期（秒）
 const FRAME_PERIOD: f64 = 0.005;
 
-/// 分段重叠（秒）
-const SEGMENT_OVERLAP_SEC: f64 = 0.005;
+/// 分段重叠上限（秒）
+const SEGMENT_OVERLAP_MAX_SEC: f64 = 0.1;
+
+/// 相邻分段过渡长度：取两段中较短者的 50%，并限制在上限内。
+fn segment_overlap_sec(left_timeline_sec: f64, right_timeline_sec: f64) -> f64 {
+    left_timeline_sec
+        .max(0.0)
+        .min(right_timeline_sec.max(0.0))
+        .mul_add(0.5, 0.0)
+        .min(SEGMENT_OVERLAP_MAX_SEC * 0.5)
+}
 
 /// 轨道颜色调色板（与 state.rs / vocalshifter_import.rs 一致）
 const TRACK_COLORS: &[&str] = &[
@@ -491,19 +500,34 @@ fn process_item(
         // 有 stretch markers：拆分为多段
         // effective rate = segment_avg_rate * item_play_rate（源消耗速率）
         let seg_count = segments.len();
+        let mut segment_clip_indices: Vec<usize> = Vec::with_capacity(seg_count);
+        let mut segment_actual_pre_tl: Vec<f64> = Vec::with_capacity(seg_count);
+        let mut segment_actual_post_tl: Vec<f64> = Vec::with_capacity(seg_count);
+        let seg_timeline_durations: Vec<f64> = segments
+            .iter()
+            .map(|seg| (seg.offset_length() / play_rate).max(0.001))
+            .collect();
         let mut current_timeline_pos = item_pos + time_offset;
         let mut cumulative_source_pos: f64 = 0.0;
 
         for (seg_idx, seg) in segments.iter().enumerate() {
             let seg_avg_rate = seg.velocity_average().max(0.01);
             let effective_rate = seg_avg_rate * play_rate;
-            let seg_timeline_duration = seg.offset_length() / play_rate;
+            let seg_timeline_duration = seg_timeline_durations[seg_idx];
             // 源消耗量 = 时间线时长 × 播放速率
             let seg_source_duration = seg_timeline_duration * effective_rate;
 
             // 分段重叠与淡入淡出
-            let want_pre = if seg_idx > 0 { SEGMENT_OVERLAP_SEC } else { 0.0 };
-            let want_post = if seg_idx + 1 < seg_count { SEGMENT_OVERLAP_SEC } else { 0.0 };
+            let want_pre = if seg_idx > 0 {
+                segment_overlap_sec(seg_timeline_durations[seg_idx - 1], seg_timeline_duration)
+            } else {
+                0.0
+            };
+            let want_post = if seg_idx + 1 < seg_count {
+                segment_overlap_sec(seg_timeline_duration, seg_timeline_durations[seg_idx + 1])
+            } else {
+                0.0
+            };
             let actual_pre_src = (want_pre * effective_rate).min(cumulative_source_pos);
             let actual_post_src = want_post * effective_rate;
             let actual_pre_tl = actual_pre_src / effective_rate;
@@ -521,19 +545,9 @@ fn process_item(
             let clip_start = current_timeline_pos - actual_pre_tl;
             let clip_length = (seg_timeline_duration + actual_pre_tl + actual_post_tl).max(0.001);
 
-            let fi = if seg_idx > 0 {
-                actual_pre_tl.min(SEGMENT_OVERLAP_SEC)
-            } else {
-                fade_in_sec
-            };
-            let fo = if seg_idx + 1 < seg_count {
-                actual_post_tl.min(SEGMENT_OVERLAP_SEC)
-            } else {
-                fade_out_sec
-            };
-
             let clip_name = clip_name_from_path(&audio_path);
             let clip_id = new_clip_id();
+            let clip_index = clips.len();
 
             clips.push(Clip {
                 id: clip_id.clone(),
@@ -553,13 +567,16 @@ fn process_item(
                 source_start_sec: clip_src_start.max(0.0),
                 source_end_sec: clip_src_end,
                 playback_rate: (effective_rate as f32).clamp(0.1, 10.0),
-                fade_in_sec: fi,
-                fade_out_sec: fo,
+                fade_in_sec: 0.0,
+                fade_out_sec: 0.0,
                 fade_in_curve: "sine".to_string(),
                 fade_out_curve: "sine".to_string(),
                 extra_curves: None,
                 extra_params: None,
             });
+            segment_clip_indices.push(clip_index);
+            segment_actual_pre_tl.push(actual_pre_tl);
+            segment_actual_post_tl.push(actual_post_tl);
 
             // 写入 pitch 偏移数据
             write_pitch_for_clip(
@@ -576,6 +593,29 @@ fn process_item(
 
             current_timeline_pos += seg_timeline_duration;
             cumulative_source_pos += seg_source_duration;
+        }
+
+        for seg_idx in 0..seg_count {
+            let clip_idx = segment_clip_indices[seg_idx];
+            let Some(clip) = clips.get_mut(clip_idx) else {
+                continue;
+            };
+
+            let fade_in_sec = if seg_idx > 0 {
+                (segment_actual_pre_tl[seg_idx] + segment_actual_post_tl[seg_idx - 1])
+                    .min(clip.length_sec.max(0.0))
+            } else {
+                fade_in_sec.min(clip.length_sec.max(0.0))
+            };
+            let fade_out_sec = if seg_idx + 1 < seg_count {
+                (segment_actual_post_tl[seg_idx] + segment_actual_pre_tl[seg_idx + 1])
+                    .min(clip.length_sec.max(0.0))
+            } else {
+                fade_out_sec.min(clip.length_sec.max(0.0))
+            };
+
+            clip.fade_in_sec = fade_in_sec;
+            clip.fade_out_sec = fade_out_sec;
         }
     } else {
         // 无 stretch markers：使用 take 的 play_rate

@@ -58,6 +58,9 @@ export const jaJP = {
     edit_param: "パラメータ編集",
     draw: "描画",
     select: "選択",
+    vibrato_tool: "ビブラート",
+    draw_tool: "描画ツール",
+    vibrato_draw_tool: "直線/ビブラートツール",
     pitch: "ピッチ",
     tension: "テンション",
     breath: "ブレス",
@@ -203,13 +206,21 @@ export const jaJP = {
     ctx_mute_all: "すべてミュート",
     ctx_copy_all: "すべてコピー",
     ctx_cut_all: "すべてカット",
+    ctx_replace_all: "すべて置換",
     ctx_normalize_all: "すべてノーマライズ",
     ctx_delete: "削除",
     ctx_rename: "名前を変更",
     ctx_copy: "コピー",
     ctx_cut: "カット",
+    ctx_replace: "置換",
     ctx_split_at_playhead: "再生ヘッドで分割",
     ctx_normalize: "ノーマライズ",
+    clip_replace_same_source_confirm:
+        "プロジェクト内に、選択したクリップと同じソースファイルパスを使う他のクリップがあります。これらの同一ソースクリップもまとめて置換しますか？",
+    missing_file_replace_title: "ファイルが見つかりません",
+    missing_file_replace_desc:
+        "以下の音声ファイルが見つかりません。代替ファイルを手動で指定しますか？",
+    missing_file_replace_pick: "代替ファイルを選択",
 
     fade_curve_linear: "リニア",
     fade_curve_sine: "サイン",
@@ -255,6 +266,10 @@ export const jaJP = {
     kb_playback_toggle: "再生 / 一時停止",
     kb_playback_stop: "再生 / 停止",
     kb_playback_focus_cursor: "再生カーソルにフォーカス",
+    kb_playback_seek_left: "再生カーソルを左へ移動",
+    kb_playback_seek_right: "再生カーソルを右へ移動",
+    kb_timeline_zoom_in: "タイムラインを横方向に拡大（フォーカス中のビュー）",
+    kb_timeline_zoom_out: "タイムラインを横方向に縮小（フォーカス中のビュー）",
     kb_edit_undo: "元に戻す",
     kb_edit_redo: "やり直す",
     kb_project_new: "新規プロジェクト",
@@ -275,17 +290,22 @@ export const jaJP = {
     kb_pianoroll_paste: "パラメータフレームをペースト",
     kb_pianoroll_shift_param_up: "パラメータを上へ移動（クリップ範囲）",
     kb_pianoroll_shift_param_down: "パラメータを下へ移動（クリップ範囲）",
+    kb_pianoroll_shift_param_up_selection: "パラメーターライン上移動（選択範囲）",
+    kb_pianoroll_shift_param_down_selection: "パラメーターライン下移動（選択範囲）",
     kb_modifier_slip_edit: "Slip 編集（クリップドラッグ中に押す）",
     kb_modifier_stretch: "タイムストレッチ（エッジドラッグ中に押す）",
     kb_modifier_no_snap: "スナップ切替（ドラッグ中に押す）",
     kb_modifier_copy_drag: "コピードラッグ（クリップドラッグ中に押す）",
     kb_modifier_pr_vzoom: "垂直ズーム（押しながらスクロール）",
+    kb_modifier_param_morph: "パラメータ形状変形（選択範囲内で押す）",
+    kb_modifier_param_fine_adjust: "パラメータ微調整（押している間）",
+    kb_modifier_vibrato_amplitude_adjust: "ビブラート振幅調整（押しながらスクロール）",
+    kb_modifier_vibrato_frequency_adjust: "ビブラート周波数調整（押しながらスクロール）",
     kb_group_mode: "モード",
     kb_mode_toggle: "モード切替",
-    kb_mode_toggle_reverse: "モード切替（逆順）",
     kb_mode_select_tool: "選択ツールに切替",
     kb_mode_draw_tool: "描画ツールに切替",
-    kb_mode_line_tool: "直線ツールに切替",
+    kb_mode_vibrato_tool: "直線/ビブラートツールに切替",
     kb_press_modifier: "修飾キーを押してください…",
     menu_keybindings: "キーボードショートカット...",
     kb_group_quick_search: "クイック検索",
@@ -333,6 +353,7 @@ export const jaJP = {
     auto_scroll: "自動スクロール",
     clipboard_preview: "クリップボードプレビュー",
     lock_param_lines: "パラメータ線をロック",
+    edge_smoothness: "平滑度",
 
     // グリッド音符タイプラベル
     grid_note_normal: "通常",
@@ -371,6 +392,17 @@ export const jaJP = {
     pitch_snap_off: "オフ",
     pitch_snap_tolerance: "許容差（セント）",
     base_scale: "基準スケール",
+    custom_scale_label: "カスタムスケール",
+    custom_scale_action: "カスタマイズ...",
+    custom_scale_dialog_title: "カスタムスケール",
+    custom_scale_template: "テンプレート",
+    custom_scale_name: "名前",
+    custom_scale_notes: "スケール音",
+    custom_scale_save_apply: "保存して適用",
+    custom_scale_default_name: "カスタムスケール",
+    custom_scale_short: "カスタム",
+    project_scale_prefix: "プロジェクトスケール",
+    project_scale_generic: "プロジェクトスケール",
 
     // 修飾キーリネーム
         // Scale highlight setting
@@ -421,7 +453,7 @@ export const jaJP = {
 
     // スムージングダイアログ
     smooth_title: "スムージング",
-    smooth_strength: "強度",
+    smooth_strength: "スムーズ度",
 
     // ビブラート追加ダイアログ
     vibrato_title: "ビブラートを追加",
@@ -465,7 +497,8 @@ export const jaJP = {
 
     // ダイアログフィールドラベル
     dlg_midi_note: "MIDI ノート",
-    dlg_strength: "強度",
+    dlg_strength: "スムーズ度",
+    dlg_smoothness: "スムーズ度",
     dlg_depth_cents: "振幅（セント）",
     dlg_amplitude_cents: "振幅（セント）",
     dlg_amplitude: "振幅",

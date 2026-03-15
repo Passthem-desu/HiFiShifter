@@ -1,6 +1,6 @@
 use crate::project::{
     load_project_file, make_paths_relative, project_name_from_path, resolve_paths_relative,
-    ProjectFile,
+    CustomScale, ProjectFile,
 };
 use crate::state::AppState;
 use std::fs;
@@ -15,6 +15,10 @@ fn normalize_scale_key(raw: &str) -> String {
         return raw.to_string();
     }
     "C".to_string()
+}
+
+fn normalize_custom_scale(input: Option<CustomScale>) -> Option<CustomScale> {
+    input.map(|s| s.normalized())
 }
 
 fn normalize_beats_per_bar(raw: u32) -> u32 {
@@ -55,16 +59,20 @@ pub(crate) fn save_project_to_path_inner(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let (base_scale, beats_per_bar, grid_size) = {
+    let (base_scale, use_custom_scale, custom_scale, beats_per_bar, grid_size) = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         (
             normalize_scale_key(&p.base_scale),
+            p.use_custom_scale,
+            normalize_custom_scale(p.custom_scale.clone()),
             normalize_beats_per_bar(p.beats_per_bar),
             normalize_grid_size(&p.grid_size),
         )
     };
     let tl_rel = make_paths_relative(tl, &path);
-    let pf = ProjectFile::new(name.clone(), tl_rel, base_scale, beats_per_bar, grid_size);
+    let mut pf = ProjectFile::new(name.clone(), tl_rel, base_scale, beats_per_bar, grid_size);
+    pf.use_custom_scale = use_custom_scale && custom_scale.is_some();
+    pf.custom_scale = custom_scale;
     // 使用 MessagePack 格式保存（v2），体积更小、解析更快。
     let bytes = rmp_serde::to_vec_named(&pf).map_err(|e| e.to_string())?;
     fs::write(&path, bytes).map_err(|e| e.to_string())?;
@@ -116,6 +124,8 @@ pub(super) fn new_project(state: State<'_, AppState>, window: Window) -> crate::
         p.path = None;
         p.dirty = false;
         p.base_scale = "C".to_string();
+        p.use_custom_scale = false;
+        p.custom_scale = None;
         p.beats_per_bar = 4;
         p.grid_size = "1/4".to_string();
     }
@@ -157,6 +167,15 @@ pub(super) fn open_project(
     };
 
     pf.timeline = resolve_paths_relative(pf.timeline, &path);
+    let missing_files: Vec<String> = pf
+        .timeline
+        .clips
+        .iter()
+        .filter_map(|clip| clip.source_path.clone())
+        .filter(|sp| !sp.trim().is_empty() && !std::path::Path::new(sp).exists())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     // 旧项目兼容迁移：source_end_sec == 0.0 曾表示"到源文件末尾"，
     // 新语义要求它是真实的结束时间，此处自动修正为 duration_sec 或 length_sec。
     for clip in &mut pf.timeline.clips {
@@ -176,6 +195,8 @@ pub(super) fn open_project(
         p.path = Some(project_path.clone());
         p.dirty = false;
         p.base_scale = normalize_scale_key(&pf.base_scale);
+        p.custom_scale = normalize_custom_scale(pf.custom_scale);
+        p.use_custom_scale = pf.use_custom_scale && p.custom_scale.is_some();
         p.beats_per_bar = normalize_beats_per_bar(pf.beats_per_bar);
         p.grid_size = normalize_grid_size(&pf.grid_size);
         // recent list (in-memory)
@@ -195,7 +216,11 @@ pub(super) fn open_project(
         }
     }
 
-    get_timeline_state(state)
+    let mut payload = get_timeline_state(state);
+    if !missing_files.is_empty() {
+        payload.missing_files = Some(missing_files);
+    }
+    payload
 }
 
 
@@ -259,11 +284,12 @@ pub(super) fn set_project_base_scale(
     let normalized = normalize_scale_key(&base_scale);
     let (name, changed, was_clean) = {
         let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
-        if p.base_scale == normalized {
+        if p.base_scale == normalized && !p.use_custom_scale {
             return serde_json::json!({ "ok": true, "base_scale": p.base_scale });
         }
         let was_clean = !p.dirty;
         p.base_scale = normalized.clone();
+        p.use_custom_scale = false;
         p.dirty = true;
         (p.name.clone(), true, was_clean)
     };
@@ -280,6 +306,39 @@ pub(super) fn set_project_base_scale(
 
     let payload = state.project_meta_payload();
     serde_json::json!({ "ok": true, "project": payload })
+}
+
+pub(super) fn set_project_custom_scale(
+    state: State<'_, AppState>,
+    custom_scale: CustomScale,
+) -> serde_json::Value {
+    let normalized = custom_scale.normalized();
+    let (name, changed, was_clean) = {
+        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        let changed = p.custom_scale.as_ref().map(|s| (&s.id, &s.name, &s.notes))
+            != Some((&normalized.id, &normalized.name, &normalized.notes))
+            || !p.use_custom_scale;
+        if !changed {
+            return serde_json::json!({ "ok": true, "project": state.project_meta_payload() });
+        }
+        let was_clean = !p.dirty;
+        p.custom_scale = Some(normalized);
+        p.use_custom_scale = true;
+        p.dirty = true;
+        (p.name.clone(), true, was_clean)
+    };
+
+    if changed && was_clean {
+        if let Some(handle) = state.app_handle.get() {
+            use tauri::Manager;
+            if let Some(win) = handle.get_webview_window("main") {
+                let title = format!("HiFiShifter - {}*", name);
+                let _ = win.set_title(&title);
+            }
+        }
+    }
+
+    serde_json::json!({ "ok": true, "project": state.project_meta_payload() })
 }
 
 pub(super) fn set_project_timeline_settings(

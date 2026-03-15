@@ -211,6 +211,18 @@ export const timelineApi = {
             payload.color,
         ),
 
+    replaceClipSource: (payload: {
+        clipIds: string[];
+        newSourcePath: string;
+        replaceSameSource?: boolean;
+    }) =>
+        invoke<TimelineResult>(
+            "replace_clip_source",
+            payload.clipIds,
+            payload.newSourcePath,
+            payload.replaceSameSource,
+        ),
+
     splitClip: (clipId: string, splitSec: number) =>
         invoke<TimelineResult>("split_clip", clipId, splitSec),
 
