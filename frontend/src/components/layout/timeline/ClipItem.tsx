@@ -14,6 +14,9 @@ import WaveformCanvas from "../../waveform/WaveformCanvas";
 import { useAppTheme } from "../../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../../theme/waveformColors";
 
+// 高精度模式开关（可通过 props 或全局配置覆盖）
+const HIGH_RES_MODE_ENABLED = true;
+
 type WaveformPreview = number[] | { l: number[]; r: number[] };
 
 /**
@@ -385,6 +388,33 @@ export const ClipItem = React.memo(function ClipItem({
 
         // If very wide, switch to tileMode which requests per-tile segments and
         // uses a worker to downsample on the background thread.
+        // 高精度模式：使用 BasePeaksManager 缓存 + 前端降采样
+        if (HIGH_RES_MODE_ENABLED && clip.sourcePath && clip.durationSec && clip.durationSec > 0) {
+            return (
+                <div style={{ width: canvasWidthPx, height: totalH }}>
+                    <WaveformCanvas
+                        targetWidthPx={canvasWidthPx}
+                        heightPx={totalH}
+                        stroke={stroke}
+                        strokeWidth={1}
+                        opacity={waveformOpacity}
+                        clipPeak={clipPeakAbs}
+                        highResMode={true}
+                        sourcePath={clip.sourcePath}
+                        sourceDurationSec={clip.durationSec}
+                        sourceStartSec={Number(clip.sourceStartSec ?? 0) || 0}
+                        clipDurationSec={Number(clip.lengthSec ?? 0) || 0}
+                        playbackRate={Number(clip.playbackRate ?? 1) || 1}
+                        volumeGain={Number(clip.gain ?? 1) || 1}
+                        fadeInSec={Number(clip.fadeInSec ?? 0) || 0}
+                        fadeOutSec={Number(clip.fadeOutSec ?? 0) || 0}
+                        fadeInCurve={(clip.fadeInCurve as FadeCurveType) ?? "sine"}
+                        fadeOutCurve={(clip.fadeOutCurve as FadeCurveType) ?? "sine"}
+                    />
+                </div>
+            );
+        }
+
         if (canvasWidthPx > TILE_THRESHOLD && clip.sourcePath) {
             return (
                 <div style={{ width: canvasWidthPx, height: totalH }}>

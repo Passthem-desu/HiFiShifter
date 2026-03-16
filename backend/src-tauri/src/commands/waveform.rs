@@ -19,7 +19,7 @@ pub(super) fn get_waveform_peaks_segment(
     duration_sec: f64,
     columns: usize,
 ) -> waveform::WaveformPeaksSegmentPayload {
-    let hop = 256usize;
+    let hop = 64usize;
     let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
 
     let peaks = match state.get_or_compute_waveform_peaks(&source_path, hop) {

@@ -1,39 +1,17 @@
 /**
- * 波形渲染工具模块
+ * 波形渲染工具模块（重写版）
  *
- * 提供统一的波形数据处理和渲染接口，支持 Canvas 和 SVG 两种输出格式。
- * 用于 Piano Roll 背景波形和时间轴 Clip 波形的统一渲染。
+ * 核心改进：
+ * 1. 高精度降采样：每像素至少 4 个采样点，移除 stride<=16 的限制
+ * 2. 支持增益应用：clip 音量 + 淡入淡出曲线
+ * 3. 高性能：Float32Array 存储，避免频繁内存分配
+ * 4. stroke-jitter 模式：绘制细线波形，无填充
  *
  * @module waveformRenderer
- *
- * @example
- * ```typescript
- * // Canvas 渲染（用于 Piano Roll）
- * const processed = processWaveformPeaks({
- *   min: peaksData.min,
- *   max: peaksData.max,
- *   startSec: peaksData.startSec,
- *   durSec: peaksData.durSec,
- *   visibleStartSec: 0,
- *   visibleDurSec: 10,
- *   targetWidth: 800
- * });
- * renderWaveformCanvas(ctx, processed, {
- *   width: 800,
- *   height: 400,
- *   fillColor: 'rgba(255,255,255,0.2)',
- *   strokeColor: 'rgba(255,255,255,0.7)'
- * });
- *
- * // SVG 渲染（用于 Clip）
- * const svgPath = renderWaveformSvg(processed, {
- *   width: 100,
- *   height: 24,
- *   centerY: 12,
- *   halfHeight: 5
- * });
- * ```
  */
+
+import type { FadeCurveType } from "../components/layout/timeline/paths";
+import { fadeCurveGain } from "../components/layout/timeline/paths";
 
 /** 波形峰值数据（原始格式） */
 export interface WavePeaksData {
@@ -392,6 +370,294 @@ export function renderWaveformSvg(
         d += `L${xCoords[i]} ${yMin[i]}`;
     }
     d += "Z";
+
+    return d;
+}
+
+// ============================================================================
+// 新增：高精度降采样和增益应用
+// ============================================================================
+
+/** 高精度波形渲染参数 */
+export interface HighResRenderParams {
+    /** canvas 宽度（像素） */
+    canvasWidth: number;
+    /** canvas 高度（像素） */
+    canvasHeight: number;
+    /** 波形中心 Y 坐标 */
+    centerY: number;
+    /** clip 在源文件中的起始位置（秒） */
+    sourceStartSec: number;
+    /** clip 时长（秒，考虑 playbackRate 后） */
+    clipDuration: number;
+    /** 播放速度 */
+    playbackRate: number;
+    /** 源文件时长（秒） */
+    sourceDurationSec: number;
+    /** clip 音量增益（线性值，0~2） */
+    volumeGain: number;
+    /** 淡入时长（秒） */
+    fadeInSec: number;
+    /** 淡出时长（秒） */
+    fadeOutSec: number;
+    /** 淡入曲线类型 */
+    fadeInCurve: FadeCurveType;
+    /** 淡出曲线类型 */
+    fadeOutCurve: FadeCurveType;
+}
+
+/**
+ * 从 base peaks 中降采样提取指定时间范围的波形数据
+ *
+ * 修复：使用时间域映射 + 插值，确保目标采样数不超过源数据范围
+ *
+ * @param basePeaks - Float32Array，格式 [min0, max0, min1, max1, ...]
+ * @param params - 渲染参数
+ * @returns Float32Array 格式的降采样后数据 [min0, max0, min1, max1, ...]
+ */
+export function downsampleBasePeaks(
+    basePeaks: Float32Array,
+    params: HighResRenderParams,
+): Float32Array {
+    const {
+        canvasWidth,
+        sourceStartSec,
+        clipDuration,
+        playbackRate,
+        sourceDurationSec,
+    } = params;
+
+    const totalBaseSamples = basePeaks.length / 2;
+    if (totalBaseSamples < 2) return new Float32Array(0);
+
+    // 计算源文件中的采样范围
+    const sourceEndSec = Math.min(
+        sourceStartSec + clipDuration * playbackRate,
+        sourceDurationSec,
+    );
+
+    // base peaks 的时间分辨率（每秒多少个采样点）
+    const basePeaksPerSec = totalBaseSamples / sourceDurationSec;
+
+    // 目标采样数：每像素至少 4 个点（高精度），但不超过源数据量
+    const targetPointsPerPixel = 4;
+    const maxTargetSamples = Math.floor(canvasWidth * targetPointsPerPixel);
+    
+    // 关键修复：目标采样数不能超过源数据中该时间范围的采样数
+    const samplesInRange = Math.floor((sourceEndSec - sourceStartSec) * basePeaksPerSec);
+    const targetSamples = Math.max(2, Math.min(maxTargetSamples, samplesInRange));
+
+    // 降采样结果
+    const result = new Float32Array(targetSamples * 2);
+
+    // 使用时间域映射：对每个目标采样点，计算其对应的源文件时间
+    // 然后从 basePeaks 中查找最近的采样点
+    for (let i = 0; i < targetSamples; i++) {
+        // 目标采样点在 clip 中的相对位置 (0 ~ 1)
+        const position = targetSamples > 1 ? i / (targetSamples - 1) : 0;
+        
+        // 对应的源文件时间
+        const time = sourceStartSec + position * (sourceEndSec - sourceStartSec);
+        
+        // 对应的 basePeaks 索引（带插值）
+        const srcIdxFloat = time * basePeaksPerSec;
+        const srcIdxLow = Math.floor(srcIdxFloat);
+        const srcIdxHigh = Math.min(srcIdxLow + 1, totalBaseSamples - 1);
+        const frac = srcIdxFloat - srcIdxLow;
+
+        // 双线性插值获取 min 和 max
+        const minLow = basePeaks[srcIdxLow * 2] ?? 0;
+        const maxLow = basePeaks[srcIdxLow * 2 + 1] ?? 0;
+        const minHigh = basePeaks[srcIdxHigh * 2] ?? 0;
+        const maxHigh = basePeaks[srcIdxHigh * 2 + 1] ?? 0;
+
+        // 插值
+        const min = minLow + (minHigh - minLow) * frac;
+        const max = maxLow + (maxHigh - maxLow) * frac;
+
+        result[i * 2] = min;
+        result[i * 2 + 1] = max;
+    }
+
+    return result;
+}
+
+/**
+ * 应用增益（音量 + 淡入淡出）到波形数据
+ *
+ * @param peaks - Float32Array 格式的波形数据 [min0, max0, min1, max1, ...]
+ * @param params - 渲染参数
+ * @returns 应用增益后的 Float32Array
+ */
+export function applyGainsToPeaks(
+    peaks: Float32Array,
+    params: HighResRenderParams,
+): Float32Array {
+    const {
+        clipDuration,
+        volumeGain,
+        fadeInSec,
+        fadeOutSec,
+        fadeInCurve,
+        fadeOutCurve,
+    } = params;
+
+    const result = new Float32Array(peaks.length);
+    const totalSamples = peaks.length / 2;
+
+    for (let i = 0; i < totalSamples; i++) {
+        const position = totalSamples > 1 ? i / (totalSamples - 1) : 0; // 0~1
+        const time = position * clipDuration; // 当前时间（秒）
+
+        // 计算综合增益
+        let gain = volumeGain;
+
+        // 淡入：时间 0 -> fadeInSec，增益 0 -> 1
+        if (fadeInSec > 0 && time < fadeInSec) {
+            const fadeInProgress = time / fadeInSec;
+            gain *= fadeCurveGain(fadeInProgress, fadeInCurve);
+        }
+
+        // 淡出：时间 (clipDuration - fadeOutSec) -> clipDuration，增益 1 -> 0
+        if (fadeOutSec > 0) {
+            const fadeOutStart = clipDuration - fadeOutSec;
+            if (time > fadeOutStart) {
+                const fadeOutProgress = (time - fadeOutStart) / fadeOutSec;
+                gain *= 1 - fadeCurveGain(fadeOutProgress, fadeOutCurve);
+            }
+        }
+
+        // 应用增益
+        result[i * 2] = peaks[i * 2] * gain;
+        result[i * 2 + 1] = peaks[i * 2 + 1] * gain;
+    }
+
+    return result;
+}
+
+/**
+ * 高精度波形渲染（Canvas）
+ *
+ * 特点：
+ * - stroke-jitter 模式：绘制细线，无填充
+ * - 电平越高，振幅越大
+ * - 波形始终在 clip 中心
+ *
+ * @param ctx - Canvas 2D 上下文
+ * @param peaks - Float32Array 格式的波形数据 [min0, max0, min1, max1, ...]
+ * @param params - 渲染参数
+ * @param strokeColor - 描边颜色
+ * @param strokeWidth - 描边宽度
+ */
+export function renderHighResWaveform(
+    ctx: CanvasRenderingContext2D,
+    peaks: Float32Array,
+    params: HighResRenderParams,
+    strokeColor: string = "currentColor",
+    strokeWidth: number = 1,
+): void {
+    const { canvasWidth, canvasHeight, centerY } = params;
+    const totalSamples = peaks.length / 2;
+
+    if (totalSamples < 2) return;
+
+    // 振幅比例：电平越高，振幅越大
+    // 0 电平 -> 0 振幅，1 电平 -> height/2 振幅
+    const amplitudeScale = canvasHeight / 2;
+
+    // 计算参考峰值（用于归一化）
+    let peakAbs = 0;
+    for (let i = 0; i < totalSamples; i++) {
+        const mi = Math.abs(peaks[i * 2]);
+        const ma = Math.abs(peaks[i * 2 + 1]);
+        if (mi > peakAbs) peakAbs = mi;
+        if (ma > peakAbs) peakAbs = ma;
+    }
+
+    // 如果波形非常小，使用一个最小可见比例
+    const minOccupy = 0.15;
+    const occupy = peakAbs > 0.001 ? Math.min(1, Math.max(minOccupy, peakAbs)) : minOccupy;
+    const finalAmplitude = amplitudeScale * occupy;
+
+    ctx.beginPath();
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = strokeWidth;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+
+    // stroke-jitter 模式：交替采样产生抖动细线
+    for (let i = 0; i < totalSamples; i++) {
+        const x = (i / (totalSamples - 1)) * canvasWidth;
+        const min = peaks[i * 2];
+        const max = peaks[i * 2 + 1];
+
+        // jitter: 在包络内交替采样
+        const t = i % 2 === 0 ? 0.25 : 0.75;
+        const v = max + (min - max) * t;
+
+        // 归一化到振幅范围
+        const vNorm = peakAbs > 1e-9 ? v / peakAbs : 0;
+        const y = centerY - vNorm * finalAmplitude;
+
+        if (i === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
+        }
+    }
+
+    ctx.stroke();
+}
+
+/**
+ * 高精度波形渲染（返回 SVG path）
+ *
+ * @param peaks - Float32Array 格式的波形数据
+ * @param params - 渲染参数
+ * @returns SVG path d 属性字符串
+ */
+export function renderHighResWaveformSvg(
+    peaks: Float32Array,
+    params: HighResRenderParams,
+): string {
+    const { canvasWidth, canvasHeight, centerY } = params;
+    const totalSamples = peaks.length / 2;
+
+    if (totalSamples < 2) return "";
+
+    const amplitudeScale = canvasHeight / 2;
+
+    // 计算峰值
+    let peakAbs = 0;
+    for (let i = 0; i < totalSamples; i++) {
+        const mi = Math.abs(peaks[i * 2]);
+        const ma = Math.abs(peaks[i * 2 + 1]);
+        if (mi > peakAbs) peakAbs = mi;
+        if (ma > peakAbs) peakAbs = ma;
+    }
+
+    const minOccupy = 0.15;
+    const occupy = peakAbs > 0.001 ? Math.min(1, Math.max(minOccupy, peakAbs)) : minOccupy;
+    const finalAmplitude = amplitudeScale * occupy;
+
+    // 构建 stroke-jitter 路径
+    let d = "";
+    for (let i = 0; i < totalSamples; i++) {
+        const x = (i / (totalSamples - 1)) * canvasWidth;
+        const min = peaks[i * 2];
+        const max = peaks[i * 2 + 1];
+
+        const t = i % 2 === 0 ? 0.25 : 0.75;
+        const v = max + (min - max) * t;
+        const vNorm = peakAbs > 1e-9 ? v / peakAbs : 0;
+        const y = centerY - vNorm * finalAmplitude;
+
+        if (i === 0) {
+            d = `M${x.toFixed(2)} ${y.toFixed(2)}`;
+        } else {
+            d += `L${x.toFixed(2)} ${y.toFixed(2)}`;
+        }
+    }
 
     return d;
 }
