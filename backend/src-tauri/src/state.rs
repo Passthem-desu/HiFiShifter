@@ -345,11 +345,15 @@ impl TimelineState {
         let (start_frame, end_frame) = self.clip_frame_bounds(start_sec, length_sec, frame_period_ms);
         let entry = self.params_by_root_track.get(root_track_id)?;
 
-        let pitch_edit = entry
-            .pitch_edit
-            .get(start_frame..end_frame)
-            .unwrap_or(&[])
-            .to_vec();
+        let pitch_edit = if entry.pitch_edit_user_modified {
+            entry
+                .pitch_edit
+                .get(start_frame..end_frame)
+                .unwrap_or(&[])
+                .to_vec()
+        } else {
+            Vec::new()
+        };
         let tension_edit = entry
             .tension_edit
             .get(start_frame..end_frame)
@@ -379,6 +383,7 @@ impl TimelineState {
         root_track_id: &str,
         start_sec: f64,
         length_sec: f64,
+        clear_pitch: bool,
         extra_curve_keys: Option<&[String]>,
     ) {
         self.ensure_params_for_root(root_track_id);
@@ -390,7 +395,9 @@ impl TimelineState {
         };
 
         let required_len = entry.pitch_edit.len().max(end_frame);
-        Self::clear_curve_range(&mut entry.pitch_edit, required_len, start_frame, end_frame, 0.0);
+        if clear_pitch {
+            Self::clear_curve_range(&mut entry.pitch_edit, required_len, start_frame, end_frame, 0.0);
+        }
         Self::clear_curve_range(&mut entry.tension_edit, required_len, start_frame, end_frame, 0.0);
 
         let keys = extra_curve_keys
@@ -405,7 +412,9 @@ impl TimelineState {
             Self::clear_curve_range(curve, required_len, start_frame, end_frame, default_value);
         }
 
-        entry.pitch_edit_user_modified = true;
+        if clear_pitch {
+            entry.pitch_edit_user_modified = true;
+        }
     }
 
     fn apply_linked_params_to_root_range(
@@ -420,6 +429,7 @@ impl TimelineState {
         let frame_len = Self::linked_param_frame_len(linked_params);
         let end_frame = start_frame.saturating_add(frame_len);
         let kind = self.root_track_kind(root_track_id);
+        let has_pitch = !linked_params.pitch_edit.is_empty();
 
         let target_existing_keys = self
             .params_by_root_track
@@ -432,15 +442,19 @@ impl TimelineState {
         };
 
         let required_len = entry.pitch_edit.len().max(end_frame);
-        Self::clear_curve_range(&mut entry.pitch_edit, required_len, start_frame, end_frame, 0.0);
+        if has_pitch {
+            Self::clear_curve_range(&mut entry.pitch_edit, required_len, start_frame, end_frame, 0.0);
+        }
         Self::clear_curve_range(&mut entry.tension_edit, required_len, start_frame, end_frame, 0.0);
-        Self::write_curve_range(
-            &mut entry.pitch_edit,
-            required_len,
-            start_frame,
-            &linked_params.pitch_edit,
-            0.0,
-        );
+        if has_pitch {
+            Self::write_curve_range(
+                &mut entry.pitch_edit,
+                required_len,
+                start_frame,
+                &linked_params.pitch_edit,
+                0.0,
+            );
+        }
         Self::write_curve_range(
             &mut entry.tension_edit,
             required_len,
@@ -472,7 +486,9 @@ impl TimelineState {
             Self::write_curve_range(curve, required_len, start_frame, values, default_value);
         }
 
-        entry.pitch_edit_user_modified = true;
+        if has_pitch {
+            entry.pitch_edit_user_modified = true;
+        }
     }
 
     pub fn extract_clip_linked_params(&mut self, clip_id: &str) -> Option<LinkedParamCurvesPayload> {
@@ -1526,6 +1542,7 @@ impl TimelineState {
                 &linked_move.old_root_track_id,
                 linked_move.old_start_sec,
                 linked_move.clip_length_sec,
+                !linked_move.linked_params.pitch_edit.is_empty(),
                 Some(&linked_move.source_extra_keys),
             );
         }
@@ -2078,6 +2095,7 @@ mod tests {
 
         let src = tl.params_by_root_track.get_mut("track_a").unwrap();
         src.pitch_edit = vec![0.0, 61.0, 62.0, 63.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        src.pitch_edit_user_modified = true;
         src.extra_curves.insert(
             "formant_shift_cents".to_string(),
             vec![0.0, 10.0, 20.0, 30.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -2093,6 +2111,32 @@ mod tests {
         assert_eq!(&src_pitch[1..4], &[61.0, 62.0, 63.0]);
         assert_eq!(&dst_pitch[5..8], &[61.0, 62.0, 63.0]);
         assert_eq!(&dst_curve[5..8], &[10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn move_clip_with_linked_params_does_not_preserve_unmodified_pitch_residue() {
+        let mut tl = TimelineState::default();
+        tl.project_sec = 1.0;
+        tl.clips.push(make_clip("clip_a", "track_main", 0.005, 0.015));
+        tl.ensure_params_for_root("track_main");
+
+        let entry = tl.params_by_root_track.get_mut("track_main").unwrap();
+        entry.pitch_orig = vec![0.0, 61.0, 62.0, 63.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        entry.pitch_edit = entry.pitch_orig.clone();
+        entry.pitch_edit_user_modified = false;
+
+        tl.move_clip("clip_a", 0.025, None, true);
+
+        let entry = &tl.params_by_root_track["track_main"];
+        assert!(!entry.pitch_edit_user_modified);
+        assert_eq!(&entry.pitch_edit[1..4], &[61.0, 62.0, 63.0]);
+
+        tl.move_clip("clip_a", 0.045, None, false);
+        tl.ensure_params_for_root("track_main");
+
+        let entry = &tl.params_by_root_track["track_main"];
+        assert!(!entry.pitch_edit_user_modified);
+        assert!(entry.pitch_edit.iter().all(|value| value.abs() <= f32::EPSILON));
     }
 
     #[test]
