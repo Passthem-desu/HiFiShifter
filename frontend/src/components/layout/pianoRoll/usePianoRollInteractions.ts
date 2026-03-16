@@ -1413,11 +1413,7 @@ export function usePianoRollInteractions(args: {
             }
 
             if (toolMode === "select") {
-                // 右键：显示上下文菜单，不清除选区
-                if (e.button === 2) {
-                    return;
-                }
-                if (e.button !== 0) return;
+                if (e.button !== 0 && e.button !== 2) return;
 
                 const existingMorph = morphOverlayRef.current;
                 const pvForMorph = paramViewRef.current;
@@ -1439,7 +1435,7 @@ export function usePianoRollInteractions(args: {
                         );
                     });
 
-                    if (hit) {
+                    if (hit && e.button === 0) {
                         e.preventDefault();
                         morphDragRef.current = {
                             pointerId: e.pointerId,
@@ -1914,6 +1910,203 @@ export function usePianoRollInteractions(args: {
                                 curveY !== null &&
                                 Math.abs(mouseY - curveY) < HIT_THRESHOLD_PX
                             ) {
+                                if (e.button === 2) {
+                                    e.preventDefault();
+                                    const startClientY = e.clientY;
+                                    const pid = e.pointerId;
+                                    (
+                                        e.currentTarget as HTMLCanvasElement
+                                    ).setPointerCapture(pid);
+
+                                    setCanvasCursor("grabbing");
+
+                                    const selStartSec = aBeat * secPerBeat;
+                                    const selEndSec = bBeat * secPerBeat;
+                                    const selStartFrame = Math.max(
+                                        0,
+                                        Math.floor((selStartSec * 1000) / fp),
+                                    );
+                                    const selEndFrame = Math.max(
+                                        0,
+                                        Math.ceil((selEndSec * 1000) / fp),
+                                    );
+                                    const stride = Math.max(1, pv.stride);
+                                    const selStartIdx = Math.max(
+                                        0,
+                                        Math.round(
+                                            (selStartFrame - pv.startFrame) /
+                                                stride,
+                                        ),
+                                    );
+                                    const selEndIdx = Math.min(
+                                        pv.edit.length - 1,
+                                        Math.round(
+                                            (selEndFrame - pv.startFrame) /
+                                                stride,
+                                        ),
+                                    );
+                                    const origValues = pv.edit.slice(
+                                        selStartIdx,
+                                        selEndIdx + 1,
+                                    );
+
+                                    const validMask = origValues.map((v) =>
+                                        editParam === "pitch"
+                                            ? Number.isFinite(v) && v !== 0
+                                            : Number.isFinite(v),
+                                    );
+                                    const validValues = origValues.filter((_, i) =>
+                                        validMask[i],
+                                    );
+                                    const mean =
+                                        validValues.length > 0
+                                            ? validValues.reduce((acc, v) => acc + v, 0) /
+                                              validValues.length
+                                            : 0;
+
+                                    let didDrag = false;
+                                    let latestDense = origValues.slice();
+
+                                    ensureLiveEditBase(pv);
+                                    if (liveEditActiveRef)
+                                        liveEditActiveRef.current = true;
+
+                                    const suppressContextMenu = (ev: Event) => {
+                                        ev.preventDefault();
+                                        ev.stopImmediatePropagation();
+                                    };
+
+                                    const onMove = (ev: globalThis.PointerEvent) => {
+                                        const fineScale = pointerFineScale(ev);
+                                        const dy =
+                                            (startClientY - ev.clientY) * fineScale;
+                                        if (Math.abs(dy) >= 2) {
+                                            didDrag = true;
+                                        }
+
+                                        const deviationPercent = dy * 2;
+                                        const scale = Math.max(
+                                            0,
+                                            1 + deviationPercent / 100,
+                                        );
+
+                                        latestDense = origValues.map((v, idx) => {
+                                            if (!validMask[idx]) return v;
+                                            return mean + (v - mean) * scale;
+                                        });
+
+                                        const pvNow = paramViewRef.current;
+                                        if (!pvNow) return;
+                                        applyDenseToLiveEdit(
+                                            pvNow,
+                                            selStartFrame,
+                                            latestDense,
+                                            selStartFrame,
+                                            selEndFrame,
+                                            "draw",
+                                        );
+                                        invalidate();
+                                    };
+
+                                    const onUp = (ev: globalThis.PointerEvent) => {
+                                        window.removeEventListener("pointermove", onMove);
+                                        window.removeEventListener("pointerup", onUp);
+                                        window.removeEventListener("pointercancel", onUp);
+                                        window.removeEventListener(
+                                            "contextmenu",
+                                            suppressContextMenu,
+                                            true,
+                                        );
+
+                                        if (!didDrag) {
+                                            liveEditOverrideRef.current = null;
+                                            if (liveEditActiveRef) {
+                                                liveEditActiveRef.current = false;
+                                            }
+                                            setCanvasCursor("grab");
+                                            if (args.onContextMenu) {
+                                                args.onContextMenu(
+                                                    ev.clientX,
+                                                    ev.clientY,
+                                                );
+                                            }
+                                            invalidate();
+                                            return;
+                                        }
+
+                                        const pvNow = paramViewRef.current;
+                                        if (!pvNow || !rootTrackId) {
+                                            if (liveEditActiveRef) {
+                                                liveEditActiveRef.current = false;
+                                            }
+                                            setCanvasCursor("grab");
+                                            invalidate();
+                                            return;
+                                        }
+
+                                        const nextEdit = pvNow.edit.slice();
+                                        for (let i = 0; i < latestDense.length; i += 1) {
+                                            const idx = selStartIdx + i;
+                                            if (idx >= 0 && idx < nextEdit.length) {
+                                                nextEdit[idx] = latestDense[i];
+                                            }
+                                        }
+                                        setParamView({ ...pvNow, edit: nextEdit });
+                                        liveEditOverrideRef.current = null;
+
+                                        void (async () => {
+                                            await paramsApi.setParamFrames(
+                                                rootTrackId,
+                                                editParam,
+                                                selStartFrame,
+                                                latestDense,
+                                                true,
+                                            );
+                                            if (liveEditActiveRef) {
+                                                liveEditActiveRef.current = false;
+                                            }
+                                            bumpRefreshToken();
+                                        })();
+
+                                        const suppressOnce = (
+                                            evt: globalThis.MouseEvent,
+                                        ) => {
+                                            evt.preventDefault();
+                                            evt.stopPropagation();
+                                            window.removeEventListener(
+                                                "contextmenu",
+                                                suppressOnce,
+                                                true,
+                                            );
+                                        };
+                                        window.addEventListener(
+                                            "contextmenu",
+                                            suppressOnce,
+                                            true,
+                                        );
+                                        setTimeout(() => {
+                                            window.removeEventListener(
+                                                "contextmenu",
+                                                suppressOnce,
+                                                true,
+                                            );
+                                        }, 0);
+
+                                        setCanvasCursor("grab");
+                                        invalidate();
+                                    };
+
+                                    window.addEventListener(
+                                        "contextmenu",
+                                        suppressContextMenu,
+                                        true,
+                                    );
+                                    window.addEventListener("pointermove", onMove);
+                                    window.addEventListener("pointerup", onUp);
+                                    window.addEventListener("pointercancel", onUp);
+                                    return;
+                                }
+
                                 // 进入拖拽选中曲线模式（支持 X+Y 双向拖拽）
                                 setCanvasCursor("grabbing");
                                 const startMouseVal = mouseVal;
@@ -2369,31 +2562,37 @@ export function usePianoRollInteractions(args: {
                     }
                 }
 
-                // 默认行为：创建新选区
-                selectionRef.current = { aBeat: b, bBeat: b };
-                updateSelectionUi(selectionRef.current);
-                const pid = e.pointerId;
-                (e.currentTarget as HTMLCanvasElement).setPointerCapture(pid);
-                const onMove = (ev: globalThis.PointerEvent) => {
-                    if (selectionRef.current == null) return;
-                    const bb = pointerBeat(ev.clientX);
-                    selectionRef.current = {
-                        aBeat: selectionRef.current.aBeat,
-                        bBeat: bb,
-                    };
+                // 默认行为：仅左键创建新选区；右键不应在 pointerdown 时清除选区
+                if (e.button === 0) {
+                    selectionRef.current = { aBeat: b, bBeat: b };
                     updateSelectionUi(selectionRef.current);
-                    invalidate(); // 实时重绘选区
-                };
-                const onUp = () => {
-                    window.removeEventListener("pointermove", onMove);
-                    window.removeEventListener("pointerup", onUp);
-                    window.removeEventListener("pointercancel", onUp);
-                    invalidate();
-                };
-                window.addEventListener("pointermove", onMove);
-                window.addEventListener("pointerup", onUp);
-                window.addEventListener("pointercancel", onUp);
-                return;
+                    const pid = e.pointerId;
+                    (e.currentTarget as HTMLCanvasElement).setPointerCapture(pid);
+                    const onMove = (ev: globalThis.PointerEvent) => {
+                        if (selectionRef.current == null) return;
+                        const bb = pointerBeat(ev.clientX);
+                        selectionRef.current = {
+                            aBeat: selectionRef.current.aBeat,
+                            bBeat: bb,
+                        };
+                        updateSelectionUi(selectionRef.current);
+                        invalidate(); // 实时重绘选区
+                    };
+                    const onUp = () => {
+                        window.removeEventListener("pointermove", onMove);
+                        window.removeEventListener("pointerup", onUp);
+                        window.removeEventListener("pointercancel", onUp);
+                        invalidate();
+                    };
+                    window.addEventListener("pointermove", onMove);
+                    window.addEventListener("pointerup", onUp);
+                    window.addEventListener("pointercancel", onUp);
+                    return;
+                }
+                // 右键：不在 pointerdown 时清除或重建选区，交由 contextmenu 或右键拖拽逻辑处理
+                if (e.button === 2) {
+                    return;
+                }
             }
 
             const mode: StrokeMode = e.button === 2 ? "restore" : "draw";
