@@ -401,14 +401,31 @@ fn any_user_edit_in_range(
         return false;
     }
 
-    let stride = ((100.0 / fp).round() as usize).max(1); // ~100ms
+    // 短片段必须密集采样，否则会漏掉尾部编辑点（导致短 clip 被误判为“无编辑”）。
+    let span = end_f.saturating_sub(start_f);
+    let stride = if span <= 256 {
+        1
+    } else {
+        ((20.0 / fp).round() as usize).max(1) // ~20ms for long regions
+    };
     let mut i = start_f;
+    let mut last_checked = start_f;
     while i < end_f {
         let v = pitch_edit.get(i).copied().unwrap_or(0.0);
         if v.is_finite() && v > 0.0 {
             return true;
         }
+        last_checked = i;
         i += stride;
+    }
+
+    // Ensure tail frame is always checked even when stride skips it.
+    let tail = end_f.saturating_sub(1);
+    if tail != last_checked {
+        let v = pitch_edit.get(tail).copied().unwrap_or(0.0);
+        if v.is_finite() && v > 0.0 {
+            return true;
+        }
     }
     false
 }
@@ -432,9 +449,15 @@ fn any_effective_pitch_change_in_range(
     // ~100ms sampling is enough to avoid wasting expensive inference.
     // Use a small epsilon to ignore tiny float noise in MIDI curves.
     let eps_semitones = 0.10f64;
-    let stride = ((100.0 / fp).round() as usize).max(1);
+    let span = end_f.saturating_sub(start_f);
+    let stride = if span <= 256 {
+        1
+    } else {
+        ((20.0 / fp).round() as usize).max(1)
+    };
 
     let mut i = start_f;
+    let mut last_checked = start_f;
     while i < end_f {
         let abs_time_sec = (i as f64) * fp / 1000.0;
 
@@ -459,7 +482,22 @@ fn any_effective_pitch_change_in_range(
             return true;
         }
 
+        last_checked = i;
         i += stride;
+    }
+
+    // Ensure tail frame is always checked even when stride skips it.
+    let tail = end_f.saturating_sub(1);
+    if tail != last_checked {
+        let abs_time_sec = (tail as f64) * fp / 1000.0;
+        let orig = clip_midi_at_time(frame_period_ms, clip_start_sec, clip_midi, abs_time_sec);
+        if orig.is_finite() && orig > 0.0 {
+            if let Some(target) = edit_midi_at_time_or_none(frame_period_ms, pitch_edit, abs_time_sec) {
+                if target.is_finite() && target > 0.0 && (target - orig).abs() > eps_semitones {
+                    return true;
+                }
+            }
+        }
     }
 
     false
@@ -480,7 +518,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     sample_rate: u32,
     pcm_stereo: &mut Vec<f32>,
 ) -> Result<bool, String> {
-    if pcm_stereo.len() < 32 {
+    if pcm_stereo.len() < 2 {
         return Ok(false);
     }
 
@@ -1018,5 +1056,41 @@ mod tests {
 
         assert_eq!(track.id, "track_root");
         assert!(entry.pitch_edit_user_modified);
+    }
+
+    #[test]
+    fn any_user_edit_in_range_detects_short_segment_tail_edit() {
+        let frame_period_ms = 5.0f64;
+        let mut pitch_edit = vec![0.0f32; 64];
+        // 90ms segment with edit near the tail.
+        let tail_idx = ((0.085f64 * 1000.0f64) / frame_period_ms).round() as usize;
+        pitch_edit[tail_idx] = 64.0;
+
+        assert!(any_user_edit_in_range(
+            frame_period_ms,
+            &pitch_edit,
+            0.0,
+            0.09,
+        ));
+    }
+
+    #[test]
+    fn any_effective_pitch_change_in_range_detects_short_segment_tail_change() {
+        let frame_period_ms = 5.0f64;
+        let clip_start_sec = 0.0;
+        let clip_midi = vec![60.0f32; 64];
+        let mut pitch_edit = vec![0.0f32; 64];
+        // 90ms segment with > 0.1 semitone change near the tail.
+        let tail_idx = ((0.085f64 * 1000.0f64) / frame_period_ms).round() as usize;
+        pitch_edit[tail_idx] = 62.0;
+
+        assert!(any_effective_pitch_change_in_range(
+            frame_period_ms,
+            &pitch_edit,
+            clip_start_sec,
+            &clip_midi,
+            0.0,
+            0.09,
+        ));
     }
 }

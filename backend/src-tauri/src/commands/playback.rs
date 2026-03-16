@@ -615,28 +615,25 @@ crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
 
     let render_variant = |clip_variant: &crate::state::Clip| {
         let mut rendered = segment.clone();
-        let seg_frames = rendered.len() / 2;
-        if seg_frames >= 16 {
-            match crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
-                timeline,
-                clip_variant,
-                clip_start_sec,
-                seg_start_sec,
-                out_rate,
-                &mut rendered,
-            ) {
-                Ok(true) => {
-                    if debug {
-                        eprintln!(
-                            "render_single_clip: pitch_edit applied to clip_id={}",
-                            &clip_variant.id
-                        );
-                    }
+        match crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
+            timeline,
+            clip_variant,
+            clip_start_sec,
+            seg_start_sec,
+            out_rate,
+            &mut rendered,
+        ) {
+            Ok(true) => {
+                if debug {
+                    eprintln!(
+                        "render_single_clip: pitch_edit applied to clip_id={}",
+                        &clip_variant.id
+                    );
                 }
-                Ok(false) => {}
-                Err(e) => {
-                    eprintln!("[pitch_edit] clip_id={} ERROR: {e}", &clip_variant.id);
-                }
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("[pitch_edit] clip_id={} ERROR: {e}", &clip_variant.id);
             }
         }
 

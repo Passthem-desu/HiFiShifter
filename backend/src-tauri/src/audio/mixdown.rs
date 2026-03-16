@@ -436,29 +436,26 @@ pub fn render_mixdown_interleaved(
 
         // Apply pitch edit per-clip (v2) if enabled.
         if opts.apply_pitch_edit {
-            let seg_frames = segment.len() / 2;
-            if seg_frames >= 16 {
-                let seg_start_sec = clip_start_sec + pre_silence_sec;
-                let mut seg = segment;
-                let applied = crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
-                    timeline,
-                    clip,
-                    clip_start_sec,
-                    seg_start_sec,
-                    out_rate,
-                    &mut seg,
-                );
-                match applied {
-                    Ok(true) => {
-                        segment = seg;
-                    }
-                    Ok(false) => {
-                        segment = seg;
-                    }
-                    Err(e) => {
-                        eprintln!("[pitch_edit] clip_id={} ERROR: {e}", clip.id);
-                        segment = seg;
-                    }
+            let seg_start_sec = clip_start_sec + pre_silence_sec;
+            let mut seg = segment;
+            let applied = crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
+                timeline,
+                clip,
+                clip_start_sec,
+                seg_start_sec,
+                out_rate,
+                &mut seg,
+            );
+            match applied {
+                Ok(true) => {
+                    segment = seg;
+                }
+                Ok(false) => {
+                    segment = seg;
+                }
+                Err(e) => {
+                    eprintln!("[pitch_edit] clip_id={} ERROR: {e}", clip.id);
+                    segment = seg;
                 }
             }
         }
