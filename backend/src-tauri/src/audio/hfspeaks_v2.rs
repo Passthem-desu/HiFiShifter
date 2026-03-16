@@ -1466,25 +1466,4 @@ fn downsample_mipmap(min: &[f32], max: &[f32], factor: usize) -> (Vec<f32>, Vec<
     (result_min, result_max)
 }
 
-impl HfsPeaksCache {
-    /// 尝试从旧版缓存迁移
-    /// 
-    /// 查找旧版缓存文件，如果存在则迁移到 v2 格式
-    pub fn try_migrate_from_v1(&self, source_path: &Path, old_cache_path: &Path) -> Option<HfsPeakFile> {
-        // 尝试加载旧格式
-        let legacy = try_load_v1_format(old_cache_path)?;
-        
-        // 迁移到 v2 格式
-        let v2 = migrate_v1_to_v2(legacy, source_path);
-        
-        // 保存 v2 格式
-        if let Err(e) = self.save(source_path, &v2) {
-            eprintln!("Warning: failed to save migrated v2 cache: {}", e);
-        } else {
-            // 删除旧版缓存文件
-            let _ = std::fs::remove_file(old_cache_path);
-        }
-        
-        Some(v2)
-    }
-}
+
