@@ -982,7 +982,7 @@ export const PianoRollPanel: React.FC = () => {
 
     useEffect(() => {
         invalidate();
-    }, [pitchView, paramViews, editParam, activeSecondaryParamId, invalidate]);
+    }, [pitchView, paramViews, editParam, activeSecondaryParamId, themeMode, invalidate]);
 
     // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后�?
     // useEffect 已移�?detectedPitchCurves useMemo 定义之后，见下方�?
