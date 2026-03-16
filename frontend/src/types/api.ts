@@ -169,6 +169,33 @@ export interface WaveformPeaksSegmentPayload {
     max: number[];
 }
 
+/** HFSPeaks v2 mipmap 级别 */
+export type MipmapLevel = 0 | 1 | 2 | 3;
+
+/** v2 波形峰值响应 */
+export interface WaveformPeaksV2Payload {
+    ok: boolean;
+    min: number[];
+    max: number[];
+    sample_rate: number;
+    mipmap_level: number;
+    division_factor: number;
+}
+
+/** v2 波形元数据响应 */
+export interface WaveformPeaksV2MetaPayload {
+    ok: boolean;
+    sample_rate: number;
+    channels: number;
+    total_frames: number;
+    mipmap_levels: Array<{
+        level: number;
+        division_factor: number;
+        peak_count: number;
+    }>;
+    cached: boolean;
+}
+
 export type ParamReferenceKind = "source_curve" | "default_value";
 
 export interface ParamFramesPayload {

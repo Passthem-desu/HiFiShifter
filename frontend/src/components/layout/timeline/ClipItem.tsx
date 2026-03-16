@@ -136,6 +136,8 @@ export const ClipItem = React.memo(function ClipItem({
     selected,
     isInMultiSelectedSet,
     multiSelectedCount,
+    viewportStartSec,
+    viewportEndSec,
     ensureSelected,
     selectClipRemote,
     openContextMenu,
@@ -160,14 +162,17 @@ export const ClipItem = React.memo(function ClipItem({
     selected: boolean;
     isInMultiSelectedSet: boolean;
     multiSelectedCount: number;
+    /** 可视区开始时间（秒） */
+    viewportStartSec?: number;
+    /** 可视区结束时间（秒） */
+    viewportEndSec?: number;
 
     ensureSelected: (clipId: string) => void;
     selectClipRemote: (clipId: string) => void;
     openContextMenu: (clipId: string, clientX: number, clientY: number) => void;
 
-    /** 轨道主题色，用于 Clip 背景色和选中边框�?*/
+    /** 轨道主题色，用于 Clip 背景色和选中边框 */
     trackColor?: string;
-
     seekFromClientX: (clientX: number, commit: boolean) => void;
     startClipDrag: (
         e: React.PointerEvent<HTMLDivElement>,
@@ -410,6 +415,9 @@ export const ClipItem = React.memo(function ClipItem({
                         fadeOutSec={Number(clip.fadeOutSec ?? 0) || 0}
                         fadeInCurve={(clip.fadeInCurve as FadeCurveType) ?? "sine"}
                         fadeOutCurve={(clip.fadeOutCurve as FadeCurveType) ?? "sine"}
+                        viewportStartSec={viewportStartSec}
+                        viewportEndSec={viewportEndSec}
+                        clipStartSec={clip.startSec}
                     />
                 </div>
             );

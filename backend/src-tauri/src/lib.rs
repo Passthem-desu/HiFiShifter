@@ -40,6 +40,7 @@ mod state;
 #[path = "audio/time_stretch.rs"] mod time_stretch;
 #[path = "audio/waveform.rs"] mod waveform;
 #[path = "audio/waveform_disk_cache.rs"] mod waveform_disk_cache;
+#[path = "audio/hfspeaks_v2.rs"] mod hfspeaks_v2;
 mod config;
 mod temp_manager;
 #[path = "vocoder/world.rs"] mod world;
@@ -159,6 +160,9 @@ pub fn run() {
             commands::get_root_mix_waveform_peaks_segment,
             commands::get_track_mix_waveform_peaks_segment,
             commands::clear_waveform_cache,
+            commands::get_waveform_peaks_v2,
+            commands::get_waveform_peaks_v2_level,
+            commands::get_waveform_peaks_v2_meta,
             commands::import_audio_item,
             commands::import_audio_bytes,
             commands::add_track,

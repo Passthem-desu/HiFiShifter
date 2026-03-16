@@ -1,4 +1,4 @@
-import type { WaveformPeaksSegmentPayload } from "../../types/api";
+import type { WaveformPeaksSegmentPayload, WaveformPeaksV2Payload, WaveformPeaksV2MetaPayload, MipmapLevel } from "../../types/api";
 
 import { invoke } from "../invoke";
 
@@ -16,6 +16,44 @@ export const waveformApi = {
             durationSec,
             columns,
         ),
+
+    // ============== HFSPeaks v2 API ==============
+
+    /** 获取 v2 波形峰值（自动选择 mipmap 级别） */
+    getWaveformPeaksV2: (
+        sourcePath: string,
+        timeRangeStart?: number,
+        timeRangeEnd?: number,
+        samplesPerPixel?: number,
+    ) =>
+        invoke<WaveformPeaksV2Payload>(
+            "get_waveform_peaks_v2",
+            sourcePath,
+            timeRangeStart,
+            timeRangeEnd,
+            samplesPerPixel,
+        ),
+
+    /** 获取指定 mipmap 级别的波形峰值 */
+    getWaveformPeaksV2Level: (
+        sourcePath: string,
+        level: MipmapLevel,
+        timeRangeStart?: number,
+        timeRangeEnd?: number,
+    ) =>
+        invoke<WaveformPeaksV2Payload>(
+            "get_waveform_peaks_v2_level",
+            sourcePath,
+            level,
+            timeRangeStart,
+            timeRangeEnd,
+        ),
+
+    /** 获取波形文件元数据 */
+    getWaveformPeaksV2Meta: (sourcePath: string) =>
+        invoke<WaveformPeaksV2MetaPayload>("get_waveform_peaks_v2_meta", sourcePath),
+
+    // ============== Mix 波形 API ==============
 
     getRootMixWaveformPeaksSegment: (
         trackId: string,

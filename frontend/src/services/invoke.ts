@@ -327,6 +327,25 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 columns: args[3],
             };
 
+        case "get_waveform_peaks_v2":
+            return {
+                sourcePath: args[0],
+                timeRangeStart: args[1],
+                timeRangeEnd: args[2],
+                samplesPerPixel: args[3],
+            };
+
+        case "get_waveform_peaks_v2_level":
+            return {
+                sourcePath: args[0],
+                level: args[1],
+                timeRangeStart: args[2],
+                timeRangeEnd: args[3],
+            };
+
+        case "get_waveform_peaks_v2_meta":
+            return { sourcePath: args[0] };
+
         case "get_root_mix_waveform_peaks_segment":
         case "get_track_mix_waveform_peaks_segment":
             return {

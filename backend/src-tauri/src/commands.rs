@@ -242,6 +242,40 @@ pub fn clear_waveform_cache(state: State<'_, AppState>) -> serde_json::Value {
     waveform::clear_waveform_cache(state)
 }
 
+// ===================== waveform v2 =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_waveform_peaks_v2(
+    state: State<'_, AppState>,
+    source_path: String,
+    start_sec: f64,
+    duration_sec: f64,
+    columns: usize,
+    samples_per_pixel: f64,
+) -> crate::hfspeaks_v2::PeaksSegmentResult {
+    waveform::get_waveform_peaks_v2(state, source_path, start_sec, duration_sec, columns, samples_per_pixel)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_waveform_peaks_v2_level(
+    state: State<'_, AppState>,
+    source_path: String,
+    start_sec: f64,
+    duration_sec: f64,
+    columns: usize,
+    level: usize,
+) -> crate::hfspeaks_v2::PeaksSegmentResult {
+    waveform::get_waveform_peaks_v2_level(state, source_path, start_sec, duration_sec, columns, level)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_waveform_peaks_v2_meta(
+    state: State<'_, AppState>,
+    source_path: String,
+) -> crate::hfspeaks_v2::PeaksResponse {
+    waveform::get_waveform_peaks_v2_meta(state, source_path)
+}
+
 // ===================== timeline =====================
 
 #[tauri::command(rename_all = "camelCase")]
