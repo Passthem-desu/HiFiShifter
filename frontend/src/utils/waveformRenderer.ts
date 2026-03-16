@@ -561,23 +561,8 @@ export function renderHighResWaveform(
 
     if (totalSamples < 2) return;
 
-    // 振幅比例：电平越高，振幅越大
-    // 0 电平 -> 0 振幅，1 电平 -> height/2 振幅
+    // 振幅比例：0 电平在中心（静音），±1 电平占满整个高度
     const amplitudeScale = canvasHeight / 2;
-
-    // 计算参考峰值（用于归一化）
-    let peakAbs = 0;
-    for (let i = 0; i < totalSamples; i++) {
-        const mi = Math.abs(peaks[i * 2]);
-        const ma = Math.abs(peaks[i * 2 + 1]);
-        if (mi > peakAbs) peakAbs = mi;
-        if (ma > peakAbs) peakAbs = ma;
-    }
-
-    // 如果波形非常小，使用一个最小可见比例
-    const minOccupy = 0.15;
-    const occupy = peakAbs > 0.001 ? Math.min(1, Math.max(minOccupy, peakAbs)) : minOccupy;
-    const finalAmplitude = amplitudeScale * occupy;
 
     ctx.beginPath();
     ctx.strokeStyle = strokeColor;
@@ -595,9 +580,8 @@ export function renderHighResWaveform(
         const t = i % 2 === 0 ? 0.25 : 0.75;
         const v = max + (min - max) * t;
 
-        // 归一化到振幅范围
-        const vNorm = peakAbs > 1e-9 ? v / peakAbs : 0;
-        const y = centerY - vNorm * finalAmplitude;
+        // 直接使用原始振幅值（-1 ~ 1），映射到 canvas 高度
+        const y = centerY - v * amplitudeScale;
 
         if (i === 0) {
             ctx.moveTo(x, y);
@@ -627,19 +611,6 @@ export function renderHighResWaveformSvg(
 
     const amplitudeScale = canvasHeight / 2;
 
-    // 计算峰值
-    let peakAbs = 0;
-    for (let i = 0; i < totalSamples; i++) {
-        const mi = Math.abs(peaks[i * 2]);
-        const ma = Math.abs(peaks[i * 2 + 1]);
-        if (mi > peakAbs) peakAbs = mi;
-        if (ma > peakAbs) peakAbs = ma;
-    }
-
-    const minOccupy = 0.15;
-    const occupy = peakAbs > 0.001 ? Math.min(1, Math.max(minOccupy, peakAbs)) : minOccupy;
-    const finalAmplitude = amplitudeScale * occupy;
-
     // 构建 stroke-jitter 路径
     let d = "";
     for (let i = 0; i < totalSamples; i++) {
@@ -649,8 +620,8 @@ export function renderHighResWaveformSvg(
 
         const t = i % 2 === 0 ? 0.25 : 0.75;
         const v = max + (min - max) * t;
-        const vNorm = peakAbs > 1e-9 ? v / peakAbs : 0;
-        const y = centerY - vNorm * finalAmplitude;
+        // 直接使用原始振幅值（-1 ~ 1），映射到 canvas 高度
+        const y = centerY - v * amplitudeScale;
 
         if (i === 0) {
             d = `M${x.toFixed(2)} ${y.toFixed(2)}`;

@@ -38,8 +38,8 @@ const ssKeySet = new Set<string>();
 /** 正在请求中的 Promise */
 const pendingRequests = new Map<string, Promise<BasePeaksCache | null>>();
 
-/** 后端返回的列数常量（与后端 hop=64 对应，提升4倍精度） */
-const BASE_COLUMNS_PER_SEC = 4096;
+/** 后端返回的列数常量（与 Piano Roll 波形保持一致） */
+const BASE_COLUMNS_PER_SEC = 128;
 
 /**
  * 从 sessionStorage 读取缓存

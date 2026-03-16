@@ -346,7 +346,7 @@ export function drawPianoRoll(args: {
         pitchAnalysisPending,
         waveformColors = {
             fill: "rgba(255,255,255,0.2)",
-            stroke: "rgba(255,255,255,0.7)",
+            stroke: "rgba(255,255,255,0.5)",
         },
         detectedPitchCurves,
         isDark = true,
@@ -632,7 +632,10 @@ export function drawPianoRoll(args: {
         // sourceStart 对应的 timeline 域偏移量（像素）= (sourceStartSec / pr) * pxPerSec
         const trimOffsetPx = (sourceStartSec / pr) * pxPerSec;
 
-        // 处理波形：1:1 映射 peaks 列
+        // 动态降采样：根据 clip 的像素宽度计算目标采样数
+        // 每像素 2 个采样点，保证精度同时控制数据量
+        const targetRenderWidth = Math.max(2, Math.floor(clipWidthPx * 2));
+        
         const processed = processWaveformPeaks({
             min: pMin,
             max: pMax,
@@ -640,7 +643,7 @@ export function drawPianoRoll(args: {
             durSec: pDurSec,
             visibleStartSec: 0,
             visibleDurSec: pDurSec,
-            targetWidth: peaksCols,
+            targetWidth: targetRenderWidth,
         });
 
         // 裁剪到 clip 的可视 x 范围，避免溢出到相邻 clip
@@ -664,7 +667,7 @@ export function drawPianoRoll(args: {
             fillColor: waveformColors.fill,
             strokeColor: waveformColors.stroke,
             mode: "stroke-jitter",
-            strokeWidth: 1,
+            strokeWidth: 0.5,
             barWidth: 1.5,
             centerY: h * 0.5,
             amplitude: h * 0.5,

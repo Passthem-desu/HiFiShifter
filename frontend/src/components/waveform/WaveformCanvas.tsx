@@ -1,6 +1,7 @@
 import React from "react";
 import {
     applyGainsToPeaks,
+    downsampleBasePeaks,
     renderHighResWaveform,
     type HighResRenderParams,
 } from "../../utils/waveformRenderer";
@@ -142,8 +143,12 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
                 fadeOutCurve,
             };
 
-            // 直接使用 basePeaks 数据（不再降采样）
-            const withGains = applyGainsToPeaks(basePeaks.peaks, params);
+            // 动态降采样：根据 canvas 宽度计算目标采样数
+            // 每像素 2 个采样点，保证精度同时控制数据量
+            const downsampled = downsampleBasePeaks(basePeaks.peaks, params);
+            
+            // 应用增益
+            const withGains = applyGainsToPeaks(downsampled, params);
             
             // 渲染
             renderHighResWaveform(ctx, withGains, params, stroke, strokeWidth);

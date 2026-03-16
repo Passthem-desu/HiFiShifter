@@ -49,9 +49,9 @@ type CachedEntry = {
 const clipPeaksCache = new Map<string, CachedEntry>();
 const clipPeaksInflight = new Map<string, Promise<CachedEntry | null>>();
 const CLIP_PEAKS_CACHE_LIMIT = 128;
-const PEAKS_COLUMNS_PER_SEC = 512;
-const PEAKS_COLUMNS_MIN = 96;
-const PEAKS_COLUMNS_MAX = 65536;
+const PEAKS_COLUMNS_PER_SEC = 128; // 降低请求精度，前端动态降采样
+const PEAKS_COLUMNS_MIN = 64;
+const PEAKS_COLUMNS_MAX = 16384;
 const PEAKS_COLUMNS_QUANT = 32;
 
 /** 量化秒数，减少重复请�?*/
