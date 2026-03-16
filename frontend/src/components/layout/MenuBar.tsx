@@ -41,6 +41,7 @@ import {
     QuantizeDialog,
     MeanQuantizeDialog,
 } from "../editDialogs/EditDialogs";
+import { SCALE_LABELS } from "../../utils/musicalScales";
 // import type { VibratoParams } from "../editDialogs/EditDialogs"; // 已移除无效导入
 
 interface MenuBarProps {
@@ -80,6 +81,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     } | null>(null);
 
     const isPitchParam = s.editParam === "pitch";
+    const projectScaleLabel =
+        s.project.useCustomScale && s.project.customScale
+            ? `${tAny("project_scale_prefix")} (${tAny("custom_scale_short")})`
+            : `${tAny("project_scale_prefix")} (${SCALE_LABELS[s.project.baseScale]})`;
+
+    const resolveScaleToken = (scaleValue: string) =>
+        scaleValue === "__project__" ? "__project__" : scaleValue;
 
     // Listen for context menu → open dialog requests
     useEffect(() => {
@@ -575,22 +583,44 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <TransposeCentsDialog
                 open={transposeCentsOpen}
                 onOpenChange={setTransposeCentsOpen}
-                onConfirm={(cents) => dispatchEditOp("transposeCents", { cents })}
+                defaultSmoothness={s.edgeSmoothnessPercent}
+                onConfirm={(cents, edgeSmoothnessPercent) =>
+                    dispatchEditOp("transposeCents", {
+                        cents,
+                        edgeSmoothnessPercent,
+                    })
+                }
             />
             <TransposeDegreesDialog
                 open={transposeDegreesOpen}
                 onOpenChange={setTransposeDegreesOpen}
                 defaultScale={s.project.baseScale}
-                onConfirm={(degrees, scale) => dispatchEditOp("transposeDegrees", { degrees, scale })}
+                defaultUseProjectScale={true}
+                projectScaleLabel={projectScaleLabel}
+                defaultSmoothness={s.edgeSmoothnessPercent}
+                onConfirm={(degrees, scaleValue, edgeSmoothnessPercent) =>
+                    dispatchEditOp("transposeDegrees", {
+                        degrees,
+                        scale: resolveScaleToken(scaleValue),
+                        edgeSmoothnessPercent,
+                    })
+                }
             />
             <SetPitchDialog
                 open={setPitchOpen}
                 onOpenChange={setSetPitchOpen}
-                onConfirm={(midiNote) => dispatchEditOp("setPitch", { midiNote })}
+                defaultSmoothness={s.edgeSmoothnessPercent}
+                onConfirm={(midiNote, edgeSmoothnessPercent) =>
+                    dispatchEditOp("setPitch", {
+                        midiNote,
+                        edgeSmoothnessPercent,
+                    })
+                }
             />
             <SmoothDialog
                 open={smoothOpen}
                 onOpenChange={setSmoothOpen}
+                defaultSmoothness={s.edgeSmoothnessPercent}
                 onConfirm={(strength) => dispatchEditOp("smooth", { strength })}
             />
             <VibratoDialog
@@ -604,16 +634,31 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 open={quantizeOpen}
                 onOpenChange={setQuantizeOpen}
                 defaultScale={s.project.baseScale}
+                defaultUseProjectScale={true}
+                projectScaleLabel={projectScaleLabel}
                 defaultToleranceCents={s.pitchSnapToleranceCents}
-                onConfirm={(unit, scale, toleranceCents) =>
-                    dispatchEditOp("quantize", { unit, scale, toleranceCents })
+                onConfirm={(unit, scaleValue, toleranceCents) =>
+                    dispatchEditOp("quantize", {
+                        unit,
+                        scale: resolveScaleToken(scaleValue),
+                        toleranceCents,
+                    })
                 }
             />
             <MeanQuantizeDialog
                 open={meanQuantizeOpen}
                 onOpenChange={setMeanQuantizeOpen}
                 defaultScale={s.project.baseScale}
-                onConfirm={(unit, scale) => dispatchEditOp("meanQuantize", { unit, scale })}
+                defaultUseProjectScale={true}
+                projectScaleLabel={projectScaleLabel}
+                defaultToleranceCents={s.pitchSnapToleranceCents}
+                onConfirm={(unit, scaleValue, toleranceCents) =>
+                    dispatchEditOp("meanQuantize", {
+                        unit,
+                        scale: resolveScaleToken(scaleValue),
+                        toleranceCents,
+                    })
+                }
             />
         </Flex>
     );

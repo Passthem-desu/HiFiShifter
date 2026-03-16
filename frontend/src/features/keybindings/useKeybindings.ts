@@ -66,6 +66,7 @@ function findMatchingAction(
 
     // 先检查有修饰键的绑定
     for (const [actionId, kb] of entries) {
+        if (kb.modifierOnly) continue;
         if (kb.ctrl || kb.shift || kb.alt) {
             if (matchesKeybinding(e, kb)) {
                 const ctx = ACTION_META[actionId]?.scopedContext;
@@ -76,6 +77,7 @@ function findMatchingAction(
     }
     // 再检查无修饰键的绑定
     for (const [actionId, kb] of entries) {
+        if (kb.modifierOnly) continue;
         if (!kb.ctrl && !kb.shift && !kb.alt) {
             if (matchesKeybinding(e, kb)) {
                 const ctx = ACTION_META[actionId]?.scopedContext;
@@ -85,6 +87,17 @@ function findMatchingAction(
         }
     }
     return null;
+}
+
+function mergeExcludes(
+    ...sets: Array<Set<string> | undefined>
+): Set<string> | undefined {
+    const merged = new Set<string>();
+    for (const s of sets) {
+        if (!s) continue;
+        for (const v of s) merged.add(v);
+    }
+    return merged.size > 0 ? merged : undefined;
 }
 
 export type KeybindingActionHandler = (actionId: ActionId) => void;
@@ -118,6 +131,7 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
 
     useEffect(() => {
         const excludeParamEditor = new Set(["paramEditorSelect"]);
+        const excludeQuickSearch = new Set(["quickSearch"]);
 
         function onKeyDown(e: KeyboardEvent) {
             if (e.repeat) return;
@@ -126,6 +140,9 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
 
             // 快捷键设置对话框打开时，阻塞所有快捷键
             if (document.body.hasAttribute("data-keybindings-dialog-open")) return;
+
+            // Quick Search 打开时，交给弹窗自身输入框处理（避免 ↑/↓ 与时间轴缩放冲突）
+            if (document.body.hasAttribute("data-quick-search-open")) return;
 
             // PianoRoll scroller 内的快捷键由其自身 onKeyDown 处理，不拦截
             const active = document.activeElement as HTMLElement | null;
@@ -139,7 +156,9 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
                 if (
                     matchedAction?.startsWith("pianoRoll.") &&
                     matchedAction !== "pianoRoll.shiftParamUp" &&
-                    matchedAction !== "pianoRoll.shiftParamDown"
+                    matchedAction !== "pianoRoll.shiftParamDown" &&
+                    matchedAction !== "pianoRoll.shiftParamUpSelection" &&
+                    matchedAction !== "pianoRoll.shiftParamDownSelection"
                 ) {
                     return;
                 }
@@ -156,7 +175,11 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
                         return; // PianoRoll 会处理
                     }
                     // 工具不是 select，排除 paramEditorSelect 操作后重新查找
-                    const fallbackAction = findMatchingAction(e, keybindingsRef.current, excludeParamEditor);
+                    const fallbackAction = findMatchingAction(
+                        e,
+                        keybindingsRef.current,
+                        mergeExcludes(excludeParamEditor, excludeQuickSearch),
+                    );
                     if (fallbackAction) {
                         e.preventDefault();
                         e.stopPropagation();
@@ -177,7 +200,9 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
             const actionId = findMatchingAction(
                 e,
                 keybindingsRef.current,
-                inPianoRoll ? undefined : excludeParamEditor,
+                inPianoRoll
+                    ? excludeQuickSearch
+                    : mergeExcludes(excludeParamEditor, excludeQuickSearch),
             );
             if (!actionId) return;
 

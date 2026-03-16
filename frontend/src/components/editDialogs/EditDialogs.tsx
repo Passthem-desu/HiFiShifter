@@ -2,17 +2,29 @@ import { useState, useEffect } from "react";
 import { Dialog, Flex, Text, TextField, Button, Select } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
 import type { ScaleKey } from "../../utils/musicalScales";
+import { SCALE_KEYS, SCALE_LABELS } from "../../utils/musicalScales";
+import { useAppSelector } from "../../app/hooks";
+import {
+    isModifierActive,
+    selectKeybinding,
+} from "../../features/keybindings/keybindingsSlice";
 
 interface Props {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onConfirm?: (cents: number) => void;
+    defaultSmoothness?: number;
+    onConfirm?: (cents: number, edgeSmoothnessPercent: number) => void;
 }
 
-export function TransposeCentsDialog({ open, onOpenChange, onConfirm }: Props) {
+export function TransposeCentsDialog({ open, onOpenChange, defaultSmoothness = 0, onConfirm }: Props) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [cents, setCents] = useState("0");
+    const [smoothness, setSmoothness] = useState(String(Math.round(defaultSmoothness)));
+
+    useEffect(() => {
+        if (open) setSmoothness(String(Math.round(defaultSmoothness)));
+    }, [open, defaultSmoothness]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -29,12 +41,33 @@ export function TransposeCentsDialog({ open, onOpenChange, onConfirm }: Props) {
                             style={{ flex: 1 }}
                         />
                     </Flex>
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("edge_smoothness")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={smoothness}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSmoothness(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                        <Text size="1" color="gray">%</Text>
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(Number(cents) || 0); onOpenChange(false); }}>
+                    <Button
+                        onClick={() => {
+                            onConfirm?.(
+                                Number(cents) || 0,
+                                Math.max(0, Math.min(100, Number(smoothness) || 0)),
+                            );
+                            onOpenChange(false);
+                        }}
+                    >
                         {tAny("ok")}
                     </Button>
                 </Flex>
@@ -47,20 +80,39 @@ interface TransposeDegreesProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     defaultScale?: ScaleKey;
-    onConfirm?: (degrees: number, scale: ScaleKey) => void;
+    defaultUseProjectScale?: boolean;
+    projectScaleLabel?: string;
+    defaultSmoothness?: number;
+    onConfirm?: (
+        degrees: number,
+        scaleValue: string,
+        edgeSmoothnessPercent: number,
+    ) => void;
 }
 
-export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C", onConfirm }: TransposeDegreesProps) {
+export function TransposeDegreesDialog({
+    open,
+    onOpenChange,
+    defaultScale = "C",
+    defaultUseProjectScale = true,
+    projectScaleLabel,
+    defaultSmoothness = 0,
+    onConfirm,
+}: TransposeDegreesProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [degrees, setDegrees] = useState("3");
-    const [scale, setScale] = useState<ScaleKey>(defaultScale);
+    const [scaleValue, setScaleValue] = useState<string>(
+        defaultUseProjectScale ? "__project__" : defaultScale,
+    );
+    const [smoothness, setSmoothness] = useState(String(Math.round(defaultSmoothness)));
 
     useEffect(() => {
         if (open) {
-            setScale(defaultScale);
+            setScaleValue(defaultUseProjectScale ? "__project__" : defaultScale);
+            setSmoothness(String(Math.round(defaultSmoothness)));
         }
-    }, [open, defaultScale]);
+    }, [open, defaultScale, defaultSmoothness, defaultUseProjectScale]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -68,7 +120,8 @@ export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C",
                 <Dialog.Title>{tAny("menu_transpose_degrees")}</Dialog.Title>
                 <Flex direction="column" gap="3" mt="3">
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 80 }}>{tAny("transpose_degrees_amount")}</Text>                        <TextField.Root
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("transpose_degrees_amount")}</Text>
+                        <TextField.Root
                             size="2"
                             type="number"
                             value={degrees}
@@ -76,13 +129,51 @@ export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C",
                             style={{ flex: 1 }}
                         />
                     </Flex>
-                    {/* base scale is global and available in the top toolbar; removed from dialog */}
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
+                        <Select.Root value={scaleValue} size="2" onValueChange={setScaleValue}>
+                            <Select.Trigger style={{ flex: 1 }} />
+                            <Select.Content>
+                                <Select.Item value="__project__">
+                                    {projectScaleLabel ?? tAny("project_scale_generic")}
+                                </Select.Item>
+                                <Select.Separator />
+                                {SCALE_KEYS.map((k) => (
+                                    <Select.Item key={k} value={k}>
+                                        {SCALE_LABELS[k]}
+                                    </Select.Item>
+                                ))}
+                            </Select.Content>
+                        </Select.Root>
+                    </Flex>
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("edge_smoothness")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={smoothness}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSmoothness(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                        <Text size="1" color="gray">%</Text>
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(Number(degrees) || 0, scale); onOpenChange(false); }}>
+                    <Button
+                        onClick={() => {
+                            onConfirm?.(
+                                Number(degrees) || 0,
+                                scaleValue,
+                                Math.max(0, Math.min(100, Number(smoothness) || 0)),
+                            );
+                            onOpenChange(false);
+                        }}
+                    >
                         {tAny("ok")}
                     </Button>
                 </Flex>
@@ -94,13 +185,19 @@ export function TransposeDegreesDialog({ open, onOpenChange, defaultScale = "C",
 interface SetPitchProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onConfirm?: (midiNote: number) => void;
+    defaultSmoothness?: number;
+    onConfirm?: (midiNote: number, edgeSmoothnessPercent: number) => void;
 }
 
-export function SetPitchDialog({ open, onOpenChange, onConfirm }: SetPitchProps) {
+export function SetPitchDialog({ open, onOpenChange, defaultSmoothness = 0, onConfirm }: SetPitchProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [note, setNote] = useState("60"); // C4
+    const [smoothness, setSmoothness] = useState(String(Math.round(defaultSmoothness)));
+
+    useEffect(() => {
+        if (open) setSmoothness(String(Math.round(defaultSmoothness)));
+    }, [open, defaultSmoothness]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -117,12 +214,33 @@ export function SetPitchDialog({ open, onOpenChange, onConfirm }: SetPitchProps)
                             style={{ flex: 1 }}
                         />
                     </Flex>
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 100 }}>{tAny("edge_smoothness")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={smoothness}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSmoothness(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                        <Text size="1" color="gray">%</Text>
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(Number(note) || 60); onOpenChange(false); }}>
+                    <Button
+                        onClick={() => {
+                            onConfirm?.(
+                                Number(note) || 60,
+                                Math.max(0, Math.min(100, Number(smoothness) || 0)),
+                            );
+                            onOpenChange(false);
+                        }}
+                    >
                         {tAny("ok")}
                     </Button>
                 </Flex>
@@ -134,13 +252,21 @@ export function SetPitchDialog({ open, onOpenChange, onConfirm }: SetPitchProps)
 interface SmoothProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    defaultSmoothness?: number;
     onConfirm?: (strength: number) => void;
 }
 
-export function SmoothDialog({ open, onOpenChange, onConfirm }: SmoothProps) {
+export function SmoothDialog({ open, onOpenChange, defaultSmoothness = 50, onConfirm }: SmoothProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
-    const [strength, setStrength] = useState("50");
+    const [strength, setStrength] = useState(50);
+    const paramFineAdjustKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.paramFineAdjust"),
+    );
+
+    useEffect(() => {
+        if (open) setStrength(Math.max(0, Math.min(100, Math.round(defaultSmoothness))));
+    }, [open, defaultSmoothness]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -148,22 +274,42 @@ export function SmoothDialog({ open, onOpenChange, onConfirm }: SmoothProps) {
                 <Dialog.Title>{tAny("menu_smooth")}</Dialog.Title>
                 <Flex direction="column" gap="3" mt="3">
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 100 }}>{tAny("dlg_strength")}</Text>
-                        <TextField.Root
-                            size="2"
-                            type="number"
-                            value={strength}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setStrength(e.target.value)}
+                        <Text size="2" style={{ minWidth: 72 }}>{tAny("dlg_smoothness")}</Text>
+                        <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={Math.round(strength)}
+                            onWheel={(e) => {
+                                e.preventDefault();
+                                const fine = isModifierActive(
+                                    paramFineAdjustKb,
+                                    e.nativeEvent,
+                                );
+                                const step = fine ? 1 : 5;
+                                const dir = e.deltaY < 0 ? 1 : -1;
+                                const next = Math.max(
+                                    0,
+                                    Math.min(100, Math.round(strength) + dir * step),
+                                );
+                                setStrength(next);
+                            }}
+                            onChange={(e) => {
+                                setStrength(Number(e.currentTarget.value) || 0);
+                            }}
                             style={{ flex: 1 }}
                         />
-                        <Text size="1" color="gray">%</Text>
+                        <Text size="1" style={{ minWidth: 40, textAlign: "right" }}>
+                            {Math.round(strength)}%
+                        </Text>
                     </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(Number(strength) || 50); onOpenChange(false); }}>
+                    <Button onClick={() => { onConfirm?.(Math.max(0, Math.min(100, Math.round(strength)))); onOpenChange(false); }}>
                         {tAny("ok")}
                     </Button>
                 </Flex>
@@ -278,10 +424,12 @@ interface QuantizeProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     defaultScale?: ScaleKey;
+    defaultUseProjectScale?: boolean;
+    projectScaleLabel?: string;
     defaultToleranceCents?: number;
     onConfirm?: (
         unit: "semitone" | "scale",
-        scale: ScaleKey,
+        scaleValue: string,
         toleranceCents: number,
     ) => void;
 }
@@ -290,21 +438,25 @@ export function QuantizeDialog({
     open,
     onOpenChange,
     defaultScale = "C",
+    defaultUseProjectScale = true,
+    projectScaleLabel,
     defaultToleranceCents = 0,
     onConfirm,
 }: QuantizeProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [unit, setUnit] = useState<"semitone" | "scale">("semitone");
-    const [scale, setScale] = useState<ScaleKey>(defaultScale);
+    const [scaleValue, setScaleValue] = useState<string>(
+        defaultUseProjectScale ? "__project__" : defaultScale,
+    );
     const [toleranceCents, setToleranceCents] = useState<string>(String(defaultToleranceCents));
 
     useEffect(() => {
         if (open) {
-            setScale(defaultScale);
+            setScaleValue(defaultUseProjectScale ? "__project__" : defaultScale);
             setToleranceCents(String(defaultToleranceCents));
         }
-    }, [open, defaultScale, defaultToleranceCents]);
+    }, [open, defaultScale, defaultToleranceCents, defaultUseProjectScale]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -321,7 +473,25 @@ export function QuantizeDialog({
                             </Select.Content>
                         </Select.Root>
                     </Flex>
-                    {/* base scale is taken from project toolbar; removed from dialog */}
+                    {unit === "scale" && (
+                        <Flex align="center" gap="2">
+                            <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
+                            <Select.Root value={scaleValue} size="2" onValueChange={setScaleValue}>
+                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Content>
+                                    <Select.Item value="__project__">
+                                        {projectScaleLabel ?? tAny("project_scale_generic")}
+                                    </Select.Item>
+                                    <Select.Separator />
+                                    {SCALE_KEYS.map((k) => (
+                                        <Select.Item key={k} value={k}>
+                                            {SCALE_LABELS[k]}
+                                        </Select.Item>
+                                    ))}
+                                </Select.Content>
+                            </Select.Root>
+                        </Flex>
+                    )}
                     <Flex align="center" gap="2">
                         <Text size="2" style={{ minWidth: 80 }}>{tAny("pitch_snap_tolerance")}</Text>
                         <TextField.Root
@@ -339,7 +509,7 @@ export function QuantizeDialog({
                     </Dialog.Close>
                     <Button onClick={() => {
                         const parsed = Math.abs(Math.round(Number(toleranceCents) || 0));
-                        onConfirm?.(unit, scale, parsed);
+                        onConfirm?.(unit, scaleValue, parsed);
                         onOpenChange(false);
                     }}>
                         {tAny("ok")}
@@ -354,20 +524,39 @@ interface MeanQuantizeProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     defaultScale?: ScaleKey;
-    onConfirm?: (unit: "semitone" | "scale", scale: ScaleKey) => void;
+    defaultUseProjectScale?: boolean;
+    projectScaleLabel?: string;
+    defaultToleranceCents?: number;
+    onConfirm?: (
+        unit: "semitone" | "scale",
+        scaleValue: string,
+        toleranceCents: number,
+    ) => void;
 }
 
-export function MeanQuantizeDialog({ open, onOpenChange, defaultScale = "C", onConfirm }: MeanQuantizeProps) {
+export function MeanQuantizeDialog({
+    open,
+    onOpenChange,
+    defaultScale = "C",
+    defaultUseProjectScale = true,
+    projectScaleLabel,
+    defaultToleranceCents = 0,
+    onConfirm,
+}: MeanQuantizeProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const [unit, setUnit] = useState<"semitone" | "scale">("semitone");
-    const [scale, setScale] = useState<ScaleKey>(defaultScale);
+    const [scaleValue, setScaleValue] = useState<string>(
+        defaultUseProjectScale ? "__project__" : defaultScale,
+    );
+    const [toleranceCents, setToleranceCents] = useState<string>(String(defaultToleranceCents));
 
     useEffect(() => {
         if (open) {
-            setScale(defaultScale);
+            setScaleValue(defaultUseProjectScale ? "__project__" : defaultScale);
+            setToleranceCents(String(defaultToleranceCents));
         }
-    }, [open, defaultScale]);
+    }, [open, defaultScale, defaultToleranceCents, defaultUseProjectScale]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -384,13 +573,45 @@ export function MeanQuantizeDialog({ open, onOpenChange, defaultScale = "C", onC
                             </Select.Content>
                         </Select.Root>
                     </Flex>
-                    {/* base scale is global and controlled from the top toolbar */}
+                    {unit === "scale" && (
+                        <Flex align="center" gap="2">
+                            <Text size="2" style={{ minWidth: 80 }}>{tAny("base_scale")}</Text>
+                            <Select.Root value={scaleValue} size="2" onValueChange={setScaleValue}>
+                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Content>
+                                    <Select.Item value="__project__">
+                                        {projectScaleLabel ?? tAny("project_scale_generic")}
+                                    </Select.Item>
+                                    <Select.Separator />
+                                    {SCALE_KEYS.map((k) => (
+                                        <Select.Item key={k} value={k}>
+                                            {SCALE_LABELS[k]}
+                                        </Select.Item>
+                                    ))}
+                                </Select.Content>
+                            </Select.Root>
+                        </Flex>
+                    )}
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 80 }}>{tAny("pitch_snap_tolerance")}</Text>
+                        <TextField.Root
+                            size="2"
+                            type="number"
+                            value={toleranceCents}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setToleranceCents(e.target.value)}
+                            style={{ flex: 1 }}
+                        />
+                    </Flex>
                 </Flex>
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
                         <Button variant="soft" color="gray">{tAny("cancel")}</Button>
                     </Dialog.Close>
-                    <Button onClick={() => { onConfirm?.(unit, scale); onOpenChange(false); }}>
+                    <Button onClick={() => {
+                        const parsed = Math.abs(Math.round(Number(toleranceCents) || 0));
+                        onConfirm?.(unit, scaleValue, parsed);
+                        onOpenChange(false);
+                    }}>
                         {tAny("ok")}
                     </Button>
                 </Flex>

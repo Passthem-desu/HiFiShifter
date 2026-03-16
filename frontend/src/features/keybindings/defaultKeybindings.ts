@@ -8,7 +8,6 @@ import type { ActionId, ActionMeta, KeybindingMap } from "./types";
 export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     // 模式切换
     "mode.toggle": { key: "tab" },
-    "mode.toggleReverse": { key: "tab", shift: true },
     "mode.selectTool": { key: "f7" },
     "mode.drawTool": { key: "f8" },
     "mode.lineTool": { key: "f9" },
@@ -17,6 +16,10 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "playback.toggle": { key: "space" },
     "playback.stop": { key: "enter" }, // Play/Stop: 播放/停止（停止时回到起始位置）
     "playback.focusCursor": { key: "\\" }, // 聚焦播放光标
+    "playback.seekLeft": { key: "arrowleft" },
+    "playback.seekRight": { key: "arrowright" },
+    "timeline.zoomIn": { key: "arrowup" },
+    "timeline.zoomOut": { key: "arrowdown" },
 
     // 编辑
     "edit.undo": { key: "z", ctrl: true },
@@ -58,6 +61,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "pianoRoll.paste": { key: "v", ctrl: true },
     "pianoRoll.shiftParamUp": { key: "=" },
     "pianoRoll.shiftParamDown": { key: "-" },
+    "pianoRoll.shiftParamUpSelection": { key: "]" },
+    "pianoRoll.shiftParamDownSelection": { key: "[" },
 
     // 修饰键行为
     "modifier.clipSlipEdit": { key: "alt", modifierOnly: true, alt: true },
@@ -75,6 +80,12 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
         shift: true,
     },
     "modifier.scrollVertical": { key: "alt", modifierOnly: true, alt: true },
+    "modifier.paramMorph": { key: "alt", modifierOnly: true, alt: true },
+    // 目前微调操作有逻辑问题，没法完全实现，暂时禁用快捷键
+    // "modifier.paramFineAdjust": { key: "control", modifierOnly: true, ctrl: true },
+    "modifier.paramFineAdjust": { key: "__none__", modifierOnly: true },
+    "modifier.vibratoAmplitudeAdjust": { key: "__none__", modifierOnly: true },
+    "modifier.vibratoFrequencyAdjust": { key: "alt", modifierOnly: true, alt: true },
 
     // 快速搜索
     "quickSearch.open": { key: "f", ctrl: true },
@@ -90,16 +101,33 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
  */
 export const ACTION_META: Record<ActionId, ActionMeta> = {
     "mode.toggle": { labelKey: "kb_mode_toggle", group: "mode" },
-    "mode.toggleReverse": { labelKey: "kb_mode_toggle_reverse", group: "mode" },
     "mode.selectTool": { labelKey: "kb_mode_select_tool", group: "mode" },
     "mode.drawTool": { labelKey: "kb_mode_draw_tool", group: "mode" },
-    "mode.lineTool": { labelKey: "kb_mode_line_tool", group: "mode" },
+    "mode.lineTool": { labelKey: "kb_mode_vibrato_tool", group: "mode" },
 
     "playback.toggle": { labelKey: "kb_playback_toggle", group: "playback" },
     "playback.stop": { labelKey: "kb_playback_stop", group: "playback" },
     "playback.focusCursor": {
         labelKey: "kb_playback_focus_cursor",
         group: "playback",
+    },
+    "playback.seekLeft": {
+        labelKey: "kb_playback_seek_left",
+        group: "playback",
+    },
+    "playback.seekRight": {
+        labelKey: "kb_playback_seek_right",
+        group: "playback",
+    },
+    "timeline.zoomIn": {
+        labelKey: "kb_timeline_zoom_in",
+        group: "playback",
+        scopedContext: "timelineFocus",
+    },
+    "timeline.zoomOut": {
+        labelKey: "kb_timeline_zoom_out",
+        group: "playback",
+        scopedContext: "timelineFocus",
     },
 
     "edit.undo": { labelKey: "kb_edit_undo", group: "edit" },
@@ -182,6 +210,14 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
         labelKey: "kb_pianoroll_shift_param_down",
         group: "pianoRoll",
     },
+    "pianoRoll.shiftParamUpSelection": {
+        labelKey: "kb_pianoroll_shift_param_up_selection",
+        group: "pianoRoll",
+    },
+    "pianoRoll.shiftParamDownSelection": {
+        labelKey: "kb_pianoroll_shift_param_down_selection",
+        group: "pianoRoll",
+    },
 
     "modifier.clipSlipEdit": {
         labelKey: "kb_modifier_slip_edit",
@@ -215,6 +251,26 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     },
     "modifier.scrollVertical": {
         labelKey: "kb_modifier_scroll_v",
+        group: "modifier",
+        modifierOperationType: "wheel",
+    },
+    "modifier.paramMorph": {
+        labelKey: "kb_modifier_param_morph",
+        group: "modifier",
+        modifierOperationType: "drag",
+    },
+    "modifier.paramFineAdjust": {
+        labelKey: "kb_modifier_param_fine_adjust",
+        group: "modifier",
+        modifierOperationType: "drag",
+    },
+    "modifier.vibratoAmplitudeAdjust": {
+        labelKey: "kb_modifier_vibrato_amplitude_adjust",
+        group: "modifier",
+        modifierOperationType: "wheel",
+    },
+    "modifier.vibratoFrequencyAdjust": {
+        labelKey: "kb_modifier_vibrato_frequency_adjust",
         group: "modifier",
         modifierOperationType: "wheel",
     },

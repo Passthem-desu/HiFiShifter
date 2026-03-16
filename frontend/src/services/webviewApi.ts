@@ -58,6 +58,7 @@ export const webApi = {
     saveProject: projectApi.saveProject,
     saveProjectAs: projectApi.saveProjectAs,
     setProjectBaseScale: projectApi.setProjectBaseScale,
+    setProjectCustomScale: projectApi.setProjectCustomScale,
     setProjectTimelineSettings: projectApi.setProjectTimelineSettings,
 
     openVocalShifterDialog: projectApi.openVocalShifterDialog,
@@ -99,6 +100,7 @@ export const webApi = {
     getClipLinkedParams: timelineApi.getClipLinkedParams,
     applyClipLinkedParams: timelineApi.applyClipLinkedParams,
     setClipState: timelineApi.setClipState,
+    replaceClipSource: timelineApi.replaceClipSource,
     splitClip: timelineApi.splitClip,
     glueClips: timelineApi.glueClips,
     selectClip: timelineApi.selectClip,

@@ -11,14 +11,41 @@ export const projectApi = {
             dirty: boolean;
             recent: string[];
             base_scale?: string;
+            use_custom_scale?: boolean;
+            custom_scale?: {
+                id: string;
+                name: string;
+                notes: number[];
+            } | null;
             beats_per_bar?: number;
             grid_size?: string;
         }>("get_project_meta"),
 
     setProjectBaseScale: (baseScale: string) =>
-        invoke<{ ok: boolean; project?: { base_scale?: string } }>(
+        invoke<{
+            ok: boolean;
+            project?: {
+                base_scale?: string;
+                use_custom_scale?: boolean;
+                custom_scale?: {
+                    id: string;
+                    name: string;
+                    notes: number[];
+                } | null;
+            };
+        }>(
             "set_project_base_scale",
             baseScale,
+        ),
+
+    setProjectCustomScale: (customScale: {
+        id: string;
+        name: string;
+        notes: number[];
+    }) =>
+        invoke<{ ok: boolean; project?: { custom_scale?: unknown; use_custom_scale?: boolean } }>(
+            "set_project_custom_scale",
+            customScale,
         ),
 
     setProjectTimelineSettings: (beatsPerBar: number, gridSize: string) =>

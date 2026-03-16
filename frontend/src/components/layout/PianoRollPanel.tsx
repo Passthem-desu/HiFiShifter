@@ -9,19 +9,27 @@ import React, {
     useState,
 } from "react";
 import { Flex, Text, Button, Select, Box, IconButton } from "@radix-ui/themes";
-import { EyeOpenIcon, EyeClosedIcon } from "@radix-ui/react-icons";
+import {
+    CursorArrowIcon,
+    EyeOpenIcon,
+    EyeClosedIcon,
+    Pencil1Icon,
+    CheckIcon,
+} from "@radix-ui/react-icons";
 
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
 import {
     setEditParam,
+    setEdgeSmoothnessPercent,
     setTrackStateRemote,
     togglePitchSnap,
     setScaleHighlightMode,
     toggleClipboardPreview,
     toggleLockParamLines,
     cycleDragDirection,
+    setToolMode,
     persistUiSettings,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
@@ -30,9 +38,16 @@ import { getWaveformColors } from "../../theme/waveformColors";
 import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
 import type { ParamFramesPayload } from "../../types/api";
-import { snapToScale, snapToSemitone, SCALE_NOTES } from "../../utils/musicalScales";
+import {
+    degreeInputToScaleSteps,
+    isScaleKey,
+    snapToScale,
+    snapToSemitone,
+    transposePitchByScaleSteps,
+} from "../../utils/musicalScales";
+import { computeAnchoredHorizontalZoom } from "../../utils/horizontalZoom";
 import { isModifierActive } from "../../features/keybindings/keybindingsSlice";
-import type { ScaleKey } from "../../utils/musicalScales";
+import type { ScaleLike } from "../../utils/musicalScales";
 import {
     pasteReaperClipboard,
     pasteVocalShifterClipboard,
@@ -55,11 +70,13 @@ import { usePianoRollData } from "./pianoRoll/usePianoRollData";
 import { useClipsPeaksForPianoRoll } from "./pianoRoll/useClipsPeaksForPianoRoll";
 import { usePianoRollInteractions } from "./pianoRoll/usePianoRollInteractions";
 import { useLiveParamEditing } from "./pianoRoll/useLiveParamEditing";
+import { getParamShiftStep } from "./pianoRoll/paramShiftStep";
 import {
     getActiveSecondaryParamId,
     toggleSecondaryParamVisibility,
 } from "./pianoRoll/secondaryOverlaySelection";
 import type {
+    ParamMorphOverlay,
     ParamName,
     StrokeMode,
     StrokePoint,
@@ -84,6 +101,13 @@ export const PianoRollPanel: React.FC = () => {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
     const s = useAppSelector((state: RootState) => state.session);
+    const effectiveProjectScale = useMemo<ScaleLike>(
+        () =>
+            s.project.useCustomScale && s.project.customScale
+                ? s.project.customScale.notes
+                : s.project.baseScale,
+        [s.project.baseScale, s.project.customScale, s.project.useCustomScale],
+    );
     const editParam = s.editParam as ParamName;
     // pitchSnapOpen 已在顶部工具栏 JSX 内声明和使用，无需重复声明
     const pianoRollCopyKb = useAppSelector((state) =>
@@ -101,9 +125,26 @@ export const PianoRollPanel: React.FC = () => {
     const scrollVerticalKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.scrollVertical"),
     );
+    const paramMorphKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.paramMorph"),
+    );
+    const paramFineAdjustKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.paramFineAdjust"),
+    );
+    const stretchKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.clipStretch"),
+    );
+    const vibratoAmplitudeAdjustKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.vibratoAmplitudeAdjust"),
+    );
+    const vibratoFrequencyAdjustKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.vibratoFrequencyAdjust"),
+    );
     const mergedKeybindings = useAppSelector(selectMergedKeybindings);
     // 是否按住切换吸附的修饰键（临时切换吸附时用于高亮显示）
     const [snapToggleHeld, setSnapToggleHeld] = useState(false);
+    // 仅在参数编辑实际操作期间（选择拖拽/绘制）参与临时吸附视觉切换
+    const [snapGestureActive, setSnapGestureActive] = useState(false);
 
     useEffect(() => {
         const kb = mergedKeybindings["modifier.clipNoSnap"];
@@ -129,6 +170,11 @@ export const PianoRollPanel: React.FC = () => {
         [themeMode],
     );
 
+    const effectivePitchSnapVisual =
+        snapGestureActive && snapToggleHeld
+            ? !s.pitchSnapEnabled
+            : s.pitchSnapEnabled;
+
     // Task 6.3: 集成 useAsyncPitchRefresh Hook
     const asyncRefresh = useAsyncPitchRefresh();
     const [showSuccessMessage] = useState(false);
@@ -146,6 +192,46 @@ export const PianoRollPanel: React.FC = () => {
     const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(
         null,
     );
+    const [drawToolMenuOpen, setDrawToolMenuOpen] = useState(false);
+    const drawToolMenuRef = useRef<HTMLDivElement | null>(null);
+
+    const currentDrawTool = s.drawToolMode === "line" ? "vibrato" : s.drawToolMode;
+    const drawToolButtonTitle =
+        currentDrawTool === "vibrato"
+              ? tAny("vibrato_draw_tool")
+              : tAny("draw_tool");
+    const activeDragDirection =
+        s.toolMode === "select"
+            ? s.selectDragDirection
+            : currentDrawTool === "draw"
+              ? s.drawDragDirection
+              : s.lineVibratoDragDirection;
+    const activeDragDirectionTool =
+        s.toolMode === "select"
+            ? ("select" as const)
+            : currentDrawTool === "draw"
+              ? ("draw" as const)
+              : ("vibrato" as const);
+
+    useEffect(() => {
+        if (!drawToolMenuOpen) return;
+        const onPointerDown = (e: PointerEvent) => {
+            const target = e.target as Node | null;
+            if (drawToolMenuRef.current?.contains(target)) return;
+            setDrawToolMenuOpen(false);
+        };
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                setDrawToolMenuOpen(false);
+            }
+        };
+        window.addEventListener("pointerdown", onPointerDown, true);
+        window.addEventListener("keydown", onKeyDown, true);
+        return () => {
+            window.removeEventListener("pointerdown", onPointerDown, true);
+            window.removeEventListener("keydown", onKeyDown, true);
+        };
+    }, [drawToolMenuOpen]);
 
     const handleOpenMidiDialog = useCallback(async () => {
         try {
@@ -184,6 +270,10 @@ export const PianoRollPanel: React.FC = () => {
     const scrollLeftRef = useRef(scrollLeft);
     const pxPerBeatRef = useRef(pxPerBeat);
     const pxPerSecRef = useRef(pxPerSec);
+    const keyboardZoomPendingRef = useRef<{
+        nextScale: number;
+        nextScrollLeft: number;
+    } | null>(null);
 
     // BPM 变化时，按比例调�?scrollLeft，保持视口中心点的秒数不�?
     // scrollLeft_new = scrollLeft_old × (bpm_old / bpm_new)
@@ -207,6 +297,65 @@ export const PianoRollPanel: React.FC = () => {
         pxPerSecRef.current = pxPerSec;
         localStorage.setItem("hifishifter.paramPxPerSec", String(pxPerSec));
     }, [pxPerBeat, pxPerSec]);
+
+    useLayoutEffect(() => {
+        const pending = keyboardZoomPendingRef.current;
+        if (!pending) return;
+        if (Math.abs(pending.nextScale - pxPerSec) > 1e-9) return;
+        const scroller = scrollerRef.current;
+        if (!scroller) return;
+
+        keyboardZoomPendingRef.current = null;
+        scroller.scrollLeft = pending.nextScrollLeft;
+        syncScrollLeft(scroller);
+    }, [pxPerSec]);
+
+    useEffect(() => {
+        function onZoomFocused(e: Event) {
+            const active = document.activeElement as HTMLElement | null;
+            const inPianoRoll =
+                active?.hasAttribute("data-piano-roll-scroller") ||
+                active?.closest?.("[data-piano-roll-scroller]") ||
+                document.body.getAttribute("data-hs-focus-window") === "pianoRoll";
+            if (!inPianoRoll) return;
+
+            const factor = Number(
+                (e as CustomEvent<{ factor?: number }>).detail?.factor ?? 1,
+            );
+            if (!Number.isFinite(factor) || factor <= 0) return;
+
+            const scroller = scrollerRef.current;
+            if (!scroller) return;
+
+            const zoom = computeAnchoredHorizontalZoom({
+                currentScale: pxPerSecRef.current,
+                factor,
+                minScale: MIN_PX_PER_SEC,
+                maxScale: MAX_PX_PER_SEC,
+                scrollLeft: scroller.scrollLeft,
+                viewportWidth: scroller.clientWidth,
+                anchorSec: Number(s.playheadSec ?? 0) || 0,
+                contentSec: s.projectSec,
+            });
+            if (!zoom) return;
+
+            keyboardZoomPendingRef.current = {
+                nextScale: zoom.nextScale,
+                nextScrollLeft: zoom.nextScrollLeft,
+            };
+            setPxPerSec(zoom.nextScale);
+        }
+
+        window.addEventListener(
+            "hifi:zoomTimelineFocus",
+            onZoomFocused as EventListener,
+        );
+        return () =>
+            window.removeEventListener(
+                "hifi:zoomTimelineFocus",
+                onZoomFocused as EventListener,
+            );
+    }, [s.playheadSec, s.projectSec]);
 
     const setPxPerBeatImmediate = useCallback(
         (next: number) => {
@@ -277,6 +426,19 @@ export const PianoRollPanel: React.FC = () => {
     const [processorStaticValues, setProcessorStaticValues] = useState<
         Record<string, number>
     >({});
+    const currentParamRange = useMemo(() => {
+        if (editParam === "pitch") {
+            return { min: 24, max: 108 };
+        }
+        const desc = processorParamsRef.current.find((d) => d.id === editParam);
+        if (desc?.kind.type === "automation_curve") {
+            return {
+                min: desc.kind.min_value,
+                max: desc.kind.max_value,
+            };
+        }
+        return undefined;
+    }, [editParam, processorParams]);
 
     // 当 algo 变化时，重新抓取参数描述符
     useEffect(() => {
@@ -676,6 +838,8 @@ export const PianoRollPanel: React.FC = () => {
         aBeat: number;
         bBeat: number;
     } | null>(null);
+    const [paramMorphOverlay, setParamMorphOverlay] =
+        useState<ParamMorphOverlay | null>(null);
     const [canvasCursor, setCanvasCursor] = useState<CSSProperties["cursor"]>(
         s.toolMode === "select" ? "default" : "crosshair",
     );
@@ -888,7 +1052,7 @@ export const PianoRollPanel: React.FC = () => {
     // Ensure pitch-snap related changes immediately redraw
     useEffect(() => {
         invalidate();
-    }, [s.pitchSnapEnabled, s.pitchSnapUnit, s.project.baseScale, s.scaleHighlightMode, snapToggleHeld, invalidate]);
+    }, [s.pitchSnapEnabled, s.pitchSnapUnit, effectiveProjectScale, s.scaleHighlightMode, snapToggleHeld, invalidate]);
 
     // 剪贴板预览开关变化时立即重绘
     useEffect(() => {
@@ -928,10 +1092,11 @@ export const PianoRollPanel: React.FC = () => {
                 : null,
             // pitch snap visual helpers
             pitchSnapUnit: s.pitchSnapUnit,
-            projectBaseScale: s.project.baseScale,
+            projectScale: effectiveProjectScale,
             scaleHighlightMode: s.scaleHighlightMode,
             toolMode: s.toolMode,
             snapToggleHeld: snapToggleHeld,
+            paramMorphOverlay,
         });
     };
 
@@ -960,6 +1125,7 @@ export const PianoRollPanel: React.FC = () => {
         canvasRef,
         viewSizeRef,
         selectionRef,
+        selectionUi,
         setSelectionUi,
         setCanvasCursor,
         strokeRef,
@@ -985,6 +1151,11 @@ export const PianoRollPanel: React.FC = () => {
         prVerticalZoomKb,
         scrollHorizontalKb,
         scrollVerticalKb,
+        paramMorphKb,
+        paramStretchKb: stretchKb,
+        vibratoAmplitudeAdjustKb,
+        vibratoFrequencyAdjustKb,
+        paramFineAdjustKb,
         onContextMenu: useCallback((x: number, y: number) => {
             setCtxMenu({ x, y });
         }, []),
@@ -992,15 +1163,24 @@ export const PianoRollPanel: React.FC = () => {
         playheadZoomEnabled: s.playheadZoomEnabled,
         pitchSnapEnabled: s.pitchSnapEnabled,
         pitchSnapUnit: s.pitchSnapUnit,
-        projectBaseScale: s.project.baseScale,
+        projectScale: effectiveProjectScale,
         pitchSnapToleranceCents: s.pitchSnapToleranceCents,
         keybindingMap: mergedKeybindings,
         onEditAction: stableEditAction,
-        dragDirection: s.dragDirection,
-        onCycleDragDirection: useCallback(() => {
-            dispatch(cycleDragDirection());
+        dragDirection: activeDragDirection,
+        onCycleDragDirection: useCallback((tool: "select" | "draw" | "vibrato") => {
+            dispatch(cycleDragDirection(tool));
             void dispatch(persistUiSettings());
         }, [dispatch]),
+        edgeSmoothnessPercent: s.edgeSmoothnessPercent,
+        onMorphOverlayChange: setParamMorphOverlay,
+        currentParamRange,
+        onPitchSnapGestureActiveChange: useCallback(
+            (active: boolean) => {
+                setSnapGestureActive(active);
+            },
+            [],
+        ),
     });
 
     const onScrollerWheelNative = interactions.onScrollerWheelNative;
@@ -1087,6 +1267,10 @@ export const PianoRollPanel: React.FC = () => {
 
     useEffect(() => {
         setCanvasCursor(s.toolMode === "select" ? "default" : "crosshair");
+    }, [s.toolMode]);
+
+    useEffect(() => {
+        setCtxMenu(null);
     }, [s.toolMode]);
 
     // 切换工具时清除选区
@@ -1188,6 +1372,152 @@ export const PianoRollPanel: React.FC = () => {
                 1,
                 200_000,
             );
+
+            const applySelectionEditWithEdgeSmoothing = async (
+                editSelection: (currentSelectionVals: number[]) => number[],
+                smoothnessInput?: number,
+            ) => {
+                const smoothness = clamp(
+                    Number(
+                        smoothnessInput ??
+                            (data?.edgeSmoothnessPercent as number | undefined) ??
+                            s.edgeSmoothnessPercent,
+                    ) || 0,
+                    0,
+                    100,
+                );
+
+                const maxTransitionFrames = Math.floor(frameCount / 2);
+                const transitionFrames =
+                    smoothness > 0 && maxTransitionFrames > 0
+                        ? Math.round((smoothness / 100) * maxTransitionFrames)
+                        : 0;
+                const halfSpan = transitionFrames > 0 ? transitionFrames / 2 : 0;
+                const extend = Math.max(0, Math.ceil(halfSpan));
+
+                const extStart = Math.max(0, startFrame - extend);
+                const extCount = frameCount + Math.max(0, startFrame - extStart) + extend;
+                const selOffset = startFrame - extStart;
+
+                const res = await paramsApi.getParamFrames(
+                    rootTrackId,
+                    editParam,
+                    extStart,
+                    extCount,
+                    1,
+                );
+                if (!res?.ok) return;
+
+                const payload = res as ParamFramesPayload;
+                const beforeDense = (payload.edit ?? []).map((v) => Number(v) || 0);
+                if (beforeDense.length <= 0) return;
+
+                const selEnd = Math.min(beforeDense.length - 1, selOffset + frameCount - 1);
+                if (selOffset < 0 || selOffset >= beforeDense.length || selEnd < selOffset) {
+                    return;
+                }
+                const actualSelLen = selEnd - selOffset + 1;
+                const currentSel = beforeDense.slice(selOffset, selOffset + actualSelLen);
+                const nextSel = editSelection(currentSel);
+
+                const editedDense = beforeDense.slice();
+                for (let i = 0; i < actualSelLen; i += 1) {
+                    editedDense[selOffset + i] = Number(nextSel[i] ?? currentSel[i] ?? 0) || 0;
+                }
+
+                if (smoothness > 0 && transitionFrames > 0) {
+                    const calcMean = (arr: number[]) => {
+                        let sum = 0;
+                        let count = 0;
+                        for (let i = 0; i < actualSelLen; i += 1) {
+                            const v = Number(arr[selOffset + i] ?? 0);
+                            if (editParam === "pitch" && v === 0) continue;
+                            sum += v;
+                            count += 1;
+                        }
+                        return { sum, count };
+                    };
+
+                    const beforeMean = calcMean(beforeDense);
+                    const afterMean = calcMean(editedDense);
+                    const meanDelta =
+                        beforeMean.count > 0 && afterMean.count > 0
+                            ? Math.abs(
+                                  afterMean.sum / afterMean.count -
+                                      beforeMean.sum / beforeMean.count,
+                              )
+                            : 0;
+
+                    let boundaryDelta = 0;
+                    let boundaryCount = 0;
+                    if (selOffset > 0) {
+                        boundaryDelta += Math.abs(
+                            Number(beforeDense[selOffset] ?? 0) -
+                                Number(beforeDense[selOffset - 1] ?? 0),
+                        );
+                        boundaryCount += 1;
+                    }
+                    if (selEnd < beforeDense.length - 1) {
+                        boundaryDelta += Math.abs(
+                            Number(beforeDense[selEnd] ?? 0) -
+                                Number(beforeDense[selEnd + 1] ?? 0),
+                        );
+                        boundaryCount += 1;
+                    }
+                    const boundaryMean = boundaryCount > 0 ? boundaryDelta / boundaryCount : 0;
+                    const changeFactor = clamp(
+                        meanDelta / (meanDelta + boundaryMean + 1e-6),
+                        0,
+                        1,
+                    );
+
+                    if (changeFactor > 0) {
+                        const snapshot = editedDense.slice();
+                        const span = Math.max(1e-9, 2 * halfSpan);
+
+                        if (selOffset > 0) {
+                            const left = Math.max(0, Math.floor(selOffset - halfSpan));
+                            const right = Math.min(editedDense.length - 1, Math.ceil(selOffset + halfSpan));
+                            for (let idx = left; idx <= right; idx += 1) {
+                                const t = clamp((idx - (selOffset - halfSpan)) / span, 0, 1);
+                                const outsideIdx = Math.min(selOffset - 1, idx);
+                                const insideIdx = Math.max(selOffset, idx);
+                                const outsideVal = snapshot[outsideIdx] ?? editedDense[idx];
+                                const insideVal = snapshot[insideIdx] ?? editedDense[idx];
+                                const smoothed = outsideVal + (insideVal - outsideVal) * t;
+                                editedDense[idx] =
+                                    snapshot[idx] +
+                                    (smoothed - snapshot[idx]) * changeFactor;
+                            }
+                        }
+
+                        if (selEnd < editedDense.length - 1) {
+                            const left = Math.max(0, Math.floor(selEnd - halfSpan));
+                            const right = Math.min(editedDense.length - 1, Math.ceil(selEnd + halfSpan));
+                            for (let idx = left; idx <= right; idx += 1) {
+                                const t = clamp((idx - (selEnd - halfSpan)) / span, 0, 1);
+                                const insideIdx = Math.min(selEnd, idx);
+                                const outsideIdx = Math.max(selEnd + 1, idx);
+                                const insideVal = snapshot[insideIdx] ?? editedDense[idx];
+                                const outsideVal = snapshot[outsideIdx] ?? editedDense[idx];
+                                const smoothed = insideVal + (outsideVal - insideVal) * t;
+                                editedDense[idx] =
+                                    snapshot[idx] +
+                                    (smoothed - snapshot[idx]) * changeFactor;
+                            }
+                        }
+                    }
+                }
+
+                await paramsApi.setParamFrames(
+                    rootTrackId,
+                    editParam,
+                    extStart,
+                    editedDense,
+                    true,
+                );
+                bumpRefreshToken();
+            };
 
             switch (op) {
                 case "copy": {
@@ -1308,117 +1638,71 @@ export const PianoRollPanel: React.FC = () => {
                 case "transposeCents": {
                     const cents = Number(data?.cents ?? 0);
                     if (cents === 0) return;
-                    const res = await paramsApi.getParamFrames(
-                        rootTrackId,
-                        editParam,
-                        startFrame,
-                        frameCount,
-                        1,
-                    );
-                    if (!res?.ok) return;
-                    const payload = res as ParamFramesPayload;
-                    const vals = (payload.edit ?? []).map(
-                        (v) => Number(v) || 0,
-                    );
                     const delta = cents / 100;
-                    const result =
-                        editParam === "pitch"
-                            ? vals.map((v) => (v === 0 ? 0 : v + delta))
-                            : vals.map((v) => v + delta);
-                    await paramsApi.setParamFrames(
-                        rootTrackId,
-                        editParam,
-                        startFrame,
-                        result,
-                        true,
+                    await applySelectionEditWithEdgeSmoothing(
+                        (vals) =>
+                            editParam === "pitch"
+                                ? vals.map((v) => (v === 0 ? 0 : v + delta))
+                                : vals.map((v) => v + delta),
+                        Number(data?.edgeSmoothnessPercent),
                     );
-                    bumpRefreshToken();
                     break;
                 }
                 case "transposeDegrees": {
                     const degrees = Number(data?.degrees ?? 0);
-                    const scale = (data?.scale as string) ?? "chromatic";
-                    if (degrees === 0) return;
-                    // project base scale is controlled from toolbar; do not change it here
-                    const res = await paramsApi.getParamFrames(
-                        rootTrackId,
-                        editParam,
-                        startFrame,
-                        frameCount,
-                        1,
+                    const scaleToken = String(data?.scale ?? "__project__");
+                    const scale: ScaleLike =
+                        scaleToken === "__project__"
+                            ? effectiveProjectScale
+                            : (isScaleKey(scaleToken) ? scaleToken : "C");
+                    const degreeSteps = degreeInputToScaleSteps(degrees);
+                    if (degreeSteps === 0) return;
+                    await applySelectionEditWithEdgeSmoothing(
+                        (vals) =>
+                            editParam === "pitch"
+                                ? vals.map((midi) =>
+                                      midi === 0
+                                          ? 0
+                                          : transposePitchByScaleSteps(
+                                                midi,
+                                                degreeSteps,
+                                                scale,
+                                            ),
+                                  )
+                                : vals.map((midi) =>
+                                      transposePitchByScaleSteps(
+                                          midi,
+                                          degreeSteps,
+                                          scale,
+                                      ),
+                                  ),
+                        Number(data?.edgeSmoothnessPercent),
                     );
-                    if (!res?.ok) return;
-                    const payload = res as ParamFramesPayload;
-                    const vals = (payload.edit ?? []).map(
-                        (v) => Number(v) || 0,
-                    );
-                    const scaleNotes =
-                        SCALE_NOTES[scale as ScaleKey] ?? SCALE_NOTES["C"];
-                    const transposed =
-                        editParam === "pitch"
-                            ? vals.map((midi) => {
-                                  if (midi === 0) return 0;
-                                  const semitone = Math.round(midi) % 12;
-                                  const idx = scaleNotes.indexOf(semitone);
-                                  if (idx >= 0) {
-                                      const newIdx = idx + degrees;
-                                      const octShift = Math.floor(
-                                          newIdx / scaleNotes.length,
-                                      );
-                                      const noteIdx =
-                                          ((newIdx % scaleNotes.length) +
-                                              scaleNotes.length) %
-                                          scaleNotes.length;
-                                      return (
-                                          Math.floor(midi / 12) * 12 +
-                                          scaleNotes[noteIdx] +
-                                          octShift * 12 +
-                                          (midi - Math.round(midi))
-                                      );
-                                  }
-                                  return midi + degrees;
-                              })
-                            : vals.map((midi) => {
-                                  const semitone = Math.round(midi) % 12;
-                                  const idx = scaleNotes.indexOf(semitone);
-                                  if (idx >= 0) {
-                                      const newIdx = idx + degrees;
-                                      const octShift = Math.floor(
-                                          newIdx / scaleNotes.length,
-                                      );
-                                      const noteIdx =
-                                          ((newIdx % scaleNotes.length) +
-                                              scaleNotes.length) %
-                                          scaleNotes.length;
-                                      return (
-                                          Math.floor(midi / 12) * 12 +
-                                          scaleNotes[noteIdx] +
-                                          octShift * 12 +
-                                          (midi - Math.round(midi))
-                                      );
-                                  }
-                                  return midi + degrees;
-                              });
-                    await paramsApi.setParamFrames(
-                        rootTrackId,
-                        editParam,
-                        startFrame,
-                        transposed,
-                        true,
-                    );
-                    bumpRefreshToken();
                     break;
                 }
                 case "setPitch": {
                     const midiNote = Number(data?.midiNote ?? 60);
-                    await paramsApi.setParamFrames(
-                        rootTrackId,
-                        editParam,
-                        startFrame,
-                        Array.from({ length: frameCount }, () => midiNote),
-                        true,
+                    await applySelectionEditWithEdgeSmoothing(
+                        (vals) =>
+                            editParam === "pitch"
+                                ? vals.map((v) => (v === 0 ? 0 : midiNote))
+                                : vals.map(() => midiNote),
+                        Number(data?.edgeSmoothnessPercent),
                     );
-                    bumpRefreshToken();
+                    break;
+                }
+                case "shiftParamUpSelection":
+                case "shiftParamDownSelection": {
+                    const descriptor = processorParamsRef.current.find(
+                        (param) => param.id === editParam,
+                    );
+                    const step = getParamShiftStep(editParam, descriptor);
+                    const delta =
+                        op === "shiftParamUpSelection" ? step : -step;
+                    await applySelectionEditWithEdgeSmoothing(
+                        (vals) => vals.map((v) => v + delta),
+                        Number(data?.edgeSmoothnessPercent),
+                    );
                     break;
                 }
                 case "smooth": {
@@ -1528,7 +1812,11 @@ export const PianoRollPanel: React.FC = () => {
                 }
                 case "quantize": {
                     const unit = (data?.unit as string) ?? "semitone";
-                    const scale = (data?.scale as string) ?? "chromatic";
+                    const scaleToken = String(data?.scale ?? "__project__");
+                    const scale: ScaleLike =
+                        scaleToken === "__project__"
+                            ? effectiveProjectScale
+                            : (isScaleKey(scaleToken) ? scaleToken : "C");
                     const toleranceCents = Math.abs(
                         Math.round(Number(data?.toleranceCents ?? 0) || 0),
                     );
@@ -1564,7 +1852,7 @@ export const PianoRollPanel: React.FC = () => {
                                       : (() => {
                                           const snapped = snapToScale(
                                               v,
-                                              scale as ScaleKey,
+                                              scale,
                                           );
                                           return Math.abs(v - snapped) <= toleranceSemitone
                                               ? v
@@ -1583,7 +1871,15 @@ export const PianoRollPanel: React.FC = () => {
                 }
                 case "meanQuantize": {
                     const unit = (data?.unit as string) ?? "semitone";
-                    const scale = (data?.scale as string) ?? "chromatic";
+                    const scaleToken = String(data?.scale ?? "__project__");
+                    const scale: ScaleLike =
+                        scaleToken === "__project__"
+                            ? effectiveProjectScale
+                            : (isScaleKey(scaleToken) ? scaleToken : "C");
+                    const toleranceCents = Math.abs(
+                        Math.round(Number(data?.toleranceCents ?? 0) || 0),
+                    );
+                    const toleranceSemitone = toleranceCents / 100;
                     const res = await paramsApi.getParamFrames(
                         rootTrackId,
                         editParam,
@@ -1608,12 +1904,23 @@ export const PianoRollPanel: React.FC = () => {
                     const quantizedAvg =
                         unit === "semitone"
                             ? snapToSemitone(avg)
-                            : snapToScale(avg, scale as ScaleKey);
+                            : snapToScale(avg, scale);
                     const delta = quantizedAvg - avg;
                     const result =
                         editParam === "pitch"
-                            ? vals.map((v) => (v === 0 ? 0 : v + delta))
-                            : vals.map((v) => v + delta);
+                            ? vals.map((v) => {
+                                  if (v === 0) return 0;
+                                  const moved = v + delta;
+                                  return Math.abs(moved - v) <= toleranceSemitone
+                                      ? v
+                                      : moved + ((v - moved) > 0 ? 1 : -1) * toleranceSemitone;
+                              })
+                            : vals.map((v) => {
+                                  const moved = v + delta;
+                                  return Math.abs(moved - v) <= toleranceSemitone
+                                      ? v
+                                      : moved + ((v - moved) > 0 ? 1 : -1) * toleranceSemitone;
+                              });
                     await paramsApi.setParamFrames(
                         rootTrackId,
                         editParam,
@@ -1632,6 +1939,8 @@ export const PianoRollPanel: React.FC = () => {
             paramView?.framePeriodMs,
             secPerBeat,
             dynamicProjectSec,
+            s.edgeSmoothnessPercent,
+            effectiveProjectScale,
             bumpRefreshToken,
             invalidate,
         ],
@@ -1689,6 +1998,17 @@ export const PianoRollPanel: React.FC = () => {
     // Pitch Snap 设置弹窗状态
     const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
 
+    const vibratoToolIcon = (
+        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1.5 7.5C3 7.5 3 3.5 4.5 3.5C6 3.5 6 11.5 7.5 11.5C9 11.5 9 3.5 10.5 3.5C12 3.5 12 7.5 13.5 7.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+    );
+
+    const currentDrawToolIcon =
+        currentDrawTool === "vibrato"
+              ? vibratoToolIcon
+              : <Pencil1Icon />;
+
     return (
         <Flex
             direction="column"
@@ -1707,20 +2027,150 @@ export const PianoRollPanel: React.FC = () => {
                     </Text>
                     {/* 音高吸附和剪贴板预览按钮，紧邻 param_editor 右侧，留 8px 空白 */}
                     <Flex gap="1" align="center" style={{ marginLeft: 8 }}>
+                        <IconButton
+                            size="1"
+                            variant={s.toolModeGroup === "select" ? "solid" : "ghost"}
+                            color="gray"
+                            title={t("select")}
+                            tabIndex={-1}
+                            onClick={() => dispatch(setToolMode("select"))}
+                        >
+                            <CursorArrowIcon />
+                        </IconButton>
+                        <Box style={{ position: "relative" }} data-hs-context-menu>
+                            <IconButton
+                                size="1"
+                                variant={s.toolModeGroup === "draw" ? "solid" : "ghost"}
+                                color="gray"
+                                title={drawToolButtonTitle}
+                                tabIndex={-1}
+                                onClick={() => dispatch(setToolMode(currentDrawTool))}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    setDrawToolMenuOpen(true);
+                                }}
+                            >
+                                <Box style={{ position: "relative", width: 15, height: 15 }}>
+                                    <Box
+                                        style={{
+                                            position: "absolute",
+                                            inset: 0,
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                        }}
+                                    >
+                                        {currentDrawToolIcon}
+                                    </Box>
+                                    <Box
+                                        style={{
+                                            position: "absolute",
+                                            right: -1,
+                                            bottom: -1,
+                                            width: 0,
+                                            height: 0,
+                                            borderLeft: "4px solid transparent",
+                                            borderTop: "4px solid currentColor",
+                                            opacity: 0.7,
+                                        }}
+                                    />
+                                </Box>
+                            </IconButton>
+
+                            {drawToolMenuOpen && (
+                                <Box
+                                    ref={drawToolMenuRef}
+                                    data-hs-context-menu
+                                    style={{
+                                        position: "absolute",
+                                        left: 0,
+                                        top: "calc(100% + 4px)",
+                                        minWidth: 190,
+                                        padding: 4,
+                                        borderRadius: 6,
+                                        border: "1px solid var(--gray-6)",
+                                        background: "var(--gray-2)",
+                                        boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+                                        zIndex: 30,
+                                    }}
+                                >
+                                    {[
+                                        {
+                                            mode: "draw" as const,
+                                            label: tAny("draw_tool"),
+                                            icon: <Pencil1Icon />,
+                                        },
+                                        {
+                                            mode: "vibrato" as const,
+                                            label: tAny("vibrato_draw_tool"),
+                                            icon: vibratoToolIcon,
+                                        },
+                                    ].map((item) => {
+                                        const active = currentDrawTool === item.mode;
+                                        return (
+                                            <Flex
+                                                key={item.mode}
+                                                align="center"
+                                                justify="between"
+                                                px="2"
+                                                py="1"
+                                                style={{
+                                                    cursor: "pointer",
+                                                    borderRadius: 4,
+                                                    background: active
+                                                        ? "var(--accent-4)"
+                                                        : "transparent",
+                                                }}
+                                                onClick={() => {
+                                                    dispatch(setToolMode(item.mode));
+                                                    setDrawToolMenuOpen(false);
+                                                }}
+                                            >
+                                                <Flex align="center" gap="2">
+                                                    <Box
+                                                        style={{
+                                                            display: "flex",
+                                                            width: 15,
+                                                            height: 15,
+                                                            alignItems: "center",
+                                                            justifyContent: "center",
+                                                        }}
+                                                    >
+                                                        {item.icon}
+                                                    </Box>
+                                                    <Text size="1">{item.label}</Text>
+                                                </Flex>
+                                                {active ? <CheckIcon /> : null}
+                                            </Flex>
+                                        );
+                                    })}
+                                </Box>
+                            )}
+                        </Box>
+
+                        <Box
+                            style={{
+                                width: 1,
+                                height: 18,
+                                background: "var(--gray-8)",
+                                marginInline: 4,
+                                opacity: 0.9,
+                            }}
+                        />
                         {/* 拖动方向按钮 */}
                         <IconButton
                             size="1"
-                            variant="ghost"
                             color="gray"
-                            title={`${tAny("drag_direction")}: ${tAny(s.dragDirection === "free" ? "drag_direction_free" : s.dragDirection === "x-only" ? "drag_direction_x_only" : "drag_direction_y_only")}`}
+                            variant={activeDragDirection === "free" ? "ghost" : "solid"}
+                            title={`${tAny("drag_direction")}: ${tAny(activeDragDirection === "free" ? "drag_direction_free" : activeDragDirection === "x-only" ? "drag_direction_x_only" : "drag_direction_y_only")}`}
                             tabIndex={-1}
-                            onClick={() => { dispatch(cycleDragDirection()); void dispatch(persistUiSettings()); }}
+                            onClick={() => { dispatch(cycleDragDirection(activeDragDirectionTool)); void dispatch(persistUiSettings()); }}
                         >
-                            {s.dragDirection === "free" ? (
+                            {activeDragDirection === "free" ? (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M3.5 11.5L11.5 3.5M11.5 3.5L8 3.5M11.5 3.5L11.5 7M3.5 11.5L7 11.5M3.5 11.5L3.5 8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
                                 </svg>
-                            ) : s.dragDirection === "x-only" ? (
+                            ) : activeDragDirection === "x-only" ? (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M2 7.5H13M2 7.5L4.5 5M2 7.5L4.5 10M13 7.5L10.5 5M13 7.5L10.5 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
                                 </svg>
@@ -1732,10 +2182,10 @@ export const PianoRollPanel: React.FC = () => {
                         </IconButton>
                         <IconButton
                             size="1"
-                            variant={s.pitchSnapEnabled ? "solid" : "ghost"}
+                            variant={effectivePitchSnapVisual ? "solid" : "ghost"}
                             color="gray"
                             title={`${t("pitch_snap")}: ${
-                                s.pitchSnapEnabled
+                                effectivePitchSnapVisual
                                     ? s.pitchSnapUnit === "semitone"
                                         ? tAny("quantize_semitone")
                                         : tAny("quantize_scale")
@@ -1748,7 +2198,7 @@ export const PianoRollPanel: React.FC = () => {
                                 setPitchSnapOpen(true);
                             }}
                         >
-                            {!s.pitchSnapEnabled ? (
+                            {!effectivePitchSnapVisual ? (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M3 12L12 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                                     <path d="M10 2V10.5C10 11.88 8.88 13 7.5 13C6.12 13 5 11.88 5 10.5C5 9.12 6.12 8 7.5 8" stroke="currentColor" strokeWidth="1" opacity="0.6"/>
@@ -1826,6 +2276,47 @@ export const PianoRollPanel: React.FC = () => {
                                 <path d="M5 6V4.5C5 3.12 6.12 2 7.5 2C8.88 2 10 3.12 10 4.5V6" stroke="currentColor" strokeWidth="1" fill="none"/>
                             </svg>
                         </IconButton>
+                        <Flex align="center" gap="1" ml="2">
+                            <Text size="1">{tAny("edge_smoothness")}:</Text>
+                            <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                step={1}
+                                value={Math.round(s.edgeSmoothnessPercent)}
+                                onWheel={(e) => {
+                                    e.preventDefault();
+                                    const fine = isModifierActive(
+                                        paramFineAdjustKb,
+                                        e.nativeEvent,
+                                    );
+                                    const step = fine ? 1 : 5;
+                                    const dir = e.deltaY < 0 ? 1 : -1;
+                                    const next = clamp(
+                                        Math.round(s.edgeSmoothnessPercent) +
+                                            dir * step,
+                                        0,
+                                        100,
+                                    );
+                                    dispatch(setEdgeSmoothnessPercent(next));
+                                    void dispatch(persistUiSettings());
+                                }}
+                                onChange={(e) => {
+                                    const next = Number(e.currentTarget.value);
+                                    dispatch(setEdgeSmoothnessPercent(next));
+                                }}
+                                onPointerUp={() => {
+                                    void dispatch(persistUiSettings());
+                                }}
+                                onKeyUp={() => {
+                                    void dispatch(persistUiSettings());
+                                }}
+                                style={{ width: 120 }}
+                            />
+                            <Text size="1" style={{ minWidth: 36, textAlign: "right" }}>
+                                {Math.round(s.edgeSmoothnessPercent)}%
+                            </Text>
+                        </Flex>
                     </Flex>
                 </Flex>
 
@@ -2141,7 +2632,10 @@ export const PianoRollPanel: React.FC = () => {
                         secPerBeat={secPerBeat}
                         playheadSec={s.playheadSec}
                         contentRef={rulerContentRef}
-                        onMouseDown={interactions.onRulerMouseDown}
+                        onMouseDown={(e) => {
+                            document.body.setAttribute("data-hs-focus-window", "pianoRoll");
+                            interactions.onRulerMouseDown(e);
+                        }}
                     />
 
                     <div
@@ -2149,8 +2643,14 @@ export const PianoRollPanel: React.FC = () => {
                         className="flex-1 bg-qt-graph-bg overflow-x-scroll overflow-y-hidden relative custom-scrollbar outline-none focus:outline-none focus-visible:outline-none"
                         data-piano-roll-scroller
                         tabIndex={0}
+                        onFocus={() => {
+                            document.body.setAttribute("data-hs-focus-window", "pianoRoll");
+                        }}
                         onMouseDownCapture={
-                            interactions.onScrollerMouseDownCapture
+                            (e) => {
+                                document.body.setAttribute("data-hs-focus-window", "pianoRoll");
+                                interactions.onScrollerMouseDownCapture(e);
+                            }
                         }
                         onAuxClick={interactions.onScrollerAuxClick}
                         onScroll={interactions.onScrollerScroll}

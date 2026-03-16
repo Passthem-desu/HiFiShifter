@@ -1,4 +1,9 @@
-import type { ParamName, ParamViewSegment, ValueViewport } from "./types";
+import type {
+    ParamMorphOverlay,
+    ParamName,
+    ParamViewSegment,
+    ValueViewport,
+} from "./types";
 import type { ClipPeaksEntry } from "./useClipsPeaksForPianoRoll";
 import { clamp } from "../timeline";
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./constants";
@@ -8,7 +13,8 @@ import {
     processWaveformPeaks,
     renderWaveformCanvas,
 } from "../../../utils/waveformRenderer";
-import { SCALE_NOTES } from "../../../utils/musicalScales";
+import { resolveScaleNotes } from "../../../utils/musicalScales";
+import type { ScaleLike } from "../../../utils/musicalScales";
 
 /** 为数值轴选择"好看"的刻度步长 */
 function niceAxisStep(range: number, targetCount: number): number {
@@ -191,6 +197,78 @@ function drawCurveTimed(args: {
     ctx.stroke();
 }
 
+function drawParamMorphOverlay(args: {
+    ctx: CanvasRenderingContext2D;
+    overlay: ParamMorphOverlay;
+    editParam: ParamName;
+    framePeriodMs: number;
+    visibleStartSec: number;
+    visibleDurSec: number;
+    w: number;
+    h: number;
+    valueToY: (param: ParamName, v: number, h: number) => number;
+    isDark: boolean;
+}) {
+    const {
+        ctx,
+        overlay,
+        editParam,
+        framePeriodMs,
+        visibleStartSec,
+        visibleDurSec,
+        w,
+        h,
+        valueToY,
+        isDark,
+    } = args;
+    const fp = Math.max(1e-6, framePeriodMs);
+    const points = overlay.points.slice().sort((a, b) => a.frame - b.frame);
+    if (points.length !== 4) return;
+
+    const lineColor = isDark
+        ? "rgba(255, 210, 95, 0.9)"
+        : "rgba(160, 90, 10, 0.9)";
+    const fillColor = isDark
+        ? "rgba(255, 210, 95, 0.22)"
+        : "rgba(160, 90, 10, 0.18)";
+
+    const toCanvasX = (frame: number) => {
+        const sec = framesToTime(frame, fp);
+        return timeToPixel(sec, visibleStartSec, visibleDurSec, w);
+    };
+
+    ctx.save();
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    for (let i = 0; i < points.length; i += 1) {
+        const p = points[i];
+        const mappedValue = editParam === "pitch" ? p.value + 0.5 : p.value;
+        const x = toCanvasX(p.frame);
+        const y = valueToY(editParam, mappedValue, h);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (const p of points) {
+        const mappedValue = editParam === "pitch" ? p.value + 0.5 : p.value;
+        const x = toCanvasX(p.frame);
+        const y = valueToY(editParam, mappedValue, h);
+        const radius = p.kind === "left" || p.kind === "right" ? 4 : 5;
+        ctx.fillStyle = fillColor;
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
 /**
  * per-clip 检测音高曲线（来自后端 clip_pitch_data 事件），
  * 在参数面板 pitch 视图中作为参考线渲染。
@@ -239,10 +317,11 @@ export function drawPianoRoll(args: {
     } | null;
     // pitch snap visual helpers
     pitchSnapUnit?: "semitone" | "scale";
-    projectBaseScale?: import("../../../utils/musicalScales").ScaleKey | null;
+    projectScale?: ScaleLike | null;
     toolMode?: string;
     snapToggleHeld?: boolean;
     scaleHighlightMode?: import("../../../features/session/sessionTypes").ScaleHighlightMode;
+    paramMorphOverlay?: ParamMorphOverlay | null;
 }) {
     const {
         axisCanvas,
@@ -272,6 +351,7 @@ export function drawPianoRoll(args: {
         detectedPitchCurves,
         isDark = true,
         clipboardPreview,
+        paramMorphOverlay,
     } = args;
 
     // 主题颜色查找表
@@ -496,17 +576,20 @@ export function drawPianoRoll(args: {
         const startMidi = clamp(Math.floor(min), absMin, absMax);
         const endMidi = clamp(Math.ceil(max), absMin, absMax);
         const highlightActive = (() => {
-            if (!args.projectBaseScale) return false;
+            if (!args.projectScale) return false;
             const mode = args.scaleHighlightMode ?? "off";
             if (mode === "off") return false;
             return mode === "always";
         })();
+        const projectScaleNotes = args.projectScale
+            ? resolveScaleNotes(args.projectScale)
+            : [];
 
         for (let midi = startMidi; midi <= endMidi; midi += 1) {
             const y = valueToY("pitch", midi + 0.5, h);
             const pc = ((midi % 12) + 12) % 12;
             const isScaleNote = highlightActive
-                ? (SCALE_NOTES[args.projectBaseScale ?? "C"] || []).includes(pc)
+                ? projectScaleNotes.includes(pc)
                 : false;
 
             if (isScaleNote) {
@@ -838,6 +921,21 @@ export function drawPianoRoll(args: {
             }
             ctx.stroke();
             ctx.restore();
+        }
+
+        if (paramMorphOverlay) {
+            drawParamMorphOverlay({
+                ctx,
+                overlay: paramMorphOverlay,
+                editParam,
+                framePeriodMs: paramView.framePeriodMs,
+                visibleStartSec,
+                visibleDurSec,
+                w,
+                h,
+                valueToY,
+                isDark,
+            });
         }
     }
 

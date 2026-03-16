@@ -37,6 +37,11 @@ export function isNoneBinding(kb: Keybinding): boolean {
     return kb.key === "__none__";
 }
 
+const VIBRATO_WHEEL_MODIFIERS = new Set<ActionId>([
+    "modifier.vibratoAmplitudeAdjust",
+    "modifier.vibratoFrequencyAdjust",
+]);
+
 /**
  * 将 Keybinding 格式化为可读字符串，如 "Ctrl+Shift+S"
  * 如果为"无"绑定，返回本地化占位文本
@@ -140,7 +145,21 @@ export function findConflicts(
     actionId: ActionId,
     newBinding: Keybinding,
 ): ActionId[] {
-    if (isNoneBinding(newBinding)) return [];
+    if (isNoneBinding(newBinding)) {
+        // 颤音滚轮修饰键允许配置为 None，但两者同时为 None 会冲突。
+        if (VIBRATO_WHEEL_MODIFIERS.has(actionId)) {
+            const merged = mergeKeybindings(overrides);
+            const conflicts = (Object.entries(merged) as [ActionId, Keybinding][])
+                .filter(([id, binding]) =>
+                    id !== actionId &&
+                    VIBRATO_WHEEL_MODIFIERS.has(id) &&
+                    isNoneBinding(binding),
+                )
+                .map(([id]) => id);
+            return conflicts;
+        }
+        return [];
+    }
     const merged = mergeKeybindings(overrides);
     const conflicts: ActionId[] = [];
     const selfMeta = ACTION_META[actionId];
@@ -174,7 +193,12 @@ export function findConflicts(
  */
 export function isModifierActive(
     kb: Keybinding,
-    event: { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey?: boolean },
+    event: {
+        ctrlKey: boolean;
+        shiftKey: boolean;
+        altKey: boolean;
+        metaKey?: boolean;
+    },
 ): boolean {
     if (isNoneBinding(kb)) return false;
     const isMac =

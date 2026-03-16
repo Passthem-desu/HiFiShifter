@@ -159,6 +159,14 @@ pub fn set_project_base_scale(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn set_project_custom_scale(
+    state: State<'_, AppState>,
+    custom_scale: crate::project::CustomScale,
+) -> serde_json::Value {
+    project::set_project_custom_scale(state, custom_scale)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn set_project_timeline_settings(
     state: State<'_, AppState>,
     beats_per_bar: u32,
@@ -415,6 +423,21 @@ pub fn set_clip_state(
         fade_in_curve,
         fade_out_curve,
         color,
+    )
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn replace_clip_source(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+    new_source_path: String,
+    replace_same_source: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    timeline::replace_clip_source(
+        state,
+        clip_ids,
+        new_source_path,
+        replace_same_source,
     )
 }
 #[tauri::command(rename_all = "camelCase")]

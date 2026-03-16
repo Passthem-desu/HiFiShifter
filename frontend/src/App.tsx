@@ -48,6 +48,7 @@ import { runConfirmedExitClose } from "./confirmedExitClose";
 import { paramsApi } from "./services/api";
 import { coreApi } from "./services/api/core";
 import type { ParamFramesPayload, ProcessorParamDescriptor } from "./types/api";
+import { MISSING_FILE_CONFIRM_EVENT } from "./features/session/thunks/missingFilePrompt";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -106,6 +107,7 @@ function AppInner() {
         (state) => state.fileBrowser.visible,
     );
     const toolMode = useAppSelector((state) => state.session.toolMode);
+    const drawToolMode = useAppSelector((state) => state.session.drawToolMode);
     const outputPath = useAppSelector((state) => state.session.outputPath);
     const projectDirty = useAppSelector((state) => state.session.project.dirty);
     const projectPath = useAppSelector((state) => state.session.project.path);
@@ -131,8 +133,15 @@ function AppInner() {
         open: boolean;
         mode: "switch" | "exit";
     }>({ open: false, mode: "switch" });
+    const [missingFileDialog, setMissingFileDialog] = useState<{
+        open: boolean;
+        missingPath: string;
+    }>({ open: false, missingPath: "" });
     const pendingUnsavedActionRef = useRef<null | (() => Promise<void>)>(null);
     const allowWindowCloseRef = useRef(false);
+    const missingFileResolverRef = useRef<((shouldPick: boolean) => void) | null>(
+        null,
+    );
     const processorParamCacheRef = useRef(
         new Map<string, ProcessorParamDescriptor[]>(),
     );
@@ -373,6 +382,7 @@ function AppInner() {
         isPlaying: false,
         hasSynthesized: false,
         toolMode: "draw" as import("./features/session/sessionTypes").ToolMode,
+        drawToolMode: "draw" as import("./features/session/sessionTypes").DrawToolMode,
     });
     const outputPathRef = useRef(outputPath);
 
@@ -496,12 +506,46 @@ function AppInner() {
             isPlaying: Boolean(runtimeIsPlaying),
             hasSynthesized: Boolean(runtimeHasSynthesized),
             toolMode,
+            drawToolMode,
         };
-    }, [runtimeIsPlaying, runtimeHasSynthesized, toolMode]);
+    }, [runtimeIsPlaying, runtimeHasSynthesized, toolMode, drawToolMode]);
 
     useEffect(() => {
         outputPathRef.current = outputPath;
     }, [outputPath]);
+
+    useEffect(() => {
+        const handler = (
+            event: Event,
+        ) => {
+            const detail = (
+                event as CustomEvent<{
+                    missingPath?: string;
+                    resolve?: (shouldPick: boolean) => void;
+                }>
+            ).detail;
+            if (!detail || typeof detail.resolve !== "function") return;
+            missingFileResolverRef.current = detail.resolve;
+            setMissingFileDialog({
+                open: true,
+                missingPath:
+                    typeof detail.missingPath === "string"
+                        ? detail.missingPath
+                        : "",
+            });
+        };
+        window.addEventListener(MISSING_FILE_CONFIRM_EVENT, handler as EventListener);
+        return () => {
+            window.removeEventListener(
+                MISSING_FILE_CONFIRM_EVENT,
+                handler as EventListener,
+            );
+            if (missingFileResolverRef.current) {
+                missingFileResolverRef.current(false);
+                missingFileResolverRef.current = null;
+            }
+        };
+    }, []);
 
     useEffect(() => {
         let disposed = false;
@@ -561,6 +605,34 @@ function AppInner() {
                 case "playback.focusCursor":
                     window.dispatchEvent(new CustomEvent("hifi:focusCursor"));
                     break;
+                case "playback.seekLeft":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:nudgePlayhead", {
+                            detail: { direction: -1 },
+                        }),
+                    );
+                    break;
+                case "playback.seekRight":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:nudgePlayhead", {
+                            detail: { direction: 1 },
+                        }),
+                    );
+                    break;
+                case "timeline.zoomIn":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:zoomTimelineFocus", {
+                            detail: { factor: 1.1 },
+                        }),
+                    );
+                    break;
+                case "timeline.zoomOut":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:zoomTimelineFocus", {
+                            detail: { factor: 0.9 },
+                        }),
+                    );
+                    break;
                 case "edit.undo":
                     void dispatch(undoRemote());
                     break;
@@ -609,16 +681,11 @@ function AppInner() {
                     break;
                 case "mode.toggle": {
                     const cur = runtimeRef.current.toolMode;
-                    const order: Array<"select" | "draw" | "line"> = ["select", "draw", "line"];
-                    const idx = order.indexOf(cur as "select" | "draw" | "line");
-                    dispatch(setToolMode(order[(idx + 1) % order.length]));
-                    break;
-                }
-                case "mode.toggleReverse": {
-                    const cur2 = runtimeRef.current.toolMode;
-                    const order2: Array<"select" | "draw" | "line"> = ["select", "draw", "line"];
-                    const idx2 = order2.indexOf(cur2 as "select" | "draw" | "line");
-                    dispatch(setToolMode(order2[(idx2 - 1 + order2.length) % order2.length]));
+                    if (cur === "select") {
+                        dispatch(setToolMode(runtimeRef.current.drawToolMode));
+                    } else {
+                        dispatch(setToolMode("select"));
+                    }
                     break;
                 }
                 case "mode.selectTool":
@@ -628,7 +695,7 @@ function AppInner() {
                     dispatch(setToolMode("draw"));
                     break;
                 case "mode.lineTool":
-                    dispatch(setToolMode("line"));
+                    dispatch(setToolMode("vibrato"));
                     break;
                 case "quickSearch.open":
                     setQuickSearchOpen(true);
@@ -715,29 +782,172 @@ function AppInner() {
                         }
                         const step = getParamShiftStep(editP, descriptor);
                         const delta = isUp ? step : -step;
-                        const res = await paramsApi.getParamFrames(
+                        const clampNum = (v: number, minV: number, maxV: number) =>
+                            Math.min(maxV, Math.max(minV, v));
+                        const smoothness = clampNum(
+                            Number(ss.edgeSmoothnessPercent) || 0,
+                            0,
+                            100,
+                        );
+                        const maxTransitionFrames = Math.floor(frameCount / 2);
+                        const transitionFrames =
+                            smoothness > 0 && maxTransitionFrames > 0
+                                ? Math.round((smoothness / 100) * maxTransitionFrames)
+                                : 0;
+                        const halfSpan = transitionFrames > 0 ? transitionFrames / 2 : 0;
+                        const extend = Math.max(0, Math.ceil(halfSpan));
+                        const extStart = Math.max(0, startFrame - extend);
+                        const extCount = frameCount + Math.max(0, startFrame - extStart) + extend;
+                        const selOffset = startFrame - extStart;
+
+                        const extRes = await paramsApi.getParamFrames(
                             rootTrkId,
                             editP,
-                            startFrame,
-                            frameCount,
+                            extStart,
+                            extCount,
                             1,
                         );
-                        if (!res?.ok) return;
-                        const payload = res as ParamFramesPayload;
-                        const editValues = (payload.edit ?? []).map(
+                        if (!extRes?.ok) return;
+                        const extPayload = extRes as ParamFramesPayload;
+                        const beforeDense = (extPayload.edit ?? []).map(
                             (v) => Number(v) || 0,
                         );
-                        const shifted = editValues.map((v) => v + delta);
+                        if (beforeDense.length === 0) return;
+
+                        const selEnd = Math.min(
+                            beforeDense.length - 1,
+                            selOffset + frameCount - 1,
+                        );
+                        if (selOffset < 0 || selOffset >= beforeDense.length || selEnd < selOffset) {
+                            return;
+                        }
+                        const actualSelLen = selEnd - selOffset + 1;
+                        const editedDense = beforeDense.slice();
+                        for (let i = 0; i < actualSelLen; i += 1) {
+                            const orig = beforeDense[selOffset + i] ?? 0;
+                            editedDense[selOffset + i] = orig + delta;
+                        }
+
+                        if (smoothness > 0 && transitionFrames > 0) {
+                            const calcMean = (arr: number[]) => {
+                                let sum = 0;
+                                let count = 0;
+                                for (let i = 0; i < actualSelLen; i += 1) {
+                                    const v = Number(arr[selOffset + i] ?? 0);
+                                    if (editP === "pitch" && v === 0) continue;
+                                    sum += v;
+                                    count += 1;
+                                }
+                                return { sum, count };
+                            };
+
+                            const beforeMean = calcMean(beforeDense);
+                            const afterMean = calcMean(editedDense);
+                            const meanDelta =
+                                beforeMean.count > 0 && afterMean.count > 0
+                                    ? Math.abs(
+                                          afterMean.sum / afterMean.count -
+                                              beforeMean.sum / beforeMean.count,
+                                      )
+                                    : 0;
+
+                            let boundaryDelta = 0;
+                            let boundaryCount = 0;
+                            if (selOffset > 0) {
+                                boundaryDelta += Math.abs(
+                                    Number(beforeDense[selOffset] ?? 0) -
+                                        Number(beforeDense[selOffset - 1] ?? 0),
+                                );
+                                boundaryCount += 1;
+                            }
+                            if (selEnd < beforeDense.length - 1) {
+                                boundaryDelta += Math.abs(
+                                    Number(beforeDense[selEnd] ?? 0) -
+                                        Number(beforeDense[selEnd + 1] ?? 0),
+                                );
+                                boundaryCount += 1;
+                            }
+                            const boundaryMean = boundaryCount > 0 ? boundaryDelta / boundaryCount : 0;
+                            const changeFactor = clampNum(
+                                meanDelta / (meanDelta + boundaryMean + 1e-6),
+                                0,
+                                1,
+                            );
+
+                            if (changeFactor > 0) {
+                                const snapshot = editedDense.slice();
+                                const span = Math.max(1e-9, 2 * halfSpan);
+                                if (selOffset > 0) {
+                                    const left = Math.max(0, Math.floor(selOffset - halfSpan));
+                                    const right = Math.min(
+                                        editedDense.length - 1,
+                                        Math.ceil(selOffset + halfSpan),
+                                    );
+                                    for (let idx = left; idx <= right; idx += 1) {
+                                        const t = clampNum(
+                                            (idx - (selOffset - halfSpan)) / span,
+                                            0,
+                                            1,
+                                        );
+                                        const outsideIdx = Math.min(selOffset - 1, idx);
+                                        const insideIdx = Math.max(selOffset, idx);
+                                        const outsideVal = snapshot[outsideIdx] ?? editedDense[idx];
+                                        const insideVal = snapshot[insideIdx] ?? editedDense[idx];
+                                        const smoothed = outsideVal + (insideVal - outsideVal) * t;
+                                        editedDense[idx] =
+                                            snapshot[idx] +
+                                            (smoothed - snapshot[idx]) * changeFactor;
+                                    }
+                                }
+                                if (selEnd < editedDense.length - 1) {
+                                    const left = Math.max(0, Math.floor(selEnd - halfSpan));
+                                    const right = Math.min(
+                                        editedDense.length - 1,
+                                        Math.ceil(selEnd + halfSpan),
+                                    );
+                                    for (let idx = left; idx <= right; idx += 1) {
+                                        const t = clampNum(
+                                            (idx - (selEnd - halfSpan)) / span,
+                                            0,
+                                            1,
+                                        );
+                                        const insideIdx = Math.min(selEnd, idx);
+                                        const outsideIdx = Math.max(selEnd + 1, idx);
+                                        const insideVal = snapshot[insideIdx] ?? editedDense[idx];
+                                        const outsideVal = snapshot[outsideIdx] ?? editedDense[idx];
+                                        const smoothed = insideVal + (outsideVal - insideVal) * t;
+                                        editedDense[idx] =
+                                            snapshot[idx] +
+                                            (smoothed - snapshot[idx]) * changeFactor;
+                                    }
+                                }
+                            }
+                        }
+
                         await paramsApi.setParamFrames(
                             rootTrkId,
                             editP,
-                            startFrame,
-                            shifted,
+                            extStart,
+                            editedDense,
                             true,
                         );
                         // 通知 PianoRoll 刷新曲线
                         dispatch(checkpointHistory());
                     })();
+                    break;
+                }
+                case "pianoRoll.shiftParamUpSelection":
+                case "pianoRoll.shiftParamDownSelection": {
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:editOp", {
+                            detail: {
+                                op:
+                                    actionId === "pianoRoll.shiftParamUpSelection"
+                                        ? "shiftParamUpSelection"
+                                        : "shiftParamDownSelection",
+                            },
+                        }),
+                    );
                     break;
                 }
                 case "edit.pasteReaper":
@@ -893,6 +1103,55 @@ function AppInner() {
                         </Button>
                         <Button onClick={saveUnsavedAndContinue}>
                             {t("menu_save_project")}
+                        </Button>
+                    </Flex>
+                </Dialog.Content>
+            </Dialog.Root>
+
+            <Dialog.Root
+                open={missingFileDialog.open}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setMissingFileDialog((prev) => ({ ...prev, open: false }));
+                        if (missingFileResolverRef.current) {
+                            missingFileResolverRef.current(false);
+                            missingFileResolverRef.current = null;
+                        }
+                    }
+                }}
+            >
+                <Dialog.Content maxWidth="560px">
+                    <Dialog.Title>{t("missing_file_replace_title" as any)}</Dialog.Title>
+                    <Dialog.Description>
+                        {t("missing_file_replace_desc" as any)}
+                    </Dialog.Description>
+                    <div className="mt-2 rounded border border-qt-border bg-qt-base p-2 text-xs break-all">
+                        {missingFileDialog.missingPath}
+                    </div>
+                    <Flex justify="end" gap="2" mt="4">
+                        <Button
+                            variant="soft"
+                            color="gray"
+                            onClick={() => {
+                                setMissingFileDialog((prev) => ({ ...prev, open: false }));
+                                if (missingFileResolverRef.current) {
+                                    missingFileResolverRef.current(false);
+                                    missingFileResolverRef.current = null;
+                                }
+                            }}
+                        >
+                            {t("cancel")}
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                setMissingFileDialog((prev) => ({ ...prev, open: false }));
+                                if (missingFileResolverRef.current) {
+                                    missingFileResolverRef.current(true);
+                                    missingFileResolverRef.current = null;
+                                }
+                            }}
+                        >
+                            {t("missing_file_replace_pick" as any)}
                         </Button>
                     </Flex>
                 </Dialog.Content>

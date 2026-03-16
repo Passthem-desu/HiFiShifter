@@ -11,20 +11,18 @@ import {
 import {
     PlayIcon,
     StopIcon,
-    CursorArrowIcon,
-    Pencil1Icon,
 } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
 import { PitchSnapSettingsDialog } from "./PitchSnapSettingsDialog";
+import { CustomScaleDialog } from "./CustomScaleDialog";
 
 import {
     playOriginal,
     stopAudioPlayback,
     setBpm,
     updateTransportBpm,
-    setToolMode,
     setProjectTimelineSettingsRemote,
     toggleAutoCrossfade,
     toggleGridSnap,
@@ -32,6 +30,7 @@ import {
     toggleAutoScroll,
     persistUiSettings,
     setProjectBaseScaleRemote,
+    setProjectCustomScaleRemote,
 } from "../../features/session/sessionSlice";
 import { SCALE_KEYS, SCALE_LABELS } from "../../utils/musicalScales";
 import { toggleVisible } from "../../features/fileBrowser/fileBrowserSlice";
@@ -46,6 +45,7 @@ export function ActionBar() {
     const tAny = t as (key: string) => string;
 
     const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
+    const [customScaleOpen, setCustomScaleOpen] = useState(false);
     const [gridSnapMenuPos, setGridSnapMenuPos] = useState<{ x: number; y: number } | null>(null);
 
     const [bpmText, setBpmText] = useState(() =>
@@ -82,44 +82,6 @@ export function ActionBar() {
             gap="3"
             className="h-8 bg-qt-window border-b border-qt-border px-1 text-qt-text flex-nowrap overflow-x-auto overflow-y-hidden min-w-0 custom-scrollbar"
         >
-            {/* Mode & Param Group */}
-            <Flex align="center" gap="1" className="shrink-0">
-                <IconButton
-                    size="1"
-                    variant={s.toolMode === "select" ? "solid" : "ghost"}
-                    color="gray"
-                    title={t("select")}
-                    tabIndex={-1}
-                    onClick={() => dispatch(setToolMode("select"))}
-                >
-                    <CursorArrowIcon />
-                </IconButton>
-                <IconButton
-                    size="1"
-                    variant={s.toolMode === "draw" ? "solid" : "ghost"}
-                    color="gray"
-                    title={t("draw")}
-                    tabIndex={-1}
-                    onClick={() => dispatch(setToolMode("draw"))}
-                >
-                    <Pencil1Icon />
-                </IconButton>
-                <IconButton
-                    size="1"
-                    variant={s.toolMode === "line" ? "solid" : "ghost"}
-                    color="gray"
-                    title={tAny("line")}
-                    tabIndex={-1}
-                    onClick={() => dispatch(setToolMode("line"))}
-                >
-                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <line x1="2" y1="13" x2="13" y2="2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                    </svg>
-                </IconButton>
-            </Flex>
-
-
-
             {/* BPM & Time */}
             <Flex align="center" gap="2" className="shrink-0">
                 <Text size="1" className="text-qt-text-muted">
@@ -238,10 +200,24 @@ export function ActionBar() {
                     {t("base_scale")}:
                 </Text>
                 <Select.Root
-                    value={s.project?.baseScale ?? "C"}
+                    value={
+                        s.project?.useCustomScale && s.project?.customScale
+                            ? "__custom__"
+                            : (s.project?.baseScale ?? "C")
+                    }
                     size="1"
                     onValueChange={(v) => {
-                        dispatch(setProjectBaseScaleRemote(v));
+                        if (v === "__custom_dialog__") {
+                            setCustomScaleOpen(true);
+                            return;
+                        }
+                        if (v === "__custom__" && s.project?.customScale) {
+                            dispatch(setProjectCustomScaleRemote(s.project.customScale));
+                            return;
+                        }
+                        if ((SCALE_KEYS as readonly string[]).includes(v)) {
+                            dispatch(setProjectBaseScaleRemote(v));
+                        }
                     }}
                 >
                     <Select.Trigger style={{ backgroundColor: "var(--qt-base)" }} />
@@ -252,6 +228,22 @@ export function ActionBar() {
                                     {SCALE_LABELS[k]}
                                 </Select.Item>
                             ))}
+                        </Select.Group>
+                        {s.project?.customScale ? (
+                            <>
+                                <Select.Separator />
+                                <Select.Group>
+                                    <Select.Item value="__custom__">
+                                        {`${tAny("custom_scale_label")}: ${s.project.customScale.name}`}
+                                    </Select.Item>
+                                </Select.Group>
+                            </>
+                        ) : null}
+                        <Select.Separator />
+                        <Select.Group>
+                            <Select.Item value="__custom_dialog__">
+                                {tAny("custom_scale_action")}
+                            </Select.Item>
                         </Select.Group>
                     </Select.Content>
                 </Select.Root>
@@ -381,6 +373,13 @@ onClick={() => dispatch(playOriginal())}
                 <PitchSnapSettingsDialog
                     open={pitchSnapOpen}
                     onOpenChange={setPitchSnapOpen}
+                />
+            )}
+
+            {customScaleOpen && (
+                <CustomScaleDialog
+                    open={customScaleOpen}
+                    onOpenChange={setCustomScaleOpen}
                 />
             )}
 

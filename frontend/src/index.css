@@ -95,6 +95,16 @@ textarea {
   font-family: inherit;
 }
 
+button:focus,
+button:focus-visible,
+[role="button"]:focus,
+[role="button"]:focus-visible,
+.rt-BaseButton:focus,
+.rt-BaseButton:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 /* Qt/DAW-style scrollbars */
 ::-webkit-scrollbar {
   width: 10px;

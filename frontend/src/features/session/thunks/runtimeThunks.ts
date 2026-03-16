@@ -40,7 +40,12 @@ export const persistUiSettings = createAsyncThunk(
             autoScroll: s.autoScrollEnabled,
             showClipboardPreview: s.showClipboardPreview,
             lockParamLines: s.lockParamLinesEnabled,
-            dragDirection: s.dragDirection,
+            dragDirection: s.selectDragDirection,
+            selectDragDirection: s.selectDragDirection,
+            drawDragDirection: s.drawDragDirection,
+            lineVibratoDragDirection: s.lineVibratoDragDirection,
+            smoothnessPercent: s.edgeSmoothnessPercent,
+            customScalePresets: s.customScalePresets,
         });
     },
 );

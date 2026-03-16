@@ -11,9 +11,119 @@ import {
     setClipStateRemote,
     setClipSourceRange,
 } from "../../../../features/session/sessionSlice";
+import { applyAutoCrossfade } from "./autoCrossfade";
 import { clamp, gainToDb, dbToGain } from "../math";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
+import { paramsApi } from "../../../../services/api";
+
+/**
+ * 拉伸后对参数线进行时域映射（拉伸或压缩）。
+ * 将旧范围 [oldStartSec, oldStartSec+oldLengthSec] 内的参数值，
+ * 线性重映射到新范围 [newStartSec, newStartSec+newLengthSec]，
+ * 并将不再被音频块覆盖的旧帧恢复为原始值。
+ */
+async function stretchLinkedParams(
+    trackId: string,
+    oldStartSec: number,
+    oldLengthSec: number,
+    newStartSec: number,
+    newLengthSec: number,
+): Promise<void> {
+    if (
+        Math.abs(oldLengthSec - newLengthSec) < 1e-6 &&
+        Math.abs(oldStartSec - newStartSec) < 1e-6
+    ) {
+        return;
+    }
+
+    // 获取帧周期（通过最小量探针请求）
+    const probe = await paramsApi.getParamFrames(trackId, "pitch", 0, 1, 1);
+    if (!probe?.ok) return;
+    const fp = Math.max(1, Number(probe.frame_period_ms) || 5);
+
+    const oldStartFrame = Math.round((oldStartSec * 1000) / fp);
+    const oldEndFrame = Math.round(((oldStartSec + oldLengthSec) * 1000) / fp);
+    const oldFrameCount = Math.max(1, oldEndFrame - oldStartFrame);
+
+    const newStartFrame = Math.round((newStartSec * 1000) / fp);
+    const newEndFrame = Math.round(((newStartSec + newLengthSec) * 1000) / fp);
+    const newFrameCount = Math.max(1, newEndFrame - newStartFrame);
+
+    for (const paramType of ["pitch", "tension"] as const) {
+        const res = await paramsApi.getParamFrames(
+            trackId,
+            paramType,
+            oldStartFrame,
+            oldFrameCount,
+            1,
+        );
+        if (!res?.ok) continue;
+        const oldValues = (res.edit ?? []).map((v) => Number(v) || 0);
+        if (oldValues.length === 0) continue;
+
+        // 线性插值时域映射：用旧帧值填充新帧
+        const newValues = new Array<number>(newFrameCount);
+        for (let i = 0; i < newFrameCount; i++) {
+            const t = newFrameCount > 1 ? i / (newFrameCount - 1) : 0;
+            const oldIdxF = t * (oldValues.length - 1);
+            const lo = Math.floor(oldIdxF);
+            const hi = Math.min(lo + 1, oldValues.length - 1);
+            const frac = oldIdxF - lo;
+            const loVal = oldValues[lo] ?? 0;
+            const hiVal = oldValues[hi] ?? 0;
+            if (paramType === "pitch") {
+                // pitch=0 表示无效（无声）帧，保留 0
+                if (loVal === 0 && hiVal === 0) {
+                    newValues[i] = 0;
+                } else if (loVal === 0) {
+                    newValues[i] = 0;
+                } else if (hiVal === 0) {
+                    newValues[i] = frac < 0.5 ? loVal : 0;
+                } else {
+                    newValues[i] = loVal + (hiVal - loVal) * frac;
+                }
+            } else {
+                newValues[i] = loVal + (hiVal - loVal) * frac;
+            }
+        }
+
+        // 将重映射后的值写入新范围
+        await paramsApi.setParamFrames(
+            trackId,
+            paramType,
+            newStartFrame,
+            newValues,
+            false,
+        );
+
+        // 恢复旧范围中不再被新音频块覆盖的帧（还原到原始值）
+        const newRangeMax = newStartFrame + newFrameCount - 1;
+        const oldRangeMax = oldStartFrame + oldFrameCount - 1;
+
+        if (oldStartFrame < newStartFrame) {
+            const clearLen = newStartFrame - oldStartFrame;
+            void paramsApi.restoreParamFrames(
+                trackId,
+                paramType,
+                oldStartFrame,
+                clearLen,
+                false,
+            );
+        }
+        if (oldRangeMax > newRangeMax) {
+            const clearFrom = newRangeMax + 1;
+            const clearLen = oldRangeMax - newRangeMax;
+            void paramsApi.restoreParamFrames(
+                trackId,
+                paramType,
+                clearFrom,
+                clearLen,
+                false,
+            );
+        }
+    }
+}
 
 export type EditDragType =
     | "trim_left"
@@ -217,14 +327,15 @@ export function useEditDrag(deps: {
             const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
             if (!clipNow) return;
 
+            let persistPromise: Promise<unknown> | null = null;
             if (drag.type === "trim_left") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, sourceStartSec: clipNow.sourceStartSec }));
+                persistPromise = dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, sourceStartSec: clipNow.sourceStartSec })).unwrap();
             } else if (drag.type === "trim_right") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, sourceEndSec: clipNow.sourceEndSec }));
+                persistPromise = dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, sourceEndSec: clipNow.sourceEndSec })).unwrap();
             } else if (drag.type === "stretch_left") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate }));
+                persistPromise = dispatch(setClipStateRemote({ clipId: drag.clipId, startSec: clipNow.startSec, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate })).unwrap();
             } else if (drag.type === "stretch_right") {
-                void dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate }));
+                persistPromise = dispatch(setClipStateRemote({ clipId: drag.clipId, lengthSec: clipNow.lengthSec, playbackRate: clipNow.playbackRate })).unwrap();
             } else if (drag.type === "fade_in") {
                 void dispatch(setClipStateRemote({ clipId: drag.clipId, fadeInSec: clipNow.fadeInSec }));
             } else if (drag.type === "fade_out") {
@@ -233,7 +344,43 @@ export function useEditDrag(deps: {
                 void dispatch(setClipStateRemote({ clipId: drag.clipId, gain: clipNow.gain }));
             }
 
-            window.removeEventListener("pointermove", onMove);
+            const shouldApplyAutoCrossfade =
+                sessionRef.current.autoCrossfadeEnabled &&
+                (drag.type === "trim_left" ||
+                    drag.type === "trim_right" ||
+                    drag.type === "stretch_left" ||
+                    drag.type === "stretch_right");
+            if (shouldApplyAutoCrossfade) {
+                void Promise.resolve(persistPromise).finally(() => {
+                    void applyAutoCrossfade(sessionRef.current, [drag.clipId], dispatch);
+                });
+            }
+
+                // 拉伸后同步参数线：当"锁定参数线"启用时，将旧范围内的参数值时域映射到新范围
+                const isStretch =
+                    drag.type === "stretch_left" || drag.type === "stretch_right";
+                if (
+                    isStretch &&
+                    sessionRef.current.lockParamLinesEnabled &&
+                    clipNow.trackId
+                ) {
+                    const stretchTrackId = clipNow.trackId;
+                    const oldStartSec = drag.basestartSec;
+                    const oldLengthSec = drag.baselengthSec;
+                    const newStartSec = clipNow.startSec;
+                    const newLengthSec = clipNow.lengthSec;
+                    void Promise.resolve(persistPromise).then(() =>
+                        stretchLinkedParams(
+                            stretchTrackId,
+                            oldStartSec,
+                            oldLengthSec,
+                            newStartSec,
+                            newLengthSec,
+                        ),
+                    );
+                }
+
+                window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", end);
             window.removeEventListener("pointercancel", end);
         }
