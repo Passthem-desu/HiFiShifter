@@ -536,6 +536,19 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
             .insert(pair);
     }
 
+    // 统计每个 (原始轨道索引, algo_pair) 的最早出现时间（用于对拆分后的同源轨道进行排序）
+    let mut earliest_start_by_algo: std::collections::HashMap<(i32, bool, i32), f64> =
+        std::collections::HashMap::new();
+    for (i, base) in item_bases.iter().enumerate() {
+        let pair = item_exts.get(i).map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+        let start_sec = base.start_sample / sample_rate;
+        let key = (base.track_index, pair.0, pair.1);
+        let entry = earliest_start_by_algo.entry(key).or_insert(f64::INFINITY);
+        if start_sec.is_finite() && start_sec < *entry {
+            *entry = start_sec;
+        }
+    }
+
     // 为每个 VspTrack 创建 HiFiShifter 轨道
     for (vsp_idx, vsp_track) in vsp_tracks.iter().enumerate() {
         let idx = vsp_idx as i32;
@@ -544,8 +557,15 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
 
         if has_mixed {
             // 需要拆分：为每个不同的 (is_world, synth_mode) 各建一条轨道
+            // 按该算法在原轨道中音频块首次出现的时间排序
             let mut sorted: Vec<(bool, i32)> = algos.map(|s| s.iter().copied().collect()).unwrap_or_default();
-            sorted.sort();
+            sorted.sort_by(|a, b| {
+                let ka = (idx, a.0, a.1);
+                let kb = (idx, b.0, b.1);
+                let ta = earliest_start_by_algo.get(&ka).copied().unwrap_or(f64::INFINITY);
+                let tb = earliest_start_by_algo.get(&kb).copied().unwrap_or(f64::INFINITY);
+                ta.partial_cmp(&tb).unwrap_or(std::cmp::Ordering::Equal)
+            });
             for (is_world, synth_mode) in sorted {
                 let id = new_track_id();
                 let algo = if is_world {
@@ -675,12 +695,11 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
             });
 
         // 记录 vslib 轨道的 synth_mode
-        if !is_world {
-            if let Some(e) = ext {
-                synth_mode_by_track
-                    .entry(track_id.clone())
-                    .or_insert_with(|| algo_synth_mode(e.algo_type));
-            }
+        // 记录该轨道对应的 synth_mode（不再因为 World 而忽略）
+        if let Some(e) = ext {
+            synth_mode_by_track
+                .entry(track_id.clone())
+                .or_insert_with(|| algo_synth_mode(e.algo_type));
         }
 
         let item_start_sec = base.start_sample / sample_rate;
@@ -804,20 +823,18 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     &mut pitch_data_by_track,
                 );
 
-                // vslib 轨道：写入额外曲线数据
-                if !is_world {
-                    write_extra_curves_for_segment(
-                        &track_id,
-                        pitch_points,
-                        seg_src_start,
-                        seg_src_end,
-                        clip_start,
-                        rate64,
-                        0.0,
-                        0.0,
-                        &mut extra_curve_data_by_track,
-                    );
-                }
+                // 写入额外曲线数据（不再因为 World 而跳过）
+                write_extra_curves_for_segment(
+                    &track_id,
+                    pitch_points,
+                    seg_src_start,
+                    seg_src_end,
+                    clip_start,
+                    rate64,
+                    0.0,
+                    0.0,
+                    &mut extra_curve_data_by_track,
+                );
             }
 
             for seg_idx in 0..seg_count {
@@ -903,20 +920,18 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 &mut pitch_data_by_track,
             );
 
-            // vslib 轨道：写入额外曲线数据
-            if !is_world {
-                write_extra_curves_for_segment(
-                    &track_id,
-                    pitch_points,
-                    0.0,
-                    source_duration_sec,
-                    item_start_sec,
-                    rate as f64,
-                    0.0,
-                    0.0,
-                    &mut extra_curve_data_by_track,
-                );
-            }
+            // 写入额外曲线数据（不再因为 World 而跳过）
+            write_extra_curves_for_segment(
+                &track_id,
+                pitch_points,
+                0.0,
+                source_duration_sec,
+                item_start_sec,
+                rate as f64,
+                0.0,
+                0.0,
+                &mut extra_curve_data_by_track,
+            );
         }
     }
 
@@ -1345,14 +1360,11 @@ pub fn import_vsp_clipboard(
             tid
         };
 
-        // 记录 vslib 轨道的 synth_mode
-        let is_world = ext.map(|e| is_world_algo(e.algo_type)).unwrap_or(false);
-        if !is_world {
-            if let Some(e) = ext {
-                synth_mode_by_track
-                    .entry(target_track_id.clone())
-                    .or_insert_with(|| algo_synth_mode(e.algo_type));
-            }
+        // 记录轨道的 synth_mode（不再因为 World 而忽略）
+        if let Some(e) = ext {
+            synth_mode_by_track
+                .entry(target_track_id.clone())
+                .or_insert_with(|| algo_synth_mode(e.algo_type));
         }
 
         // 解析音频路径
@@ -1486,19 +1498,18 @@ pub fn import_vsp_clipboard(
                     &mut pitch_data_by_track,
                 );
 
-                if !is_world {
-                    write_extra_curves_for_segment(
-                        &target_track_id,
-                        pitch_points,
-                        seg_src_start,
-                        seg_src_end,
-                        clip_start,
-                        rate64,
-                        0.0,
-                        0.0,
-                        &mut extra_curve_data_by_track,
-                    );
-                }
+                // 始终写入额外曲线数据（包括 World）
+                write_extra_curves_for_segment(
+                    &target_track_id,
+                    pitch_points,
+                    seg_src_start,
+                    seg_src_end,
+                    clip_start,
+                    rate64,
+                    0.0,
+                    0.0,
+                    &mut extra_curve_data_by_track,
+                );
             }
 
             for seg_idx in 0..seg_count {
@@ -1583,19 +1594,18 @@ pub fn import_vsp_clipboard(
                 &mut pitch_data_by_track,
             );
 
-            if !is_world {
-                write_extra_curves_for_segment(
-                    &target_track_id,
-                    pitch_points,
-                    0.0,
-                    source_duration_sec,
-                    item_start_sec,
-                    rate as f64,
-                    0.0,
-                    0.0,
-                    &mut extra_curve_data_by_track,
-                );
-            }
+            // 始终写入额外曲线数据（包括 World）
+            write_extra_curves_for_segment(
+                &target_track_id,
+                pitch_points,
+                0.0,
+                source_duration_sec,
+                item_start_sec,
+                rate as f64,
+                0.0,
+                0.0,
+                &mut extra_curve_data_by_track,
+            );
         }
     }
 
@@ -1731,6 +1741,22 @@ fn import_vsp_clipboard_selected_tracks(
     let mut vsp_to_hs_track: std::collections::HashMap<(i32, bool, i32), String> =
         std::collections::HashMap::new();
 
+    // 对被选中轨道内不同算法的首次出现时间进行统计（用于排序拆分后的轨道）
+    let mut earliest_start_by_algo: std::collections::HashMap<(i32, bool, i32), f64> =
+        std::collections::HashMap::new();
+    for (i, base) in item_bases.iter().enumerate() {
+        if !selected_set.contains(&(base.track_index as usize)) {
+            continue;
+        }
+        let pair = item_exts.get(i).map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+        let start_sec = base.start_sample / sample_rate;
+        let key = (base.track_index, pair.0, pair.1);
+        let entry = earliest_start_by_algo.entry(key).or_insert(f64::INFINITY);
+        if start_sec.is_finite() && start_sec < *entry {
+            *entry = start_sec;
+        }
+    }
+
     // 为每个选中的轨道创建新轨道（按不同算法对拆分）
     for &vsp_idx in &selected_track_indices {
         let vsp_track = &vsp_tracks[vsp_idx];
@@ -1749,7 +1775,14 @@ fn import_vsp_clipboard_selected_tracks(
 
         if has_mixed {
             let mut sorted: Vec<(bool, i32)> = algo_pairs.into_iter().collect();
-            sorted.sort();
+            // 按首次出现时间排序同源拆分轨道
+            sorted.sort_by(|a, b| {
+                let ka = (vsp_idx as i32, a.0, a.1);
+                let kb = (vsp_idx as i32, b.0, b.1);
+                let ta = earliest_start_by_algo.get(&ka).copied().unwrap_or(f64::INFINITY);
+                let tb = earliest_start_by_algo.get(&kb).copied().unwrap_or(f64::INFINITY);
+                ta.partial_cmp(&tb).unwrap_or(std::cmp::Ordering::Equal)
+            });
             for (is_world, synth_mode) in sorted {
                 let algo = if is_world {
                     PitchAnalysisAlgo::WorldDll
@@ -1824,9 +1857,9 @@ fn import_vsp_clipboard_selected_tracks(
             continue;
         };
 
-        // 记录 vslib 轨道的 synth_mode
-        if !is_world {
-            let sm = ext.map(|e| algo_synth_mode(e.algo_type)).unwrap_or(1);
+        // 记录轨道的 synth_mode（不再因为 World 而忽略）
+        if let Some(e) = ext {
+            let sm = algo_synth_mode(e.algo_type);
             synth_mode_by_track.entry(track_id.clone()).or_insert(sm);
         }
 
@@ -1957,20 +1990,18 @@ fn import_vsp_clipboard_selected_tracks(
                     0.0,
                     &mut pitch_data_by_track,
                 );
-
-                if !is_world {
-                    write_extra_curves_for_segment(
-                        &track_id,
-                        pitch_points,
-                        seg_src_start,
-                        seg_src_end,
-                        clip_start,
-                        rate64,
-                        0.0,
-                        0.0,
-                        &mut extra_curve_data_by_track,
-                    );
-                }
+                // 始终写入额外曲线数据（包括 World）
+                write_extra_curves_for_segment(
+                    &track_id,
+                    pitch_points,
+                    seg_src_start,
+                    seg_src_end,
+                    clip_start,
+                    rate64,
+                    0.0,
+                    0.0,
+                    &mut extra_curve_data_by_track,
+                );
             }
 
             for seg_idx in 0..seg_count {
@@ -2053,20 +2084,18 @@ fn import_vsp_clipboard_selected_tracks(
                 0.0,
                 &mut pitch_data_by_track,
             );
-
-            if !is_world {
-                write_extra_curves_for_segment(
-                    &track_id,
-                    pitch_points,
-                    0.0,
-                    source_duration_sec,
-                    item_start_sec,
-                    rate as f64,
-                    0.0,
-                    0.0,
-                    &mut extra_curve_data_by_track,
-                );
-            }
+            // 始终写入额外曲线数据（包括 World）
+            write_extra_curves_for_segment(
+                &track_id,
+                pitch_points,
+                0.0,
+                source_duration_sec,
+                item_start_sec,
+                rate as f64,
+                0.0,
+                0.0,
+                &mut extra_curve_data_by_track,
+            );
         }
     }
 
