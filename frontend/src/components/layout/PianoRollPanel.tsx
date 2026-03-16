@@ -2623,7 +2623,7 @@ export const PianoRollPanel: React.FC = () => {
                 </Flex>
 
                 {/* Right: ruler + scrollable canvas */}
-                <Flex direction="column" className="flex-1 min-w-0">
+                <Flex direction="column" className="flex-1 min-w-0 select-none">
                     <TimeRuler
                         contentWidth={contentWidth}
                         scrollLeft={scrollLeft}
