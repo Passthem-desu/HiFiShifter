@@ -10,6 +10,7 @@ import {
     selectKeybinding,
     formatKeybinding,
 } from "../../../features/keybindings/keybindingsSlice";
+import { sortAndFilterFadedClips } from "./clipFadeContext";
 
 // ── 单条菜单项 ──────────────────────────────────────────────────────────────
 const MenuItem: React.FC<{
@@ -321,17 +322,12 @@ export const ClipContextMenu: React.FC<{
                     />
                     {onFadeCurveChange &&
                         (() => {
-                            // Collect all clips involved in the overlap (clicked + overlapping neighbors)
-                            const fadedClips =
-                                overlappingClips.length > 0
-                                    ? [clip, ...overlappingClips].filter(
-                                          (c) => c.fadeInSec > 0 || c.fadeOutSec > 0,
-                                      )
-                                    : clip.fadeInSec > 0 || clip.fadeOutSec > 0
-                                      ? [clip]
-                                      : [];
+                            const fadedClips = sortAndFilterFadedClips({
+                                clip,
+                                overlappingClips,
+                            });
                             if (fadedClips.length === 0) return null;
-                            const showHeader = overlappingClips.length > 0;
+                            const showHeader = fadedClips.length > 1;
                             return (
                                 <>
                                     <Divider />

@@ -988,7 +988,7 @@ export const PianoRollPanel: React.FC = () => {
 
     useEffect(() => {
         invalidate();
-    }, [pitchView, paramViews, editParam, activeSecondaryParamId, invalidate]);
+    }, [pitchView, paramViews, editParam, activeSecondaryParamId, themeMode, invalidate]);
 
     // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后�?
     // useEffect 已移�?detectedPitchCurves useMemo 定义之后，见下方�?
@@ -1201,7 +1201,7 @@ export const PianoRollPanel: React.FC = () => {
         };
     }, [onScrollerWheelNative]);
 
-    // Piano keys (axis) area: scroll wheel → vertical zoom
+    // Piano keys (axis) area: 默认滚轮做垂直滚动，按住垂直缩放修饰键时做垂直缩放
     useEffect(() => {
         const el = axisWrapRef.current;
         if (!el) return;
@@ -1214,42 +1214,66 @@ export const PianoRollPanel: React.FC = () => {
             const pointerY = clamp(e.clientY - bounds.top, 0, h);
             // t: 0=top, 1=bottom — same semantics as usePianoRollInteractions
             const t = pointerY / h;
-            const valueAtPointer = editParam === "pitch"
-                ? (() => {
-                    const view = pitchViewRef.current;
-                    const absMin = PITCH_MIN_MIDI;
-                    const absMax = PITCH_MAX_MIDI;
-                    const span = clamp(view.span, 1e-6, absMax - absMin);
-                    const min = clamp(view.center - span / 2, absMin, absMax - span);
-                    return clamp(min + (1 - t) * span, absMin, absMax);
-                })()
-                : (() => {
-                    const desc = processorParamsRef.current?.find((d: ProcessorParamDescriptor) => d.id === editParam);
-                    const absMin = desc?.kind.type === "automation_curve" ? desc.kind.min_value : 0;
-                    const absMax = desc?.kind.type === "automation_curve" ? desc.kind.max_value : 1;
-                    const view = paramViewsRef.current[editParam] ?? { center: (absMin + absMax) / 2, span: absMax - absMin || 1 };
-                    const span = clamp(view.span, 1e-6, absMax - absMin || 1);
-                    const min = clamp(view.center - span / 2, absMin, absMax - span);
-                    return clamp(min + (1 - t) * span, absMin, absMax);
-                })();
 
-            // Scroll up (negative deltaY) → zoom in (smaller span), scroll down → zoom out
-            const factor = e.deltaY < 0 ? 0.9 : 1.1;
+            // 如果按住垂直缩放修饰键，则进行垂直缩放（原有行为）
+            if (isModifierActive(prVerticalZoomKb, e as any)) {
+                const valueAtPointer = editParam === "pitch"
+                    ? (() => {
+                        const view = pitchViewRef.current;
+                        const absMin = PITCH_MIN_MIDI;
+                        const absMax = PITCH_MAX_MIDI;
+                        const span = clamp(view.span, 1e-6, absMax - absMin);
+                        const min = clamp(view.center - span / 2, absMin, absMax - span);
+                        return clamp(min + (1 - t) * span, absMin, absMax);
+                    })()
+                    : (() => {
+                        const desc = processorParamsRef.current?.find((d: ProcessorParamDescriptor) => d.id === editParam);
+                        const absMin = desc?.kind.type === "automation_curve" ? desc.kind.min_value : 0;
+                        const absMax = desc?.kind.type === "automation_curve" ? desc.kind.max_value : 1;
+                        const view = paramViewsRef.current[editParam] ?? { center: (absMin + absMax) / 2, span: absMax - absMin || 1 };
+                        const span = clamp(view.span, 1e-6, absMax - absMin || 1);
+                        const min = clamp(view.center - span / 2, absMin, absMax - span);
+                        return clamp(min + (1 - t) * span, absMin, absMax);
+                    })();
 
+                // Scroll up (negative deltaY) → zoom in (smaller span), scroll down → zoom out
+                const factor = e.deltaY < 0 ? 0.9 : 1.1;
+
+                if (editParam === "pitch") {
+                    const cur = pitchViewRef.current;
+                    const nextSpan = cur.span * factor;
+                    const next = clampViewport("pitch", {
+                        span: nextSpan,
+                        center: valueAtPointer - (0.5 - t) * nextSpan,
+                    });
+                    setPitchView(next);
+                } else {
+                    const cur = paramViewsRef.current[editParam] ?? { center: 0.5, span: 1 };
+                    const nextSpan = cur.span * factor;
+                    const next = clampViewport(editParam, {
+                        span: nextSpan,
+                        center: valueAtPointer - (0.5 - t) * nextSpan,
+                    });
+                    setParamViewport(editParam, next);
+                }
+                invalidate();
+                return;
+            }
+
+            // 默认行为：垂直滚动（上下平移参数视图中心）
+            const delta = (-e.deltaY / h) * 0.5;
             if (editParam === "pitch") {
                 const cur = pitchViewRef.current;
-                const nextSpan = cur.span * factor;
                 const next = clampViewport("pitch", {
-                    span: nextSpan,
-                    center: valueAtPointer - (0.5 - t) * nextSpan,
+                    span: cur.span,
+                    center: cur.center + delta * cur.span,
                 });
                 setPitchView(next);
             } else {
                 const cur = paramViewsRef.current[editParam] ?? { center: 0.5, span: 1 };
-                const nextSpan = cur.span * factor;
                 const next = clampViewport(editParam, {
-                    span: nextSpan,
-                    center: valueAtPointer - (0.5 - t) * nextSpan,
+                    span: cur.span,
+                    center: cur.center + delta * cur.span,
                 });
                 setParamViewport(editParam, next);
             }
@@ -1260,7 +1284,13 @@ export const PianoRollPanel: React.FC = () => {
         return () => {
             el.removeEventListener("wheel", handler);
         };
-    }, [editParam, setPitchView, setParamViewport, invalidate]);
+    }, [
+        editParam,
+        setPitchView,
+        setParamViewport,
+        invalidate,
+        prVerticalZoomKb,
+    ]);
 
     // Silence unused state warnings; selectionUi is future UI.
     void selectionUi;
@@ -2599,7 +2629,7 @@ export const PianoRollPanel: React.FC = () => {
                 </Flex>
 
                 {/* Right: ruler + scrollable canvas */}
-                <Flex direction="column" className="flex-1 min-w-0">
+                <Flex direction="column" className="flex-1 min-w-0 select-none">
                     <TimeRuler
                         contentWidth={contentWidth}
                         scrollLeft={scrollLeft}

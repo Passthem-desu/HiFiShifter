@@ -1,53 +1,79 @@
 mod audio_engine;
-#[path = "audio/audio_utils.rs"] mod audio_utils;
+#[path = "audio/audio_utils.rs"]
+mod audio_utils;
+#[path = "pitch/clip_pitch_cache.rs"]
+mod clip_pitch_cache;
+#[path = "pitch/clip_rendering_state.rs"]
+mod clip_rendering_state;
 mod commands;
-#[path = "audio/mixdown.rs"] mod mixdown;
-#[path = "audio/hifigan_tension.rs"] mod hifigan_tension;
+#[path = "audio/hifigan_tension.rs"]
+mod hifigan_tension;
+#[path = "audio/mixdown.rs"]
+mod mixdown;
 mod models;
 mod pitch_analysis;
-#[path = "pitch/pitch_clip.rs"] mod pitch_clip;
-#[path = "pitch/pitch_config.rs"] mod pitch_config;
-#[cfg(test)] #[path = "pitch/pitch_config_tests.rs"] mod pitch_config_tests;
+#[path = "pitch/pitch_clip.rs"]
+mod pitch_clip;
+#[path = "pitch/pitch_config.rs"]
+mod pitch_config;
+#[cfg(test)]
+#[path = "pitch/pitch_config_tests.rs"]
+mod pitch_config_tests;
 mod pitch_editing;
-mod synth_clip_cache;
-#[path = "pitch/clip_pitch_cache.rs"] mod clip_pitch_cache;
-#[path = "pitch/pitch_progress.rs"] mod pitch_progress;
+#[path = "pitch/pitch_progress.rs"]
+mod pitch_progress;
 mod renderer;
-#[path = "pitch/clip_rendering_state.rs"] mod clip_rendering_state;
+mod synth_clip_cache;
 
 #[cfg(feature = "onnx")]
-#[path = "vocoder/nsf_hifigan_onnx.rs"] mod nsf_hifigan_onnx;
+#[path = "vocoder/nsf_hifigan_onnx.rs"]
+mod nsf_hifigan_onnx;
 #[cfg(not(feature = "onnx"))]
-#[path = "vocoder/nsf_hifigan_onnx_stub.rs"] mod nsf_hifigan_onnx_stub;
+#[path = "vocoder/nsf_hifigan_onnx_stub.rs"]
+mod nsf_hifigan_onnx_stub;
 #[cfg(not(feature = "onnx"))]
 use nsf_hifigan_onnx_stub as nsf_hifigan_onnx;
 
 #[cfg(feature = "onnx")]
-#[path = "vocoder/hnsep_onnx.rs"] mod hnsep_onnx;
+#[path = "vocoder/hnsep_onnx.rs"]
+mod hnsep_onnx;
 #[cfg(not(feature = "onnx"))]
-#[path = "vocoder/hnsep_onnx_stub.rs"] mod hnsep_onnx_stub;
+#[path = "vocoder/hnsep_onnx_stub.rs"]
+mod hnsep_onnx_stub;
 #[cfg(not(feature = "onnx"))]
 use hnsep_onnx_stub as hnsep_onnx;
 
-mod project;
-#[path = "audio/sstretch.rs"] mod sstretch;
-#[path = "import/vocalshifter_clipboard.rs"] mod vocalshifter_clipboard;
-#[path = "import/vocalshifter_import.rs"] mod vocalshifter_import;
-#[path = "import/reaper_parser.rs"] mod reaper_parser;
-#[path = "import/reaper_import.rs"] mod reaper_import;
-#[path = "import/midi_import.rs"] mod midi_import;
-mod state;
-#[path = "audio/time_stretch.rs"] mod time_stretch;
-#[path = "audio/waveform.rs"] mod waveform;
-#[path = "audio/waveform_disk_cache.rs"] mod waveform_disk_cache;
-#[path = "audio/hfspeaks_v2.rs"] mod hfspeaks_v2;
 mod config;
+#[path = "import/midi_import.rs"]
+mod midi_import;
+mod project;
+#[path = "import/reaper_import.rs"]
+mod reaper_import;
+#[path = "import/reaper_parser.rs"]
+mod reaper_parser;
+#[path = "audio/sstretch.rs"]
+mod sstretch;
+mod state;
 mod temp_manager;
-#[path = "vocoder/world.rs"] mod world;
-#[path = "vocoder/streaming_world.rs"] mod streaming_world;
-#[path = "vocoder/world_vocoder.rs"] mod world_vocoder;
+#[path = "audio/time_stretch.rs"]
+mod time_stretch;
+#[path = "audio/waveform.rs"]
+mod waveform;
+#[path = "audio/waveform_disk_cache.rs"]
+mod waveform_disk_cache;
+#[path = "audio/time_stretch.rs"]
+mod time_stretch;
+#[path = "import/vocalshifter_clipboard.rs"]
+mod vocalshifter_clipboard;
+#[path = "import/vocalshifter_import.rs"]
+mod vocalshifter_import;
 #[cfg(feature = "vslib")]
-#[path = "vocoder/vslib.rs"] mod vslib;
+#[path = "vocoder/vslib.rs"]
+mod vslib;
+#[path = "vocoder/world.rs"]
+mod world;
+#[path = "vocoder/world_vocoder.rs"]
+mod world_vocoder;
 
 use tauri::Manager;
 
@@ -74,9 +100,7 @@ pub fn run() {
             if std::env::var_os("HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR").is_none() {
                 if let Ok(res_dir) = app.path().resource_dir() {
                     let p = res_dir.join("models").join("nsf_hifigan");
-                    if p.join("pc_nsf_hifigan.onnx").exists()
-                        && p.join("config.json").exists()
-                    {
+                    if p.join("pc_nsf_hifigan.onnx").exists() && p.join("config.json").exists() {
                         std::env::set_var("HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR", &p);
                     }
                 }
@@ -220,11 +244,10 @@ pub fn run() {
             commands::get_midi_tracks,
             commands::import_midi_to_pitch,
             commands::get_ui_settings,
-            commands::save_ui_settings
-            // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
-            // commands::start_pitch_refresh_task,
-            // commands::get_pitch_refresh_status,
-            // commands::cancel_pitch_task
+            commands::save_ui_settings // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
+                                       // commands::start_pitch_refresh_task,
+                                       // commands::get_pitch_refresh_status,
+                                       // commands::cancel_pitch_task
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

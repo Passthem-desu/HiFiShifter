@@ -17,6 +17,17 @@ import { isModifierActive } from "../../../../features/keybindings/keybindingsSl
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { paramsApi } from "../../../../services/api";
 
+export function resolveStretchParamTypes(
+    pitchEditUserModified: boolean | null | undefined,
+): Array<"pitch" | "tension"> {
+    // 未手动编辑的 pitch 曲线由后端根据 clip 几何自动重建，
+    // 前端若再次映射会造成“二次拉伸”。
+    if (pitchEditUserModified === false) {
+        return ["tension"];
+    }
+    return ["pitch", "tension"];
+}
+
 /**
  * 拉伸后对参数线进行时域映射（拉伸或压缩）。
  * 将旧范围 [oldStartSec, oldStartSec+oldLengthSec] 内的参数值，
@@ -37,10 +48,12 @@ async function stretchLinkedParams(
         return;
     }
 
-    // 获取帧周期（通过最小量探针请求）
+    // 获取帧周期（通过最小量探针请求）。
+    // 同时读取 pitch_edit_user_modified 以决定是否应手动映射 pitch。
     const probe = await paramsApi.getParamFrames(trackId, "pitch", 0, 1, 1);
     if (!probe?.ok) return;
     const fp = Math.max(1, Number(probe.frame_period_ms) || 5);
+    const stretchParams = resolveStretchParamTypes(probe.pitch_edit_user_modified);
 
     const oldStartFrame = Math.round((oldStartSec * 1000) / fp);
     const oldEndFrame = Math.round(((oldStartSec + oldLengthSec) * 1000) / fp);
@@ -50,7 +63,7 @@ async function stretchLinkedParams(
     const newEndFrame = Math.round(((newStartSec + newLengthSec) * 1000) / fp);
     const newFrameCount = Math.max(1, newEndFrame - newStartFrame);
 
-    for (const paramType of ["pitch", "tension"] as const) {
+    for (const paramType of stretchParams) {
         const res = await paramsApi.getParamFrames(
             trackId,
             paramType,

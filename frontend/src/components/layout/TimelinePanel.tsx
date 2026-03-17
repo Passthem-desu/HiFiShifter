@@ -39,6 +39,7 @@ import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
 import { useKeyboardShortcuts } from "./timeline/hooks/useKeyboardShortcuts";
 import { computeAutoCrossfadeFromPayload } from "./timeline/hooks/autoCrossfade";
+import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../features/keybindings/types";
 import { webApi } from "../../services/webviewApi";
@@ -673,6 +674,7 @@ export const TimelinePanel: React.FC = () => {
         x: number;
         y: number;
         clipId: string;
+        overlappingClipIds?: string[];
     } | null>(null);
     const [trackAreaMenu, setTrackAreaMenu] = useState<{
         x: number;
@@ -1756,12 +1758,57 @@ export const TimelinePanel: React.FC = () => {
                     }}
                     onContextMenu={(e) => {
                         e.preventDefault();
+                        // Clear any existing clip menu state first
                         setContextMenu(null);
+
+                        const target = e.target as HTMLElement | null;
+                        // If clicking on an existing custom context menu, ignore
+                        if (target?.closest?.("[data-hs-context-menu='1']")) return;
+
                         const trackId = trackIdFromClientY(e.clientY);
                         if (!trackId) {
                             setTrackAreaMenu(null);
                             return;
                         }
+
+                        // Try to detect clips at this time position (for overlapping clips)
+                        const scroller = scrollRef.current;
+                        const bounds = scroller?.getBoundingClientRect() ?? null;
+                        const timeAtPointer =
+                            bounds && scroller
+                                ? beatFromClientX(e.clientX, bounds, scroller.scrollLeft)
+                                : null;
+
+                        if (timeAtPointer != null) {
+                            const clipsHere = sessionRef.current.clips
+                                .filter((c) => c.trackId === trackId)
+                                .filter((c) => {
+                                    const start = Number(c.startSec ?? 0) || 0;
+                                    const end = start + (Number(c.lengthSec ?? 0) || 0);
+                                    return timeAtPointer >= start && timeAtPointer <= end;
+                                })
+                                .sort((a, b) => a.startSec - b.startSec);
+
+                            if (clipsHere.length > 0) {
+                                // If the click actually landed inside a clip DOM node, let the clip's handler win (it stops propagation).
+                                if (target?.closest?.("[data-hs-clip-item='1']")) return;
+
+                                // Open clip context menu for the top-most clip, and pass overlapping ids if multiple
+                                const topClip = clipsHere[clipsHere.length - 1];
+                                setContextMenu({
+                                    x: e.clientX,
+                                    y: e.clientY,
+                                    clipId: topClip.id,
+                                    overlappingClipIds:
+                                        clipsHere.length > 1
+                                            ? clipsHere.map((c) => c.id)
+                                            : undefined,
+                                });
+                                return;
+                            }
+                        }
+
+                        // Fallback: open track area menu
                         if (sessionRef.current.selectedTrackId !== trackId) {
                             void dispatch(selectTrackRemote(trackId));
                         }
@@ -2296,29 +2343,13 @@ export const TimelinePanel: React.FC = () => {
                                     )
                                   : ctxClip.startSec;
 
-                          // Find all clips on the same track whose fade regions contain the mouse position
-                          const overlappingFadeClips = sessionRef.current.clips
-                              .filter((c) => {
-                                  if (c.trackId !== ctxClip.trackId)
-                                      return false;
-                                  const fadeInEnd =
-                                      c.startSec + (c.fadeInSec || 0);
-                                  const fadeOutStart =
-                                      c.startSec +
-                                      c.lengthSec -
-                                      (c.fadeOutSec || 0);
-                                  const mouseInFadeIn =
-                                      c.fadeInSec > 0 &&
-                                      contextTimeSec >= c.startSec &&
-                                      contextTimeSec <= fadeInEnd;
-                                  const mouseInFadeOut =
-                                      c.fadeOutSec > 0 &&
-                                      contextTimeSec >= fadeOutStart &&
-                                      contextTimeSec <=
-                                          c.startSec + c.lengthSec;
-                                  return mouseInFadeIn || mouseInFadeOut;
-                              })
-                              .sort((a, b) => a.startSec - b.startSec);
+                          const overlappingFadeClips = collectFadeContextClips({
+                              allClips: sessionRef.current.clips,
+                              contextClip: ctxClip,
+                              contextTimeSec,
+                              explicitOverlappingClipIds:
+                                  contextMenu.overlappingClipIds,
+                          });
 
                           const playheadSec = sessionRef.current.playheadSec;
                           const playheadInClip =
