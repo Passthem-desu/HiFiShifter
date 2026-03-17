@@ -40,7 +40,7 @@ import {
     transposePitchByScaleSteps,
 } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
-import { getWheelGestureAxis } from "./wheelGesture";
+import { getParamEditorWheelAction } from "./wheelGesture";
 
 type CanvasCursor =
     | "default"
@@ -1076,16 +1076,33 @@ export function usePianoRollInteractions(args: {
                 return;
             }
 
+            const horizontalScrollModifierActive = isModifierActive(
+                scrollHorizontalKb,
+                e,
+            );
+            const verticalPanModifierActive = isModifierActive(
+                scrollVerticalKb,
+                e,
+            );
+            const wheelAction = getParamEditorWheelAction({
+                deltaX: e.deltaX,
+                deltaY: e.deltaY,
+                horizontalScrollModifier: horizontalScrollModifierActive,
+                verticalPanModifier: verticalPanModifierActive,
+            });
+
             // Scroll modifier: convert wheel to horizontal scroll
-            if (isModifierActive(scrollHorizontalKb, e)) {
+            if (wheelAction === "horizontal-scroll") {
                 e.preventDefault();
-                el.scrollLeft += e.deltaY;
+                el.scrollLeft += horizontalScrollModifierActive
+                    ? e.deltaY
+                    : e.deltaX;
                 syncScrollLeft(el);
                 return;
             }
 
             // Scroll modifier: convert wheel to vertical scroll
-            if (isModifierActive(scrollVerticalKb, e)) {
+            if (wheelAction === "vertical-pan") {
                 e.preventDefault();
                 // 实现参数值轴的平移（center 上下移动）
                 const h = Math.max(1, el.clientHeight);
@@ -1106,13 +1123,6 @@ export function usePianoRollInteractions(args: {
                     setParamViewport(editParam, next);
                 }
                 invalidate();
-                return;
-            }
-
-            if (getWheelGestureAxis(e) === "horizontal") {
-                e.preventDefault();
-                el.scrollLeft += e.deltaX;
-                syncScrollLeft(el);
                 return;
             }
 

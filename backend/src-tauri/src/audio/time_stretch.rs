@@ -16,6 +16,117 @@ pub enum StretchAlgorithm {
     ElastiqueSoloist,
 }
 
+const STRETCH_SILENCE_WINDOW_MS: f64 = 10.0;
+const STRETCH_MIN_SILENCE_MS: f64 = 20.0;
+const STRETCH_SILENCE_RMS: f32 = 1.0e-4;
+
+fn env_f32(name: &str) -> Option<f32> {
+    std::env::var(name)
+        .ok()
+        .and_then(|s| s.trim().parse::<f32>().ok())
+}
+
+fn preserve_hard_silence_after_stretch(
+    input: &[f32],
+    output: &mut [f32],
+    channels: usize,
+    sample_rate: u32,
+) {
+    if input.is_empty() || output.is_empty() || channels == 0 {
+        return;
+    }
+
+    let in_frames = input.len() / channels;
+    let out_frames = output.len() / channels;
+    if in_frames == 0 || out_frames == 0 {
+        return;
+    }
+
+    let silence_rms = env_f32("HIFISHIFTER_STRETCH_SILENCE_RMS")
+        .unwrap_or(STRETCH_SILENCE_RMS)
+        .max(0.0);
+    let window_frames = ((sample_rate.max(1) as f64) * (STRETCH_SILENCE_WINDOW_MS / 1000.0))
+        .round()
+        .max(1.0) as usize;
+    let min_silence_blocks = (STRETCH_MIN_SILENCE_MS / STRETCH_SILENCE_WINDOW_MS)
+        .round()
+        .max(1.0) as usize;
+
+    let block_count = in_frames.div_ceil(window_frames);
+    let mut silent_blocks = vec![false; block_count];
+
+    for (block_index, silent) in silent_blocks.iter_mut().enumerate() {
+        let start_frame = block_index.saturating_mul(window_frames);
+        let end_frame = (start_frame + window_frames).min(in_frames);
+        if start_frame >= end_frame {
+            continue;
+        }
+
+        let mut energy = 0.0f64;
+        let mut sample_count = 0usize;
+        for frame in start_frame..end_frame {
+            let base = frame * channels;
+            for channel in 0..channels {
+                let sample = input[base + channel] as f64;
+                energy += sample * sample;
+                sample_count += 1;
+            }
+        }
+
+        if sample_count == 0 {
+            continue;
+        }
+
+        let rms = (energy / sample_count as f64).sqrt() as f32;
+        *silent = rms <= silence_rms;
+    }
+
+    let mut run_start: Option<usize> = None;
+    for index in 0..=silent_blocks.len() {
+        let is_silent = silent_blocks.get(index).copied().unwrap_or(false);
+        match (run_start, is_silent) {
+            (None, true) => run_start = Some(index),
+            (Some(start), false) => {
+                if index.saturating_sub(start) < min_silence_blocks {
+                    for block in &mut silent_blocks[start..index] {
+                        *block = false;
+                    }
+                }
+                run_start = None;
+            }
+            _ => {}
+        }
+    }
+
+    if !silent_blocks.iter().any(|&silent| silent) {
+        return;
+    }
+
+    let scale = if out_frames <= 1 || in_frames <= 1 {
+        0.0
+    } else {
+        (in_frames - 1) as f64 / (out_frames - 1) as f64
+    };
+
+    for out_frame in 0..out_frames {
+        let source_frame = if out_frames <= 1 || in_frames <= 1 {
+            0
+        } else {
+            ((out_frame as f64) * scale)
+                .round()
+                .clamp(0.0, (in_frames - 1) as f64) as usize
+        };
+        let block_index = (source_frame / window_frames).min(silent_blocks.len() - 1);
+        if !silent_blocks[block_index] {
+            continue;
+        }
+        let base = out_frame * channels;
+        for channel in 0..channels {
+            output[base + channel] = 0.0;
+        }
+    }
+}
+
 pub fn time_stretch_interleaved(
     input: &[f32],
     channels: usize,
@@ -61,7 +172,12 @@ pub fn time_stretch_interleaved(
             match result {
                 Ok(mut out) => {
                     // 确保输出长度精确匹配请求
-                    let got_frames = out.len() / channels.max(1);
+                    preserve_hard_silence_after_stretch(
+                        input,
+                        &mut out,
+                        channels,
+                        sample_rate.max(1),
+                    );
                     out.resize(out_frames * channels, 0.0);
                     out
                 }
@@ -120,4 +236,34 @@ fn linear_time_stretch_interleaved(input: &[f32], channels: usize, out_frames: u
     }
 
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preserve_hard_silence_after_stretch;
+
+    #[test]
+    fn preserve_hard_silence_zeroes_stretched_output_tail() {
+        let sample_rate = 1_000;
+        let channels = 1;
+        let input = vec![0.6, 0.6, 0.6, 0.0, 0.0, 0.0];
+        let mut output = vec![0.6, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02, 0.01, 0.0];
+
+        preserve_hard_silence_after_stretch(&input, &mut output, channels, sample_rate);
+
+        assert_eq!(&output[..5], &[0.6, 0.6, 0.4, 0.2, 0.1]);
+        assert!(output[5..].iter().all(|sample| sample.abs() < 1e-9));
+    }
+
+    #[test]
+    fn preserve_hard_silence_keeps_short_gaps_untouched() {
+        let sample_rate = 1_000;
+        let channels = 1;
+        let input = vec![0.6, 0.6, 0.0, 0.6, 0.6];
+        let mut output = vec![0.6, 0.55, 0.25, 0.5, 0.6];
+
+        preserve_hard_silence_after_stretch(&input, &mut output, channels, sample_rate);
+
+        assert_eq!(output, vec![0.6, 0.55, 0.25, 0.5, 0.6]);
+    }
 }
