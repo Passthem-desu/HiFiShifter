@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 // Direct FFI bindings to statically-linked WORLD library
 
 #[repr(C)]
@@ -153,16 +154,19 @@ enum WorldF0Method {
 }
 
 fn world_f0_method() -> WorldF0Method {
-    match std::env::var("HIFISHIFTER_WORLD_F0")
-        .ok()
-        .as_deref()
-        .map(|s| s.trim().to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("dio") => WorldF0Method::Dio,
-        Some("harvest") => WorldF0Method::Harvest,
-        _ => WorldF0Method::Harvest,
-    }
+    static METHOD: OnceLock<WorldF0Method> = OnceLock::new();
+    *METHOD.get_or_init(|| {
+        match std::env::var("HIFISHIFTER_WORLD_F0")
+            .ok()
+            .as_deref()
+            .map(|s| s.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("dio") => WorldF0Method::Dio,
+            Some("harvest") => WorldF0Method::Harvest,
+            _ => WorldF0Method::Harvest,
+        }
+    })
 }
 
 pub fn is_available() -> bool {
@@ -193,9 +197,12 @@ fn blend_unvoiced_regions_with_silence_gate(
     fp: f64,
     fs: i32,
 ) {
-    let silence_rms = env_f64("HIFISHIFTER_WORLD_DRY_SILENCE_RMS")
-        .unwrap_or(WORLD_DRY_SILENCE_RMS)
-        .max(0.0);
+    static SILENCE_RMS: OnceLock<f64> = OnceLock::new();
+    let silence_rms = *SILENCE_RMS.get_or_init(|| {
+        env_f64("HIFISHIFTER_WORLD_DRY_SILENCE_RMS")
+            .unwrap_or(WORLD_DRY_SILENCE_RMS)
+            .max(0.0)
+    });
     blend_unvoiced_regions_with_silence_gate_impl(out, dry, voiced, fp, fs, silence_rms);
 }
 
@@ -294,7 +301,8 @@ fn cleanup_f0_inplace(f0: &mut [f64], frame_period_ms: f64, f0_floor: f64, f0_ce
     // 2) Fill short unvoiced gaps inside voiced regions.
     // This reduces analysis/synthesis instability ("gargling") when f0 flickers to 0 for a few frames.
     // Default: 15ms; set HIFISHIFTER_WORLD_F0_GAP_MS=0 to disable.
-    let gap_ms = env_f64("HIFISHIFTER_WORLD_F0_GAP_MS").unwrap_or(15.0);
+    static GAP_MS: OnceLock<f64> = OnceLock::new();
+    let gap_ms = *GAP_MS.get_or_init(|| env_f64("HIFISHIFTER_WORLD_F0_GAP_MS").unwrap_or(15.0));
     if gap_ms <= 0.0 {
         return;
     }
@@ -549,8 +557,11 @@ fn vocode_one(
     let spec_bins = (fft_size as usize / 2) + 1;
 
     // Allocate spectrogram and aperiodicity as 2D arrays.
-    let mut spectrogram: Vec<Vec<f64>> = vec![vec![0.0f64; spec_bins]; f0.len()];
-    let mut sp_ptrs: Vec<*mut f64> = spectrogram.iter_mut().map(|row| row.as_mut_ptr()).collect();
+    let mut spectrogram = vec![0.0f64; f0.len() * spec_bins];
+    let mut sp_ptrs: Vec<*mut f64> = spectrogram
+        .chunks_exact_mut(spec_bins)
+        .map(|row| row.as_mut_ptr())
+        .collect();
 
     unsafe {
         CheapTrick(
@@ -571,9 +582,9 @@ fn vocode_one(
     let mut d4c_opt = D4COption { threshold: 0.85 };
     unsafe { InitializeD4COption(&mut d4c_opt as *mut D4COption) };
 
-    let mut aperiodicity: Vec<Vec<f64>> = vec![vec![0.0f64; spec_bins]; f0.len()];
+    let mut aperiodicity = vec![0.0f64; f0.len() * spec_bins];
     let mut ap_ptrs: Vec<*mut f64> = aperiodicity
-        .iter_mut()
+        .chunks_exact_mut(spec_bins)
         .map(|row| row.as_mut_ptr())
         .collect();
 
@@ -602,13 +613,11 @@ fn vocode_one(
     let mut y = vec![0.0f64; x_f64.len()];
 
     unsafe {
-        let sp_const: Vec<*const f64> = sp_ptrs.iter().map(|&p| p as *const f64).collect();
-        let ap_const: Vec<*const f64> = ap_ptrs.iter().map(|&p| p as *const f64).collect();
         Synthesis(
             shifted_f0.as_ptr(),
             f0_len_i32,
-            sp_const.as_ptr(),
-            ap_const.as_ptr(),
+            sp_ptrs.as_ptr() as *const *const f64,
+            ap_ptrs.as_ptr() as *const *const f64,
             fft_size,
             fp,
             fs,
@@ -715,8 +724,11 @@ fn vocode_one_streaming(
 
     let spec_bins = (fft_size as usize / 2) + 1;
 
-    let mut spectrogram: Vec<Vec<f64>> = vec![vec![0.0f64; spec_bins]; f0.len()];
-    let mut sp_ptrs: Vec<*mut f64> = spectrogram.iter_mut().map(|row| row.as_mut_ptr()).collect();
+    let mut spectrogram = vec![0.0f64; f0.len() * spec_bins];
+    let mut sp_ptrs: Vec<*mut f64> = spectrogram
+        .chunks_exact_mut(spec_bins)
+        .map(|row| row.as_mut_ptr())
+        .collect();
 
     unsafe {
         CheapTrick(
@@ -738,9 +750,9 @@ fn vocode_one_streaming(
     let mut d4c_opt = D4COption { threshold: 0.85 };
     unsafe { InitializeD4COption(&mut d4c_opt as *mut D4COption) };
 
-    let mut aperiodicity: Vec<Vec<f64>> = vec![vec![0.0f64; spec_bins]; f0.len()];
+    let mut aperiodicity = vec![0.0f64; f0.len() * spec_bins];
     let mut ap_ptrs: Vec<*mut f64> = aperiodicity
-        .iter_mut()
+        .chunks_exact_mut(spec_bins)
         .map(|row| row.as_mut_ptr())
         .collect();
 
@@ -797,13 +809,11 @@ fn vocode_one_streaming(
             .map_err(|_| "WORLD: output too long".to_string())?;
         let mut y = vec![0.0f64; x_f64.len()];
         unsafe {
-            let sp_const: Vec<*const f64> = sp_ptrs.iter().map(|&p| p as *const f64).collect();
-            let ap_const: Vec<*const f64> = ap_ptrs.iter().map(|&p| p as *const f64).collect();
             Synthesis(
                 shifted_f0.as_ptr(),
                 f0_len_i32,
-                sp_const.as_ptr(),
-                ap_const.as_ptr(),
+                sp_ptrs.as_ptr() as *const *const f64,
+                ap_ptrs.as_ptr() as *const *const f64,
                 fft_size,
                 fp,
                 fs,
@@ -879,6 +889,9 @@ where
 
     let mut out = vec![0.0f32; total_frames];
 
+    // 预先在循环外部分配好内存池，避免在 Chunk 循环中疯狂申请堆内存
+    let mut x_f64 = Vec::with_capacity(chunk_len + overlap_len * 2);
+
     let mut pos = 0usize;
     while pos < total_frames {
         let chunk_start = pos;
@@ -888,7 +901,8 @@ where
         let pad_end = (chunk_end + overlap_len).min(total_frames);
 
         let x = &mono_pcm[pad_start..pad_end];
-        let mut x_f64 = Vec::with_capacity(x.len());
+        x_f64.clear(); // 清空上次的脏数据，但复用分配好的物理内存容量
+
         let mut mean = 0.0f64;
         for &v in x {
             mean += v as f64;
