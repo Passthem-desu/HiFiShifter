@@ -62,15 +62,8 @@ pub fn time_stretch_interleaved(
                 Ok(mut out) => {
                     // 确保输出长度精确匹配请求
                     let got_frames = out.len() / channels.max(1);
-                    if got_frames == out_frames {
-                        out
-                    } else if got_frames > out_frames {
-                        out.truncate(out_frames * channels);
-                        out
-                    } else {
-                        out.resize(out_frames * channels, 0.0);
-                        out
-                    }
+                    out.resize(out_frames * channels, 0.0);
+                    out
                 }
                 Err(e) => {
                     if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
@@ -111,13 +104,18 @@ fn linear_time_stretch_interleaved(input: &[f32], channels: usize, out_frames: u
 
     for of in 0..out_frames {
         let t_in = (of as f64) * scale;
-        let i0 = t_in.floor() as usize;
+        let i0 = t_in as usize;
         let i1 = (i0 + 1).min(in_frames - 1);
         let frac = (t_in - (i0 as f64)) as f32;
+
+        let base0 = i0 * channels;
+        let base1 = i1 * channels;
+        let out_base = of * channels;
+
         for ch in 0..channels {
-            let a = input[i0 * channels + ch];
-            let b = input[i1 * channels + ch];
-            out[of * channels + ch] = a + (b - a) * frac;
+            let a = input[base0 + ch];
+            let b = input[base1 + ch];
+            out[out_base + ch] = a + (b - a) * frac;
         }
     }
 

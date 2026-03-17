@@ -40,11 +40,8 @@ extern "C" {
         time_ratio: f64,
     ) -> c_int;
 
-    fn sstretch_flush(
-        state: SStretchState,
-        output_interleaved: *mut f32,
-        out_frames: u32,
-    ) -> c_int;
+    fn sstretch_flush(state: SStretchState, output_interleaved: *mut f32, out_frames: u32)
+        -> c_int;
 }
 
 // ── 公共 API ──────────────────────────────────────────────────────
@@ -70,6 +67,7 @@ pub struct SignalsmithRealtimeStretcher {
     /// process_interleaved() 产出的数据暂存于此，
     /// retrieve_interleaved_into() 从中取出。
     out_buffer: Vec<f32>,
+    temp_out: Vec<f32>,
 }
 
 unsafe impl Send for SignalsmithRealtimeStretcher {}
@@ -110,6 +108,7 @@ impl SignalsmithRealtimeStretcher {
             sample_rate: sample_rate.max(1),
             time_ratio,
             out_buffer: Vec::with_capacity(4096),
+            temp_out: Vec::with_capacity(4096),
         })
     }
 
@@ -151,14 +150,15 @@ impl SignalsmithRealtimeStretcher {
             return Ok(());
         }
 
-        let mut temp_out = vec![0.0f32; out_frames * self.channels];
+        // 复用结构体自带的 buffer，消除高频内存分配
+        self.temp_out.resize(out_frames * self.channels, 0.0);
 
         let ret = unsafe {
             sstretch_process_interleaved(
                 self.state,
                 input_interleaved.as_ptr(),
                 in_frames as u32,
-                temp_out.as_mut_ptr(),
+                self.temp_out.as_mut_ptr(),
                 out_frames as u32,
             )
         };
@@ -168,7 +168,7 @@ impl SignalsmithRealtimeStretcher {
         }
 
         // 追加到内部缓冲区
-        self.out_buffer.extend_from_slice(&temp_out);
+        self.out_buffer.extend_from_slice(&self.temp_out);
 
         Ok(())
     }
@@ -348,15 +348,21 @@ pub fn try_time_stretch_interleaved_realtime(
         let mut in_cursor: usize = 0;
         let mut out_produced: usize = 0;
 
+        // 提前在循环外分配好最大容量的复用 Buffer，消除循环内开销
+        let mut in_block = vec![0.0f32; BLOCK * channels];
+        let mut out_block = vec![0.0f32; BLOCK * 4 * channels]; // block_out 最大为 BLOCK * 4
+
         while in_cursor < total_in || out_produced < total_out {
             let remain_in = total_in.saturating_sub(in_cursor);
             let block_in = remain_in.min(BLOCK);
 
-            // 按比例计算输出帧数
             let block_out = if total_in > 0 {
                 let next_progress = ((in_cursor + block_in) as f64) / (total_in as f64);
                 let next_expected = (next_progress * total_out as f64).round() as usize;
-                next_expected.saturating_sub(out_produced).max(1).min(BLOCK * 4)
+                next_expected
+                    .saturating_sub(out_produced)
+                    .max(1)
+                    .min(BLOCK * 4)
             } else {
                 0
             };
@@ -365,20 +371,19 @@ pub fn try_time_stretch_interleaved_realtime(
                 break;
             }
 
-            // 准备输入（可能包含静音 padding）
-            let mut in_block = vec![0.0f32; block_in * channels];
-            for i in 0..block_in {
-                let src_i = in_cursor + i;
-                if src_i < in_frames {
-                    for ch in 0..channels {
-                        in_block[i * channels + ch] =
-                            input_interleaved[src_i * channels + ch];
-                    }
-                }
-                // else: 保持 0（静音 flush）
-            }
+            // 利用底层 memcpy 极速拷贝数据，超出的部分补 0
+            let valid_in_frames = in_frames.saturating_sub(in_cursor).min(block_in);
+            let valid_in_samples = valid_in_frames * channels;
+            let total_in_samples = block_in * channels;
 
-            let mut out_block = vec![0.0f32; block_out * channels];
+            if valid_in_samples > 0 {
+                let start = in_cursor * channels;
+                in_block[..valid_in_samples]
+                    .copy_from_slice(&input_interleaved[start..start + valid_in_samples]);
+            }
+            if total_in_samples > valid_in_samples {
+                in_block[valid_in_samples..total_in_samples].fill(0.0);
+            }
 
             let ret = sstretch_process_interleaved(
                 state,
@@ -393,7 +398,8 @@ pub fn try_time_stretch_interleaved_realtime(
                 return Err("sstretch_process_interleaved failed".to_string());
             }
 
-            all_output.extend_from_slice(&out_block);
+            // 仅取出当前轮次有效输出的切片
+            all_output.extend_from_slice(&out_block[..block_out * channels]);
             in_cursor += block_in;
             out_produced += block_out;
         }
@@ -408,7 +414,7 @@ pub fn try_time_stretch_interleaved_realtime(
 
         sstretch_delete(state);
 
-        // 跳过 pre-roll（output_latency 帧），取 out_frames 帧
+        // 跳过 pre-roll，取 out_frames 帧
         let skip = output_latency.min(all_output.len() / channels.max(1));
         let skip_samples = skip * channels;
         let available = all_output.len().saturating_sub(skip_samples);
