@@ -40,6 +40,7 @@ import {
     transposePitchByScaleSteps,
 } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
+import { getWheelGestureAxis } from "./wheelGesture";
 
 type CanvasCursor =
     | "default"
@@ -1105,6 +1106,13 @@ export function usePianoRollInteractions(args: {
                     setParamViewport(editParam, next);
                 }
                 invalidate();
+                return;
+            }
+
+            if (getWheelGestureAxis(e) === "horizontal") {
+                e.preventDefault();
+                el.scrollLeft += e.deltaX;
+                syncScrollLeft(el);
                 return;
             }
 

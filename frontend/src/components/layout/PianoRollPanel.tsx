@@ -71,6 +71,7 @@ import { useClipsPeaksForPianoRoll } from "./pianoRoll/useClipsPeaksForPianoRoll
 import { usePianoRollInteractions } from "./pianoRoll/usePianoRollInteractions";
 import { useLiveParamEditing } from "./pianoRoll/useLiveParamEditing";
 import { getParamShiftStep } from "./pianoRoll/paramShiftStep";
+import { getWheelGestureAxis } from "./pianoRoll/wheelGesture";
 import {
     getActiveSecondaryParamId,
     toggleSecondaryParamVisibility,
@@ -1251,6 +1252,13 @@ export const PianoRollPanel: React.FC = () => {
                     setParamViewport(editParam, next);
                 }
                 invalidate();
+                return;
+            }
+
+            const scroller = scrollerRef.current;
+            if (scroller && getWheelGestureAxis(e) === "horizontal") {
+                scroller.scrollLeft += e.deltaX;
+                syncScrollLeft(scroller);
                 return;
             }
 
