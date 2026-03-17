@@ -148,7 +148,9 @@ export const ClipItem = React.memo(function ClipItem({
                     fadeInSec={Number(clip.fadeInSec ?? 0) || 0}
                     fadeOutSec={Number(clip.fadeOutSec ?? 0) || 0}
                     fadeInCurve={(clip.fadeInCurve as FadeCurveType) ?? "sine"}
-                    fadeOutCurve={(clip.fadeOutCurve as FadeCurveType) ?? "sine"}
+                    fadeOutCurve={
+                        (clip.fadeOutCurve as FadeCurveType) ?? "sine"
+                    }
                     viewportStartSec={viewportStartSec}
                     viewportEndSec={viewportEndSec}
                     clipStartSec={clip.startSec}

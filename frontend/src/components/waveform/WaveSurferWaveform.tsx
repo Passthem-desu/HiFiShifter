@@ -40,7 +40,10 @@ export default function WaveSurferWaveform(props: Props) {
     React.useEffect(() => {
         if (!containerRef.current) return;
         try {
-            console.log("[WaveSurferWaveform] creating WaveSurfer instance (mount)", containerRef.current);
+            console.log(
+                "[WaveSurferWaveform] creating WaveSurfer instance (mount)",
+                containerRef.current,
+            );
             wsRef.current = WaveSurfer.create({
                 container: containerRef.current,
                 waveColor: stroke,
@@ -50,12 +53,13 @@ export default function WaveSurferWaveform(props: Props) {
                 interact: false,
                 normalize: false,
             });
-            console.log("[WaveSurferWaveform] WaveSurfer created (mount)", wsRef.current);
-            
+            console.log(
+                "[WaveSurferWaveform] WaveSurfer created (mount)",
+                wsRef.current,
+            );
         } catch (e) {
             console.error("[WaveSurferWaveform] init error (mount)", e);
             wsRef.current = null;
-            
         }
 
         return () => {
@@ -75,21 +79,50 @@ export default function WaveSurferWaveform(props: Props) {
         const clipEnd = clipStart + clipLen;
         const fullWidthPx = targetWidthPx;
 
-        if (viewportStartSec === undefined || viewportEndSec === undefined || clipLen <= 0) {
-            return { visibleWidthPx: fullWidthPx, offsetPx: 0, visibleStartRatio: 0, visibleEndRatio: 1 };
+        if (
+            viewportStartSec === undefined ||
+            viewportEndSec === undefined ||
+            clipLen <= 0
+        ) {
+            return {
+                visibleWidthPx: fullWidthPx,
+                offsetPx: 0,
+                visibleStartRatio: 0,
+                visibleEndRatio: 1,
+            };
         }
 
         const visStart = Math.max(clipStart, viewportStartSec - 2);
         const visEnd = Math.min(clipEnd, viewportEndSec + 2);
-        if (visEnd <= visStart) return { visibleWidthPx: 0, offsetPx: 0, visibleStartRatio: 0, visibleEndRatio: 0 };
+        if (visEnd <= visStart)
+            return {
+                visibleWidthPx: 0,
+                offsetPx: 0,
+                visibleStartRatio: 0,
+                visibleEndRatio: 0,
+            };
 
         const startRatio = (visStart - clipStart) / clipLen;
         const endRatio = (visEnd - clipStart) / clipLen;
         const offsetPx = Math.floor(startRatio * fullWidthPx);
-        const visibleWidthPx = Math.max(1, Math.ceil(endRatio * fullWidthPx) - offsetPx);
+        const visibleWidthPx = Math.max(
+            1,
+            Math.ceil(endRatio * fullWidthPx) - offsetPx,
+        );
 
-        return { visibleWidthPx, offsetPx, visibleStartRatio: startRatio, visibleEndRatio: endRatio };
-    }, [targetWidthPx, clipDurationSec, clipStartSec, viewportStartSec, viewportEndSec]);
+        return {
+            visibleWidthPx,
+            offsetPx,
+            visibleStartRatio: startRatio,
+            visibleEndRatio: endRatio,
+        };
+    }, [
+        targetWidthPx,
+        clipDurationSec,
+        clipStartSec,
+        viewportStartSec,
+        viewportEndSec,
+    ]);
 
     // （保留可视区参数，但不进行复杂裁剪计算）
 
@@ -122,53 +155,97 @@ export default function WaveSurferWaveform(props: Props) {
                 if (canceled || requestId !== requestIdRef.current) return;
                 if (!res) return;
 
-                console.log("[WaveSurferWaveform] fetched peaks for WaveSurfer", {
-                    samples: (res.peaks[0] as Float32Array).length,
-                    duration: res.duration,
-                    preview: Array.from((res.peaks[0] as Float32Array).slice(0, 10)),
-                });
+                console.log(
+                    "[WaveSurferWaveform] fetched peaks for WaveSurfer",
+                    {
+                        samples: (res.peaks[0] as Float32Array).length,
+                        duration: res.duration,
+                        preview: Array.from(
+                            (res.peaks[0] as Float32Array).slice(0, 10),
+                        ),
+                    },
+                );
 
                 const ws = wsRef.current;
                 if (ws) {
                     try {
-                        console.log("[WaveSurferWaveform] loading peaks into WaveSurfer", {
-                            peaksLen: (res.peaks[0] as Float32Array).length,
-                            duration: res.duration,
-                        });
+                        console.log(
+                            "[WaveSurferWaveform] loading peaks into WaveSurfer",
+                            {
+                                peaksLen: (res.peaks[0] as Float32Array).length,
+                                duration: res.duration,
+                            },
+                        );
                         // Prefer calling `load('', peaks, duration)` which will create decodedData
                         // and let WaveSurfer's renderer render it. Fall back to setOptions + manual
                         // renderer.render when load is not available.
                         if (typeof ws.load === "function") {
-                            await ws.load("", res.peaks, res.duration as number);
-                            console.log("[WaveSurferWaveform] WaveSurfer.load completed and should be rendered");
+                            await ws.load(
+                                "",
+                                res.peaks,
+                                res.duration as number,
+                            );
+                            console.log(
+                                "[WaveSurferWaveform] WaveSurfer.load completed and should be rendered",
+                            );
                         } else if (typeof ws.setOptions === "function") {
-                            ws.setOptions({ peaks: res.peaks, duration: res.duration });
+                            ws.setOptions({
+                                peaks: res.peaks,
+                                duration: res.duration,
+                            });
                             // try to trigger a render from decoded data
-                            const decoded = typeof ws.getDecodedData === "function" ? ws.getDecodedData() : ws.decodedData;
-                            if (decoded && ws.renderer && typeof ws.renderer.render === "function") {
+                            const decoded =
+                                typeof ws.getDecodedData === "function"
+                                    ? ws.getDecodedData()
+                                    : ws.decodedData;
+                            if (
+                                decoded &&
+                                ws.renderer &&
+                                typeof ws.renderer.render === "function"
+                            ) {
                                 try {
                                     ws.renderer.render(decoded);
-                                    console.log("[WaveSurferWaveform] renderer.render invoked (fallback)");
+                                    console.log(
+                                        "[WaveSurferWaveform] renderer.render invoked (fallback)",
+                                    );
                                 } catch (err) {
-                                    console.warn("[WaveSurferWaveform] renderer.render failed", err);
+                                    console.warn(
+                                        "[WaveSurferWaveform] renderer.render failed",
+                                        err,
+                                    );
                                 }
                             }
                         } else {
-                            console.warn("[WaveSurferWaveform] no compatible load/setOptions API on WaveSurfer instance");
+                            console.warn(
+                                "[WaveSurferWaveform] no compatible load/setOptions API on WaveSurfer instance",
+                            );
                         }
                     } catch (e) {
-                        console.error("[WaveSurferWaveform] failed to load peaks into WaveSurfer", e);
+                        console.error(
+                            "[WaveSurferWaveform] failed to load peaks into WaveSurfer",
+                            e,
+                        );
                     }
                 }
             } catch (e) {
-                console.error("[WaveSurferWaveform] backend peaks fetch error", e);
+                console.error(
+                    "[WaveSurferWaveform] backend peaks fetch error",
+                    e,
+                );
             }
         })();
 
         return () => {
             canceled = true;
         };
-    }, [sourcePath, sourceStartSec, sourceDurationSec, targetWidthPx, heightPx, stroke]);
+    }, [
+        sourcePath,
+        sourceStartSec,
+        sourceDurationSec,
+        targetWidthPx,
+        heightPx,
+        stroke,
+    ]);
 
     // 清理
     React.useEffect(() => {
@@ -203,7 +280,10 @@ export default function WaveSurferWaveform(props: Props) {
     return (
         <div style={containerStyle}>
             <div style={innerStyle}>
-                <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+                <div
+                    ref={containerRef}
+                    style={{ width: "100%", height: "100%" }}
+                />
             </div>
         </div>
     );

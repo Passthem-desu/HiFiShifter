@@ -30,7 +30,10 @@ export interface WaveSurferPeaksResult {
  * 将 v2 min/max 响应转换为 wavesurfer 可用的 peaks。返回单通道（mono）。
  * 如果需要 stereo，可在此处扩展为生成两个通道数组。
  */
-export function buildWaveSurferPeaksFromV2(resp: WaveformPeaksV2Payload, fallbackDuration?: number): WaveSurferPeaksResult {
+export function buildWaveSurferPeaksFromV2(
+    resp: WaveformPeaksV2Payload,
+    fallbackDuration?: number,
+): WaveSurferPeaksResult {
     const mins = (resp.min || []).map((v) => Number(v) || 0);
     const maxs = (resp.max || []).map((v) => Number(v) || 0);
     // 使用已有的转换函数以保留更多波形信息：interleaved (min,max)
@@ -63,7 +66,13 @@ export async function fetchWaveSurferPeaksFromV2(
     columns: number,
     level: MipmapLevel = 0,
 ): Promise<WaveSurferPeaksResult | null> {
-    const resp = await waveformApi.getWaveformPeaksV2Level(sourcePath, startSec, durationSec, columns, level);
+    const resp = await waveformApi.getWaveformPeaksV2Level(
+        sourcePath,
+        startSec,
+        durationSec,
+        columns,
+        level,
+    );
     if (!resp || !resp.ok) return null;
     return buildWaveSurferPeaksFromV2(resp, durationSec);
 }

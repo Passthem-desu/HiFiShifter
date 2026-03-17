@@ -1,12 +1,12 @@
 /**
  * PianoRoll 渲染模块
- * 
+ *
  * 负责钢琴卷帘界面的可视化渲染，包括：
  * - 音高网格和键盘可视化
  * - 音频波形渲染
  * - 参数曲线绘制（音高、音量等）
  * - 选区、播放头等交互元素
- * 
+ *
  * @module render
  */
 
@@ -605,10 +605,13 @@ export function drawPianoRoll(args: {
                 : false;
 
             if (isScaleNote) {
-                ctx.strokeStyle = isDark ? "rgba(255,200,80,0.22)" : "rgba(200,120,20,0.22)";
+                ctx.strokeStyle = isDark
+                    ? "rgba(255,200,80,0.22)"
+                    : "rgba(200,120,20,0.22)";
                 ctx.lineWidth = 2;
             } else {
-                ctx.strokeStyle = pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
+                ctx.strokeStyle =
+                    pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
                 ctx.lineWidth = 1;
             }
             ctx.beginPath();
@@ -670,8 +673,7 @@ export function drawPianoRoll(args: {
         const visibleCols = Math.max(2, sourceEndCol - sourceStartCol);
 
         // 计算可见区域的像素宽度
-        const visibleSourceColsPx =
-            (visibleSourceDurSec / pr) * pxPerSec;
+        const visibleSourceColsPx = (visibleSourceDurSec / pr) * pxPerSec;
 
         // 动态降采样：根据可见宽度计算目标采样数
         // 每像素 2 个采样点，保证精度同时控制数据量
