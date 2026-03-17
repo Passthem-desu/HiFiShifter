@@ -1,4 +1,4 @@
-import { createSlice, type PayloadAction } from "@reduxjs/toolkit";
+import { createSlice, current, type PayloadAction } from "@reduxjs/toolkit";
 import type {
     TimelineClip,
     TimelineState,
@@ -289,37 +289,25 @@ function ensureClipAutomation(state: SessionState, clipId: string) {
 function createSnapshot(state: SessionState): StateSnapshot {
     return {
         clips: state.clips.map((clip) => ({ ...clip })),
-        clipAutomation: JSON.parse(
-            JSON.stringify(state.clipAutomation),
-        ) as SessionState["clipAutomation"],
+        clipAutomation: structuredClone(current(state.clipAutomation)),
         selectedTrackId: state.selectedTrackId,
         selectedClipId: state.selectedClipId,
         selectedPointId: state.selectedPointId,
         playheadSec: state.playheadSec,
-        clipWaveforms: JSON.parse(
-            JSON.stringify(state.clipWaveforms),
-        ) as Record<string, WaveformPreview>,
-        clipPitchRanges: JSON.parse(
-            JSON.stringify(state.clipPitchRanges),
-        ) as Record<string, { min: number; max: number }>,
+        clipWaveforms: { ...state.clipWaveforms },
+        clipPitchRanges: { ...state.clipPitchRanges },
     };
 }
 
 function applySnapshot(state: SessionState, snapshot: StateSnapshot) {
-    state.clips = snapshot.clips.map((clip) => ({ ...clip }));
-    state.clipAutomation = JSON.parse(
-        JSON.stringify(snapshot.clipAutomation),
-    ) as SessionState["clipAutomation"];
+    state.clips = snapshot.clips;
+    state.clipAutomation = snapshot.clipAutomation;
     state.selectedTrackId = snapshot.selectedTrackId;
     state.selectedClipId = snapshot.selectedClipId;
     state.selectedPointId = snapshot.selectedPointId;
     state.playheadSec = snapshot.playheadSec;
-    state.clipWaveforms = JSON.parse(
-        JSON.stringify(snapshot.clipWaveforms),
-    ) as Record<string, WaveformPreview>;
-    state.clipPitchRanges = JSON.parse(
-        JSON.stringify(snapshot.clipPitchRanges),
-    ) as Record<string, { min: number; max: number }>;
+    state.clipWaveforms = snapshot.clipWaveforms;
+    state.clipPitchRanges = snapshot.clipPitchRanges;
 }
 
 function pushHistory(state: SessionState) {
@@ -347,19 +335,30 @@ function applyAutoCrossfadeInReducer(
     state: SessionState,
     movedIds: string[],
 ) {
-    if (!state.autoCrossfadeEnabled) return;
+    if (!state.autoCrossfadeEnabled || movedIds.length === 0) return;
+
+    const trackClipsMap: Record<string, ClipInfo[]> = {};
+    const clipMap: Record<string, ClipInfo> = {}; 
+    
+    // 一次性建立轨道分组和全局 ID 索引，时间复杂度 O(N)
+    for (const clip of state.clips) {
+        clipMap[clip.id] = clip;
+        if (!trackClipsMap[clip.trackId]) trackClipsMap[clip.trackId] = [];
+        trackClipsMap[clip.trackId].push(clip);
+    }
 
     const fadeInOverlaps = new Map<string, number>();
     const fadeOutOverlaps = new Map<string, number>();
 
     for (const id of movedIds) {
-        const clip = state.clips.find((c) => c.id === id);
+        // O(1) 直接获取，消除多余的 find 遍历
+        const clip = clipMap[id]; 
         if (!clip) continue;
         const clipStart = Number(clip.startSec);
         const clipEnd = clipStart + Number(clip.lengthSec);
 
-        const sameTrack = state.clips.filter(
-            (c) => c.trackId === clip.trackId && c.id !== id,
+        const sameTrack = (trackClipsMap[clip.trackId] || []).filter(
+            (c) => c.id !== id,
         );
 
         for (const other of sameTrack) {
@@ -385,8 +384,10 @@ function applyAutoCrossfadeInReducer(
         ...fadeOutOverlaps.keys(),
         ...movedIds,
     ]);
+    
     for (const clipId of allClipIds) {
-        const clip = state.clips.find((c) => c.id === clipId);
+        // O(1) 直接获取，消除多余的 find 遍历
+        const clip = clipMap[clipId]; 
         if (!clip) continue;
 
         const hasOverlapIn = fadeInOverlaps.has(clipId);
@@ -452,25 +453,6 @@ function applyTimelineState(state: SessionState, timeline: TimelineState) {
             fadeInCurve: (clip.fade_in_curve ?? "sine") as FadeCurveType,
             fadeOutCurve: (clip.fade_out_curve ?? "sine") as FadeCurveType,
         };
-
-        // DEBUG: 打印每个clip的关键参�?
-        console.log(`[SessionSlice] Parsed clip ${parsed.id.slice(0, 8)}:`, {
-            lengthSec: parsed.lengthSec,
-            durationSec: parsed.durationSec,
-            durationFrames: parsed.durationFrames,
-            sourceSampleRate: parsed.sourceSampleRate,
-            computedDurSec:
-                parsed.durationFrames && parsed.sourceSampleRate
-                    ? (parsed.durationFrames / parsed.sourceSampleRate).toFixed(
-                          6,
-                      )
-                    : "N/A",
-            sourcePath: parsed.sourcePath?.split(/[/\\]/).pop(),
-            startSec: parsed.startSec,
-            sourceStartSec: parsed.sourceStartSec,
-            sourceEndSec: parsed.sourceEndSec,
-            playbackRate: parsed.playbackRate,
-        });
 
         return parsed;
     });
@@ -1945,7 +1927,10 @@ const sessionSlice = createSlice({
                     ok?: boolean;
                 } & TimelineState;
                 if (!payload.ok) return;
+                // 保留播放头位置，避免 UI 跳变
+                const currentPlayheadSec = state.playheadSec;
                 applyTimelineState(state, payload);
+                state.playheadSec = currentPlayheadSec;
             })
 
             .addCase(redoRemote.fulfilled, (state, action) => {
@@ -1953,7 +1938,10 @@ const sessionSlice = createSlice({
                     ok?: boolean;
                 } & TimelineState;
                 if (!payload.ok) return;
+                // 保留播放头位置，避免 UI 跳变
+                const currentPlayheadSec = state.playheadSec;
                 applyTimelineState(state, payload);
+                state.playheadSec = currentPlayheadSec;
             })
 
             .addCase(newProjectRemote.fulfilled, (state, action) => {
@@ -2079,17 +2067,28 @@ const sessionSlice = createSlice({
                     return;
                 }
 
+                // 保留播放头位置和音高曲线，避免 UI 跳变
+                const currentPlayheadSec = state.playheadSec;
+                const currentParamsEpoch = state.paramsEpoch;
+                const currentClipPitchCurves = state.clipPitchCurves;
+
                 if (payload?.ok && payload?.timeline?.ok) {
                     applyTimelineState(
                         state,
                         payload.timeline as TimelineState,
                     );
+                    state.playheadSec = currentPlayheadSec;
+                    state.paramsEpoch = currentParamsEpoch;
+                    state.clipPitchCurves = currentClipPitchCurves;
                     state.status = "Project saved";
                     return;
                 }
 
                 if (payload?.ok && payload?.tracks && payload?.clips) {
                     applyTimelineState(state, payload as TimelineState);
+                    state.playheadSec = currentPlayheadSec;
+                    state.paramsEpoch = currentParamsEpoch;
+                    state.clipPitchCurves = currentClipPitchCurves;
                     state.status = "Project saved";
                     return;
                 }
@@ -2110,17 +2109,28 @@ const sessionSlice = createSlice({
                     return;
                 }
 
+                // 保留播放头位置和音高曲线，避免 UI 跳变
+                const currentPlayheadSec = state.playheadSec;
+                const currentParamsEpoch = state.paramsEpoch;
+                const currentClipPitchCurves = state.clipPitchCurves;
+
                 if (payload?.ok && payload?.timeline?.ok) {
                     applyTimelineState(
                         state,
                         payload.timeline as TimelineState,
                     );
+                    state.playheadSec = currentPlayheadSec;
+                    state.paramsEpoch = currentParamsEpoch;
+                    state.clipPitchCurves = currentClipPitchCurves;
                     state.status = "Project saved";
                     return;
                 }
 
                 if (payload?.ok && payload?.tracks && payload?.clips) {
                     applyTimelineState(state, payload as TimelineState);
+                    state.playheadSec = currentPlayheadSec;
+                    state.paramsEpoch = currentParamsEpoch;
+                    state.clipPitchCurves = currentClipPitchCurves;
                     state.status = "Project saved";
                     return;
                 }
@@ -2355,7 +2365,15 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
+                // 保留当前播放头位置，避免 mute/solo 操作时播放头跳变
+                const currentPlayheadSec = state.playheadSec;
+                // 保留 paramsEpoch 和 clipPitchCurves，避免触发钢琴窗音高曲线重新渲染
+                const currentParamsEpoch = state.paramsEpoch;
+                const currentClipPitchCurves = state.clipPitchCurves;
                 applyTimelineState(state, payload);
+                state.playheadSec = currentPlayheadSec;
+                state.paramsEpoch = currentParamsEpoch;
+                state.clipPitchCurves = currentClipPitchCurves;
             })
 
             .addCase(updateTransportBpm.fulfilled, (state, action) => {

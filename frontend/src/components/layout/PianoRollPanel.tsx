@@ -17,6 +17,7 @@ import {
     CheckIcon,
 } from "@radix-ui/react-icons";
 
+import { shallowEqual } from "react-redux";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
@@ -97,9 +98,18 @@ import { EditContextMenu } from "../editDialogs/EditContextMenu";
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
+    const rafRef = useRef<number | null>(null);
+    const drawRef = useRef<() => void>(() => { });
+    const invalidate = useCallback(() => {
+        if (rafRef.current != null) return;
+        rafRef.current = requestAnimationFrame(() => {
+            rafRef.current = null;
+            drawRef.current();
+        });
+    }, []);
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
-    const s = useAppSelector((state: RootState) => state.session);
+    const s = useAppSelector((state: RootState) => state.session, shallowEqual);
     const effectiveProjectScale = useMemo<ScaleLike>(
         () =>
             s.project.useCustomScale && s.project.customScale
@@ -197,20 +207,20 @@ export const PianoRollPanel: React.FC = () => {
     const currentDrawTool = s.drawToolMode === "line" ? "vibrato" : s.drawToolMode;
     const drawToolButtonTitle =
         currentDrawTool === "vibrato"
-              ? tAny("vibrato_draw_tool")
-              : tAny("draw_tool");
+            ? tAny("vibrato_draw_tool")
+            : tAny("draw_tool");
     const activeDragDirection =
         s.toolMode === "select"
             ? s.selectDragDirection
             : currentDrawTool === "draw"
-              ? s.drawDragDirection
-              : s.lineVibratoDragDirection;
+                ? s.drawDragDirection
+                : s.lineVibratoDragDirection;
     const activeDragDirectionTool =
         s.toolMode === "select"
             ? ("select" as const)
             : currentDrawTool === "draw"
-              ? ("draw" as const)
-              : ("vibrato" as const);
+                ? ("draw" as const)
+                : ("vibrato" as const);
 
     useEffect(() => {
         if (!drawToolMenuOpen) return;
@@ -294,7 +304,10 @@ export const PianoRollPanel: React.FC = () => {
     useEffect(() => {
         pxPerBeatRef.current = pxPerBeat;
         pxPerSecRef.current = pxPerSec;
-        localStorage.setItem("hifishifter.paramPxPerSec", String(pxPerSec));
+        const timer = setTimeout(() => {
+            localStorage.setItem("hifishifter.paramPxPerSec", String(pxPerSec));
+        }, 500);
+        return () => clearTimeout(timer);
     }, [pxPerBeat, pxPerSec]);
 
     useLayoutEffect(() => {
@@ -309,8 +322,14 @@ export const PianoRollPanel: React.FC = () => {
         syncScrollLeft(scroller);
     }, [pxPerSec]);
 
+    const zoomTimelineStateRef = useRef({ playheadSec: s.playheadSec, projectSec: s.projectSec });
+    useLayoutEffect(() => {
+        zoomTimelineStateRef.current = { playheadSec: s.playheadSec, projectSec: s.projectSec };
+    });
+
     useEffect(() => {
         function onZoomFocused(e: Event) {
+            const { playheadSec, projectSec } = zoomTimelineStateRef.current;
             const active = document.activeElement as HTMLElement | null;
             const inPianoRoll =
                 active?.hasAttribute("data-piano-roll-scroller") ||
@@ -318,9 +337,7 @@ export const PianoRollPanel: React.FC = () => {
                 document.body.getAttribute("data-hs-focus-window") === "pianoRoll";
             if (!inPianoRoll) return;
 
-            const factor = Number(
-                (e as CustomEvent<{ factor?: number }>).detail?.factor ?? 1,
-            );
+            const factor = Number((e as CustomEvent<{ factor?: number }>).detail?.factor ?? 1);
             if (!Number.isFinite(factor) || factor <= 0) return;
 
             const scroller = scrollerRef.current;
@@ -333,28 +350,18 @@ export const PianoRollPanel: React.FC = () => {
                 maxScale: MAX_PX_PER_SEC,
                 scrollLeft: scroller.scrollLeft,
                 viewportWidth: scroller.clientWidth,
-                anchorSec: Number(s.playheadSec ?? 0) || 0,
-                contentSec: s.projectSec,
+                anchorSec: Number(playheadSec ?? 0) || 0,
+                contentSec: projectSec,
             });
             if (!zoom) return;
 
-            keyboardZoomPendingRef.current = {
-                nextScale: zoom.nextScale,
-                nextScrollLeft: zoom.nextScrollLeft,
-            };
+            keyboardZoomPendingRef.current = { nextScale: zoom.nextScale, nextScrollLeft: zoom.nextScrollLeft };
             setPxPerSec(zoom.nextScale);
         }
 
-        window.addEventListener(
-            "hifi:zoomTimelineFocus",
-            onZoomFocused as EventListener,
-        );
-        return () =>
-            window.removeEventListener(
-                "hifi:zoomTimelineFocus",
-                onZoomFocused as EventListener,
-            );
-    }, [s.playheadSec, s.projectSec]);
+        window.addEventListener("hifi:zoomTimelineFocus", onZoomFocused as EventListener);
+        return () => window.removeEventListener("hifi:zoomTimelineFocus", onZoomFocused as EventListener);
+    }, []); // 空依赖
 
     const setPxPerBeatImmediate = useCallback(
         (next: number) => {
@@ -377,33 +384,20 @@ export const PianoRollPanel: React.FC = () => {
         );
     }, []);
 
-    const [pitchView, setPitchView] = useState<ValueViewport>(() => ({
-        center: 72, // C5 为正中心
-        span: 24,   // 两个八度（C4~C6）
-    }));
-    // 按参数 id 屘化的视口状态（音高以外的所有参数）
-    const [paramViews, setParamViews] = useState<Record<string, ValueViewport>>(
-        {},
-    );
-    const pitchViewRef = useRef(pitchView);
-    const paramViewsRef = useRef(paramViews);
+    const pitchViewRef = useRef<ValueViewport>({
+        center: 72,
+        span: 24,
+    });
+    const setPitchView = useCallback((next: ValueViewport) => {
+        pitchViewRef.current = next;
+        invalidate(); // 绕过 React 渲染，直接命令 Canvas 重绘
+    }, [invalidate]);
 
-    useEffect(() => {
-        pitchViewRef.current = pitchView;
-    }, [pitchView]);
-    useEffect(() => {
-        paramViewsRef.current = paramViews;
-    }, [paramViews]);
-
-    /** 更新单个非音高参数的视口 */
-    const setParamViewport = useCallback(
-        (param: string, next: ValueViewport) => {
-            setParamViews((prev) => ({ ...prev, [param]: next }));
-            // 同时就地更新 ref，保证 pointer 回调内能立即得到新属性
-            paramViewsRef.current = { ...paramViewsRef.current, [param]: next };
-        },
-        [],
-    );
+    const paramViewsRef = useRef<Record<string, ValueViewport>>({});
+    const setParamViewport = useCallback((param: string, next: ValueViewport) => {
+        paramViewsRef.current = { ...paramViewsRef.current, [param]: next };
+        invalidate(); // 绕过 React 渲染，直接命令 Canvas 重绘
+    }, [invalidate]);
 
     const rootTrackId = useMemo(() => {
         return resolveRootTrackId(s.tracks, effectiveSelectedTrackId);
@@ -457,22 +451,24 @@ export const PianoRollPanel: React.FC = () => {
                 processorParamsRef.current = curvable;
                 setProcessorParams(curvable);
                 setProcessorStaticParams(staticParams);
-                // 初始化还没有视口的参数
-                setParamViews((prev) => {
-                    const next = { ...prev };
-                    for (const p of curvable) {
-                        if (!next[p.id] && p.kind.type === "automation_curve") {
-                            const { min_value, max_value, default_value } =
-                                p.kind;
-                            const span = max_value - min_value;
-                            next[p.id] = {
-                                center: default_value,
-                                span: span > 0 ? span : 1,
-                            };
-                        }
+                // 初始化还没有视口的参数 (优化，直接读写 Ref)
+                const nextViews = { ...paramViewsRef.current };
+                let viewsChanged = false;
+                for (const p of curvable) {
+                    if (!nextViews[p.id] && p.kind.type === "automation_curve") {
+                        const { min_value, max_value, default_value } = p.kind;
+                        const span = max_value - min_value;
+                        nextViews[p.id] = {
+                            center: default_value,
+                            span: span > 0 ? span : 1,
+                        };
+                        viewsChanged = true;
                     }
-                    return next;
-                });
+                }
+                if (viewsChanged) {
+                    paramViewsRef.current = nextViews;
+                    invalidate(); // 数据有初始化，通知画布重绘
+                }
 
                 if (!rootTrackId || staticParams.length === 0) {
                     setProcessorStaticValues({});
@@ -625,8 +621,6 @@ export const PianoRollPanel: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const axisCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const axisWrapRef = useRef<HTMLDivElement | null>(null);
-    const rafRef = useRef<number | null>(null);
-    const drawRef = useRef<() => void>(() => {});
     const lastScrollLeftRef = useRef<number | null>(null);
     const scrollStateRafRef = useRef<number | null>(null);
 
@@ -655,14 +649,6 @@ export const PianoRollPanel: React.FC = () => {
         });
         ro.observe(el);
         return () => ro.disconnect();
-    }, []);
-
-    const invalidate = useCallback(() => {
-        if (rafRef.current != null) return;
-        rafRef.current = requestAnimationFrame(() => {
-            rafRef.current = null;
-            drawRef.current();
-        });
     }, []);
 
     // The ruler is React-rendered, but the main graph is canvas-rendered.
@@ -708,10 +694,11 @@ export const PianoRollPanel: React.FC = () => {
         }
 
         if (scrollStateRafRef.current == null) {
-            scrollStateRafRef.current = requestAnimationFrame(() => {
+            // 用 setTimeout 替代 requestAnimationFrame 强制降频
+            scrollStateRafRef.current = setTimeout(() => {
                 scrollStateRafRef.current = null;
                 setScrollLeft(scrollLeftRef.current);
-            });
+            }, 50) as unknown as number; // 约等于 20fps 的状态更新，释放 CPU
         }
 
         invalidate();
@@ -982,7 +969,7 @@ export const PianoRollPanel: React.FC = () => {
 
     useEffect(() => {
         invalidate();
-    }, [pitchView, paramViews, editParam, activeSecondaryParamId, themeMode, invalidate]);
+    }, [editParam, activeSecondaryParamId, themeMode, invalidate]);
 
     // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后�?
     // useEffect 已移�?detectedPitchCurves useMemo 定义之后，见下方�?
@@ -1094,7 +1081,7 @@ export const PianoRollPanel: React.FC = () => {
         });
     };
 
-    const handleEditActionRef = useRef<(op: string) => void>(() => {});
+    const handleEditActionRef = useRef<(op: string) => void>(() => { });
     // Stable callback that delegates to the latest handleEditOp via ref
     const stableEditAction = useCallback((op: string) => {
         handleEditActionRef.current(op);
@@ -1178,13 +1165,18 @@ export const PianoRollPanel: React.FC = () => {
     });
 
     const onScrollerWheelNative = interactions.onScrollerWheelNative;
+    const scrollerWheelHandlerRef = useRef(onScrollerWheelNative);
+
+    useLayoutEffect(() => {
+        scrollerWheelHandlerRef.current = onScrollerWheelNative;
+    });
 
     useEffect(() => {
         const el = scrollerRef.current;
         if (!el) return;
 
         const handler: EventListener = (evt) => {
-            onScrollerWheelNative(evt as globalThis.WheelEvent);
+            scrollerWheelHandlerRef.current(evt as globalThis.WheelEvent);
         };
 
         el.addEventListener("wheel", handler, {
@@ -1193,7 +1185,7 @@ export const PianoRollPanel: React.FC = () => {
         return () => {
             el.removeEventListener("wheel", handler);
         };
-    }, [onScrollerWheelNative]);
+    }, []); // 空依赖
 
     // Piano keys (axis) area: 默认滚轮做垂直滚动，按住垂直缩放修饰键时做垂直缩放
     useEffect(() => {
@@ -1349,9 +1341,9 @@ export const PianoRollPanel: React.FC = () => {
                 const sel2 = selectionRef.current;
                 let selArgs:
                     | {
-                          selectionStartFrame?: number;
-                          selectionMaxFrames?: number;
-                      }
+                        selectionStartFrame?: number;
+                        selectionMaxFrames?: number;
+                    }
                     | undefined;
                 if (sel2) {
                     const a = Math.min(sel2.aBeat, sel2.bBeat);
@@ -1404,8 +1396,8 @@ export const PianoRollPanel: React.FC = () => {
                 const smoothness = clamp(
                     Number(
                         smoothnessInput ??
-                            (data?.edgeSmoothnessPercent as number | undefined) ??
-                            s.edgeSmoothnessPercent,
+                        (data?.edgeSmoothnessPercent as number | undefined) ??
+                        s.edgeSmoothnessPercent,
                     ) || 0,
                     0,
                     100,
@@ -1467,9 +1459,9 @@ export const PianoRollPanel: React.FC = () => {
                     const meanDelta =
                         beforeMean.count > 0 && afterMean.count > 0
                             ? Math.abs(
-                                  afterMean.sum / afterMean.count -
-                                      beforeMean.sum / beforeMean.count,
-                              )
+                                afterMean.sum / afterMean.count -
+                                beforeMean.sum / beforeMean.count,
+                            )
                             : 0;
 
                     let boundaryDelta = 0;
@@ -1477,14 +1469,14 @@ export const PianoRollPanel: React.FC = () => {
                     if (selOffset > 0) {
                         boundaryDelta += Math.abs(
                             Number(beforeDense[selOffset] ?? 0) -
-                                Number(beforeDense[selOffset - 1] ?? 0),
+                            Number(beforeDense[selOffset - 1] ?? 0),
                         );
                         boundaryCount += 1;
                     }
                     if (selEnd < beforeDense.length - 1) {
                         boundaryDelta += Math.abs(
                             Number(beforeDense[selEnd] ?? 0) -
-                                Number(beforeDense[selEnd + 1] ?? 0),
+                            Number(beforeDense[selEnd + 1] ?? 0),
                         );
                         boundaryCount += 1;
                     }
@@ -1685,21 +1677,21 @@ export const PianoRollPanel: React.FC = () => {
                         (vals) =>
                             editParam === "pitch"
                                 ? vals.map((midi) =>
-                                      midi === 0
-                                          ? 0
-                                          : transposePitchByScaleSteps(
-                                                midi,
-                                                degreeSteps,
-                                                scale,
-                                            ),
-                                  )
+                                    midi === 0
+                                        ? 0
+                                        : transposePitchByScaleSteps(
+                                            midi,
+                                            degreeSteps,
+                                            scale,
+                                        ),
+                                )
                                 : vals.map((midi) =>
-                                      transposePitchByScaleSteps(
-                                          midi,
-                                          degreeSteps,
-                                          scale,
-                                      ),
-                                  ),
+                                    transposePitchByScaleSteps(
+                                        midi,
+                                        degreeSteps,
+                                        scale,
+                                    ),
+                                ),
                         Number(data?.edgeSmoothnessPercent),
                     );
                     break;
@@ -1764,8 +1756,8 @@ export const PianoRollPanel: React.FC = () => {
                                 editParam === "pitch" && vals[i] === 0
                                     ? 0
                                     : count > 0
-                                      ? sum / count
-                                      : buf[i];
+                                        ? sum / count
+                                        : buf[i];
                         }
                         buf = next;
                     }
@@ -1820,7 +1812,7 @@ export const PianoRollPanel: React.FC = () => {
                         const phaseRad = (phase * Math.PI) / 180;
                         const vib = Math.sin(
                             (2 * Math.PI * tMs) / Math.max(1, period) +
-                                phaseRad,
+                            phaseRad,
                         );
                         return v + ampFactor * env * vib;
                     });
@@ -1861,28 +1853,28 @@ export const PianoRollPanel: React.FC = () => {
                     const quantized =
                         unit === "semitone"
                             ? vals.map((v) =>
-                                  editParam === "pitch" && v === 0
-                                      ? 0
-                                      : (() => {
-                                          const snapped = snapToSemitone(v);
-                                          return Math.abs(v - snapped) <= toleranceSemitone
-                                              ? v
-                                              : snapped + ((v - snapped) > 0 ? 1 : -1) * toleranceSemitone;
-                                      })(),
-                              )
+                                editParam === "pitch" && v === 0
+                                    ? 0
+                                    : (() => {
+                                        const snapped = snapToSemitone(v);
+                                        return Math.abs(v - snapped) <= toleranceSemitone
+                                            ? v
+                                            : snapped + ((v - snapped) > 0 ? 1 : -1) * toleranceSemitone;
+                                    })(),
+                            )
                             : vals.map((v) =>
-                                  editParam === "pitch" && v === 0
-                                      ? 0
-                                      : (() => {
-                                          const snapped = snapToScale(
-                                              v,
-                                              scale,
-                                          );
-                                          return Math.abs(v - snapped) <= toleranceSemitone
-                                              ? v
-                                              : snapped + ((v - snapped) > 0 ? 1 : -1) * toleranceSemitone;
-                                      })(),
-                              );
+                                editParam === "pitch" && v === 0
+                                    ? 0
+                                    : (() => {
+                                        const snapped = snapToScale(
+                                            v,
+                                            scale,
+                                        );
+                                        return Math.abs(v - snapped) <= toleranceSemitone
+                                            ? v
+                                            : snapped + ((v - snapped) > 0 ? 1 : -1) * toleranceSemitone;
+                                    })(),
+                            );
                     await paramsApi.setParamFrames(
                         rootTrackId,
                         editParam,
@@ -1933,18 +1925,18 @@ export const PianoRollPanel: React.FC = () => {
                     const result =
                         editParam === "pitch"
                             ? vals.map((v) => {
-                                  if (v === 0) return 0;
-                                  const moved = v + delta;
-                                  return Math.abs(moved - v) <= toleranceSemitone
-                                      ? v
-                                      : moved + ((v - moved) > 0 ? 1 : -1) * toleranceSemitone;
-                              })
+                                if (v === 0) return 0;
+                                const moved = v + delta;
+                                return Math.abs(moved - v) <= toleranceSemitone
+                                    ? v
+                                    : moved + ((v - moved) > 0 ? 1 : -1) * toleranceSemitone;
+                            })
                             : vals.map((v) => {
-                                  const moved = v + delta;
-                                  return Math.abs(moved - v) <= toleranceSemitone
-                                      ? v
-                                      : moved + ((v - moved) > 0 ? 1 : -1) * toleranceSemitone;
-                              });
+                                const moved = v + delta;
+                                return Math.abs(moved - v) <= toleranceSemitone
+                                    ? v
+                                    : moved + ((v - moved) > 0 ? 1 : -1) * toleranceSemitone;
+                            });
                     await paramsApi.setParamFrames(
                         rootTrackId,
                         editParam,
@@ -2024,14 +2016,26 @@ export const PianoRollPanel: React.FC = () => {
 
     const vibratoToolIcon = (
         <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M1.5 7.5C3 7.5 3 3.5 4.5 3.5C6 3.5 6 11.5 7.5 11.5C9 11.5 9 3.5 10.5 3.5C12 3.5 12 7.5 13.5 7.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M1.5 7.5C3 7.5 3 3.5 4.5 3.5C6 3.5 6 11.5 7.5 11.5C9 11.5 9 3.5 10.5 3.5C12 3.5 12 7.5 13.5 7.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
     );
 
     const currentDrawToolIcon =
         currentDrawTool === "vibrato"
-              ? vibratoToolIcon
-              : <Pencil1Icon />;
+            ? vibratoToolIcon
+            : <Pencil1Icon />;
+
+    const timeRulerBars = useMemo(() => {
+        const beatsPerBar = Math.max(1, Math.round(s.beats || 4));
+        const totalBeats = Math.max(1, Math.ceil(s.projectSec / secPerBeat));
+        const result: Array<{ beat: number; label: string }> = [];
+        let barIndex = 1;
+        for (let beat = 0; beat <= totalBeats; beat += beatsPerBar) {
+            result.push({ beat, label: `${barIndex}.1` });
+            barIndex += 1;
+        }
+        return result;
+    }, [s.beats, s.projectSec, secPerBeat]);
 
     return (
         <Flex
@@ -2192,15 +2196,15 @@ export const PianoRollPanel: React.FC = () => {
                         >
                             {activeDragDirection === "free" ? (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M3.5 11.5L11.5 3.5M11.5 3.5L8 3.5M11.5 3.5L11.5 7M3.5 11.5L7 11.5M3.5 11.5L3.5 8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M3.5 11.5L11.5 3.5M11.5 3.5L8 3.5M11.5 3.5L11.5 7M3.5 11.5L7 11.5M3.5 11.5L3.5 8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                             ) : activeDragDirection === "x-only" ? (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M2 7.5H13M2 7.5L4.5 5M2 7.5L4.5 10M13 7.5L10.5 5M13 7.5L10.5 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M2 7.5H13M2 7.5L4.5 5M2 7.5L4.5 10M13 7.5L10.5 5M13 7.5L10.5 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                             ) : (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M7.5 2V13M7.5 2L5 4.5M7.5 2L10 4.5M7.5 13L5 10.5M7.5 13L10 10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    <path d="M7.5 2V13M7.5 2L5 4.5M7.5 2L10 4.5M7.5 13L5 10.5M7.5 13L10 10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
                                 </svg>
                             )}
                         </IconButton>
@@ -2208,13 +2212,12 @@ export const PianoRollPanel: React.FC = () => {
                             size="1"
                             variant={effectivePitchSnapVisual ? "solid" : "ghost"}
                             color="gray"
-                            title={`${t("pitch_snap")}: ${
-                                effectivePitchSnapVisual
-                                    ? s.pitchSnapUnit === "semitone"
-                                        ? tAny("quantize_semitone")
-                                        : tAny("quantize_scale")
-                                    : tAny("pitch_snap_off")
-                            }`}
+                            title={`${t("pitch_snap")}: ${effectivePitchSnapVisual
+                                ? s.pitchSnapUnit === "semitone"
+                                    ? tAny("quantize_semitone")
+                                    : tAny("quantize_scale")
+                                : tAny("pitch_snap_off")
+                                }`}
                             tabIndex={-1}
                             onClick={() => { dispatch(togglePitchSnap()); void dispatch(persistUiSettings()); }}
                             onContextMenu={(e) => {
@@ -2224,21 +2227,21 @@ export const PianoRollPanel: React.FC = () => {
                         >
                             {!effectivePitchSnapVisual ? (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M3 12L12 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                                    <path d="M10 2V10.5C10 11.88 8.88 13 7.5 13C6.12 13 5 11.88 5 10.5C5 9.12 6.12 8 7.5 8" stroke="currentColor" strokeWidth="1" opacity="0.6"/>
+                                    <path d="M3 12L12 3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                                    <path d="M10 2V10.5C10 11.88 8.88 13 7.5 13C6.12 13 5 11.88 5 10.5C5 9.12 6.12 8 7.5 8" stroke="currentColor" strokeWidth="1" opacity="0.6" />
                                 </svg>
                             ) : s.pitchSnapUnit === "semitone" ? (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M3 5.5H12M3 9.5H12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                                    <circle cx="7.5" cy="7.5" r="4.2" stroke="currentColor" strokeWidth="1" opacity="0.7"/>
+                                    <path d="M3 5.5H12M3 9.5H12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                                    <circle cx="7.5" cy="7.5" r="4.2" stroke="currentColor" strokeWidth="1" opacity="0.7" />
                                 </svg>
                             ) : (
                                 <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M2.5 10.5L5.5 4.5L8.5 10.5L11.5 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-                                    <circle cx="2.5" cy="10.5" r="1" fill="currentColor"/>
-                                    <circle cx="5.5" cy="4.5" r="1" fill="currentColor"/>
-                                    <circle cx="8.5" cy="10.5" r="1" fill="currentColor"/>
-                                    <circle cx="11.5" cy="6" r="1" fill="currentColor"/>
+                                    <path d="M2.5 10.5L5.5 4.5L8.5 10.5L11.5 6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                                    <circle cx="2.5" cy="10.5" r="1" fill="currentColor" />
+                                    <circle cx="5.5" cy="4.5" r="1" fill="currentColor" />
+                                    <circle cx="8.5" cy="10.5" r="1" fill="currentColor" />
+                                    <circle cx="11.5" cy="6" r="1" fill="currentColor" />
                                 </svg>
                             )}
                         </IconButton>
@@ -2261,15 +2264,15 @@ export const PianoRollPanel: React.FC = () => {
                         >
                             {s.scaleHighlightMode === "always" ? (
                                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <circle cx="5" cy="9" r="2.2" fill="currentColor"/>
-                                    <path d="M7 4V8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                                    <path d="M7 4L11 3.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                                    <circle cx="5" cy="9" r="2.2" fill="currentColor" />
+                                    <path d="M7 4V8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                                    <path d="M7 4L11 3.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
                                 </svg>
                             ) : (
                                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <circle cx="5" cy="9" r="2.2" stroke="currentColor" strokeWidth="1" fill="none"/>
-                                    <path d="M7 4V8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-                                    <path d="M7 4L11 3.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                                    <circle cx="5" cy="9" r="2.2" stroke="currentColor" strokeWidth="1" fill="none" />
+                                    <path d="M7 4V8.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                                    <path d="M7 4L11 3.2" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
                                 </svg>
                             )}
                         </IconButton>
@@ -2282,9 +2285,9 @@ export const PianoRollPanel: React.FC = () => {
                             onClick={() => { dispatch(toggleClipboardPreview()); void dispatch(persistUiSettings()); }}
                         >
                             <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <rect x="3" y="1" width="9" height="13" rx="1" stroke="currentColor" strokeWidth="1" fill="none"/>
-                                <path d="M5.5 1V2.5H9.5V1" stroke="currentColor" strokeWidth="0.8"/>
-                                <path d="M5 6L7 8L10 5" stroke="currentColor" strokeWidth="1.2" opacity="0.7"/>
+                                <rect x="3" y="1" width="9" height="13" rx="1" stroke="currentColor" strokeWidth="1" fill="none" />
+                                <path d="M5.5 1V2.5H9.5V1" stroke="currentColor" strokeWidth="0.8" />
+                                <path d="M5 6L7 8L10 5" stroke="currentColor" strokeWidth="1.2" opacity="0.7" />
                             </svg>
                         </IconButton>
                         <IconButton
@@ -2296,8 +2299,8 @@ export const PianoRollPanel: React.FC = () => {
                             onClick={() => { dispatch(toggleLockParamLines()); void dispatch(persistUiSettings()); }}
                         >
                             <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <rect x="3" y="6" width="9" height="7" rx="1" stroke="currentColor" strokeWidth="1" fill="none"/>
-                                <path d="M5 6V4.5C5 3.12 6.12 2 7.5 2C8.88 2 10 3.12 10 4.5V6" stroke="currentColor" strokeWidth="1" fill="none"/>
+                                <rect x="3" y="6" width="9" height="7" rx="1" stroke="currentColor" strokeWidth="1" fill="none" />
+                                <path d="M5 6V4.5C5 3.12 6.12 2 7.5 2C8.88 2 10 3.12 10 4.5V6" stroke="currentColor" strokeWidth="1" fill="none" />
                             </svg>
                         </IconButton>
                         <Flex align="center" gap="1" ml="2">
@@ -2318,7 +2321,7 @@ export const PianoRollPanel: React.FC = () => {
                                     const dir = e.deltaY < 0 ? 1 : -1;
                                     const next = clamp(
                                         Math.round(s.edgeSmoothnessPercent) +
-                                            dir * step,
+                                        dir * step,
                                         0,
                                         100,
                                     );
@@ -2627,30 +2630,7 @@ export const PianoRollPanel: React.FC = () => {
                     <TimeRuler
                         contentWidth={contentWidth}
                         scrollLeft={scrollLeft}
-                        bars={(() => {
-                            const beatsPerBar = Math.max(
-                                1,
-                                Math.round(s.beats || 4),
-                            );
-                            const totalBeats = Math.max(
-                                1,
-                                Math.ceil(s.projectSec / secPerBeat),
-                            );
-                            const result: Array<{
-                                beat: number;
-                                label: string;
-                            }> = [];
-                            let barIndex = 1;
-                            for (
-                                let beat = 0;
-                                beat <= totalBeats;
-                                beat += beatsPerBar
-                            ) {
-                                result.push({ beat, label: `${barIndex}.1` });
-                                barIndex += 1;
-                            }
-                            return result;
-                        })()}
+                        bars={timeRulerBars}
                         pxPerBeat={pxPerBeat}
                         pxPerSec={pxPerSec}
                         secPerBeat={secPerBeat}

@@ -82,7 +82,8 @@ export const TimelinePanel: React.FC = () => {
         lastBeat: number;
     } | null>(null);
     const lastClickedClipIdRef = useRef<string | null>(null);
-
+    const playheadRef = useRef<HTMLDivElement | null>(null);
+    const dropPreviewRef = useRef<HTMLDivElement | null>(null);
     const [scrollLeft, setScrollLeft] = useState(0);
     const [pxPerSec, setPxPerSec] = useState(() => {
         const stored = Number(localStorage.getItem("hifishifter.pxPerSec"));
@@ -177,6 +178,10 @@ export const TimelinePanel: React.FC = () => {
             ? Math.min(MAX_ROW_HEIGHT, Math.max(MIN_ROW_HEIGHT, stored))
             : DEFAULT_ROW_HEIGHT;
     });
+
+    // 静默访问
+    const rowHeightRef = useRef(rowHeight);
+    useEffect(() => { rowHeightRef.current = rowHeight; }, [rowHeight]);
 
     const panRef = useRef<{
         pointerId: number | null;
@@ -372,10 +377,10 @@ export const TimelinePanel: React.FC = () => {
                         const beat =
                             clientX !== undefined && bounds && scroller
                                 ? beatFromClientX(
-                                      clientX,
-                                      bounds,
-                                      scroller.scrollLeft,
-                                  )
+                                    clientX,
+                                    bounds,
+                                    scroller.scrollLeft,
+                                )
                                 : fallbackBeat;
                         const trackId =
                             clientY !== undefined
@@ -394,20 +399,26 @@ export const TimelinePanel: React.FC = () => {
                             // On some platforms, `paths` may only be populated on `drop`.
                             // Still update the ghost position on every `over`.
                             setDropPreview((prev) => {
-                                const path =
-                                    primaryPath ??
-                                    tauriDraggedPathRef.current ??
-                                    prev?.path ??
-                                    null;
+                                const path = primaryPath ?? tauriDraggedPathRef.current ?? prev?.path ?? null;
                                 if (!path) return prev;
                                 const nextFileName = fileNameFromPath(path);
-                                return {
-                                    path,
-                                    fileName: prev?.fileName ?? nextFileName,
-                                    trackId,
-                                    startSec: beat,
-                                    durationSec: prev?.durationSec ?? 0,
-                                };
+
+                                // 直接修改 DOM
+                                if (prev && dropPreviewRef.current) {
+                                    dropPreviewRef.current.style.left = `${Math.max(0, beat * pxPerSecRef.current)}px`;
+                                    dropPreviewRef.current.style.top = `${rowTopForTrackId(trackId) + 8}px`;
+                                }
+
+                                if (!prev || prev.trackId !== trackId || prev.path !== path) {
+                                    return {
+                                        path,
+                                        fileName: prev?.fileName ?? nextFileName,
+                                        trackId,
+                                        startSec: beat,
+                                        durationSec: prev?.durationSec ?? 0,
+                                    };
+                                }
+                                return prev;
                             });
                             return;
                         }
@@ -500,7 +511,7 @@ export const TimelinePanel: React.FC = () => {
             disposed = true;
             if (unlisten) unlisten();
         };
-    }, [dispatch, pxPerSec, rowHeight]);
+    }, [dispatch]);
 
     // ========== 监听文件浏览器面板的自定义拖拽事件 ==========
     useEffect(() => {
@@ -525,7 +536,7 @@ export const TimelinePanel: React.FC = () => {
                 detail.clientY >= bounds.top &&
                 detail.clientY <= bounds.bottom;
 
-            // 异步获取到音频时长后更新 ghost 宽度
+            // 异步获取到音频时长后仅更新 ghost 宽度
             if (detail.type === "duration") {
                 setDropPreview((prev) => {
                     if (prev && prev.path === detail.filePath) {
@@ -539,6 +550,7 @@ export const TimelinePanel: React.FC = () => {
                 return;
             }
 
+            // 移动时的 DOM 直通与重绘拦截
             if (detail.type === "move" || detail.type === "start") {
                 if (isOverTimeline && scroller) {
                     const beat = beatFromClientX(
@@ -547,16 +559,27 @@ export const TimelinePanel: React.FC = () => {
                         scroller.scrollLeft,
                     );
                     const trackId = trackIdFromClientY(detail.clientY);
-                    setDropPreview((prev) => ({
-                        path: detail.filePath,
-                        fileName: detail.fileName,
-                        trackId,
-                        startSec: beat,
-                        durationSec:
-                            prev?.path === detail.filePath
-                                ? prev.durationSec
-                                : 2,
-                    }));
+                    const path = detail.filePath;
+                    const fileName = detail.fileName;
+
+                    setDropPreview((prev) => {
+                        // 如果幽灵框存在，直接通过 DOM 修改其位置坐标
+                        if (prev && dropPreviewRef.current) {
+                            dropPreviewRef.current.style.left = `${Math.max(0, beat * pxPerSecRef.current)}px`;
+                            dropPreviewRef.current.style.top = `${rowTopForTrackId(trackId) + 8}px`;
+                        }
+                        // 如果切换了轨道或文件，才触发真正的 React 重绘
+                        if (!prev || prev.trackId !== trackId || prev.path !== path) {
+                            return {
+                                path,
+                                fileName,
+                                trackId,
+                                startSec: beat,
+                                durationSec: prev?.path === path ? prev.durationSec : 2,
+                            };
+                        }
+                        return prev;
+                    });
                 } else {
                     setDropPreview(null);
                 }
@@ -764,12 +787,12 @@ export const TimelinePanel: React.FC = () => {
     const secFromClientX = React.useCallback(
         (clientX: number, bounds: DOMRect, xScroll: number) => {
             const x = clientX - bounds.left + xScroll;
-            return Math.max(0, x / pxPerSec);
+            // 改用 ref，切断对 pxPerSec state 的依赖
+            return Math.max(0, x / pxPerSecRef.current);
         },
-        [pxPerSec],
+        [],
     );
 
-    /** 兼容旧名称，内部统一使用 secFromClientX */
     const beatFromClientX = secFromClientX;
 
     function trackIdFromClientY(clientY: number) {
@@ -777,7 +800,8 @@ export const TimelinePanel: React.FC = () => {
         if (!scroller) return null;
         const bounds = scroller.getBoundingClientRect();
         const y = clientY - bounds.top + scroller.scrollTop;
-        const idx = Math.floor(y / rowHeight);
+        // ⬇️ 优化核心：改用 ref，切断对 rowHeight state 的依赖
+        const idx = Math.floor(y / rowHeightRef.current);
         const tracks = sessionRef.current.tracks;
         if (idx < 0 || idx >= tracks.length) return null;
         return tracks[idx]?.id ?? null;
@@ -802,9 +826,16 @@ export const TimelinePanel: React.FC = () => {
             commit: boolean,
         ) => {
             const beat = beatFromClientX(clientX, bounds, xScroll);
-            dispatch(setplayheadSec(beat));
+
             if (commit) {
+                // 只有松手时才触发 Redux 全局重绘
+                dispatch(setplayheadSec(beat));
                 void dispatch(seekPlayhead(beat));
+            } else {
+                // 拖拽过程中直通 DOM
+                if (playheadRef.current) {
+                    playheadRef.current.style.left = `${beat * pxPerSecRef.current}px`;
+                }
             }
             return beat;
         },
@@ -1196,7 +1227,7 @@ export const TimelinePanel: React.FC = () => {
                             !ids.includes(clip.id) &&
                             Boolean(
                                 clip.sourcePath &&
-                                    selectedSourcePaths.has(clip.sourcePath),
+                                selectedSourcePaths.has(clip.sourcePath),
                             ),
                     );
                 if (hasOtherClipsWithSameSource) {
@@ -1243,15 +1274,16 @@ export const TimelinePanel: React.FC = () => {
     );
 
     const splitSelectedAtPlayhead = React.useCallback(() => {
+        // 直接从 ref 读值
         const selectedIds =
-            multiSelectedClipIds.length > 0
-                ? [...multiSelectedClipIds]
+            multiSelectedClipIdsRef.current.length > 0
+                ? [...multiSelectedClipIdsRef.current]
                 : sessionRef.current.selectedClipId
-                  ? [sessionRef.current.selectedClipId]
-                  : [];
+                    ? [sessionRef.current.selectedClipId]
+                    : [];
         if (selectedIds.length === 0) return;
         splitClipIdsAtPlayhead(selectedIds);
-    }, [multiSelectedClipIds, splitClipIdsAtPlayhead]);
+    }, [splitClipIdsAtPlayhead]); // 去除了 multiSelectedClipIds 依赖
 
     const selectClipRangeByRect = React.useCallback(
         (targetClipId: string) => {
@@ -1810,12 +1842,12 @@ export const TimelinePanel: React.FC = () => {
                             info?.name ||
                             (tauriPath
                                 ? String(
-                                      tauriPath.split(/[\\/]/).pop() ??
-                                          tauriPath,
-                                  )
+                                    tauriPath.split(/[\\/]/).pop() ??
+                                    tauriPath,
+                                )
                                 : hasDomFile
-                                  ? String(dt?.files?.[0]?.name ?? "Audio")
-                                  : "Audio");
+                                    ? String(dt?.files?.[0]?.name ?? "Audio")
+                                    : "Audio");
                         setDropPreview({
                             path,
                             fileName,
@@ -1858,7 +1890,7 @@ export const TimelinePanel: React.FC = () => {
                         if (
                             isTauri &&
                             Date.now() - (tauriDropHandledAtRef.current || 0) <
-                                500
+                            500
                         ) {
                             setDropPreview(null);
                             return;
@@ -2082,6 +2114,7 @@ export const TimelinePanel: React.FC = () => {
                         {/* Drop preview (ghost item) */}
                         {dropPreview ? (
                             <div
+                                ref={dropPreviewRef}
                                 className="absolute z-30 pointer-events-none"
                                 style={{
                                     left: Math.max(
@@ -2108,6 +2141,7 @@ export const TimelinePanel: React.FC = () => {
 
                         {/* Playhead Cursor */}
                         <div
+                            ref={playheadRef}
                             className="absolute top-0 bottom-0 w-px bg-qt-playhead z-20 cursor-ew-resize"
                             style={{ left: s.playheadSec * pxPerSec }}
                             onPointerDown={(e) => {
@@ -2276,164 +2310,164 @@ export const TimelinePanel: React.FC = () => {
 
                 {contextMenu
                     ? (() => {
-                          const ctxClip = sessionRef.current.clips.find(
-                              (c) => c.id === contextMenu.clipId,
-                          );
-                          if (!ctxClip) return null;
+                        const ctxClip = sessionRef.current.clips.find(
+                            (c) => c.id === contextMenu.clipId,
+                        );
+                        if (!ctxClip) return null;
 
-                          const selectedIds =
-                              multiSelectedClipIds.length >= 2
-                                  ? multiSelectedClipIds
-                                  : [contextMenu.clipId];
-                          const selectedClips = sessionRef.current.clips.filter(
-                              (c) => selectedIds.includes(c.id),
-                          );
+                        const selectedIds =
+                            multiSelectedClipIds.length >= 2
+                                ? multiSelectedClipIds
+                                : [contextMenu.clipId];
+                        const selectedClips = sessionRef.current.clips.filter(
+                            (c) => selectedIds.includes(c.id),
+                        );
 
-                          // Convert context menu X to timeline seconds for fade region detection
-                          const _ctxScroller = scrollRef.current;
-                          const _ctxBounds =
-                              _ctxScroller?.getBoundingClientRect();
-                          const contextTimeSec =
-                              _ctxBounds && _ctxScroller
-                                  ? beatFromClientX(
-                                        contextMenu.x,
-                                        _ctxBounds,
-                                        _ctxScroller.scrollLeft,
-                                    )
-                                  : ctxClip.startSec;
+                        // Convert context menu X to timeline seconds for fade region detection
+                        const _ctxScroller = scrollRef.current;
+                        const _ctxBounds =
+                            _ctxScroller?.getBoundingClientRect();
+                        const contextTimeSec =
+                            _ctxBounds && _ctxScroller
+                                ? beatFromClientX(
+                                    contextMenu.x,
+                                    _ctxBounds,
+                                    _ctxScroller.scrollLeft,
+                                )
+                                : ctxClip.startSec;
 
-                          const overlappingFadeClips = collectFadeContextClips({
-                              allClips: sessionRef.current.clips,
-                              contextClip: ctxClip,
-                              contextTimeSec,
-                              explicitOverlappingClipIds:
-                                  contextMenu.overlappingClipIds,
-                          });
+                        const overlappingFadeClips = collectFadeContextClips({
+                            allClips: sessionRef.current.clips,
+                            contextClip: ctxClip,
+                            contextTimeSec,
+                            explicitOverlappingClipIds:
+                                contextMenu.overlappingClipIds,
+                        });
 
-                          const playheadSec = sessionRef.current.playheadSec;
-                          const playheadInClip =
-                              playheadSec >= ctxClip.startSec &&
-                              playheadSec <=
-                                  ctxClip.startSec + ctxClip.lengthSec;
+                        const playheadSec = sessionRef.current.playheadSec;
+                        const playheadInClip =
+                            playheadSec >= ctxClip.startSec &&
+                            playheadSec <=
+                            ctxClip.startSec + ctxClip.lengthSec;
 
-                          return (
-                              <ClipContextMenu
-                                  x={contextMenu.x}
-                                  y={contextMenu.y}
-                                  clip={ctxClip}
-                                  selectedClips={selectedClips}
-                                  overlappingClips={overlappingFadeClips}
-                                  playheadInClip={playheadInClip}
-                                  canSplitSelected={selectedClips.some((c) => {
-                                      const splitSec = Math.max(
-                                          0,
-                                          Number(
-                                              sessionRef.current.playheadSec ??
-                                                  0,
-                                          ) || 0,
-                                      );
-                                      return (
-                                          splitSec >= c.startSec &&
-                                          splitSec <= c.startSec + c.lengthSec
-                                      );
-                                  })}
-                                  onClose={() => setContextMenu(null)}
-                                  onDelete={(ids) => {
-                                      setContextMenu(null);
-                                      setMultiSelectedClipIds([]);
-                                      for (const id of ids) {
-                                          void dispatch(removeClipRemote(id));
-                                      }
-                                  }}
-                                  onMute={(ids, muted) => {
-                                      for (const id of ids) {
-                                          dispatch(
-                                              setClipMuted({
-                                                  clipId: id,
-                                                  muted,
-                                              }),
-                                          );
-                                          void dispatch(
-                                              setClipStateRemote({
-                                                  clipId: id,
-                                                  muted,
-                                              }),
-                                          );
-                                      }
-                                  }}
-                                  onRename={(clipId) => {
-                                      setContextMenu(null);
-                                      setRenamingClipId(clipId);
-                                  }}
-                                  onCopy={(ids) => {
-                                      void (async () => {
-                                          const templates =
-                                              await buildClipClipboardTemplates(
-                                                  ids,
-                                              );
-                                          if (templates.length > 0) {
-                                              clipClipboardRef.current =
-                                                  templates;
-                                          }
-                                      })();
-                                  }}
-                                  onCut={(ids) => {
-                                      void (async () => {
-                                          const templates =
-                                              await buildClipClipboardTemplates(
-                                                  ids,
-                                              );
-                                          if (templates.length === 0) return;
-                                          clipClipboardRef.current = templates;
-                                          setContextMenu(null);
-                                          setMultiSelectedClipIds([]);
-                                          for (const id of ids) {
-                                              void dispatch(
-                                                  removeClipRemote(id),
-                                              );
-                                          }
-                                      })();
-                                  }}
-                                  onReplace={(ids) => {
-                                      void replaceClipSources(ids);
-                                  }}
-                                  onSplit={(clipIds) => {
-                                      setContextMenu(null);
-                                      splitClipIdsAtPlayhead(clipIds);
-                                  }}
-                                  onGlue={(ids) => {
-                                      setContextMenu(null);
-                                      if (ids.length >= 2) {
-                                          void dispatch(glueClipsRemote(ids));
-                                          setMultiSelectedClipIds([]);
-                                      }
-                                  }}
-                                  onFadeCurveChange={(
-                                      clipId,
-                                      target,
-                                      curve,
-                                  ) => {
-                                      dispatch(
-                                          setClipFades({
-                                              clipId,
-                                              ...(target === "in"
-                                                  ? { fadeInCurve: curve }
-                                                  : { fadeOutCurve: curve }),
-                                          }),
-                                      );
-                                      void dispatch(
-                                          setClipStateRemote({
-                                              clipId,
-                                              ...(target === "in"
-                                                  ? { fadeInCurve: curve }
-                                                  : { fadeOutCurve: curve }),
-                                          }),
-                                      );
-                                  }}
-                                  onNormalize={normalizeClips}
-                              />
-                          );
-                      })()
+                        return (
+                            <ClipContextMenu
+                                x={contextMenu.x}
+                                y={contextMenu.y}
+                                clip={ctxClip}
+                                selectedClips={selectedClips}
+                                overlappingClips={overlappingFadeClips}
+                                playheadInClip={playheadInClip}
+                                canSplitSelected={selectedClips.some((c) => {
+                                    const splitSec = Math.max(
+                                        0,
+                                        Number(
+                                            sessionRef.current.playheadSec ??
+                                            0,
+                                        ) || 0,
+                                    );
+                                    return (
+                                        splitSec >= c.startSec &&
+                                        splitSec <= c.startSec + c.lengthSec
+                                    );
+                                })}
+                                onClose={() => setContextMenu(null)}
+                                onDelete={(ids) => {
+                                    setContextMenu(null);
+                                    setMultiSelectedClipIds([]);
+                                    for (const id of ids) {
+                                        void dispatch(removeClipRemote(id));
+                                    }
+                                }}
+                                onMute={(ids, muted) => {
+                                    for (const id of ids) {
+                                        dispatch(
+                                            setClipMuted({
+                                                clipId: id,
+                                                muted,
+                                            }),
+                                        );
+                                        void dispatch(
+                                            setClipStateRemote({
+                                                clipId: id,
+                                                muted,
+                                            }),
+                                        );
+                                    }
+                                }}
+                                onRename={(clipId) => {
+                                    setContextMenu(null);
+                                    setRenamingClipId(clipId);
+                                }}
+                                onCopy={(ids) => {
+                                    void (async () => {
+                                        const templates =
+                                            await buildClipClipboardTemplates(
+                                                ids,
+                                            );
+                                        if (templates.length > 0) {
+                                            clipClipboardRef.current =
+                                                templates;
+                                        }
+                                    })();
+                                }}
+                                onCut={(ids) => {
+                                    void (async () => {
+                                        const templates =
+                                            await buildClipClipboardTemplates(
+                                                ids,
+                                            );
+                                        if (templates.length === 0) return;
+                                        clipClipboardRef.current = templates;
+                                        setContextMenu(null);
+                                        setMultiSelectedClipIds([]);
+                                        for (const id of ids) {
+                                            void dispatch(
+                                                removeClipRemote(id),
+                                            );
+                                        }
+                                    })();
+                                }}
+                                onReplace={(ids) => {
+                                    void replaceClipSources(ids);
+                                }}
+                                onSplit={(clipIds) => {
+                                    setContextMenu(null);
+                                    splitClipIdsAtPlayhead(clipIds);
+                                }}
+                                onGlue={(ids) => {
+                                    setContextMenu(null);
+                                    if (ids.length >= 2) {
+                                        void dispatch(glueClipsRemote(ids));
+                                        setMultiSelectedClipIds([]);
+                                    }
+                                }}
+                                onFadeCurveChange={(
+                                    clipId,
+                                    target,
+                                    curve,
+                                ) => {
+                                    dispatch(
+                                        setClipFades({
+                                            clipId,
+                                            ...(target === "in"
+                                                ? { fadeInCurve: curve }
+                                                : { fadeOutCurve: curve }),
+                                        }),
+                                    );
+                                    void dispatch(
+                                        setClipStateRemote({
+                                            clipId,
+                                            ...(target === "in"
+                                                ? { fadeInCurve: curve }
+                                                : { fadeOutCurve: curve }),
+                                        }),
+                                    );
+                                }}
+                                onNormalize={normalizeClips}
+                            />
+                        );
+                    })()
                     : null}
 
                 {trackAreaMenu ? (
@@ -2447,8 +2481,8 @@ export const TimelinePanel: React.FC = () => {
                         canSplit={(multiSelectedClipIds.length > 0
                             ? multiSelectedClipIds
                             : sessionRef.current.selectedClipId
-                              ? [sessionRef.current.selectedClipId]
-                              : []
+                                ? [sessionRef.current.selectedClipId]
+                                : []
                         ).some((id) => {
                             const clip = sessionRef.current.clips.find(
                                 (c) => c.id === id,
@@ -2457,7 +2491,7 @@ export const TimelinePanel: React.FC = () => {
                             const splitSec = Math.max(
                                 0,
                                 Number(sessionRef.current.playheadSec ?? 0) ||
-                                    0,
+                                0,
                             );
                             return (
                                 splitSec >= clip.startSec &&
