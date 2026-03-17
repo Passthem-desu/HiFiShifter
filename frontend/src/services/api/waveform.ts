@@ -22,15 +22,17 @@ export const waveformApi = {
     /** 获取 v2 波形峰值（自动选择 mipmap 级别） */
     getWaveformPeaksV2: (
         sourcePath: string,
-        timeRangeStart?: number,
-        timeRangeEnd?: number,
-        samplesPerPixel?: number,
+        startSec: number,
+        durationSec: number,
+        columns: number,
+        samplesPerPixel: number,
     ) =>
         invoke<WaveformPeaksV2Payload>(
             "get_waveform_peaks_v2",
             sourcePath,
-            timeRangeStart,
-            timeRangeEnd,
+            startSec,
+            durationSec,
+            columns,
             samplesPerPixel,
         ),
 

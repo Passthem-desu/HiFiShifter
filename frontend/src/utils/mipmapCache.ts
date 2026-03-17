@@ -1,11 +1,28 @@
 /**
  * HFSPeaks v2 Mipmap 缓存管理器
  * 
- * 实现类似 Reaper 的多级分辨率峰值缓存
+ * 实现类似 Reaper 的多级分辨率峰值缓存。
+ * 
+ * Level 编号与后端 hfspeaks_v2.rs 对齐：
+ *   Level 0 → division_factor=256   → 高精度/特写  （区块 5s）
+ *   Level 1 → division_factor=1024  → 中等缩放      （区块 10s）
+ *   Level 2 → division_factor=4096  → 小缩放        （区块 30s）
+ *   Level 3 → division_factor=16384 → 远景/全景      （区块 60s）
+ * 
+ * 核心特性：
+ * - 四级固定区间缓存：每个级别使用固定的区块时长
+ * - 时间参数量化：避免高精度时间参数导致的缓存抖动
+ * - LRU淘汰策略：基于访问时间淘汰不常用的缓存块
+ * - 时间轴预加载：预加载相邻时间区间，优化平移体验
+ * - 跨区块合并：自动拼接可视区覆盖的多个缓存区块
  */
 
 import { waveformApi } from "../services/api/waveform";
 import type { MipmapLevel } from "../types/api";
+
+// ============================================
+// 类型定义
+// ============================================
 
 /** 峰值数据结构 */
 export interface PeaksData {
@@ -20,87 +37,259 @@ export interface PeaksData {
     durationSec: number;
     /** 缓存时间戳 */
     timestamp: number;
+    /** 最后访问时间（用于LRU） */
+    lastAccessTime: number;
 }
 
-/** 全局缓存管理器 */
+/** 缓存级别配置 */
+interface CacheLevelConfig {
+    /** 区块时长（秒） */
+    blockDuration: number;
+    /** samplesPerPixel 阈值 */
+    samplesPerPixelThreshold: number;
+    /** 描述 */
+    description: string;
+}
+
+/** 预加载任务 */
+interface PreloadTask {
+    sourcePath: string;
+    level: MipmapLevel;
+    blockIndex: number;
+    priority: number; // 越小优先级越高
+}
+
+// ============================================
+// 常量配置
+// ============================================
+
+/** 时间量化步长（秒） */
+const TIME_QUANT_STEP = 0.5;
+
+/**
+ * 后端 DEFAULT_DIVISION_FACTORS，与 hfspeaks_v2.rs 保持一致。
+ * Level 索引 → division_factor 一一对应。
+ */
+const DIVISION_FACTORS: readonly number[] = [256, 1024, 4096, 16384];
+
+/**
+ * 四级缓存配置（与后端 Level 索引对齐：L0=高精度 → L3=远景）
+ */
+const CACHE_LEVEL_CONFIGS: Record<MipmapLevel, CacheLevelConfig> = {
+    0: { blockDuration: 5,  samplesPerPixelThreshold: 0,    description: "特写 (div=256)" },
+    1: { blockDuration: 10, samplesPerPixelThreshold: 512,  description: "近景 (div=1024)" },
+    2: { blockDuration: 30, samplesPerPixelThreshold: 2048, description: "中景 (div=4096)" },
+    3: { blockDuration: 60, samplesPerPixelThreshold: 8192, description: "远景 (div=16384)" },
+};
+
+/** 最大缓存条目数 */
+const MAX_CACHE_ENTRIES = 256;
+
+/** 预加载队列最大长度 */
+const MAX_PRELOAD_QUEUE = 10;
+
+/** 波形列数计算常量（精度再减半：512→256，进一步降低数据量提升性能） */
+const WAVEFORM_COLUMNS_PER_SEC = 256;
+const COLUMNS_QUANT = 32;
+const MIN_COLUMNS = 96;
+const MAX_COLUMNS = 65536;
+
+// ============================================
+// 工具函数
+// ============================================
+
+/**
+ * 量化时间值
+ * 将时间值对齐到固定步长的整数倍
+ */
+function quantizeTime(timeSec: number, stepSec: number = TIME_QUANT_STEP): number {
+    return Math.floor(timeSec / stepSec) * stepSec;
+}
+
+/**
+ * 计算时间点所在的区块索引
+ */
+function getBlockIndex(timeSec: number, blockDuration: number): number {
+    return Math.floor(quantizeTime(timeSec) / blockDuration);
+}
+
+/**
+ * 根据区块索引计算区块起始时间
+ */
+function getBlockStartTime(blockIndex: number, blockDuration: number): number {
+    return blockIndex * blockDuration;
+}
+
+/**
+ * 计算波形列数
+ */
+function calculateColumns(durationSec: number): number {
+    const secondsBasedColumns = durationSec * WAVEFORM_COLUMNS_PER_SEC;
+    return Math.max(
+        MIN_COLUMNS,
+        Math.min(MAX_COLUMNS, Math.round(secondsBasedColumns / COLUMNS_QUANT) * COLUMNS_QUANT)
+    );
+}
+
+// ============================================
+// 缓存管理器
+// ============================================
+
+/**
+ * 全局缓存管理器
+ * 
+ * 实现分级固定区间缓存，每个级别使用固定的区块时长，
+ * 通过量化时间参数减少缓存键数量，提高缓存复用率。
+ */
 class MipmapCacheManager {
-    /** 缓存键 -> 峰值数据（缓存键格式：filePath|level|startSec|durationSec|columns） */
+    /** 缓存键 -> 峰值数据 */
     private cache = new Map<string, PeaksData>();
     
     /** 正在进行的请求 */
     private pendingRequests = new Map<string, Promise<PeaksData | null>>();
     
-    /** 最大缓存条目数 */
-    private readonly MAX_ENTRIES = 256;
+    /** 预加载队列 */
+    private preloadQueue: PreloadTask[] = [];
+    
+    /** 预加载是否正在进行 */
+    private isPreloading = false;
 
     /**
      * 根据 samplesPerPixel 选择最佳 mipmap 级别
      * 
-     * 判断逻辑：
-     * - Level 0 (div ~128):   samplesPerPixel < 256    放大显示
-     * - Level 1 (div ~512):   samplesPerPixel < 1024   中等缩放
-     * - Level 2 (div ~2048):  samplesPerPixel < 4096   小缩放
-     * - Level 3 (div ~8192):  samplesPerPixel >= 4096  全景视图
+     * 使用与后端 select_mipmap_level 相同的"最近匹配"算法：
+     *   target = samplesPerPixel * 2
+     *   找 DIVISION_FACTORS 中与 target 绝对差最小的级别索引
+     * 
+     * 结果：
+     * - Level 0 (div=128,  特写): samplesPerPixel 较小
+     * - Level 3 (div=8192, 远景): samplesPerPixel 较大
      */
     selectMipmapLevel(samplesPerPixel: number): MipmapLevel {
-        if (samplesPerPixel < 256) return 0;
-        if (samplesPerPixel < 1024) return 1;
-        if (samplesPerPixel < 4096) return 2;
-        return 3;
+        const target = samplesPerPixel * 2;
+        let bestIdx = 0;
+        let bestDiff = Infinity;
+        for (let i = 0; i < DIVISION_FACTORS.length; i++) {
+            const diff = Math.abs(DIVISION_FACTORS[i] - target);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                bestIdx = i;
+            }
+        }
+        return bestIdx as MipmapLevel;
     }
 
     /**
-     * 获取峰值数据（自动选择 mipmap 级别）
+     * 获取峰值数据（自动选择 mipmap 级别，支持跨区块合并）
+     * 
+     * 当可视区跨越多个缓存区块时，会并行请求所有覆盖区块并合并数据。
      * 
      * @param sourcePath 源文件路径
      * @param samplesPerPixel 每像素采样数（用于选择 mipmap 级别）
      * @param startSec 起始时间（秒）
-     * @param durationSec 时长（秒，用于计算 columns，保持缓存键稳定）
-     * @param targetWidthPx 目标显示宽度（像素，保留参数以兼容现有调用）
+     * @param durationSec 时长（秒）
+     * @param _targetWidthPx 目标显示宽度（保留参数以兼容现有调用）
      */
     async getPeaks(
         sourcePath: string,
         samplesPerPixel: number,
         startSec: number,
         durationSec: number,
-        _targetWidthPx: number,  // 保留参数以兼容现有调用，实际 columns 基于 durationSec 计算
+        _targetWidthPx: number,
     ): Promise<PeaksData | null> {
         const level = this.selectMipmapLevel(samplesPerPixel);
+        const config = CACHE_LEVEL_CONFIGS[level];
         
-        // 基于音频时长计算 columns（保持缓存键稳定）
-        // 与 useClipWaveformPeaks.ts 保持一致的计算方式
-        const WAVEFORM_COLUMNS_PER_SEC = 1024;
-        const QUANT = 32;
-        const MIN_COLUMNS = 96;
-        const MAX_COLUMNS = 65536;
+        // 计算可视区覆盖的所有区块
+        const startBlock = getBlockIndex(startSec, config.blockDuration);
+        const endBlock = getBlockIndex(startSec + durationSec, config.blockDuration);
         
-        const secondsBasedColumns = durationSec * WAVEFORM_COLUMNS_PER_SEC;
-        const columns = Math.max(
-            MIN_COLUMNS,
-            Math.min(MAX_COLUMNS, Math.round(secondsBasedColumns / QUANT) * QUANT)
-        );
+        // 预加载首尾外侧相邻区块
+        this.schedulePreload(sourcePath, level, startBlock);
+        if (endBlock !== startBlock) {
+            this.schedulePreload(sourcePath, level, endBlock);
+        }
         
-        return this.getPeaksAtLevel(sourcePath, level, startSec, durationSec, columns);
+        // 单区块快速路径
+        if (startBlock === endBlock) {
+            return this.getBlockData(sourcePath, level, startBlock);
+        }
+        
+        // 多区块：并行请求所有覆盖区块
+        const promises: Promise<PeaksData | null>[] = [];
+        for (let i = startBlock; i <= endBlock; i++) {
+            promises.push(this.getBlockData(sourcePath, level, i));
+        }
+        const blocks = await Promise.all(promises);
+        
+        // 合并多区块数据
+        return this.mergeBlocks(blocks, startSec, durationSec);
+    }
+    
+    /**
+     * 合并多个区块的峰值数据
+     * 
+     * 将多个区块的 min/max 数组顺序拼接，
+     * 并更新 startSec / durationSec 为合并后的完整范围。
+     */
+    private mergeBlocks(blocks: (PeaksData | null)[], _startSec: number, _durationSec: number): PeaksData | null {
+        const validBlocks = blocks.filter((b): b is PeaksData => b !== null);
+        if (validBlocks.length === 0) return null;
+        if (validBlocks.length === 1) return validBlocks[0];
+        
+        // 按 startSec 排序（保证顺序正确）
+        validBlocks.sort((a, b) => a.startSec - b.startSec);
+        
+        const mergedMin: number[] = [];
+        const mergedMax: number[] = [];
+        
+        for (const block of validBlocks) {
+            mergedMin.push(...block.min);
+            mergedMax.push(...block.max);
+        }
+        
+        const now = performance.now();
+        const mergedStartSec = validBlocks[0].startSec;
+        const lastBlock = validBlocks[validBlocks.length - 1];
+        const mergedEndSec = lastBlock.startSec + lastBlock.durationSec;
+        
+        return {
+            min: mergedMin,
+            max: mergedMax,
+            sampleRate: validBlocks[0].sampleRate,
+            divisionFactor: validBlocks[0].divisionFactor,
+            mipmapLevel: validBlocks[0].mipmapLevel,
+            startSec: mergedStartSec,
+            durationSec: mergedEndSec - mergedStartSec,
+            timestamp: now,
+            lastAccessTime: now,
+        };
     }
 
     /**
-     * 获取指定级别的峰值数据
+     * 获取指定区块的数据
+     * 
+     * 这是核心的缓存获取方法，使用固定区块时长构建稳定的缓存键
      */
-    async getPeaksAtLevel(
-        filePath: string,
-        level: number,
-        startSec: number,
-        durationSec: number,
-        columns: number,
+    private async getBlockData(
+        sourcePath: string,
+        level: MipmapLevel,
+        blockIndex: number,
     ): Promise<PeaksData | null> {
-        console.log(`[MipmapCache Debug] getPeaksAtLevel: filePath=${filePath}, level=${level}, startSec=${startSec}, durationSec=${durationSec}, columns=${columns}`);
+        const config = CACHE_LEVEL_CONFIGS[level];
+        const startTime = getBlockStartTime(blockIndex, config.blockDuration);
+        const columns = calculateColumns(config.blockDuration);
         
-        // 构建完整缓存键（包含时间范围和列数）
-        const cacheKey = `${filePath}|${level}|${startSec.toFixed(3)}|${durationSec.toFixed(3)}|${columns}`;
+        // 构建稳定的缓存键（使用区块索引而非精确时间）
+        const cacheKey = `${sourcePath}|L${level}|B${blockIndex}`;
+        
+        console.log(`[MipmapCache] getBlockData: level=${level}, block=${blockIndex}, start=${startTime}s, duration=${config.blockDuration}s`);
         
         // 检查缓存
         const cached = this.cache.get(cacheKey);
         if (cached) {
+            // 更新访问时间（用于LRU）
+            cached.lastAccessTime = performance.now();
             return cached;
         }
 
@@ -111,7 +300,7 @@ class MipmapCacheManager {
         }
 
         // 发起新请求
-        const request = this.fetchPeaks(filePath, level as MipmapLevel, startSec, durationSec, columns);
+        const request = this.fetchPeaks(sourcePath, level, startTime, config.blockDuration, columns);
         this.pendingRequests.set(cacheKey, request);
 
         try {
@@ -148,18 +337,20 @@ class MipmapCacheManager {
                 return null;
             }
 
-return {
+            const now = performance.now();
+            return {
                 min: response.min.map((v) => Number(v) || 0),
                 max: response.max.map((v) => Number(v) || 0),
                 sampleRate: response.sample_rate,
                 divisionFactor: response.division_factor,
                 mipmapLevel: response.mipmap_level,
-                startSec: startSec,
-                durationSec: durationSec,
-                timestamp: performance.now(),
+                startSec: response.actual_start_sec,
+                durationSec: response.actual_duration_sec,
+                timestamp: now,
+                lastAccessTime: now,
             };
         } catch (error) {
-            console.error("Failed to fetch peaks:", { sourcePath, level, error });
+            console.error("[MipmapCache] Failed to fetch peaks:", { sourcePath, level, error });
             return null;
         }
     }
@@ -175,27 +366,94 @@ return {
     }
 
     /**
-     * LRU 淘汰
+     * LRU 淘汰策略
+     * 基于 lastAccessTime 淘汰最久未访问的缓存块
      */
     private evictIfNeeded(): void {
-        if (this.cache.size < this.MAX_ENTRIES) {
+        if (this.cache.size < MAX_CACHE_ENTRIES) {
             return;
         }
 
-        // 找到最旧的条目（基于 timestamp）
+        // 找到最久未访问的条目
         let oldestKey: string | null = null;
         let oldestTime = Infinity;
 
         for (const [key, data] of this.cache) {
-            if (data.timestamp < oldestTime) {
-                oldestTime = data.timestamp;
+            if (data.lastAccessTime < oldestTime) {
+                oldestTime = data.lastAccessTime;
                 oldestKey = key;
             }
         }
 
         if (oldestKey) {
             this.cache.delete(oldestKey);
+            console.log(`[MipmapCache] LRU evicted: ${oldestKey}`);
         }
+    }
+
+    /**
+     * 调度预加载任务
+     * 预加载当前区块前后各一个区块
+     */
+    private schedulePreload(sourcePath: string, level: MipmapLevel, currentBlockIndex: number): void {
+        // 添加前后区块到预加载队列
+        const preloadIndices = [currentBlockIndex - 1, currentBlockIndex + 1];
+        
+        for (let i = 0; i < preloadIndices.length; i++) {
+            const blockIndex = preloadIndices[i];
+            if (blockIndex < 0) continue;
+            
+            // 检查是否已在缓存或队列中
+            const cacheKey = `${sourcePath}|L${level}|B${blockIndex}`;
+            if (this.cache.has(cacheKey)) continue;
+            if (this.preloadQueue.some(t => t.sourcePath === sourcePath && t.level === level && t.blockIndex === blockIndex)) continue;
+            
+            // 添加到队列（优先级：距离当前区块越近优先级越高）
+            this.preloadQueue.push({
+                sourcePath,
+                level,
+                blockIndex,
+                priority: i + 1,
+            });
+        }
+        
+        // 限制队列长度
+        if (this.preloadQueue.length > MAX_PRELOAD_QUEUE) {
+            this.preloadQueue.sort((a, b) => a.priority - b.priority);
+            this.preloadQueue = this.preloadQueue.slice(0, MAX_PRELOAD_QUEUE);
+        }
+        
+        // 触发预加载
+        this.processPreloadQueue();
+    }
+
+    /**
+     * 处理预加载队列
+     */
+    private async processPreloadQueue(): Promise<void> {
+        if (this.isPreloading || this.preloadQueue.length === 0) {
+            return;
+        }
+        
+        this.isPreloading = true;
+        
+        while (this.preloadQueue.length > 0) {
+            const task = this.preloadQueue.shift();
+            if (!task) break;
+            
+            // 检查是否已缓存
+            const cacheKey = `${task.sourcePath}|L${task.level}|B${task.blockIndex}`;
+            if (this.cache.has(cacheKey)) continue;
+            
+            // 执行预加载
+            try {
+                await this.getBlockData(task.sourcePath, task.level, task.blockIndex);
+            } catch {
+                // 预加载失败不处理
+            }
+        }
+        
+        this.isPreloading = false;
     }
 
     /**
@@ -204,14 +462,18 @@ return {
      * @param sourcePath 源文件路径
      * @param startSec 起始时间（秒）
      * @param durationSec 时长（秒）
-     * @param columns 采样列数
+     * @param columns 采样列数（保留参数）
      */
-    async preloadAllLevels(sourcePath: string, startSec: number, durationSec: number, columns: number): Promise<void> {
+    async preloadAllLevels(sourcePath: string, startSec: number, _durationSec: number, _columns: number): Promise<void> {
         const levels: MipmapLevel[] = [0, 1, 2, 3];
         
-        // 并行加载所有级别
+        // 对于每个级别，预加载起始区块
         await Promise.all(
-            levels.map((level) => this.getPeaksAtLevel(sourcePath, level, startSec, durationSec, columns))
+            levels.map((level) => {
+                const config = CACHE_LEVEL_CONFIGS[level];
+                const blockIndex = getBlockIndex(startSec, config.blockDuration);
+                return this.getBlockData(sourcePath, level, blockIndex);
+            })
         );
     }
 
@@ -219,7 +481,6 @@ return {
      * 清除指定文件的缓存
      */
     invalidateFile(sourcePath: string): void {
-        // 删除所有以 sourcePath 开头的缓存条目
         for (const key of this.cache.keys()) {
             if (key.startsWith(sourcePath)) {
                 this.cache.delete(key);
@@ -233,6 +494,7 @@ return {
     clear(): void {
         this.cache.clear();
         this.pendingRequests.clear();
+        this.preloadQueue = [];
     }
 
     /**
@@ -241,59 +503,35 @@ return {
     getStats(): {
         entries: number;
         estimatedMemory: number;
+        preloadQueue: number;
     } {
         let estimatedMemory = 0;
 
         for (const [, data] of this.cache) {
-            // 每个采样点估算 8 bytes (min + max as float32)
             estimatedMemory += (data.min.length + data.max.length) * 4;
         }
 
         return {
             entries: this.cache.size,
             estimatedMemory,
+            preloadQueue: this.preloadQueue.length,
         };
     }
 
-    async loadMipmapFile(filePath: string, level: number, startSec: number = 0, durationSec: number = 0, columns: number = 1024) {
-        const cacheKey = `${filePath}|${level}|${startSec.toFixed(3)}|${durationSec.toFixed(3)}|${columns}`;
-        console.log(`[MipmapCache Debug] Loading mipmap: filePath=${filePath}, level=${level}, startSec=${startSec}, durationSec=${durationSec}, columns=${columns}`);
-        
-        // 检查缓存
-        const cached = this.cache.get(cacheKey);
-        if (cached) {
-            console.log(`[MipmapCache Debug] Successfully loaded mipmap from cache: filePath=${filePath}, level=${level}, dataLength=${cached.min.length}`);
-            return cached;
-        }
-
-        // 检查正在进行的请求
-        const pending = this.pendingRequests.get(cacheKey);
-        if (pending) {
-            return pending;
-        }
-
-        // 发起新请求
-        const request = this.fetchPeaks(filePath, level as MipmapLevel, startSec, durationSec, columns);
-        this.pendingRequests.set(cacheKey, request);
-
-        try {
-            const data = await request;
-            if (data) {
-                this.addToCache(cacheKey, data);
-                console.log(`[MipmapCache Debug] Successfully loaded mipmap: filePath=${filePath}, level=${level}, dataLength=${data.min.length}`);
-            }
-            return data;
-        } catch {
-            console.error(`[MipmapCache Debug] Failed to load mipmap: filePath=${filePath}, level=${level}`);
-            return null;
-        } finally {
-            this.pendingRequests.delete(cacheKey);
-        }
+    /**
+     * 获取级别配置（用于调试）
+     */
+    getLevelConfig(level: MipmapLevel): CacheLevelConfig {
+        return CACHE_LEVEL_CONFIGS[level];
     }
 }
 
 /** 全局单例 */
 export const mipmapCache = new MipmapCacheManager();
+
+// ============================================
+// React Hook
+// ============================================
 
 /** React Hook：获取峰值数据 */
 export function useMipmapPeaks(

@@ -5,7 +5,7 @@
  * 1. 高精度降采样：每像素至少 4 个采样点，移除 stride<=16 的限制
  * 2. 支持增益应用：clip 音量 + 淡入淡出曲线
  * 3. 高性能：Float32Array 存储，避免频繁内存分配
- * 4. stroke-jitter 模式：绘制细线波形，无填充
+ * 4. per-pixel min/max 竖线模式：DAW 标准波形渲染，无锯齿
  *
  * @module waveformRenderer
  */
@@ -375,11 +375,11 @@ export function renderWaveformSvg(
 }
 
 // ============================================================================
-// 新增：高精度降采样和增益应用
+// 增益应用和波形渲染
 // ============================================================================
 
-/** 高精度波形渲染参数 */
-export interface HighResRenderParams {
+/** 波形渲染参数 */
+export interface WaveformRenderParams {
     /** canvas 宽度（像素） */
     canvasWidth: number;
     /** canvas 高度（像素） */
@@ -408,6 +408,14 @@ export interface HighResRenderParams {
     dataStartSec?: number;
     /** 数据持续时间（秒） */
     dataDurationSec?: number;
+
+    // ========================================
+    // 可视区裁剪参数（由 WaveformCanvas 传入）
+    // ========================================
+    /** 当前 canvas 在 clip 内的像素偏移量（canvas 左边缘对应 clip 的第几个像素） */
+    clipPixelOffset?: number;
+    /** clip 完整像素宽度（用于将像素位置映射到 timeline 时间） */
+    clipTotalWidthPx?: number;
 }
 
 /**
@@ -419,72 +427,7 @@ export interface HighResRenderParams {
  * @param params - 渲染参数
  * @returns Float32Array 格式的降采样后数据 [min0, max0, min1, max1, ...]
  */
-export function downsampleBasePeaks(
-    basePeaks: Float32Array,
-    params: HighResRenderParams,
-): Float32Array {
-    const {
-        canvasWidth,
-        sourceStartSec,
-        clipDuration,
-        playbackRate,
-        sourceDurationSec,
-    } = params;
 
-    const totalBaseSamples = basePeaks.length / 2;
-    if (totalBaseSamples < 2) return new Float32Array(0);
-
-    // 计算源文件中的采样范围
-    const sourceEndSec = Math.min(
-        sourceStartSec + clipDuration * playbackRate,
-        sourceDurationSec,
-    );
-
-    // base peaks 的时间分辨率（每秒多少个采样点）
-    const basePeaksPerSec = totalBaseSamples / sourceDurationSec;
-
-    // 目标采样数：每像素至少 4 个点（高精度），但不超过源数据量
-    const targetPointsPerPixel = 4;
-    const maxTargetSamples = Math.floor(canvasWidth * targetPointsPerPixel);
-    
-    // 关键修复：目标采样数不能超过源数据中该时间范围的采样数
-    const samplesInRange = Math.floor((sourceEndSec - sourceStartSec) * basePeaksPerSec);
-    const targetSamples = Math.max(2, Math.min(maxTargetSamples, samplesInRange));
-
-    // 降采样结果
-    const result = new Float32Array(targetSamples * 2);
-
-    // 使用时间域映射：对每个目标采样点，计算其对应的源文件时间
-    // 然后从 basePeaks 中查找最近的采样点
-    for (let i = 0; i < targetSamples; i++) {
-        // 目标采样点在 clip 中的相对位置 (0 ~ 1)
-        const position = targetSamples > 1 ? i / (targetSamples - 1) : 0;
-        
-        // 对应的源文件时间
-        const time = sourceStartSec + position * (sourceEndSec - sourceStartSec);
-        
-        // 对应的 basePeaks 索引（带插值）
-        const srcIdxFloat = time * basePeaksPerSec;
-        const srcIdxLow = Math.floor(srcIdxFloat);
-        const srcIdxHigh = Math.min(srcIdxLow + 1, totalBaseSamples - 1);
-        const frac = srcIdxFloat - srcIdxLow;
-
-        // 双线性插值获取 min 和 max
-        const minLow = basePeaks[srcIdxLow * 2] ?? 0;
-        const maxLow = basePeaks[srcIdxLow * 2 + 1] ?? 0;
-        const minHigh = basePeaks[srcIdxHigh * 2] ?? 0;
-        const maxHigh = basePeaks[srcIdxHigh * 2 + 1] ?? 0;
-
-        // 插值
-        const min = minLow + (minHigh - minLow) * frac;
-        const max = maxLow + (maxHigh - maxLow) * frac;
-
-        result[i * 2] = min;
-        result[i * 2 + 1] = max;
-    }
-
-    return result;
-}
 
 /**
  * 应用增益（音量 + 淡入淡出）到波形数据
@@ -495,23 +438,43 @@ export function downsampleBasePeaks(
  */
 export function applyGainsToPeaks(
     peaks: Float32Array,
-    params: HighResRenderParams,
+    params: WaveformRenderParams,
 ): Float32Array {
     const {
+        sourceStartSec,
         clipDuration,
+        playbackRate,
         volumeGain,
         fadeInSec,
         fadeOutSec,
         fadeInCurve,
         fadeOutCurve,
+        dataStartSec,
+        dataDurationSec,
     } = params;
 
     const result = new Float32Array(peaks.length);
     const totalSamples = peaks.length / 2;
 
+    // 计算数据的时间范围（与 renderWaveform 保持一致）
+    const effectiveDataStartSec = dataStartSec ?? sourceStartSec;
+    const effectiveDataDurationSec = dataDurationSec ?? (clipDuration * playbackRate);
+
+    // 快速路径：无淡入淡出且增益为 1 时直接复制
+    const hasFade = (fadeInSec > 0) || (fadeOutSec > 0);
+    if (!hasFade && Math.abs(volumeGain - 1) < 1e-6) {
+        result.set(peaks);
+        return result;
+    }
+
     for (let i = 0; i < totalSamples; i++) {
         const position = totalSamples > 1 ? i / (totalSamples - 1) : 0; // 0~1
-        const time = position * clipDuration; // 当前时间（秒）
+        
+        // 计算采样点对应的源文件时间
+        const sourceTime = effectiveDataStartSec + position * effectiveDataDurationSec;
+        
+        // 计算该时间在 timeline 上的位置（秒）
+        const time = (sourceTime - sourceStartSec) / playbackRate;
 
         // 计算综合增益
         let gain = volumeGain;
@@ -540,12 +503,19 @@ export function applyGainsToPeaks(
 }
 
 /**
- * 高精度波形渲染（Canvas）
+ * 波形渲染（Canvas，per-pixel min/max 竖线模式）
  *
- * 特点：
- * - stroke-jitter 模式：绘制细线，无填充
- * - 电平越高，振幅越大
- * - 波形始终在 clip 中心
+ * 核心算法（DAW 标准做法）：
+ * - 遍历画布的每个像素列
+ * - 计算该像素列对应的源文件时间范围
+ * - 在数据中找到该时间范围覆盖的所有采样点
+ * - 取这些采样点的 min/max，画一条竖线
+ *
+ * 优点：
+ * - 无论数据密度如何，每像素恰好一条竖线，无锯齿
+ * - 数据过多时自动聚合（多个采样点合并到一个像素）
+ * - 数据不足时优雅降级（相邻像素复用同一采样点）
+ * - 支持数据裁剪：只渲染数据与 clip 范围重叠的部分
  *
  * @param ctx - Canvas 2D 上下文
  * @param peaks - Float32Array 格式的波形数据 [min0, max0, min1, max1, ...]
@@ -553,100 +523,146 @@ export function applyGainsToPeaks(
  * @param strokeColor - 描边颜色
  * @param strokeWidth - 描边宽度
  */
-export function renderHighResWaveform(
+export function renderWaveform(
     ctx: CanvasRenderingContext2D,
     peaks: Float32Array,
-    params: HighResRenderParams,
+    params: WaveformRenderParams,
     strokeColor: string = "currentColor",
     strokeWidth: number = 1,
 ): void {
-    const { canvasWidth, canvasHeight, centerY, sourceStartSec, clipDuration, playbackRate, dataStartSec, dataDurationSec } = params;
+    const {
+        canvasWidth, canvasHeight, centerY,
+        sourceStartSec, clipDuration, playbackRate,
+        dataStartSec, dataDurationSec,
+        clipPixelOffset = 0, clipTotalWidthPx,
+    } = params;
     const totalSamples = peaks.length / 2;
 
-    if (totalSamples < 2) return;
+    if (totalSamples < 2 || canvasWidth < 1) return;
+
+    // ========================================
+    // 可视区裁剪核心逻辑
+    // ========================================
+    // clipTotalWidthPx: clip 完整像素宽度（用于时间→像素映射）
+    // clipPixelOffset: 当前 canvas 在 clip 内的偏移
+    // canvasWidth: 当前 canvas 的实际宽度（仅渲染可见部分）
+    //
+    // 映射关系：canvas 像素 px → clip 全局像素 = px + clipPixelOffset
+    //          clip 全局像素 gpx → timeline 时间 = (gpx / clipTotalW) * clipDuration
+    const clipTotalW = clipTotalWidthPx ?? canvasWidth;
 
     // 振幅比例：0 电平在中心（静音），±1 电平占满整个高度
     const amplitudeScale = canvasHeight / 2;
 
-    ctx.beginPath();
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = strokeWidth;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-
-    // 计算数据的时间范围（如果未提供，则使用 clip 的完整范围）
+    // 计算数据的时间范围（源文件坐标系）
     const effectiveDataStartSec = dataStartSec ?? sourceStartSec;
     const effectiveDataDurationSec = dataDurationSec ?? (clipDuration * playbackRate);
+    const dataEndSec = effectiveDataStartSec + effectiveDataDurationSec;
 
-    // stroke-jitter 模式：交替采样产生抖动细线
-    for (let i = 0; i < totalSamples; i++) {
-        // 计算采样点对应的源文件时间
-        const position = totalSamples > 1 ? i / (totalSamples - 1) : 0;
-        const sourceTime = effectiveDataStartSec + position * effectiveDataDurationSec;
-        
-        // 计算该时间在 timeline 上的位置（秒）
-        const timelineTime = (sourceTime - sourceStartSec) / playbackRate;
-        
-        // 计算该时间在 canvas 上的 x 坐标
-        // clipDuration 是 clip 在 timeline 上的时长
-        const x = (timelineTime / clipDuration) * canvasWidth;
+    // 计算 clip 在源文件中的时间范围
+    const clipSourceStartSec = sourceStartSec;
+    const clipSourceEndSec = sourceStartSec + clipDuration * playbackRate;
 
-        const min = peaks[i * 2];
-        const max = peaks[i * 2 + 1];
+    // 计算数据与 clip 的重叠范围（在源文件坐标系中）
+    const overlapStartSec = Math.max(effectiveDataStartSec, clipSourceStartSec);
+    const overlapEndSec = Math.min(dataEndSec, clipSourceEndSec);
 
-        // jitter: 在包络内交替采样
-        const t = i % 2 === 0 ? 0.25 : 0.75;
-        const v = max + (min - max) * t;
+    // 如果没有重叠，不渲染
+    if (overlapEndSec <= overlapStartSec) {
+        return;
+    }
 
-        // 直接使用原始振幅值（-1 ~ 1），映射到 canvas 高度
-        const y = centerY - v * amplitudeScale;
+    // 重叠范围映射到 timeline 时间
+    const timelineOverlapStart = (overlapStartSec - sourceStartSec) / playbackRate;
+    const timelineOverlapEnd = (overlapEndSec - sourceStartSec) / playbackRate;
 
-        if (i === 0) {
-            ctx.moveTo(x, y);
+    // 重叠范围映射到 clip 全局像素
+    const globalPxStart = Math.floor((timelineOverlapStart / clipDuration) * clipTotalW);
+    const globalPxEnd = Math.ceil((timelineOverlapEnd / clipDuration) * clipTotalW);
+
+    // 裁剪到当前 canvas 范围 [0, canvasWidth)
+    const localPxStart = Math.max(0, globalPxStart - clipPixelOffset);
+    const localPxEnd = Math.min(canvasWidth - 1, globalPxEnd - clipPixelOffset);
+
+    if (localPxEnd <= localPxStart) return;
+
+    // 辅助函数：源文件时间 → 数据索引（浮点数）
+    const timeToIndex = (srcTimeSec: number): number => {
+        const ratio = (srcTimeSec - effectiveDataStartSec) / effectiveDataDurationSec;
+        return ratio * (totalSamples - 1);
+    };
+
+    // 辅助函数：canvas 本地像素 → 对应的源文件时间（秒）
+    // 先转为 clip 全局像素，再映射到 timeline 时间，最后映射到源文件时间
+    const pxToSourceTime = (localPx: number): number => {
+        const globalPx = localPx + clipPixelOffset;
+        const timelineTime = (globalPx / clipTotalW) * clipDuration;
+        return sourceStartSec + timelineTime * playbackRate;
+    };
+
+    // 设置绘制样式
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = strokeWidth;
+    ctx.lineCap = "butt";
+
+    // ========================================
+    // 滑动指针优化：O(W + N) 复杂度
+    // ========================================
+    ctx.beginPath();
+
+    let cursor = 0;
+
+    for (let px = localPxStart; px <= localPxEnd; px++) {
+        // 计算该像素列覆盖的源文件时间范围
+        const srcTimeLeft = pxToSourceTime(px - 0.5);
+        const srcTimeRight = pxToSourceTime(px + 0.5);
+
+        // 映射到数据索引
+        const idxLeft = Math.max(0, timeToIndex(Math.max(srcTimeLeft, effectiveDataStartSec)));
+        const idxRight = Math.min(totalSamples - 1, timeToIndex(Math.min(srcTimeRight, dataEndSec)));
+
+        // 取该范围内所有采样点的 min/max
+        const iStart = Math.max(0, Math.floor(idxLeft));
+        const iEnd = Math.min(totalSamples - 1, Math.ceil(idxRight));
+
+        // 滑动游标：确保 cursor 不回退，只前进
+        if (iStart > cursor) {
+            cursor = iStart;
+        }
+
+        let pixelMin = Infinity;
+        let pixelMax = -Infinity;
+
+        const scanStart = Math.min(cursor, iStart);
+        for (let i = scanStart; i <= iEnd; i++) {
+            const sMin = peaks[i * 2];
+            const sMax = peaks[i * 2 + 1];
+            if (sMin < pixelMin) pixelMin = sMin;
+            if (sMax > pixelMax) pixelMax = sMax;
+        }
+
+        cursor = iEnd;
+
+        if (pixelMin === Infinity) continue;
+
+        // 映射到 canvas Y 坐标
+        const yTop = centerY - pixelMax * amplitudeScale;
+        const yBot = centerY - pixelMin * amplitudeScale;
+
+        // 确保静音段至少有最小可见高度（0.5px）
+        const minHeight = 0.5;
+        const midY = (yTop + yBot) / 2;
+
+        if (yBot - yTop < minHeight) {
+            ctx.moveTo(px, midY - minHeight / 2);
+            ctx.lineTo(px, midY + minHeight / 2);
         } else {
-            ctx.lineTo(x, y);
+            ctx.moveTo(px, yTop);
+            ctx.lineTo(px, yBot);
         }
     }
 
     ctx.stroke();
 }
 
-/**
- * 高精度波形渲染（返回 SVG path）
- *
- * @param peaks - Float32Array 格式的波形数据
- * @param params - 渲染参数
- * @returns SVG path d 属性字符串
- */
-export function renderHighResWaveformSvg(
-    peaks: Float32Array,
-    params: HighResRenderParams,
-): string {
-    const { canvasWidth, canvasHeight, centerY } = params;
-    const totalSamples = peaks.length / 2;
 
-    if (totalSamples < 2) return "";
-
-    const amplitudeScale = canvasHeight / 2;
-
-    // 构建 stroke-jitter 路径
-    let d = "";
-    for (let i = 0; i < totalSamples; i++) {
-        const x = (i / (totalSamples - 1)) * canvasWidth;
-        const min = peaks[i * 2];
-        const max = peaks[i * 2 + 1];
-
-        const t = i % 2 === 0 ? 0.25 : 0.75;
-        const v = max + (min - max) * t;
-        // 直接使用原始振幅值（-1 ~ 1），映射到 canvas 高度
-        const y = centerY - v * amplitudeScale;
-
-        if (i === 0) {
-            d = `M${x.toFixed(2)} ${y.toFixed(2)}`;
-        } else {
-            d += `L${x.toFixed(2)} ${y.toFixed(2)}`;
-        }
-    }
-
-    return d;
-}

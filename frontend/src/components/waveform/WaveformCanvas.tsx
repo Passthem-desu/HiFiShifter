@@ -1,45 +1,44 @@
 /**
- * 波形画布组件
- * 统一使用 mipmapCache（四级缓存）获取波形数据
+ * 波形画布组件（可视区裁剪优化版）
+ * 
+ * 使用 mipmapCache（四级固定区间缓存）获取波形数据，
+ * 通过 Canvas per-pixel min/max 竖线模式绘制波形（DAW 标准做法）。
+ * 
+ * 性能优化：
+ * - 可视区裁剪：canvas 只渲染屏幕上可见的像素列，放大时性能不再线性增长
+ * - 逐像素绘制：每个像素列取对应时间范围内的 min/max，画一条竖线
+ * - 无锯齿：无论缩放级别如何，波形始终连贯平滑
+ * - 自动适配：数据过多时聚合，数据不足时优雅降级
+ * 
+ * 缓存特性（Level 编号与后端 hfspeaks_v2 对齐）：
+ * - Level 0(5s,  div=128)  特写/高精度
+ * - Level 1(10s, div=512)  近景
+ * - Level 2(30s, div=2048) 中景
+ * - Level 3(60s, div=8192) 远景/全景
+ * - 时间参数量化：0.5秒步长，减少缓存抖动
+ * - LRU淘汰：基于访问时间淘汰不常用缓存
+ * - 时间轴预加载：自动预加载相邻时间区间
+ * - 跨区块合并：可视区覆盖多区块时自动拼接数据
  */
 import React from "react";
 import {
     applyGainsToPeaks,
-    renderHighResWaveform,
-    type HighResRenderParams,
+    renderWaveform,
+    type WaveformRenderParams,
 } from "../../utils/waveformRenderer";
 import { mipmapCache } from "../../utils/mipmapCache";
 import type { FadeCurveType } from "../layout/timeline/paths";
-
-/** 分段缓存 */
-interface SegmentCache {
-    min: number[];
-    max: number[];
-    sourceTimeStart: number;
-    sourceDuration: number;
-    timestamp: number;
-}
 
 /** 缓冲区大小（秒） */
 const BUFFER_SEC = 2;
 
 export type WaveformCanvasProps = {
-    /** 旧版 props（兼容模式） */
-    min?: number[];
-    max?: number[];
     targetWidthPx: number;
     heightPx: number;
-    /** clip 级别的参考峰值（绝对值，0..1）。优先使用以保证缩放时垂直标度一致 */
-    clipPeak?: number;
     stroke?: string;
     strokeWidth?: number;
     opacity?: number;
 
-    // 新版 props（高精度模式）
-    /** 是否启用高精度模式 */
-    highResMode?: boolean;
-    /** 是否使用 v2 mipmap API（优先于 highResMode） */
-    v2Mode?: boolean;
     /** 源文件路径 */
     sourcePath?: string;
     /** 源文件时长（秒） */
@@ -68,28 +67,19 @@ export type WaveformCanvasProps = {
     /** clip 在 timeline 上的起始时间（秒） */
     clipStartSec?: number;
 
-    /** 源文件采样率（用于 v2 模式计算 samplesPerPixel） */
+    /** 源文件采样率（用于计算 samplesPerPixel） */
     sampleRate?: number;
-    /** 每秒像素数（用于 v2 模式计算 samplesPerPixel） */
+    /** 每秒像素数（用于计算 samplesPerPixel） */
     pxPerSec?: number;
-
-    // Tile-mode props (保留兼容)
-    tileMode?: boolean;
-    sourceStartOffsetSec?: number;
-    cycleLenSecTimeline?: number;
 };
 
 export default function WaveformCanvas(props: WaveformCanvasProps) {
     const {
-        min,
-        max,
         targetWidthPx,
         heightPx,
-        clipPeak,
         stroke = "currentColor",
         strokeWidth = 1,
         opacity = 1,
-        highResMode = false,
         sourcePath,
         sourceDurationSec,
         sourceStartSec = 0,
@@ -108,16 +98,8 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
     const requestIdRef = React.useRef<number>(0);
 
-    // 分段数据状态
-    const [segmentData, setSegmentData] = React.useState<{
-        min: number[];
-        max: number[];
-        sourceTimeStart: number;
-        sourceDuration: number;
-    } | null>(null);
-
-// v2 模式状态
-    const [v2Data, setV2Data] = React.useState<{
+    // mipmap 数据状态
+    const [peakData, setPeakData] = React.useState<{
         min: number[];
         max: number[];
         mipmapLevel: number;
@@ -128,18 +110,66 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
         dataDurationSec: number;
     } | null>(null);
 
-    // 计算 v2 模式的 samplesPerPixel
+    // 计算 samplesPerPixel
     const samplesPerPixel = React.useMemo(() => {
-        if (!props.v2Mode || !props.sampleRate || !props.pxPerSec) {
+        if (!props.sampleRate || !props.pxPerSec) {
             return undefined;
         }
-        // samplesPerPixel = sampleRate / pxPerSec
         return Math.max(1, Math.round(props.sampleRate / props.pxPerSec));
-    }, [props.v2Mode, props.sampleRate, props.pxPerSec]);
+    }, [props.sampleRate, props.pxPerSec]);
+
+    // ========================================
+    // 可视区裁剪：计算 clip 在屏幕上实际可见的部分
+    // ========================================
+    const visibleInfo = React.useMemo(() => {
+        const clipLen = clipDurationSec ?? 0;
+        const clipStart = clipStartSec ?? 0;
+        const clipEnd = clipStart + clipLen;
+        const fullWidthPx = targetWidthPx;
+
+        // 如果没有可视区信息，使用完整宽度（向后兼容）
+        if (viewportStartSec === undefined || viewportEndSec === undefined || clipLen <= 0) {
+            return {
+                /** canvas 渲染的像素宽度（仅可见部分） */
+                visibleWidthPx: fullWidthPx,
+                /** 可见部分在 clip 内的像素偏移（用于定位 canvas） */
+                offsetPx: 0,
+                /** 可见部分在 clip 内的起始比例 (0~1) */
+                visibleStartRatio: 0,
+                /** 可见部分在 clip 内的结束比例 (0~1) */
+                visibleEndRatio: 1,
+            };
+        }
+
+        // 计算可视区与 clip 的交集（加一点 buffer 防止滚动时出现空白）
+        const visStart = Math.max(clipStart, viewportStartSec - BUFFER_SEC);
+        const visEnd = Math.min(clipEnd, viewportEndSec + BUFFER_SEC);
+
+        if (visEnd <= visStart) {
+            return {
+                visibleWidthPx: 0,
+                offsetPx: 0,
+                visibleStartRatio: 0,
+                visibleEndRatio: 0,
+            };
+        }
+
+        const startRatio = (visStart - clipStart) / clipLen;
+        const endRatio = (visEnd - clipStart) / clipLen;
+        const offsetPx = Math.floor(startRatio * fullWidthPx);
+        const visibleWidthPx = Math.max(1, Math.ceil(endRatio * fullWidthPx) - offsetPx);
+
+        return {
+            visibleWidthPx,
+            offsetPx,
+            visibleStartRatio: startRatio,
+            visibleEndRatio: endRatio,
+        };
+    }, [targetWidthPx, clipDurationSec, clipStartSec, viewportStartSec, viewportEndSec]);
 
     // 计算可视区交集 + 缓冲区
     const viewportInfo = React.useMemo(() => {
-        if (!highResMode || !sourcePath || !sourceDurationSec || sourceDurationSec <= 0) {
+        if (!sourcePath || !sourceDurationSec || sourceDurationSec <= 0) {
             return null;
         }
 
@@ -184,7 +214,6 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
             sourceDuration,
         };
     }, [
-        highResMode,
         sourcePath,
         sourceDurationSec,
         sourceStartSec,
@@ -197,77 +226,46 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
 
     // 获取分段数据
     React.useEffect(() => {
-        // v2 模式优先处理
-        if (props.v2Mode && sourcePath && samplesPerPixel && viewportInfo) {
-            const requestId = ++requestIdRef.current;
-            
-            mipmapCache.getPeaks(
-                sourcePath,
-                samplesPerPixel,
-                viewportInfo.sourceTimeStart,
-                viewportInfo.sourceDuration,
-                targetWidthPx,
-            ).then((data) => {
-                if (requestId !== requestIdRef.current) return;
-if (data) {
-                    setV2Data({
-                        min: data.min,
-                        max: data.max,
-                        mipmapLevel: data.mipmapLevel,
-                        divisionFactor: data.divisionFactor,
-                        dataStartSec: data.startSec,
-                        dataDurationSec: data.durationSec,
-                    });
-                    setSegmentData(null); // 清除旧数据
-                }
-            });
+        if (!sourcePath || !samplesPerPixel || !viewportInfo) {
             return;
         }
 
-        // highResMode 原有逻辑：直接使用 mipmapCache
-        if (!viewportInfo || !sourcePath) {
-            setSegmentData(null);
-            return;
-        }
-
-        const { sourceTimeStart, sourceDuration } = viewportInfo;
         const requestId = ++requestIdRef.current;
-
-        // 计算 samplesPerPixel（假设采样率 44100）
-        const ASSUMED_SAMPLE_RATE = 44100;
-        const localSamplesPerPixel = Math.max(1, Math.round(ASSUMED_SAMPLE_RATE / (targetWidthPx / sourceDuration)));
-
+        
         mipmapCache.getPeaks(
             sourcePath,
-            localSamplesPerPixel,
-            sourceTimeStart,
-            sourceDuration,
-            targetWidthPx,
+            samplesPerPixel,
+            viewportInfo.sourceTimeStart,
+            viewportInfo.sourceDuration,
+            visibleInfo.visibleWidthPx,
         ).then((data) => {
             if (requestId !== requestIdRef.current) return;
             if (data) {
-                const newCache: SegmentCache = {
+                setPeakData({
                     min: data.min,
                     max: data.max,
-                    sourceTimeStart,
-                    sourceDuration,
-                    timestamp: performance.now(),
-                };
-                setSegmentData(newCache);
+                    mipmapLevel: data.mipmapLevel,
+                    divisionFactor: data.divisionFactor,
+                    dataStartSec: data.startSec,
+                    dataDurationSec: data.durationSec,
+                });
             }
         });
-    }, [viewportInfo, sourcePath, props.v2Mode, samplesPerPixel, targetWidthPx]);
+    }, [viewportInfo, sourcePath, samplesPerPixel, visibleInfo.visibleWidthPx]);
 
     // 主渲染逻辑
     React.useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
-        const displayedW = Math.max(1, Math.floor(targetWidthPx));
+        // ========================================
+        // 关键优化：canvas 宽度 = 可见宽度（而非整个 clip 宽度）
+        // ========================================
+        const displayedW = Math.max(1, Math.floor(visibleInfo.visibleWidthPx));
         const displayedH = Math.max(1, Math.floor(heightPx));
         const dpr = Math.max(1, window.devicePixelRatio || 1);
 
-        // 保护极端大的 canvas
+        // 保护极端大的 canvas（优化后这个限制几乎不会触及）
         const MAX_INTERNAL_CANVAS_PX = 32767;
         const internalW = Math.max(
             1,
@@ -289,9 +287,9 @@ if (data) {
         ctx.clearRect(0, 0, displayedW, displayedH);
         ctx.globalAlpha = Math.max(0, Math.min(1, Number(opacity) || 0));
 
-// v2 模式：使用多级 mipmap 数据渲染
-        if (props.v2Mode && v2Data && v2Data.min.length >= 2) {
-            const params: HighResRenderParams = {
+        // 使用 mipmap 数据渲染
+        if (peakData && peakData.min.length >= 2) {
+            const params: WaveformRenderParams = {
                 canvasWidth: displayedW,
                 canvasHeight: displayedH,
                 centerY: displayedH / 2,
@@ -304,20 +302,16 @@ if (data) {
                 fadeOutSec,
                 fadeInCurve,
                 fadeOutCurve,
-                dataStartSec: v2Data.dataStartSec,
-                dataDurationSec: v2Data.dataDurationSec,
+                dataStartSec: peakData.dataStartSec,
+                dataDurationSec: peakData.dataDurationSec,
+                // 可视区裁剪参数：告诉 renderWaveform 这个 canvas 对应整个 clip 的哪个部分
+                clipPixelOffset: visibleInfo.offsetPx,
+                clipTotalWidthPx: targetWidthPx,
             };
 
-            // 根据显示宽度决定是否降采样
-            const targetSamples = displayedW * 2;
-            let minData = v2Data.min;
-            let maxData = v2Data.max;
-
-            if (minData.length > targetSamples) {
-                const downsampled = downsamplePeaks(minData, maxData, targetSamples);
-                minData = downsampled.min;
-                maxData = downsampled.max;
-            }
+            // 直接使用后端数据
+            const minData = peakData.min;
+            const maxData = peakData.max;
 
             // 应用增益并渲染
             const peaks = new Float32Array(minData.length * 2);
@@ -328,121 +322,17 @@ if (data) {
             const withGains = applyGainsToPeaks(peaks, params);
 
             // 渲染
-            renderHighResWaveform(ctx, withGains, params, stroke, strokeWidth);
+            renderWaveform(ctx, withGains, params, stroke, strokeWidth);
             return;
         }
 
-        // 高精度模式：使用分段数据渲染
-        if (highResMode && segmentData && segmentData.min.length >= 2) {
-            const params: HighResRenderParams = {
-                canvasWidth: displayedW,
-                canvasHeight: displayedH,
-                centerY: displayedH / 2,
-                sourceStartSec,
-                clipDuration: clipDurationSec ?? displayedW,
-                playbackRate,
-                sourceDurationSec: sourceDurationSec ?? 1,
-                volumeGain,
-                fadeInSec,
-                fadeOutSec,
-                fadeInCurve,
-                fadeOutCurve,
-            };
-
-            // 根据显示宽度决定是否降采样
-            // 每像素需要 2 个采样点（min + max）
-            const targetSamples = displayedW * 2;
-            let minData = segmentData.min;
-            let maxData = segmentData.max;
-
-            if (minData.length > targetSamples) {
-                // 降采样到目标宽度
-                const downsampled = downsamplePeaks(minData, maxData, targetSamples);
-                minData = downsampled.min;
-                maxData = downsampled.max;
-            }
-
-            // 应用增益并渲染
-            const peaks = new Float32Array(minData.length * 2);
-            for (let i = 0; i < minData.length; i++) {
-                peaks[i * 2] = minData[i];
-                peaks[i * 2 + 1] = maxData[i];
-            }
-            const withGains = applyGainsToPeaks(peaks, params);
-
-            // 渲染
-            renderHighResWaveform(ctx, withGains, params, stroke, strokeWidth);
-            return;
-        }
-
-        // 旧版渲染（兼容模式）
-        if (!min || !max) return;
-
-        const processedTarget = Math.max(1, Math.floor(internalW / dpr));
-        const processed = processWaveformPeaksLegacy({
-            min: min,
-            max: max,
-            startSec: 0,
-            durSec: 1,
-            visibleStartSec: 0,
-            visibleDurSec: 1,
-            targetWidth: processedTarget,
-        });
-
-        const n = Math.min(processed.min.length, processed.max.length);
-        if (n === 0) return;
-
-        const centerY = displayedH / 2;
-        const fullAmplitude = displayedH / 2;
-
-        const eps = 1e-9;
-        let peakAbs = eps;
-        if (typeof clipPeak === "number" && isFinite(clipPeak) && clipPeak > 0) {
-            peakAbs = Math.max(eps, Math.min(1, Math.abs(clipPeak)));
-        } else {
-            for (let i = 0; i < n; i++) {
-                const ma = Math.abs(processed.max[i] ?? 0);
-                const mi = Math.abs(processed.min[i] ?? 0);
-                if (ma > peakAbs) peakAbs = ma;
-                if (mi > peakAbs) peakAbs = mi;
-            }
-        }
-
-        const minOccupy = 0.12;
-        const occupy = Math.min(1, Math.max(minOccupy, peakAbs));
-        const amplitude = fullAmplitude * occupy;
-
-        ctx.beginPath();
-        for (let i = 0; i < n; i++) {
-            const x = n === 1 ? 0 : (i / (n - 1)) * displayedW;
-            const top = processed.max[i] ?? 0;
-            const bot = processed.min[i] ?? 0;
-
-            const t = i % 2 === 0 ? 0.25 : 0.75;
-            const v = top + (bot - top) * t;
-
-            const vNorm = peakAbs > eps ? v / peakAbs : 0;
-            const y = centerY - vNorm * amplitude;
-
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
-
-        ctx.strokeStyle = stroke;
-        ctx.lineWidth = strokeWidth;
-        ctx.lineJoin = "round";
-        ctx.lineCap = "round";
-        ctx.stroke();
+        // 无数据时不渲染
     }, [
-        min,
-        max,
         targetWidthPx,
         heightPx,
         stroke,
         strokeWidth,
         opacity,
-        clipPeak,
-        highResMode,
         sourceStartSec,
         clipDurationSec,
         playbackRate,
@@ -451,81 +341,33 @@ if (data) {
         fadeOutSec,
         fadeInCurve,
         fadeOutCurve,
-        segmentData,
-        v2Data,
+        peakData,
+        visibleInfo,
     ]);
 
-    return <canvas ref={canvasRef} style={{ display: 'block' }} />;
-}
-
-/**
- * 降采样峰值数据到目标采样数
- */
-function downsamplePeaks(
-    min: number[],
-    max: number[],
-    targetSamples: number
-): { min: number[]; max: number[] } {
-    const n = Math.min(min.length, max.length);
-    if (n <= targetSamples) {
-        return { min: [...min], max: [...max] };
+    // 如果可见宽度为 0，不渲染
+    if (visibleInfo.visibleWidthPx <= 0) {
+        return null;
     }
 
-    const stride = Math.max(1, Math.ceil(n / targetSamples));
-    const resultMin: number[] = [];
-    const resultMax: number[] = [];
-
-    for (let i = 0; i < n; i += stride) {
-        const windowEnd = Math.min(i + stride, n);
-        let wMin = Infinity;
-        let wMax = -Infinity;
-        for (let j = i; j < windowEnd; j++) {
-            const minVal = min[j] ?? 0;
-            const maxVal = max[j] ?? 0;
-            if (minVal < wMin) wMin = minVal;
-            if (maxVal > wMax) wMax = maxVal;
-        }
-        resultMin.push(wMin === Infinity ? 0 : wMin);
-        resultMax.push(wMax === -Infinity ? 0 : wMax);
-    }
-
-    return { min: resultMin, max: resultMax };
-}
-
-/**
- * 旧版降采样算法（保留兼容）
- */
-function processWaveformPeaksLegacy(options: {
-    min: number[];
-    max: number[];
-    startSec: number;
-    durSec: number;
-    visibleStartSec: number;
-    visibleDurSec: number;
-    targetWidth: number;
-}): { min: number[]; max: number[] } {
-    const { min, max, targetWidth } = options;
-    const n = Math.min(min?.length ?? 0, max?.length ?? 0);
-    if (n === 0) return { min: [], max: [] };
-
-    const stride = Math.max(1, Math.min(16, Math.ceil(n / Math.max(1, targetWidth))));
-
-    const resultMin: number[] = [];
-    const resultMax: number[] = [];
-
-    for (let i = 0; i < n; i += stride) {
-        const windowEnd = Math.min(i + stride, n);
-        let wMin = Infinity;
-        let wMax = -Infinity;
-        for (let j = i; j < windowEnd; j++) {
-            const v = min[j] ?? 0;
-            if (v < wMin) wMin = v;
-            const u = max[j] ?? 0;
-            if (u > wMax) wMax = u;
-        }
-        resultMin.push(wMin === Infinity ? 0 : wMin);
-        resultMax.push(wMax === -Infinity ? 0 : wMax);
-    }
-
-    return { min: resultMin, max: resultMax };
+    return (
+        <div
+            style={{
+                position: 'relative',
+                width: targetWidthPx,
+                height: heightPx,
+                overflow: 'hidden',
+            }}
+        >
+            <canvas
+                ref={canvasRef}
+                style={{
+                    display: 'block',
+                    position: 'absolute',
+                    left: visibleInfo.offsetPx,
+                    top: 0,
+                }}
+            />
+        </div>
+    );
 }

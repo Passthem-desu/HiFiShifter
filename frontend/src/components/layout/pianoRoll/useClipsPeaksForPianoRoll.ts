@@ -248,20 +248,20 @@ export function useClipsPeaksForPianoRoll(args: {
             const results = await Promise.allSettled(
                 toFetch.map(async ({ clip, req, columns }) => {
                     // Mipmap优化：使用 mipmapCache 获取最佳级别的峰值数据
-                    // 根据 samplesPerPixel 自动选择级别
-                    const level = mipmapCache.selectMipmapLevel(req.samplesPerPixel);
+                    // getPeaks 内部根据 samplesPerPixel 自动选择级别
                     
                     // inflight 去重（使用 mipmap 缓存键）
+                    const level = mipmapCache.selectMipmapLevel(req.samplesPerPixel);
                     const inflightKey = `${req.sourcePath}|${level}`;
                     let p = clipPeaksInflight.get(inflightKey);
                     if (!p) {
-                        // 使用 Mipmap 缓存获取数据
+                        // 使用 Mipmap 缓存获取数据（自动选级 + 跨区块合并）
                         p = mipmapCache
-                            .getPeaksAtLevel(
+                            .getPeaks(
                                 req.sourcePath,
-                                level,
+                                req.samplesPerPixel,
                                 req.startSec,
-                                req.startSec + req.durSec,
+                                req.durSec,
                                 columns,
                             )
                             .then((data) => {

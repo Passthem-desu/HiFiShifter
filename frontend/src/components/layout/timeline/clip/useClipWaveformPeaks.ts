@@ -1,6 +1,12 @@
 /**
  * 波形峰值数据处理 Hook
- * 统一使用 mipmapCache（四级缓存）获取波形数据
+ * 
+ * 使用 mipmapCache（四级固定区间缓存）获取波形数据
+ * 缓存特性：
+ * - 四级固定区间：Level 0(60s) | Level 1(30s) | Level 2(10s) | Level 3(5s)
+ * - 时间参数量化：0.5秒步长，减少缓存抖动
+ * - LRU淘汰：基于访问时间淘汰不常用缓存
+ * - 时间轴预加载：自动预加载相邻时间区间
  */
 import React from "react";
 
@@ -56,7 +62,7 @@ function sampleSegmentMinMaxAtTime(
     return { min: lerp(mn0, mn1, f), max: lerp(mx0, mx1, f) };
 }
 
-const WAVEFORM_COLUMNS_PER_SEC = 1024;
+const WAVEFORM_COLUMNS_PER_SEC = 256; // 精度再减半：512→256，进一步降低数据量提升性能
 const WAVEFORM_COLUMNS_MIN = 96;
 const WAVEFORM_COLUMNS_MAX = 65536;
 const WAVEFORM_COLUMNS_QUANT = 32;

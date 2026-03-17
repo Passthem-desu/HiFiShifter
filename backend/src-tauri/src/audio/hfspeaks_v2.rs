@@ -43,11 +43,12 @@ pub const MAX_MIPMAP_LEVELS: usize = 4;
 
 /// 默认 mipmap 除数因子 (针对 44.1kHz 优化)
 /// 参考 Reaper: 400 peaks/sec, 10 peaks/sec, 1 peak/sec
+/// 精度减半：每级 division_factor 翻倍，数据量减少一半以提升性能
 pub const DEFAULT_DIVISION_FACTORS: [u32; MAX_MIPMAP_LEVELS] = [
-    128,    // Level 0: ~345 peaks/sec at 44.1kHz - 高精度放大视图
-    512,    // Level 1: ~86 peaks/sec - 中等缩放
-    2048,   // Level 2: ~22 peaks/sec - 小缩放
-    8192,   // Level 3: ~5 peaks/sec - 全景视图
+    256,    // Level 0: ~172 peaks/sec at 44.1kHz - 高精度放大视图
+    1024,   // Level 1: ~43 peaks/sec - 中等缩放
+    4096,   // Level 2: ~11 peaks/sec - 小缩放
+    16384,  // Level 3: ~2.7 peaks/sec - 全景视图
 ];
 
 // ============== 文件头结构 ==============
@@ -408,6 +409,8 @@ impl HfsPeakFile {
                 level: 0,
                 sample_rate: 0,
                 division_factor: 0,
+                actual_start_sec: 0.0,
+                actual_duration_sec: 0.0,
             };
         }
 
@@ -422,6 +425,8 @@ impl HfsPeakFile {
                 level: level as u32,
                 sample_rate: self.header.sample_rate,
                 division_factor: mh.division_factor,
+                actual_start_sec: 0.0,
+                actual_duration_sec: 0.0,
             };
         }
 
@@ -440,6 +445,8 @@ impl HfsPeakFile {
                 level: level as u32,
                 sample_rate: self.header.sample_rate,
                 division_factor: mh.division_factor,
+                actual_start_sec: start_sec.max(0.0),
+                actual_duration_sec: 0.0,
             };
         }
 
@@ -450,6 +457,10 @@ impl HfsPeakFile {
         let len = data.len() as i64;
         let i0 = start_peak.max(0).min(len);
         let i1 = end_peak.max(0).min(len);
+
+        // 计算实际覆盖的时间范围（由 floor/ceil 取整后的峰值索引决定）
+        let actual_start_sec = (i0 as f64 * division_factor) / sr;
+        let actual_duration_sec = ((i1 - i0) as f64 * division_factor) / sr;
         
         if i1 <= i0 {
             return PeaksSegmentResult {
@@ -459,6 +470,8 @@ impl HfsPeakFile {
                 level: level as u32,
                 sample_rate: self.header.sample_rate,
                 division_factor: mh.division_factor,
+                actual_start_sec,
+                actual_duration_sec: 0.0,
             };
         }
 
@@ -502,6 +515,8 @@ impl HfsPeakFile {
             level: level as u32,
             sample_rate: self.header.sample_rate,
             division_factor: mh.division_factor,
+            actual_start_sec,
+            actual_duration_sec,
         }
     }
 }
@@ -525,6 +540,10 @@ pub struct PeaksSegmentResult {
     pub sample_rate: u32,
     /// 除数因子：每个峰值代表的采样数
     pub division_factor: u32,
+    /// 返回数据实际覆盖的起始时间（秒），由 floor/ceil 取整后的峰值索引决定
+    pub actual_start_sec: f64,
+    /// 返回数据实际覆盖的持续时间（秒），由 floor/ceil 取整后的峰值索引决定
+    pub actual_duration_sec: f64,
 }
 
 /// 多级峰值查询响应

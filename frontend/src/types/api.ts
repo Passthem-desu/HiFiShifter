@@ -180,6 +180,10 @@ export interface WaveformPeaksV2Payload {
     sample_rate: number;
     mipmap_level: number;
     division_factor: number;
+    /** 返回数据实际覆盖的起始时间（秒），由后端 floor/ceil 取整后的峰值索引决定 */
+    actual_start_sec: number;
+    /** 返回数据实际覆盖的持续时间（秒），由后端 floor/ceil 取整后的峰值索引决定 */
+    actual_duration_sec: number;
 }
 
 /** v2 波形元数据响应 */

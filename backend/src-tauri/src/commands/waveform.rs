@@ -374,6 +374,8 @@ pub(super) fn get_waveform_peaks_v2(
                 level: 0,
                 sample_rate: 0,
                 division_factor: 0,
+                actual_start_sec: 0.0,
+                actual_duration_sec: 0.0,
             }
         }
     };
@@ -413,6 +415,8 @@ pub(super) fn get_waveform_peaks_v2_level(
                 level: 0,
                 sample_rate: 0,
                 division_factor: 0,
+                actual_start_sec: 0.0,
+                actual_duration_sec: 0.0,
             }
         }
     };
@@ -439,6 +443,8 @@ pub(super) fn get_waveform_peaks_v2_meta(
                     level: 0,
                     sample_rate: 0,
                     division_factor: 0,
+                    actual_start_sec: 0.0,
+                    actual_duration_sec: 0.0,
                 },
                 sample_rate: 0,
                 duration_sec: 0.0,
@@ -465,6 +471,8 @@ pub(super) fn get_waveform_peaks_v2_meta(
             level: 0,
             sample_rate,
             division_factor: 0,
+            actual_start_sec: 0.0,
+            actual_duration_sec: 0.0,
         },
         sample_rate,
         duration_sec,
