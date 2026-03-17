@@ -306,6 +306,15 @@ class MipmapCacheManager {
         try {
             const data = await request;
             if (data) {
+                // debug log: expose fetched block sizes
+                try {
+                    console.log("[MipmapCache] fetched peaks", cacheKey, {
+                        startSec: data.startSec,
+                        durationSec: data.durationSec,
+                        minLen: data.min.length,
+                        maxLen: data.max.length,
+                    });
+                } catch (_) {}
                 this.addToCache(cacheKey, data);
             }
             return data;

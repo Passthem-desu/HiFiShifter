@@ -16,7 +16,7 @@ import { fadeInAreaPath, fadeOutAreaPath } from "./paths";
 import type { FadeCurveType } from "./paths";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
-import WaveformCanvas from "../../waveform/WaveformCanvas";
+import WaveSurferWaveform from "../../waveform/WaveSurferWaveform";
 import { useAppTheme } from "../../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../../theme/waveformColors";
 
@@ -133,7 +133,7 @@ export const ClipItem = React.memo(function ClipItem({
 
         return (
             <div style={{ width: canvasWidthPx, height: totalH }}>
-                <WaveformCanvas
+                <WaveSurferWaveform
                     targetWidthPx={canvasWidthPx}
                     heightPx={totalH}
                     stroke={stroke}

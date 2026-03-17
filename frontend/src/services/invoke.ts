@@ -330,9 +330,10 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "get_waveform_peaks_v2":
             return {
                 sourcePath: args[0],
-                timeRangeStart: args[1],
-                timeRangeEnd: args[2],
-                samplesPerPixel: args[3],
+                startSec: args[1],
+                durationSec: args[2],
+                columns: args[3],
+                samplesPerPixel: args[4],
             };
 
         case "get_waveform_peaks_v2_level":

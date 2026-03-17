@@ -690,11 +690,12 @@ export function drawPianoRoll(args: {
             targetWidth: Math.min(targetRenderWidth, visibleCols),
         });
 
-        // 使用 renderWaveformCanvas 渲染到离屏 canvas
-        offCanvas.width = processed.min.length;
-        offCanvas.height = h;
-        const offCtx = offCanvas.getContext("2d");
-        if (!offCtx) continue;
+        // 使用 renderWaveformCanvas 渲染到离屏 canvas（考虑 DPR）
+        const displayedOffW = Math.max(1, processed.min.length);
+        const displayedOffH = Math.max(1, h);
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const internalOffW = Math.max(1, Math.floor(displayedOffW * dpr));
+        const internalOffH = Math.max(1, Math.floor(displayedOffH * dpr));
 
         console.log(`[PianoRoll Render Debug] Render params:`, {
             clipStartX,
@@ -702,22 +703,36 @@ export function drawPianoRoll(args: {
             visibleSourceColsPx,
             processedMinLength: processed.min.length,
             targetRenderWidth: Math.min(targetRenderWidth, visibleCols),
+            dpr,
+            internalOffW,
+            internalOffH,
         });
 
-        // 清空离屏 canvas
-        offCtx.clearRect(0, 0, offCanvas.width, h);
+        // 设置离屏 canvas 内部像素尺寸并缩放上下文以考虑 DPR
+        offCanvas.width = internalOffW;
+        offCanvas.height = internalOffH;
+        offCanvas.style.width = `${displayedOffW}px`;
+        offCanvas.style.height = `${displayedOffH}px`;
+        const offCtx = offCanvas.getContext("2d");
+        if (!offCtx) continue;
 
-        // 在离屏 canvas 上渲染波形
+        // 使用像素缩放，使后续绘制逻辑仍接收 CSS 像素尺寸
+        offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // 清空离屏 canvas（以 CSS 像素为单位）
+        offCtx.clearRect(0, 0, displayedOffW, displayedOffH);
+
+        // 在离屏 canvas 上渲染波形（传入 CSS 像素尺寸）
         renderWaveformCanvas(offCtx, processed, {
-            width: processed.min.length,
-            height: h,
+            width: displayedOffW,
+            height: displayedOffH,
             fillColor: waveformColors.fill,
             strokeColor: waveformColors.stroke,
             mode: "stroke-jitter",
             strokeWidth: 0.5,
             barWidth: 1.5,
-            centerY: h * 0.5,
-            amplitude: h * 0.5,
+            centerY: displayedOffH * 0.5,
+            amplitude: displayedOffH * 0.5,
         });
 
         // 计算渲染目标位置
@@ -733,12 +748,13 @@ export function drawPianoRoll(args: {
         ctx.clip();
 
         // 使用 drawImage 精确绘制，避免 scale 导致的坐标变换问题
+        // 将离屏 canvas（内部像素）按目标尺寸绘制到主 canvas
         ctx.drawImage(
             offCanvas,
             0,
             0,
-            offCanvas.width,
-            h,
+            internalOffW,
+            internalOffH,
             destX,
             0,
             visibleSourceColsPx,
