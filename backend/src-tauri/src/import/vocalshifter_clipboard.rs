@@ -66,28 +66,28 @@ pub enum ClipboardFileKind {
 /// 查找最新的 VocalShifter 剪贴板文件，返回路径及其类型。
 pub fn find_latest_clipboard_file() -> Option<(PathBuf, ClipboardFileKind)> {
     let base = std::env::temp_dir().join("vocalshifter_tmp");
+    // 将堆分配延迟到循环内，消除未命中时的无意义内存开销
     let candidates = [
-        (base.join("vocalshifter_tr.clb.vshp"), ClipboardFileKind::Project),
-        (base.join("vocalshifter_le_tr.clb.vshp"), ClipboardFileKind::Project),
-        (base.join("vocalshifter_tr.clb.vsp"), ClipboardFileKind::Project),
-        (base.join("vocalshifter_le_tr.clb.vsp"), ClipboardFileKind::Project),
-        (base.join("vocalshifter_id.clb"), ClipboardFileKind::PitchData),
-        (base.join("vocalshifter_le_id.clb"), ClipboardFileKind::PitchData),
+        ("vocalshifter_tr.clb.vshp", ClipboardFileKind::Project),
+        ("vocalshifter_le_tr.clb.vshp", ClipboardFileKind::Project),
+        ("vocalshifter_tr.clb.vsp", ClipboardFileKind::Project),
+        ("vocalshifter_le_tr.clb.vsp", ClipboardFileKind::Project),
+        ("vocalshifter_id.clb", ClipboardFileKind::PitchData),
+        ("vocalshifter_le_id.clb", ClipboardFileKind::PitchData),
     ];
 
     let mut best: Option<(PathBuf, ClipboardFileKind, SystemTime)> = None;
-    for (path, kind) in candidates {
-        let Ok(meta) = fs::metadata(&path) else {
-            continue;
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-        match &best {
-            None => best = Some((path, kind, modified)),
-            Some((_, _, t)) if modified > *t => best = Some((path, kind, modified)),
-            _ => {}
+    for (name, kind) in candidates {
+        let path = base.join(name);
+        if let Ok(meta) = fs::metadata(&path) {
+            if meta.is_file() {
+                let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                match &best {
+                    None => best = Some((path, kind, modified)),
+                    Some((_, _, t)) if modified > *t => best = Some((path, kind, modified)),
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -95,8 +95,7 @@ pub fn find_latest_clipboard_file() -> Option<(PathBuf, ClipboardFileKind)> {
 }
 
 pub fn parse_clipboard_file(path: &Path) -> Result<Vec<ClipboardPitchPoint>, String> {
-    let data = fs::read(path)
-        .map_err(|e| format!("io_error: {}", e))?;
+    let data = fs::read(path).map_err(|e| format!("io_error: {}", e))?;
 
     if data.len() % RECORD_SIZE != 0 {
         return Err(format!(
@@ -107,11 +106,7 @@ pub fn parse_clipboard_file(path: &Path) -> Result<Vec<ClipboardPitchPoint>, Str
     }
 
     let read_f64 = |rec: &[u8], offset: usize| -> f64 {
-        f64::from_le_bytes(
-            rec[offset..offset + 8]
-                .try_into()
-                .unwrap_or([0u8; 8]),
-        )
+        f64::from_le_bytes(rec[offset..offset + 8].try_into().unwrap_or([0u8; 8]))
     };
 
     let mut out = Vec::with_capacity(data.len() / RECORD_SIZE);
@@ -256,8 +251,14 @@ mod tests {
         let p1 = &points[1];
 
         // Check times.
-        assert!((p0.time_sec - time0).abs() < 1e-9, "Unexpected time for first point");
-        assert!((p1.time_sec - time1).abs() < 1e-9, "Unexpected time for second point");
+        assert!(
+            (p0.time_sec - time0).abs() < 1e-9,
+            "Unexpected time for first point"
+        );
+        assert!(
+            (p1.time_sec - time1).abs() < 1e-9,
+            "Unexpected time for second point"
+        );
 
         // Check disabled flags.
         assert_eq!(p0.disabled, false, "First point should be enabled");

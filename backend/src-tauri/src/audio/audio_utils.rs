@@ -129,8 +129,9 @@ fn decode_audio_f32_interleaved_symphonia(path: &Path) -> Result<(u32, u16, Vec<
             sample_rate = decoded.spec().rate;
         }
 
-        // 复用缓冲区，消除高频内存分配
-        if sbuf_opt.is_none() || sbuf_opt.as_ref().unwrap().capacity() < decoded.capacity() {
+        // 复用缓冲区，正确比较总样本数 (Samples = Frames * Channels)
+        let required_samples = decoded.capacity() * decoded.spec().channels.count();
+        if sbuf_opt.is_none() || sbuf_opt.as_ref().unwrap().capacity() < required_samples {
             sbuf_opt = Some(symphonia::core::audio::SampleBuffer::<f32>::new(
                 decoded.capacity() as u64,
                 *decoded.spec(),
@@ -471,7 +472,9 @@ fn compute_minmax_peaks_symphonia(
             Err(e) => return Err(e.to_string()),
         };
 
-        if sbuf_opt.is_none() || sbuf_opt.as_ref().unwrap().capacity() < decoded.capacity() {
+        // 复用缓冲区，正确比较总样本数 (Samples = Frames * Channels)
+        let required_samples = decoded.capacity() * decoded.spec().channels.count();
+        if sbuf_opt.is_none() || sbuf_opt.as_ref().unwrap().capacity() < required_samples {
             sbuf_opt = Some(symphonia::core::audio::SampleBuffer::<f32>::new(
                 decoded.capacity() as u64,
                 *decoded.spec(),
@@ -732,7 +735,9 @@ fn try_read_audio_info_symphonia(path: &Path, preview_points: usize) -> Option<W
             Err(_) => break,
         };
 
-        if sbuf_opt.is_none() || sbuf_opt.as_ref().unwrap().capacity() < decoded.capacity() {
+        // 复用缓冲区，正确比较总样本数 (Samples = Frames * Channels)
+        let required_samples = decoded.capacity() * decoded.spec().channels.count();
+        if sbuf_opt.is_none() || sbuf_opt.as_ref().unwrap().capacity() < required_samples {
             sbuf_opt = Some(symphonia::core::audio::SampleBuffer::<f32>::new(
                 decoded.capacity() as u64,
                 *decoded.spec(),
