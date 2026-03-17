@@ -14,34 +14,24 @@ export interface PeaksData {
     sampleRate: number;
     divisionFactor: number;
     mipmapLevel: number;
+    /** 数据起始时间（秒） */
+    startSec: number;
+    /** 数据持续时间（秒） */
+    durationSec: number;
     /** 缓存时间戳 */
     timestamp: number;
 }
 
-/** 单个文件的 mipmap 缓存 */
-interface FileMipmapCache {
-    /** 各级 mipmap 数据 */
-    levels: Map<number, PeaksData>;
-    /** 元数据 */
-    meta?: {
-        sampleRate: number;
-        channels: number;
-        totalFrames: number;
-    };
-    /** 最后访问时间 */
-    lastAccess: number;
-}
-
 /** 全局缓存管理器 */
 class MipmapCacheManager {
-    /** 文件路径 -> mipmap 缓存 */
-    private cache = new Map<string, FileMipmapCache>();
+    /** 缓存键 -> 峰值数据（缓存键格式：filePath|level|startSec|durationSec|columns） */
+    private cache = new Map<string, PeaksData>();
     
     /** 正在进行的请求 */
     private pendingRequests = new Map<string, Promise<PeaksData | null>>();
     
-    /** 最大缓存文件数 */
-    private readonly MAX_FILES = 32;
+    /** 最大缓存条目数 */
+    private readonly MAX_ENTRIES = 256;
 
     /**
      * 根据 samplesPerPixel 选择最佳 mipmap 级别
@@ -61,51 +51,73 @@ class MipmapCacheManager {
 
     /**
      * 获取峰值数据（自动选择 mipmap 级别）
+     * 
+     * @param sourcePath 源文件路径
+     * @param samplesPerPixel 每像素采样数（用于选择 mipmap 级别）
+     * @param startSec 起始时间（秒）
+     * @param durationSec 时长（秒，用于计算 columns，保持缓存键稳定）
+     * @param targetWidthPx 目标显示宽度（像素，保留参数以兼容现有调用）
      */
     async getPeaks(
         sourcePath: string,
         samplesPerPixel: number,
-        timeRangeStart?: number,
-        timeRangeEnd?: number,
+        startSec: number,
+        durationSec: number,
+        _targetWidthPx: number,  // 保留参数以兼容现有调用，实际 columns 基于 durationSec 计算
     ): Promise<PeaksData | null> {
         const level = this.selectMipmapLevel(samplesPerPixel);
-        return this.getPeaksAtLevel(sourcePath, level, timeRangeStart, timeRangeEnd);
+        
+        // 基于音频时长计算 columns（保持缓存键稳定）
+        // 与 useClipWaveformPeaks.ts 保持一致的计算方式
+        const WAVEFORM_COLUMNS_PER_SEC = 1024;
+        const QUANT = 32;
+        const MIN_COLUMNS = 96;
+        const MAX_COLUMNS = 65536;
+        
+        const secondsBasedColumns = durationSec * WAVEFORM_COLUMNS_PER_SEC;
+        const columns = Math.max(
+            MIN_COLUMNS,
+            Math.min(MAX_COLUMNS, Math.round(secondsBasedColumns / QUANT) * QUANT)
+        );
+        
+        return this.getPeaksAtLevel(sourcePath, level, startSec, durationSec, columns);
     }
 
     /**
      * 获取指定级别的峰值数据
      */
     async getPeaksAtLevel(
-        sourcePath: string,
-        level: MipmapLevel,
-        timeRangeStart?: number,
-        timeRangeEnd?: number,
+        filePath: string,
+        level: number,
+        startSec: number,
+        durationSec: number,
+        columns: number,
     ): Promise<PeaksData | null> {
+        console.log(`[MipmapCache Debug] getPeaksAtLevel: filePath=${filePath}, level=${level}, startSec=${startSec}, durationSec=${durationSec}, columns=${columns}`);
+        
+        // 构建完整缓存键（包含时间范围和列数）
+        const cacheKey = `${filePath}|${level}|${startSec.toFixed(3)}|${durationSec.toFixed(3)}|${columns}`;
+        
         // 检查缓存
-        const fileCache = this.cache.get(sourcePath);
-        if (fileCache) {
-            const cached = fileCache.levels.get(level);
-            if (cached) {
-                fileCache.lastAccess = performance.now();
-                return cached;
-            }
+        const cached = this.cache.get(cacheKey);
+        if (cached) {
+            return cached;
         }
 
         // 检查正在进行的请求
-        const cacheKey = `${sourcePath}|${level}|${timeRangeStart ?? 0}|${timeRangeEnd ?? 0}`;
         const pending = this.pendingRequests.get(cacheKey);
         if (pending) {
             return pending;
         }
 
         // 发起新请求
-        const request = this.fetchPeaks(sourcePath, level, timeRangeStart, timeRangeEnd);
+        const request = this.fetchPeaks(filePath, level as MipmapLevel, startSec, durationSec, columns);
         this.pendingRequests.set(cacheKey, request);
 
         try {
             const data = await request;
             if (data) {
-                this.addToCache(sourcePath, level, data);
+                this.addToCache(cacheKey, data);
             }
             return data;
         } finally {
@@ -119,27 +131,31 @@ class MipmapCacheManager {
     private async fetchPeaks(
         sourcePath: string,
         level: MipmapLevel,
-        timeRangeStart?: number,
-        timeRangeEnd?: number,
+        startSec: number,
+        durationSec: number,
+        columns: number,
     ): Promise<PeaksData | null> {
         try {
             const response = await waveformApi.getWaveformPeaksV2Level(
                 sourcePath,
+                startSec,
+                durationSec,
+                columns,
                 level,
-                timeRangeStart,
-                timeRangeEnd,
             );
 
             if (!response || !response.ok) {
                 return null;
             }
 
-            return {
+return {
                 min: response.min.map((v) => Number(v) || 0),
                 max: response.max.map((v) => Number(v) || 0),
                 sampleRate: response.sample_rate,
                 divisionFactor: response.division_factor,
                 mipmapLevel: response.mipmap_level,
+                startSec: startSec,
+                durationSec: durationSec,
                 timestamp: performance.now(),
             };
         } catch (error) {
@@ -151,56 +167,51 @@ class MipmapCacheManager {
     /**
      * 添加到缓存
      */
-    private addToCache(sourcePath: string, level: number, data: PeaksData): void {
-        let fileCache = this.cache.get(sourcePath);
-        if (!fileCache) {
-            // LRU 淘汰
-            this.evictIfNeeded();
-            
-            fileCache = {
-                levels: new Map(),
-                lastAccess: performance.now(),
-            };
-            this.cache.set(sourcePath, fileCache);
-        }
-
-        fileCache.levels.set(level, data);
-        fileCache.lastAccess = performance.now();
+    private addToCache(cacheKey: string, data: PeaksData): void {
+        // LRU 淘汰
+        this.evictIfNeeded();
+        
+        this.cache.set(cacheKey, data);
     }
 
     /**
      * LRU 淘汰
      */
     private evictIfNeeded(): void {
-        if (this.cache.size < this.MAX_FILES) {
+        if (this.cache.size < this.MAX_ENTRIES) {
             return;
         }
 
-        // 找到最久未访问的文件
-        let oldest: string | null = null;
+        // 找到最旧的条目（基于 timestamp）
+        let oldestKey: string | null = null;
         let oldestTime = Infinity;
 
-        for (const [path, cache] of this.cache) {
-            if (cache.lastAccess < oldestTime) {
-                oldestTime = cache.lastAccess;
-                oldest = path;
+        for (const [key, data] of this.cache) {
+            if (data.timestamp < oldestTime) {
+                oldestTime = data.timestamp;
+                oldestKey = key;
             }
         }
 
-        if (oldest) {
-            this.cache.delete(oldest);
+        if (oldestKey) {
+            this.cache.delete(oldestKey);
         }
     }
 
     /**
      * 预加载所有 mipmap 级别（可选优化）
+     * 
+     * @param sourcePath 源文件路径
+     * @param startSec 起始时间（秒）
+     * @param durationSec 时长（秒）
+     * @param columns 采样列数
      */
-    async preloadAllLevels(sourcePath: string): Promise<void> {
+    async preloadAllLevels(sourcePath: string, startSec: number, durationSec: number, columns: number): Promise<void> {
         const levels: MipmapLevel[] = [0, 1, 2, 3];
         
         // 并行加载所有级别
         await Promise.all(
-            levels.map((level) => this.getPeaksAtLevel(sourcePath, level))
+            levels.map((level) => this.getPeaksAtLevel(sourcePath, level, startSec, durationSec, columns))
         );
     }
 
@@ -208,7 +219,12 @@ class MipmapCacheManager {
      * 清除指定文件的缓存
      */
     invalidateFile(sourcePath: string): void {
-        this.cache.delete(sourcePath);
+        // 删除所有以 sourcePath 开头的缓存条目
+        for (const key of this.cache.keys()) {
+            if (key.startsWith(sourcePath)) {
+                this.cache.delete(key);
+            }
+        }
     }
 
     /**
@@ -223,26 +239,56 @@ class MipmapCacheManager {
      * 获取缓存统计
      */
     getStats(): {
-        files: number;
-        totalLevels: number;
+        entries: number;
         estimatedMemory: number;
     } {
-        let totalLevels = 0;
         let estimatedMemory = 0;
 
-        for (const [, fileCache] of this.cache) {
-            totalLevels += fileCache.levels.size;
-            for (const [, data] of fileCache.levels) {
-                // 每个采样点估算 8 bytes (min + max as float32)
-                estimatedMemory += (data.min.length + data.max.length) * 4;
-            }
+        for (const [, data] of this.cache) {
+            // 每个采样点估算 8 bytes (min + max as float32)
+            estimatedMemory += (data.min.length + data.max.length) * 4;
         }
 
         return {
-            files: this.cache.size,
-            totalLevels,
+            entries: this.cache.size,
             estimatedMemory,
         };
+    }
+
+    async loadMipmapFile(filePath: string, level: number, startSec: number = 0, durationSec: number = 0, columns: number = 1024) {
+        const cacheKey = `${filePath}|${level}|${startSec.toFixed(3)}|${durationSec.toFixed(3)}|${columns}`;
+        console.log(`[MipmapCache Debug] Loading mipmap: filePath=${filePath}, level=${level}, startSec=${startSec}, durationSec=${durationSec}, columns=${columns}`);
+        
+        // 检查缓存
+        const cached = this.cache.get(cacheKey);
+        if (cached) {
+            console.log(`[MipmapCache Debug] Successfully loaded mipmap from cache: filePath=${filePath}, level=${level}, dataLength=${cached.min.length}`);
+            return cached;
+        }
+
+        // 检查正在进行的请求
+        const pending = this.pendingRequests.get(cacheKey);
+        if (pending) {
+            return pending;
+        }
+
+        // 发起新请求
+        const request = this.fetchPeaks(filePath, level as MipmapLevel, startSec, durationSec, columns);
+        this.pendingRequests.set(cacheKey, request);
+
+        try {
+            const data = await request;
+            if (data) {
+                this.addToCache(cacheKey, data);
+                console.log(`[MipmapCache Debug] Successfully loaded mipmap: filePath=${filePath}, level=${level}, dataLength=${data.min.length}`);
+            }
+            return data;
+        } catch {
+            console.error(`[MipmapCache Debug] Failed to load mipmap: filePath=${filePath}, level=${level}`);
+            return null;
+        } finally {
+            this.pendingRequests.delete(cacheKey);
+        }
     }
 }
 
@@ -253,8 +299,9 @@ export const mipmapCache = new MipmapCacheManager();
 export function useMipmapPeaks(
     sourcePath: string | undefined,
     samplesPerPixel: number,
-    timeRangeStart?: number,
-    timeRangeEnd?: number,
+    startSec: number,
+    durationSec: number,
+    targetWidthPx: number,
 ): {
     data: PeaksData | null;
     loading: boolean;
@@ -282,7 +329,7 @@ export function useMipmapPeaks(
         setState((prev) => ({ ...prev, loading: true }));
 
         mipmapCache
-            .getPeaks(sourcePath, samplesPerPixel, timeRangeStart, timeRangeEnd)
+            .getPeaks(sourcePath, samplesPerPixel, startSec, durationSec, targetWidthPx)
             .then((data) => {
                 if (requestId !== requestIdRef.current) return;
                 setState({ data, loading: false, error: null });
@@ -291,7 +338,7 @@ export function useMipmapPeaks(
                 if (requestId !== requestIdRef.current) return;
                 setState({ data: null, loading: false, error });
             });
-    }, [sourcePath, samplesPerPixel, timeRangeStart, timeRangeEnd]);
+    }, [sourcePath, samplesPerPixel, startSec, durationSec, targetWidthPx]);
 
     return state;
 }

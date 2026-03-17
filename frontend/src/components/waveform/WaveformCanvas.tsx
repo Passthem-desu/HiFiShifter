@@ -1,10 +1,13 @@
+/**
+ * 波形画布组件
+ * 统一使用 mipmapCache（四级缓存）获取波形数据
+ */
 import React from "react";
 import {
     applyGainsToPeaks,
     renderHighResWaveform,
     type HighResRenderParams,
 } from "../../utils/waveformRenderer";
-import { waveformApi } from "../../services/api/waveform";
 import { mipmapCache } from "../../utils/mipmapCache";
 import type { FadeCurveType } from "../layout/timeline/paths";
 
@@ -16,11 +19,6 @@ interface SegmentCache {
     sourceDuration: number;
     timestamp: number;
 }
-
-/** 分段缓存 Map: key = sourcePath|startSec|durationSec */
-const segmentCache = new Map<string, SegmentCache>();
-const pendingRequests = new Map<string, Promise<{ min: number[]; max: number[] } | null>>();
-const CACHE_LIMIT = 128;
 
 /** 缓冲区大小（秒） */
 const BUFFER_SEC = 2;
@@ -118,12 +116,16 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
         sourceDuration: number;
     } | null>(null);
 
-    // v2 模式状态
+// v2 模式状态
     const [v2Data, setV2Data] = React.useState<{
         min: number[];
         max: number[];
         mipmapLevel: number;
         divisionFactor: number;
+        /** 数据起始时间（秒，源文件坐标系） */
+        dataStartSec: number;
+        /** 数据持续时间（秒） */
+        dataDurationSec: number;
     } | null>(null);
 
     // 计算 v2 模式的 samplesPerPixel
@@ -196,22 +198,25 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
     // 获取分段数据
     React.useEffect(() => {
         // v2 模式优先处理
-        if (props.v2Mode && sourcePath && samplesPerPixel) {
+        if (props.v2Mode && sourcePath && samplesPerPixel && viewportInfo) {
             const requestId = ++requestIdRef.current;
             
             mipmapCache.getPeaks(
                 sourcePath,
                 samplesPerPixel,
-                viewportInfo?.sourceTimeStart,
-                viewportInfo ? viewportInfo.sourceTimeStart + viewportInfo.sourceDuration : undefined
+                viewportInfo.sourceTimeStart,
+                viewportInfo.sourceDuration,
+                targetWidthPx,
             ).then((data) => {
                 if (requestId !== requestIdRef.current) return;
-                if (data) {
+if (data) {
                     setV2Data({
                         min: data.min,
                         max: data.max,
                         mipmapLevel: data.mipmapLevel,
                         divisionFactor: data.divisionFactor,
+                        dataStartSec: data.startSec,
+                        dataDurationSec: data.durationSec,
                     });
                     setSegmentData(null); // 清除旧数据
                 }
@@ -219,97 +224,39 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
             return;
         }
 
-        // highResMode 原有逻辑
+        // highResMode 原有逻辑：直接使用 mipmapCache
         if (!viewportInfo || !sourcePath) {
             setSegmentData(null);
             return;
         }
 
         const { sourceTimeStart, sourceDuration } = viewportInfo;
-        // 根据实际显示宽度计算采样列数，每像素 2 个采样点（min + max）
-        const SAMPLES_PER_PIXEL = 2;
-        const columns = Math.max(16, Math.round(targetWidthPx * SAMPLES_PER_PIXEL));
-        const cacheKey = `${sourcePath}|${sourceTimeStart.toFixed(3)}|${sourceDuration.toFixed(3)}|${columns}`;
-
-        // 检查缓存
-        const cached = segmentCache.get(cacheKey);
-        if (cached) {
-            setSegmentData(cached);
-            return;
-        }
-
         const requestId = ++requestIdRef.current;
 
-        // 检查是否有正在进行的请求
-        const pending = pendingRequests.get(cacheKey);
-        if (pending) {
-            pending.then((data) => {
-                if (requestId !== requestIdRef.current) return;
-                if (data) {
-                    const newCache: SegmentCache = {
-                        ...data,
-                        sourceTimeStart,
-                        sourceDuration,
-                        timestamp: performance.now(),
-                    };
-                    segmentCache.set(cacheKey, newCache);
-                    // LRU 淘汰
-                    while (segmentCache.size > CACHE_LIMIT) {
-                        const oldest = segmentCache.keys().next().value;
-                        if (oldest) segmentCache.delete(oldest);
-                        else break;
-                    }
-                    setSegmentData(newCache);
-                }
-            });
-            return;
-        }
+        // 计算 samplesPerPixel（假设采样率 44100）
+        const ASSUMED_SAMPLE_RATE = 44100;
+        const localSamplesPerPixel = Math.max(1, Math.round(ASSUMED_SAMPLE_RATE / (targetWidthPx / sourceDuration)));
 
-        // 发起新请求
-        const request = (async (): Promise<{ min: number[]; max: number[] } | null> => {
-            try {
-                const res = await waveformApi.getWaveformPeaksSegment(
-                    sourcePath,
-                    sourceTimeStart,
-                    sourceDuration,
-                    columns,
-                );
-
-                if (!res || !res.ok) return null;
-
-                const minArr = (res.min ?? []).map((v) => Number(v) || 0);
-                const maxArr = (res.max ?? []).map((v) => Number(v) || 0);
-
-                return { min: minArr, max: maxArr };
-            } catch {
-                return null;
-            } finally {
-                pendingRequests.delete(cacheKey);
-            }
-        })();
-
-        pendingRequests.set(cacheKey, request);
-
-        request.then((data) => {
+        mipmapCache.getPeaks(
+            sourcePath,
+            localSamplesPerPixel,
+            sourceTimeStart,
+            sourceDuration,
+            targetWidthPx,
+        ).then((data) => {
             if (requestId !== requestIdRef.current) return;
             if (data) {
                 const newCache: SegmentCache = {
-                    ...data,
+                    min: data.min,
+                    max: data.max,
                     sourceTimeStart,
                     sourceDuration,
                     timestamp: performance.now(),
                 };
-                segmentCache.set(cacheKey, newCache);
-                // LRU 淘汰
-                while (segmentCache.size > CACHE_LIMIT) {
-                    const oldest = segmentCache.keys().next().value;
-                    if (oldest) segmentCache.delete(oldest);
-                    else break;
-                }
                 setSegmentData(newCache);
             }
         });
-    }, [viewportInfo, sourcePath, props.v2Mode, samplesPerPixel]);
+    }, [viewportInfo, sourcePath, props.v2Mode, samplesPerPixel, targetWidthPx]);
 
     // 主渲染逻辑
     React.useEffect(() => {
@@ -342,7 +289,7 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
         ctx.clearRect(0, 0, displayedW, displayedH);
         ctx.globalAlpha = Math.max(0, Math.min(1, Number(opacity) || 0));
 
-        // v2 模式：使用多级 mipmap 数据渲染
+// v2 模式：使用多级 mipmap 数据渲染
         if (props.v2Mode && v2Data && v2Data.min.length >= 2) {
             const params: HighResRenderParams = {
                 canvasWidth: displayedW,
@@ -357,6 +304,8 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
                 fadeOutSec,
                 fadeInCurve,
                 fadeOutCurve,
+                dataStartSec: v2Data.dataStartSec,
+                dataDurationSec: v2Data.dataDurationSec,
             };
 
             // 根据显示宽度决定是否降采样

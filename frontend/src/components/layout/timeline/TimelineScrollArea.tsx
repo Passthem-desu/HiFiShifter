@@ -102,11 +102,11 @@ export const TimelineScrollArea: React.FC<
 
         pendingZoomRef.current = null;
         const { secAtPointer, pointerX } = pending;
-        // Use the scroller's actual scrollable range so the anchor
-        // clamp matches the real content width rendered by TimelinePanel.
+        // 直接使用 projectSec * pxPerSec 计算 maxScroll，避免依赖 DOM scrollWidth 的更新时序
+        // DOM 的 scrollWidth 在 useLayoutEffect 执行时可能还未更新到新值
         const maxScroll = Math.max(
             0,
-            scroller.scrollWidth - scroller.clientWidth,
+            projectSec * pxPerSec - scroller.clientWidth,
         );
         const nextScrollLeft = Math.min(
             maxScroll,

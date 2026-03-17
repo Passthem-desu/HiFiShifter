@@ -37,16 +37,18 @@ export const waveformApi = {
     /** 获取指定 mipmap 级别的波形峰值 */
     getWaveformPeaksV2Level: (
         sourcePath: string,
+        startSec: number,
+        durationSec: number,
+        columns: number,
         level: MipmapLevel,
-        timeRangeStart?: number,
-        timeRangeEnd?: number,
     ) =>
         invoke<WaveformPeaksV2Payload>(
             "get_waveform_peaks_v2_level",
             sourcePath,
+            startSec,
+            durationSec,
+            columns,
             level,
-            timeRangeStart,
-            timeRangeEnd,
         ),
 
     /** 获取波形文件元数据 */

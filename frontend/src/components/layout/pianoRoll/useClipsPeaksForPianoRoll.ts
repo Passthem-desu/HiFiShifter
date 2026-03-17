@@ -1,15 +1,15 @@
 /**
- * Piano Roll Per-Clip 波形 Peaks Hook
+ * Piano Roll Per-Clip 波形 Peaks Hook (Mipmap 优化版)
  *
- * �?Piano Roll 背景波形提供 per-clip �?peaks 数据�?
- * 替代原来对整�?track �?mix 后取波形的方式�?
- * 每个可见 clip 独立获取 peaks，按时间位置叠加绘制�?
+ * 使用 Mipmap 多级缓存机制，根据缩放级别自动选择最佳峰值分辨率
+ * 替代原来对单个track mix后取波形的方式
+ * 每个可见 clip 独立获取 peaks，按时间位置叠加绘制
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ClipInfo } from "../../../features/session/sessionTypes";
-import { waveformApi } from "../../../services/api";
 import { lruGet, lruSet } from "./peaksCache";
+import { mipmapCache } from "../../../utils/mipmapCache";
 
 /** 单个 clip 的 peaks 数据条目 */
 /** 单个 clip 的 peaks 数据条目 */
@@ -45,14 +45,10 @@ type CachedEntry = {
     t: number;
 };
 
-// 模块级缓存，�?hook 实例共享
+// 模块级缓存，各hook实例共享
 const clipPeaksCache = new Map<string, CachedEntry>();
 const clipPeaksInflight = new Map<string, Promise<CachedEntry | null>>();
 const CLIP_PEAKS_CACHE_LIMIT = 128;
-const PEAKS_COLUMNS_PER_SEC = 128; // 降低请求精度，前端动态降采样
-const PEAKS_COLUMNS_MIN = 64;
-const PEAKS_COLUMNS_MAX = 16384;
-const PEAKS_COLUMNS_QUANT = 32;
 
 /** 量化秒数，减少重复请�?*/
 function qsec(x: number, step = 0.005): number {
@@ -60,29 +56,34 @@ function qsec(x: number, step = 0.005): number {
     return Math.round(x / step) * step;
 }
 
-function targetColumnsForClip(clip: ClipInfo): number {
-    const lengthSec = Math.max(0, Number(clip.lengthSec ?? 0) || 0);
-    // Use fixed density (columns/sec) so total columns scale with clip length.
-    const estimated = Math.round(lengthSec * PEAKS_COLUMNS_PER_SEC);
-    const clamped = Math.max(PEAKS_COLUMNS_MIN, Math.min(PEAKS_COLUMNS_MAX, estimated || PEAKS_COLUMNS_MIN));
-    return Math.max(
-        PEAKS_COLUMNS_MIN,
-        Math.min(
-            PEAKS_COLUMNS_MAX,
-            Math.round(clamped / PEAKS_COLUMNS_QUANT) * PEAKS_COLUMNS_QUANT,
-        ),
-    );
+/**
+ * 计算目标samplesPerPixel，用于选择Mipmap级别
+ * @param clipLengthSec clip长度（秒）
+ * @param pxWidth clip在canvas上的像素宽度
+ * @param sourceSampleRate 源文件采样率
+ * @returns samplesPerPixel 每个像素对应的采样点数
+ */
+function calculateSamplesPerPixel(
+    clipLengthSec: number,
+    pxWidth: number,
+    sourceSampleRate: number,
+): number {
+    if (!Number.isFinite(clipLengthSec) || clipLengthSec <= 0 || pxWidth <= 0) {
+        return 256; // 默认值对应Mipmap Level 0/1边界
+    }
+    const totalSamples = clipLengthSec * sourceSampleRate;
+    return totalSamples / pxWidth;
 }
 
-/** �?clip 信息转换�?peaks 请求参数 */
+/** 从clip信息构建peaks请求参数 (Mipmap优化版) */
 function buildClipPeaksRequest(
     clip: ClipInfo,
-    targetColumns: number,
+    pxWidth?: number,
 ): {
     sourcePath: string;
     startSec: number;
     durSec: number;
-    columns: number;
+    samplesPerPixel: number;
     cacheKey: string;
 } | null {
     const sourcePath = clip.sourcePath;
@@ -90,12 +91,14 @@ function buildClipPeaksRequest(
 
     // 优先使用精确的frame计算
     let durationSec: number;
+    let sourceSampleRate = 44100; // 默认采样率
     if (
         clip.durationFrames &&
         clip.sourceSampleRate &&
         clip.sourceSampleRate > 0
     ) {
         durationSec = clip.durationFrames / clip.sourceSampleRate;
+        sourceSampleRate = clip.sourceSampleRate;
     } else {
         durationSec = Number(clip.durationSec ?? 0);
     }
@@ -106,40 +109,51 @@ function buildClipPeaksRequest(
     if (lengthSec <= 1e-9) return null;
 
     // 固定请求整个 source 文件的 peaks，不依赖 trim 值
-    // 这样 trim 拖动不会导致 peaks 重新请求或波形变化
     const startSecQ = 0;
     const durSecQ = Math.max(0.005, qsec(durationSec));
 
-    const columns = Math.max(
-        PEAKS_COLUMNS_MIN,
-        Math.min(PEAKS_COLUMNS_MAX, Math.round(targetColumns)),
-    );
+    // 计算samplesPerPixel用于选择Mipmap级别
+    // 如果提供了像素宽度，则使用实际宽度计算；否则使用默认中等值
+    const samplesPerPixel = pxWidth && pxWidth > 0
+        ? calculateSamplesPerPixel(durSecQ, pxWidth, sourceSampleRate)
+        : 512; // 默认中等精度
 
-    const cacheKey = `${sourcePath}|${startSecQ.toFixed(3)}|${durSecQ.toFixed(3)}|${columns}`;
+    // 缓存键包含 samplesPerPixel 的量化值，减少重复请求
+    const sppQuantized = Math.round(samplesPerPixel / 50) * 50;
+    const cacheKey = `${sourcePath}|${startSecQ.toFixed(3)}|${durSecQ.toFixed(3)}|spp${sppQuantized}`;
 
     return {
         sourcePath,
         startSec: startSecQ,
         durSec: durSecQ,
-        columns,
+        samplesPerPixel,
         cacheKey,
     };
 }
 
 /**
- * �?Piano Roll 获取当前 track 下所有可�?clip �?peaks 数据
+ * Piano Roll 获取当前 track 下所有可见 clip 的 peaks 数据 (Mipmap 优化版)
+ *
+ * 特性：
+ * 1. 使用 Mipmap 多级缓存，根据缩放级别自动选择最佳峰值分辨率
+ * 2. Level 0 (div ~128): 放大显示，高精度
+ * 3. Level 1 (div ~512): 中等缩放，平衡性能
+ * 4. Level 2 (div ~2048): 小缩放，适合概览
+ * 5. Level 3 (div ~8192): 全景视图，最低精度
  *
  * @param args.clips - 当前 track 下的所有 clip
  * @param args.visibleStartSec - 可见区域起始时间（秒）
  * @param args.visibleEndSec - 可见区域结束时间（秒）
+ * @param args.pxPerSec - 像素/秒比例，用于计算 samplesPerPixel 选择 Mipmap 级别
  * @returns ClipPeaksEntry 数组，每个 entry 对应一个可见 clip
  */
 export function useClipsPeaksForPianoRoll(args: {
     clips: ClipInfo[];
     visibleStartSec: number;
     visibleEndSec: number;
+    pxPerSec?: number;
 }): ClipPeaksEntry[] {
-    const { clips, visibleStartSec, visibleEndSec } = args;
+    const { clips, visibleStartSec, visibleEndSec, pxPerSec } = args;
     const [peaksMap, setPeaksMap] = useState<Map<string, CachedEntry>>(
         new Map(),
     );
@@ -158,6 +172,8 @@ export function useClipsPeaksForPianoRoll(args: {
      * trim 拖动只改变 lengthSec，不改变 sourcePath/trimStart/trimEnd/playbackRate。
      * 因此 cacheKey 不变，不会触发重新请求。
      * useMemo 确保只在依赖真正变化时才重新计算，避免每次 render 都调用 buildClipPeaksRequest。
+     * 
+     * Mipmap优化：缓存键包含 pxPerSec 的量化值，确保缩放时选择合适的 Mipmap 级别
      */
     const peaksRequestKeys = useMemo(
         () =>
@@ -169,16 +185,15 @@ export function useClipsPeaksForPianoRoll(args: {
                     );
                 })
                 .map((clip) => {
-                    const req = buildClipPeaksRequest(
-                        clip,
-                        targetColumnsForClip(clip),
-                    );
+                    // 估算 clip 在屏幕上的像素宽度
+                    const clipWidthPx = pxPerSec ? clip.lengthSec * pxPerSec : undefined;
+                    const req = buildClipPeaksRequest(clip, clipWidthPx);
                     return req ? `${clip.id}:${req.cacheKey}` : null;
                 })
                 .filter(Boolean)
                 .join(","),
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [clips, visibleStartSec, visibleEndSec],
+        [clips, visibleStartSec, visibleEndSec, pxPerSec],
     );
 
     useEffect(() => {
@@ -202,21 +217,23 @@ export function useClipsPeaksForPianoRoll(args: {
         const toFetch: Array<{
             clip: ClipInfo;
             req: NonNullable<ReturnType<typeof buildClipPeaksRequest>>;
+            columns: number;
         }> = [];
 
         for (const clip of visibleClips) {
             // 列数按 clip 时长自适应，长 clip 提升精度，同时保持请求上限。
-            const req = buildClipPeaksRequest(
-                clip,
-                targetColumnsForClip(clip),
-            );
+            const clipWidthPx = pxPerSec ? clip.lengthSec * pxPerSec : undefined;
+            const req = buildClipPeaksRequest(clip, clipWidthPx);
             if (!req) continue;
+
+            // 计算 columns：基于 clip 像素宽度，确保波形清晰
+            const columns = clipWidthPx ? Math.max(16, Math.round(clipWidthPx * 2)) : 256;
 
             const cached = lruGet(clipPeaksCache, req.cacheKey);
             if (cached) {
                 initialMap.set(clip.id, cached);
             } else {
-                toFetch.push({ clip, req });
+                toFetch.push({ clip, req, columns });
             }
         }
 
@@ -226,33 +243,37 @@ export function useClipsPeaksForPianoRoll(args: {
 
         if (toFetch.length === 0) return;
 
-        // 异步获取未缓存的 clip peaks
+        // 异步获取未缓存的 clip peaks (Mipmap优化版)
         void (async () => {
             const results = await Promise.allSettled(
-                toFetch.map(async ({ clip, req }) => {
-                    // inflight 去重
-                    let p = clipPeaksInflight.get(req.cacheKey);
+                toFetch.map(async ({ clip, req, columns }) => {
+                    // Mipmap优化：使用 mipmapCache 获取最佳级别的峰值数据
+                    // 根据 samplesPerPixel 自动选择级别
+                    const level = mipmapCache.selectMipmapLevel(req.samplesPerPixel);
+                    
+                    // inflight 去重（使用 mipmap 缓存键）
+                    const inflightKey = `${req.sourcePath}|${level}`;
+                    let p = clipPeaksInflight.get(inflightKey);
                     if (!p) {
-                        p = waveformApi
-                            .getWaveformPeaksSegment(
+                        // 使用 Mipmap 缓存获取数据
+                        p = mipmapCache
+                            .getPeaksAtLevel(
                                 req.sourcePath,
+                                level,
                                 req.startSec,
-                                req.durSec,
-                                req.columns,
+                                req.startSec + req.durSec,
+                                columns,
                             )
-                            .then((res) => {
-                                if (!res?.ok) return null;
+                            .then((data) => {
+                                if (!data) return null;
                                 const entry: CachedEntry = {
-                                    min: (res.min ?? []).map(
-                                        (v) => Number(v) || 0,
-                                    ),
-                                    max: (res.max ?? []).map(
-                                        (v) => Number(v) || 0,
-                                    ),
+                                    min: data.min,
+                                    max: data.max,
                                     startSec: req.startSec,
-                                    durSec: req.durSec,
-                                    t: performance.now(),
+                                    durSec: data.min.length * data.divisionFactor / data.sampleRate,
+                                    t: data.timestamp,
                                 };
+                                // 同时更新旧缓存，保持兼容性
                                 lruSet(
                                     clipPeaksCache,
                                     req.cacheKey,
@@ -262,9 +283,9 @@ export function useClipsPeaksForPianoRoll(args: {
                                 return entry;
                             })
                             .finally(() => {
-                                clipPeaksInflight.delete(req.cacheKey);
+                                clipPeaksInflight.delete(inflightKey);
                             });
-                        clipPeaksInflight.set(req.cacheKey, p);
+                        clipPeaksInflight.set(inflightKey, p);
                     }
 
                     const entry = await p;
@@ -292,7 +313,7 @@ export function useClipsPeaksForPianoRoll(args: {
             });
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [peaksRequestKeys, visibleStartSec, visibleEndSec]);
+    }, [peaksRequestKeys, visibleStartSec, visibleEndSec, pxPerSec]);
 
     // 构建返回值：过滤可见 clip，附加 peaks 数据。
     // useMemo 确保只在 peaksMap 或可见 clips 真正变化时才返回新数组引用，

@@ -1,3 +1,15 @@
+/**
+ * PianoRoll 渲染模块
+ * 
+ * 负责钢琴卷帘界面的可视化渲染，包括：
+ * - 音高网格和键盘可视化
+ * - 音频波形渲染
+ * - 参数曲线绘制（音高、音量等）
+ * - 选区、播放头等交互元素
+ * 
+ * @module render
+ */
+
 import type {
     ParamMorphOverlay,
     ParamName,
@@ -606,6 +618,15 @@ export function drawPianoRoll(args: {
         }
     }
 
+    // 创建离屏 canvas 缓冲（复用，避免每帧创建）
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const drawPianoRollRef = drawPianoRoll as unknown as {
+        _offCanvas?: HTMLCanvasElement;
+    };
+    const offCanvas =
+        drawPianoRollRef._offCanvas || document.createElement("canvas");
+    drawPianoRollRef._offCanvas = offCanvas;
+
     // Background waveform: per-clip 叠加绘制
     // peaks 数据覆盖整个 source 文件，渲染时根据 sourceStartSec/playbackRate 计算偏移，
     // 裁剪到 clip 可视区域，trim 拖动不影响 peaks 数据本身。
@@ -627,42 +648,68 @@ export function drawPianoRoll(args: {
         // peaks 覆盖整个 source 文件（0 ~ sourceDurSec），列数 = peaksCols
         const peaksCols = pMin.length;
 
-        // 整个 source 文件在 timeline 域的像素宽度 = (sourceDurSec / pr) * pxPerSec
-        const sourceWidthPx = (sourceDurSec / pr) * pxPerSec;
-        // sourceStart 对应的 timeline 域偏移量（像素）= (sourceStartSec / pr) * pxPerSec
-        const trimOffsetPx = (sourceStartSec / pr) * pxPerSec;
+        // 计算可见区域的 source 范围
+        const visibleSourceStartSec = Math.max(0, sourceStartSec);
+        const visibleSourceEndSec = Math.min(
+            sourceDurSec,
+            sourceStartSec + entry.lengthSec * pr,
+        );
+        const visibleSourceDurSec = Math.max(
+            0.001,
+            visibleSourceEndSec - visibleSourceStartSec,
+        );
 
-        // 动态降采样：根据 clip 的像素宽度计算目标采样数
+        // 计算在 peaks 数组中的范围（根据时间比例）
+        const startRatio = visibleSourceStartSec / sourceDurSec;
+        const endRatio = visibleSourceEndSec / sourceDurSec;
+        const sourceStartCol = Math.floor(startRatio * peaksCols);
+        const sourceEndCol = Math.min(
+            peaksCols,
+            Math.ceil(endRatio * peaksCols),
+        );
+        const visibleCols = Math.max(2, sourceEndCol - sourceStartCol);
+
+        // 计算可见区域的像素宽度
+        const visibleSourceColsPx =
+            (visibleSourceDurSec / pr) * pxPerSec;
+
+        // 动态降采样：根据可见宽度计算目标采样数
         // 每像素 2 个采样点，保证精度同时控制数据量
-        const targetRenderWidth = Math.max(2, Math.floor(clipWidthPx * 2));
-        
+        const targetRenderWidth = Math.max(
+            2,
+            Math.floor(visibleSourceColsPx * 2),
+        );
+
         const processed = processWaveformPeaks({
             min: pMin,
             max: pMax,
             startSec: 0,
             durSec: pDurSec,
-            visibleStartSec: 0,
-            visibleDurSec: pDurSec,
-            targetWidth: targetRenderWidth,
+            visibleStartSec: visibleSourceStartSec,
+            visibleDurSec: visibleSourceDurSec,
+            targetWidth: Math.min(targetRenderWidth, visibleCols),
         });
 
-        // 裁剪到 clip 的可视 x 范围，避免溢出到相邻 clip
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(clipStartX, 0, clipWidthPx, h);
-        ctx.clip();
+        // 使用 renderWaveformCanvas 渲染到离屏 canvas
+        offCanvas.width = processed.min.length;
+        offCanvas.height = h;
+        const offCtx = offCanvas.getContext("2d");
+        if (!offCtx) continue;
 
-        // 平移：先到 clip 起始位置，再向左偏移 sourceStart 部分
-        // 这样 peaks 的 sourceStart 位置对齐到 clipStartX
-        ctx.translate(clipStartX - trimOffsetPx, 0);
+        console.log(`[PianoRoll Render Debug] Render params:`, {
+            clipStartX,
+            clipWidthPx,
+            visibleSourceColsPx,
+            processedMinLength: processed.min.length,
+            targetRenderWidth: Math.min(targetRenderWidth, visibleCols),
+        });
 
-        // 缩放：将 peaksCols 列映射到整个 source 在 timeline 上的宽度
-        if (peaksCols > 0 && sourceWidthPx > 0) {
-            ctx.scale(sourceWidthPx / peaksCols, 1);
-        }
+        // 清空离屏 canvas
+        offCtx.clearRect(0, 0, offCanvas.width, h);
 
-        renderWaveformCanvas(ctx, processed, {
-            width: peaksCols,
+        // 在离屏 canvas 上渲染波形
+        renderWaveformCanvas(offCtx, processed, {
+            width: processed.min.length,
             height: h,
             fillColor: waveformColors.fill,
             strokeColor: waveformColors.stroke,
@@ -672,6 +719,31 @@ export function drawPianoRoll(args: {
             centerY: h * 0.5,
             amplitude: h * 0.5,
         });
+
+        // 计算渲染目标位置
+        // clipStartX 是 clip 在 canvas 上的起始位置
+        // trimOffsetPx 是 sourceStart 在 source 时间线上的偏移（已考虑 playbackRate）
+        // destX 需要考虑滚动偏移
+        const destX = clipStartX;
+
+        // 裁剪到 clip 的可视 x 范围，避免溢出到相邻 clip
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(clipStartX, 0, clipWidthPx, h);
+        ctx.clip();
+
+        // 使用 drawImage 精确绘制，避免 scale 导致的坐标变换问题
+        ctx.drawImage(
+            offCanvas,
+            0,
+            0,
+            offCanvas.width,
+            h,
+            destX,
+            0,
+            visibleSourceColsPx,
+            h,
+        );
 
         ctx.restore();
     }

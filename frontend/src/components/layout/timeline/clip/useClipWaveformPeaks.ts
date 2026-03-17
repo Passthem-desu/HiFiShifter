@@ -1,14 +1,12 @@
+/**
+ * 波形峰值数据处理 Hook
+ * 统一使用 mipmapCache（四级缓存）获取波形数据
+ */
 import React from "react";
 
-import type { WaveformPeaksSegmentPayload } from "../../../../types/api";
 import type { ClipInfo } from "../../../../features/session/sessionTypes";
-import { waveformApi } from "../../../../services/api";
+import { mipmapCache } from "../../../../utils/mipmapCache";
 import { clamp } from "../math";
-type CachedSegment = {
-    min: number[];
-    max: number[];
-    t: number;
-};
 
 export type PeaksRenderState = {
     ok: boolean;
@@ -58,104 +56,10 @@ function sampleSegmentMinMaxAtTime(
     return { min: lerp(mn0, mn1, f), max: lerp(mx0, mx1, f) };
 }
 
-const peaksSegmentCache = new Map<string, CachedSegment>();
-const peaksSegmentInflight = new Map<
-    string,
-    Promise<WaveformPeaksSegmentPayload>
->();
-const PEAKS_CACHE_LIMIT = 256;
 const WAVEFORM_COLUMNS_PER_SEC = 1024;
 const WAVEFORM_COLUMNS_MIN = 96;
 const WAVEFORM_COLUMNS_MAX = 65536;
 const WAVEFORM_COLUMNS_QUANT = 32;
-const SS_KEY_PREFIX = "hs_peaks_v1|";
-const SS_CACHE_LIMIT = 512;
-
-/**
- * 模块�?Set，记录已写入 sessionStorage 的完�?key（含前缀）�?
- * 避免 ssSet 每次写入都遍�?sessionStorage.length（O(n)），改为 O(1) 查找�?
- * 页面刷新后会重建，但重建成本极低（仅在首�?ssGet 命中时回填）�?
- */
-const ssKeySet = new Set<string>();
-
-/** �?sessionStorage 读取缓存条目（反序列化失败时静默忽略�?*/
-function ssGet(key: string): CachedSegment | null {
-    try {
-        const fullKey = SS_KEY_PREFIX + key;
-        const raw = sessionStorage.getItem(fullKey);
-        if (!raw) return null;
-        // 回填 ssKeySet，保证刷新后 Set �?sessionStorage 保持同步
-        ssKeySet.add(fullKey);
-        return JSON.parse(raw) as CachedSegment;
-    } catch {
-        return null;
-    }
-}
-
-/** 写入 sessionStorage，超�?SS_CACHE_LIMIT 时删除最旧条目（O(1) key 查找�?*/
-function ssSet(key: string, seg: CachedSegment) {
-    try {
-        const fullKey = SS_KEY_PREFIX + key;
-        if (ssKeySet.size >= SS_CACHE_LIMIT && !ssKeySet.has(fullKey)) {
-            // �?t 升序排序，删除最旧的一�?
-            const entries: { k: string; t: number }[] = [];
-            for (const k of ssKeySet) {
-                try {
-                    const v = JSON.parse(sessionStorage.getItem(k) ?? "{}") as { t?: number };
-                    entries.push({ k, t: v.t ?? 0 });
-                } catch {
-                    entries.push({ k, t: 0 });
-                }
-            }
-            entries.sort((a, b) => a.t - b.t);
-            const toDelete = entries.slice(0, ssKeySet.size - SS_CACHE_LIMIT + 1);
-            for (const { k } of toDelete) {
-                sessionStorage.removeItem(k);
-                ssKeySet.delete(k);
-            }
-        }
-        sessionStorage.setItem(fullKey, JSON.stringify(seg));
-        ssKeySet.add(fullKey);
-    } catch {
-        // 写入失败（如隐私模式或存储已满）静默忽略
-    }
-}
-
-function getCachedSegment(key: string): CachedSegment | null {
-    // 先查内存 Map
-    const hit = peaksSegmentCache.get(key);
-    if (hit) {
-        peaksSegmentCache.delete(key);
-        peaksSegmentCache.set(key, hit);
-        return hit;
-    }
-    // 未命中则�?sessionStorage，命中后回填内存 Map
-    const ssHit = ssGet(key);
-    if (ssHit) {
-        peaksSegmentCache.set(key, ssHit);
-        while (peaksSegmentCache.size > PEAKS_CACHE_LIMIT) {
-            const oldest = peaksSegmentCache.keys().next().value as string | undefined;
-            if (!oldest) break;
-            peaksSegmentCache.delete(oldest);
-        }
-        return ssHit;
-    }
-    return null;
-}
-
-function setCachedSegment(key: string, seg: CachedSegment) {
-    peaksSegmentCache.set(key, seg);
-    while (peaksSegmentCache.size > PEAKS_CACHE_LIMIT) {
-        const oldest = peaksSegmentCache.keys().next().value as
-            | string
-            | undefined;
-        if (!oldest) break;
-        peaksSegmentCache.delete(oldest);
-    }
-    // 同步写入 sessionStorage 实现跨页面刷新持久化
-    ssSet(key, seg);
-}
-
 function hasTauriInvoke(): boolean {
     const w = window as unknown as {
         __TAURI__?: { core?: { invoke?: unknown }; invoke?: unknown };
@@ -241,6 +145,14 @@ export function useClipWaveformPeaks(args: {
             ? clamp(Math.round(outColumns / 4), 16, 2048)
             : outColumns;
 
+        // 计算 samplesPerPixel 用于 mipmap 级别选择
+        // 假设采样率为 44100 Hz（标准 CD 音质）
+        const ASSUMED_SAMPLE_RATE = 44100;
+        // 每秒像素数 = 显示宽度 / timeline 长度
+        const pxPerSec = _widthPx / Math.max(1e-6, timelineLenSec);
+        // samplesPerPixel = 采样率 / 每秒像素数
+        const samplesPerPixel = Math.max(1, Math.round(ASSUMED_SAMPLE_RATE / pxPerSec));
+
         // 转换回 timeline 域（秒）
         const leadSilenceSec = preSilenceSecSrc / Math.max(1e-6, pr);
         const segmentLenSecTimeline = segmentLenSec / Math.max(1e-6, pr);
@@ -256,9 +168,12 @@ export function useClipWaveformPeaks(args: {
             leadSilenceSec,
             segmentLenSecTimeline,
             cycleLenSecTimeline,
+            // mipmap 相关参数
+            samplesPerPixel,
+            widthPx: _widthPx,
         };
     // 注意：不依赖 bpm，波形内容基于秒域计算，BPM 变化不影响波形显示
-    }, [altPressed, clip]);
+    }, [altPressed, clip, _widthPx]);
 
     const [peaks, setPeaks] = React.useState<PeaksRenderState | null>(null);
 
@@ -278,14 +193,12 @@ export function useClipWaveformPeaks(args: {
             startSec,
             durationSec: segSec,
             outColumns,
-            segmentColumns,
             leadSilenceSec,
             segmentLenSecTimeline,
             cycleLenSecTimeline,
         } = peaksRequest;
 
-        const key = `${sourcePath}|${startSec.toFixed(3)}|${segSec.toFixed(3)}|${segmentColumns}`;
-        const cached = getCachedSegment(key);
+        const key = `${sourcePath}|${startSec.toFixed(3)}|${segSec.toFixed(3)}`;
 
         const buildOutput = (
             segMin: number[],
@@ -305,10 +218,10 @@ export function useClipWaveformPeaks(args: {
             const outMax: number[] = new Array(outCols);
 
             const lead = Math.max(0, Number(leadSilenceSec) || 0);
-            // 使用当前请求的实际长度（segLen + lead），而非 clip.lengthSec�?
-            // clip.lengthSec �?trim 拖动时持续变化，会导�?buildOutput 每次
-            // 用不同的 clipLenBeats 重新映射波形，产生拉�?压缩视觉效果�?
-            // 当前请求�?segLen + lead 是稳定的，与 peaks 数据一一对应�?
+            // 使用当前请求的实际长度（segLen + lead），而非 clip.lengthSec。
+            // clip.lengthSec 在 trim 拖动时持续变化，会导致 buildOutput 每次
+            // 用不同的 clipLenBeats 重新映射波形，产生拉伸/压缩视觉效果。
+            // 当前请求的 segLen + lead 是稳定的，与 peaks 数据一一对应。
             const clipLenBeats = Math.max(1e-9, segLen + lead);
 
             for (let i = 0; i < outCols; i += 1) {
@@ -345,12 +258,6 @@ export function useClipWaveformPeaks(args: {
             };
         };
 
-        if (cached) {
-            setPeaks(buildOutput(cached.min, cached.max, false));
-            peaksKeyRef.current = key;
-            return;
-        }
-
         const keyChanged = peaksKeyRef.current !== key;
         if (keyChanged) {
             peaksKeyRef.current = key;
@@ -359,7 +266,7 @@ export function useClipWaveformPeaks(args: {
             // immediately rebuild output with the new timeline mapping while backend peaks load.
             // This avoids waveform flicker during trim/stretch/slip drags.
             // isPreview=false: trim 时波形数据本身是正确的（只是 timeline 映射变了），
-            // 不需要降�?opacity，避免视觉闪烁�?
+            // 不需要降低 opacity，避免视觉闪烁。
             if (peaks?.ok && peaks.segmentMin.length >= 2 && peaks.segmentMax.length >= 2) {
                 setPeaks(buildOutput(peaks.segmentMin, peaks.segmentMax, false));
             } else if (altPressed && hasWaveformPreview) {
@@ -378,37 +285,23 @@ export function useClipWaveformPeaks(args: {
         const debounceMs = altPressed ? 75 : 25;
         peaksDebounceRef.current = window.setTimeout(async () => {
             try {
-                let p = peaksSegmentInflight.get(key);
-                if (!p) {
-                    p = waveformApi
-                        .getWaveformPeaksSegment(
-                            sourcePath,
-                            startSec,
-                            segSec,
-                            segmentColumns,
-                        )
-                        .finally(() => {
-                            peaksSegmentInflight.delete(key);
-                        });
-                    peaksSegmentInflight.set(key, p);
-                }
-
-                const res = await p;
+                // 直接使用 mipmapCache（四级缓存）
+                const mipmapData = await mipmapCache.getPeaks(
+                    sourcePath,
+                    peaksRequest.samplesPerPixel,
+                    startSec,
+                    segSec,
+                    peaksRequest.widthPx,
+                );
 
                 if (requestId !== peaksRequestIdRef.current) return;
-                if (!res || !res.ok) return;
 
-                const segMin = (res.min ?? []).map((v) => Number(v) || 0);
-                const segMax = (res.max ?? []).map((v) => Number(v) || 0);
-                if (segMin.length < 2 || segMax.length < 2) return;
-
-                setCachedSegment(key, {
-                    min: segMin,
-                    max: segMax,
-                    t: performance.now(),
-                });
-
-                setPeaks(buildOutput(segMin, segMax, false));
+                if (mipmapData && mipmapData.min.length >= 2 && mipmapData.max.length >= 2) {
+                    const segMin = mipmapData.min;
+                    const segMax = mipmapData.max;
+                    setPeaks(buildOutput(segMin, segMax, false));
+                }
+                // mipmapCache 未返回有效数据，静默失败
             } catch {
                 // Ignore peaks failures; fallback waveform preview may still render.
             }
@@ -421,7 +314,6 @@ export function useClipWaveformPeaks(args: {
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [altPressed, hasWaveformPreview, peaksRequest, peaks?.ok, peaks?.segmentMin, peaks?.segmentMax]);
-
+    }, [altPressed, hasWaveformPreview, peaksRequest, peaks?.ok, peaks?.segmentMin, peaks?.segmentMax, peaksRequest?.samplesPerPixel, peaksRequest?.widthPx]);
     return peaks;
 }

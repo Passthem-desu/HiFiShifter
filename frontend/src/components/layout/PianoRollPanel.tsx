@@ -969,6 +969,7 @@ export const PianoRollPanel: React.FC = () => {
         clips: trackClips,
         visibleStartSec,
         visibleEndSec,
+        pxPerSec,
     });
     // Data and viewport changes should always trigger a canvas redraw.
     // usePianoRollData() may call invalidate() before these refs update,
@@ -1114,6 +1115,7 @@ export const PianoRollPanel: React.FC = () => {
         toolMode: s.toolMode,
         secPerBeat,
         bpm: s.bpm,
+        dynamicProjectSec,
         scrollLeftRef,
         pxPerBeatRef,
         setPxPerBeat: setPxPerBeatImmediate,

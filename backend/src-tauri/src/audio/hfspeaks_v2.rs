@@ -406,6 +406,8 @@ impl HfsPeakFile {
                 min: vec![],
                 max: vec![],
                 level: 0,
+                sample_rate: 0,
+                division_factor: 0,
             };
         }
 
@@ -418,6 +420,8 @@ impl HfsPeakFile {
                 min: vec![],
                 max: vec![],
                 level: level as u32,
+                sample_rate: self.header.sample_rate,
+                division_factor: mh.division_factor,
             };
         }
 
@@ -434,6 +438,8 @@ impl HfsPeakFile {
                 min: vec![0.0; columns],
                 max: vec![0.0; columns],
                 level: level as u32,
+                sample_rate: self.header.sample_rate,
+                division_factor: mh.division_factor,
             };
         }
 
@@ -451,6 +457,8 @@ impl HfsPeakFile {
                 min: vec![0.0; columns],
                 max: vec![0.0; columns],
                 level: level as u32,
+                sample_rate: self.header.sample_rate,
+                division_factor: mh.division_factor,
             };
         }
 
@@ -492,6 +500,8 @@ impl HfsPeakFile {
             min: out_min,
             max: out_max,
             level: level as u32,
+            sample_rate: self.header.sample_rate,
+            division_factor: mh.division_factor,
         }
     }
 }
@@ -509,7 +519,12 @@ pub struct PeaksSegmentResult {
     /// 最大值数组
     pub max: Vec<f32>,
     /// 使用的 mipmap 级别
+    #[serde(rename = "mipmap_level")]
     pub level: u32,
+    /// 采样率
+    pub sample_rate: u32,
+    /// 除数因子：每个峰值代表的采样数
+    pub division_factor: u32,
 }
 
 /// 多级峰值查询响应

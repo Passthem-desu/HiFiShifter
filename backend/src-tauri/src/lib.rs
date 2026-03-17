@@ -61,8 +61,6 @@ mod time_stretch;
 mod waveform;
 #[path = "audio/waveform_disk_cache.rs"]
 mod waveform_disk_cache;
-#[path = "audio/time_stretch.rs"]
-mod time_stretch;
 #[path = "import/vocalshifter_clipboard.rs"]
 mod vocalshifter_clipboard;
 #[path = "import/vocalshifter_import.rs"]
@@ -74,6 +72,10 @@ mod vslib;
 mod world;
 #[path = "vocoder/world_vocoder.rs"]
 mod world_vocoder;
+#[path = "vocoder/streaming_world.rs"]
+mod streaming_world;
+#[path = "audio/hfspeaks_v2.rs"]
+mod hfspeaks_v2;
 
 use tauri::Manager;
 

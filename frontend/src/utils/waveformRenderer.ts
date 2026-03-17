@@ -404,6 +404,10 @@ export interface HighResRenderParams {
     fadeInCurve: FadeCurveType;
     /** 淡出曲线类型 */
     fadeOutCurve: FadeCurveType;
+    /** 数据起始时间（秒，源文件坐标系） */
+    dataStartSec?: number;
+    /** 数据持续时间（秒） */
+    dataDurationSec?: number;
 }
 
 /**
@@ -556,7 +560,7 @@ export function renderHighResWaveform(
     strokeColor: string = "currentColor",
     strokeWidth: number = 1,
 ): void {
-    const { canvasWidth, canvasHeight, centerY } = params;
+    const { canvasWidth, canvasHeight, centerY, sourceStartSec, clipDuration, playbackRate, dataStartSec, dataDurationSec } = params;
     const totalSamples = peaks.length / 2;
 
     if (totalSamples < 2) return;
@@ -570,9 +574,23 @@ export function renderHighResWaveform(
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
 
+    // 计算数据的时间范围（如果未提供，则使用 clip 的完整范围）
+    const effectiveDataStartSec = dataStartSec ?? sourceStartSec;
+    const effectiveDataDurationSec = dataDurationSec ?? (clipDuration * playbackRate);
+
     // stroke-jitter 模式：交替采样产生抖动细线
     for (let i = 0; i < totalSamples; i++) {
-        const x = (i / (totalSamples - 1)) * canvasWidth;
+        // 计算采样点对应的源文件时间
+        const position = totalSamples > 1 ? i / (totalSamples - 1) : 0;
+        const sourceTime = effectiveDataStartSec + position * effectiveDataDurationSec;
+        
+        // 计算该时间在 timeline 上的位置（秒）
+        const timelineTime = (sourceTime - sourceStartSec) / playbackRate;
+        
+        // 计算该时间在 canvas 上的 x 坐标
+        // clipDuration 是 clip 在 timeline 上的时长
+        const x = (timelineTime / clipDuration) * canvasWidth;
+
         const min = peaks[i * 2];
         const max = peaks[i * 2 + 1];
 

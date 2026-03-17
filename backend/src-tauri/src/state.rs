@@ -792,14 +792,14 @@ impl AppState {
             let mut cache_v2 = self
                 .waveform_cache_v2
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
             cache_v2.clear();
         }
 
         let cache_dir = {
             self.waveform_cache_dir
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner())
                 .clone()
         };
         crate::waveform_disk_cache::clear_dir(&cache_dir)
@@ -821,9 +821,9 @@ impl AppState {
             let cache = self
                 .waveform_cache_v2
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
             if let Some(found) = cache.get(source_path) {
-                return Ok(found.clone());
+                return Ok(found.clone() as std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile>);
             }
         }
 
@@ -840,11 +840,11 @@ impl AppState {
         
         // 尝试从磁盘加载
         if let Some(cached) = hfs_cache.try_load(path) {
-            let cached = std::sync::Arc::new(cached);
+            let cached: std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile> = std::sync::Arc::new(cached);
             let mut cache = self
                 .waveform_cache_v2
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
             cache.insert(source_path.to_string(), cached.clone());
             return Ok(cached);
         }
@@ -861,7 +861,7 @@ impl AppState {
         let mut cache = self
             .waveform_cache_v2
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
         cache.insert(source_path.to_string(), peaks.clone());
         Ok(peaks)
     }

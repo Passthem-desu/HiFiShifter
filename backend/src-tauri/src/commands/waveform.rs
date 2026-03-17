@@ -372,6 +372,8 @@ pub(super) fn get_waveform_peaks_v2(
                 min: vec![],
                 max: vec![],
                 level: 0,
+                sample_rate: 0,
+                division_factor: 0,
             }
         }
     };
@@ -409,6 +411,8 @@ pub(super) fn get_waveform_peaks_v2_level(
                 min: vec![],
                 max: vec![],
                 level: 0,
+                sample_rate: 0,
+                division_factor: 0,
             }
         }
     };
@@ -433,6 +437,8 @@ pub(super) fn get_waveform_peaks_v2_meta(
                     min: vec![],
                     max: vec![],
                     level: 0,
+                    sample_rate: 0,
+                    division_factor: 0,
                 },
                 sample_rate: 0,
                 duration_sec: 0.0,
@@ -457,6 +463,8 @@ pub(super) fn get_waveform_peaks_v2_meta(
             min: vec![],
             max: vec![],
             level: 0,
+            sample_rate,
+            division_factor: 0,
         },
         sample_rate,
         duration_sec,
