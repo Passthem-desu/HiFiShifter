@@ -2,10 +2,12 @@
  * ClipItem 组件
  *
  * 时间轴上单个音频 Clip 的渲染组件，负责：
- * - 通过 WaveformCanvas 显示波形（mipmap 缓存模式）
  * - 淡入/淡出可视化和交互手柄
  * - Clip 的选中、拖拽、右键菜单等交互逻辑
  * - 支持 trim/stretch 编辑手柄
+ *
+ * 波形渲染由 WaveformTrackCanvas（轨道级 Canvas）统一负责，
+ * ClipItem 仅提供 DOM 交互层。
  */
 import React from "react";
 
@@ -13,12 +15,9 @@ import { useI18n } from "../../../i18n/I18nProvider";
 import type { ClipInfo } from "../../../features/session/sessionTypes";
 import { CLIP_BODY_PADDING_Y, CLIP_HEADER_HEIGHT } from "./constants";
 import { fadeInAreaPath, fadeOutAreaPath } from "./paths";
-import type { FadeCurveType } from "./paths";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
-import WaveSurferWaveform from "../../waveform/WaveSurferWaveform";
-import { useAppTheme } from "../../../theme/AppThemeProvider";
-import { getWaveformColors } from "../../../theme/waveformColors";
+
 
 type WaveformPreview = number[] | { l: number[]; r: number[] };
 
@@ -31,8 +30,8 @@ export const ClipItem = React.memo(function ClipItem({
     selected,
     isInMultiSelectedSet,
     multiSelectedCount,
-    viewportStartSec,
-    viewportEndSec,
+    viewportStartSec: _viewportStartSec,
+    viewportEndSec: _viewportEndSec,
     ensureSelected,
     selectClipRemote,
     openContextMenu,
@@ -102,11 +101,6 @@ export const ClipItem = React.memo(function ClipItem({
     onGainCommit?: (clipId: string, db: number) => void;
 }) {
     const { t } = useI18n();
-    const { mode: themeMode } = useAppTheme();
-    const waveformColors = React.useMemo(
-        () => getWaveformColors(themeMode),
-        [themeMode],
-    );
 
     const left = Math.max(0, clip.startSec * pxPerSec);
     const width = Math.max(1, clip.lengthSec * pxPerSec);
@@ -118,71 +112,7 @@ export const ClipItem = React.memo(function ClipItem({
     const showRepeatMarker = false;
     const repeatMarkerX = 0;
 
-    // 波形渲染内容：通过 WaveformCanvas（mipmap 缓存模式）获取并渲染波形
-    const waveformSvgContent = React.useMemo(() => {
-        if (!clip.sourcePath || !clip.durationSec || clip.durationSec <= 0) {
-            return null;
-        }
 
-        const totalH = Math.max(1, bodyHeight);
-        const canvasWidthPx = Math.max(1, Math.floor(width));
-
-        // 统一样式：从主题配置读取波形颜色
-        const stroke = waveformColors.stroke;
-        const waveformOpacity = clip.muted ? 0.4 : 1.0;
-
-        return (
-            <div style={{ width: canvasWidthPx, height: totalH }}>
-                <WaveSurferWaveform
-                    targetWidthPx={canvasWidthPx}
-                    heightPx={totalH}
-                    stroke={stroke}
-                    strokeWidth={1}
-                    opacity={waveformOpacity}
-                    sourcePath={clip.sourcePath}
-                    sourceDurationSec={clip.durationSec}
-                    sourceStartSec={Number(clip.sourceStartSec ?? 0) || 0}
-                    clipDurationSec={Number(clip.lengthSec ?? 0) || 0}
-                    playbackRate={Number(clip.playbackRate ?? 1) || 1}
-                    volumeGain={Number(clip.gain ?? 1) || 1}
-                    fadeInSec={Number(clip.fadeInSec ?? 0) || 0}
-                    fadeOutSec={Number(clip.fadeOutSec ?? 0) || 0}
-                    fadeInCurve={(clip.fadeInCurve as FadeCurveType) ?? "sine"}
-                    fadeOutCurve={
-                        (clip.fadeOutCurve as FadeCurveType) ?? "sine"
-                    }
-                    viewportStartSec={viewportStartSec}
-                    viewportEndSec={viewportEndSec}
-                    clipStartSec={clip.startSec}
-                    sampleRate={clip.sourceSampleRate}
-                    pxPerSec={pxPerSec}
-                />
-            </div>
-        );
-    }, [
-        clip.sourcePath,
-        clip.durationSec,
-        clip.muted,
-        clip.fadeInSec,
-        clip.fadeOutSec,
-        clip.fadeInCurve,
-        clip.fadeOutCurve,
-        clip.lengthSec,
-        clip.playbackRate,
-        clip.sourceStartSec,
-        clip.gain,
-        clip.sourceSampleRate,
-        clip.startSec,
-        viewportStartSec,
-        viewportEndSec,
-        pxPerSec,
-        width,
-        bodyHeight,
-        waveformColors.stroke,
-    ]);
-
-    // 波形容器宽度 = clip 在 timeline 上的像素宽度
-    const waveformSvgWidthPx = width;
 
     const startDeferredFadeEditDrag = React.useCallback(
         (
@@ -528,19 +458,7 @@ export const ClipItem = React.memo(function ClipItem({
                         ) : null}
                     </div>
 
-                    <div className="absolute inset-0 opacity-80 overflow-hidden">
-                        {/* 内层容器：通过负 marginLeft 将 trimStart 对应位置的波形对齐到容器左边缘。
-                            peaks 数据覆盖整个 source 文件（0 → durationSec），SVG 固定宽度 = durationSec/pr*pxPerSec，
-                            外层 overflow-hidden 裁掉左侧 trim 和右侧超出部分。 */}
-                        <div
-                            style={{
-                                height: "100%",
-                                width: waveformSvgWidthPx,
-                            }}
-                        >
-                            {waveformSvgContent}
-                        </div>
-                    </div>
+                    {/* 波形由 WaveformTrackCanvas（轨道级 Canvas）统一渲染，此处不再包含波形内容 */}
                 </div>
             </div>
         </div>

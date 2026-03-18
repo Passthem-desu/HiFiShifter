@@ -43,12 +43,12 @@ pub const MAX_MIPMAP_LEVELS: usize = 4;
 
 /// 默认 mipmap 除数因子 (针对 44.1kHz 优化)
 /// 参考 Reaper: 400 peaks/sec, 10 peaks/sec, 1 peak/sec
-/// 精度减半：每级 division_factor 翻倍，数据量减少一半以提升性能
+/// 测试阶段：统一使用 L0 (division_factor=1024)
 pub const DEFAULT_DIVISION_FACTORS: [u32; MAX_MIPMAP_LEVELS] = [
-    256,    // Level 0: ~172 peaks/sec at 44.1kHz - 高精度放大视图
-    1024,   // Level 1: ~43 peaks/sec - 中等缩放
-    4096,   // Level 2: ~11 peaks/sec - 小缩放
-    16384,  // Level 3: ~2.7 peaks/sec - 全景视图
+    1024,   // Level 0: ~43 peaks/sec at 44.1kHz (测试阶段：统一使用 L0)
+    1024,   // Level 1: 暂时与 L0 相同
+    4096,   // Level 2: 暂不使用
+    16384,  // Level 3: 暂不使用
 ];
 
 // ============== 文件头结构 ==============
@@ -728,8 +728,19 @@ impl MipmapPeakCalculator {
 /// 从音频文件计算多级 mipmap 峰值
 /// 
 /// 支持 WAV (通过 hound) 和其他格式 (通过 symphonia)
+/// 
+/// # 参数
+/// - `progress_cb`: 可选的进度回调，参数为 0.0~1.0 的进度值
 pub fn compute_mipmap_peaks(
     path: &Path,
+) -> Result<HfsPeakFile, String> {
+    compute_mipmap_peaks_with_progress(path, None::<fn(f32)>)
+}
+
+/// 带进度回调的多级 mipmap 峰值计算
+pub fn compute_mipmap_peaks_with_progress<F: FnMut(f32)>(
+    path: &Path,
+    mut progress_cb: Option<F>,
 ) -> Result<HfsPeakFile, String> {
     // 获取文件元数据
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
@@ -747,20 +758,21 @@ pub fn compute_mipmap_peaks(
         .unwrap_or(false);
 
     if is_wav {
-        if let Ok(peaks) = compute_mipmap_peaks_hound(path, source_file_size, source_modified_ns) {
+        if let Ok(peaks) = compute_mipmap_peaks_hound(path, source_file_size, source_modified_ns, &mut progress_cb) {
             return Ok(peaks);
         }
     }
     
     // 回退到 symphonia
-    compute_mipmap_peaks_symphonia(path, source_file_size, source_modified_ns)
+    compute_mipmap_peaks_symphonia(path, source_file_size, source_modified_ns, &mut progress_cb)
 }
 
 /// 使用 hound 计算 WAV 文件的多级峰值
-fn compute_mipmap_peaks_hound(
+fn compute_mipmap_peaks_hound<F: FnMut(f32)>(
     path: &Path,
     source_file_size: u64,
     source_modified_ns: u64,
+    progress_cb: &mut Option<F>,
 ) -> Result<HfsPeakFile, String> {
     use hound::{SampleFormat, WavReader};
 
@@ -794,6 +806,10 @@ fn compute_mipmap_peaks_hound(
         }
     };
 
+    // 进度跟踪
+    let mut frames_processed: u64 = 0;
+    let progress_interval = (total_frames / 20).max(1); // 每 ~5% 报告一次
+
     // 根据格式处理采样
     match (spec.sample_format, spec.bits_per_sample) {
         (SampleFormat::Int, 16) => {
@@ -804,9 +820,14 @@ fn compute_mipmap_peaks_hound(
                 i += 1;
                 if i >= channels as usize {
                     i = 0;
-                    // 取各声道极值
                     let (ch_min, ch_max) = compute_channel_extremes_i16(&buf);
                     calculator.process_frame(ch_min, ch_max, &mut output_callback);
+                    frames_processed += 1;
+                    if frames_processed % progress_interval == 0 {
+                        if let Some(cb) = progress_cb.as_mut() {
+                            cb(frames_processed as f32 / total_frames.max(1) as f32);
+                        }
+                    }
                 }
             }
         }
@@ -821,6 +842,12 @@ fn compute_mipmap_peaks_hound(
                     i = 0;
                     let (ch_min, ch_max) = compute_channel_extremes_i32(&buf, denom);
                     calculator.process_frame(ch_min, ch_max, &mut output_callback);
+                    frames_processed += 1;
+                    if frames_processed % progress_interval == 0 {
+                        if let Some(cb) = progress_cb.as_mut() {
+                            cb(frames_processed as f32 / total_frames.max(1) as f32);
+                        }
+                    }
                 }
             }
         }
@@ -834,6 +861,12 @@ fn compute_mipmap_peaks_hound(
                     i = 0;
                     let (ch_min, ch_max) = compute_channel_extremes_i32(&buf, i32::MAX as f32);
                     calculator.process_frame(ch_min, ch_max, &mut output_callback);
+                    frames_processed += 1;
+                    if frames_processed % progress_interval == 0 {
+                        if let Some(cb) = progress_cb.as_mut() {
+                            cb(frames_processed as f32 / total_frames.max(1) as f32);
+                        }
+                    }
                 }
             }
         }
@@ -847,6 +880,12 @@ fn compute_mipmap_peaks_hound(
                     i = 0;
                     let (ch_min, ch_max) = compute_channel_extremes_f32(&buf);
                     calculator.process_frame(ch_min, ch_max, &mut output_callback);
+                    frames_processed += 1;
+                    if frames_processed % progress_interval == 0 {
+                        if let Some(cb) = progress_cb.as_mut() {
+                            cb(frames_processed as f32 / total_frames.max(1) as f32);
+                        }
+                    }
                 }
             }
         }
@@ -871,10 +910,11 @@ fn compute_mipmap_peaks_hound(
 }
 
 /// 使用 symphonia 计算其他格式文件的多级峰值
-fn compute_mipmap_peaks_symphonia(
+fn compute_mipmap_peaks_symphonia<F: FnMut(f32)>(
     path: &Path,
     source_file_size: u64,
     source_modified_ns: u64,
+    progress_cb: &mut Option<F>,
 ) -> Result<HfsPeakFile, String> {
     use symphonia::core::codecs::DecoderOptions;
     use symphonia::core::formats::FormatOptions;
@@ -924,6 +964,10 @@ fn compute_mipmap_peaks_symphonia(
         }
     };
 
+    // 进度跟踪
+    let mut frames_processed: u64 = 0;
+    let progress_interval = if total_frames > 0 { (total_frames / 20).max(1) } else { 44100 }; // symphonia 可能没有精确 total_frames
+
     // 解码循环
     let track_id = track.id;
     loop {
@@ -962,6 +1006,18 @@ fn compute_mipmap_peaks_symphonia(
                 if v > ch_max { ch_max = v; }
             }
             calculator.process_frame(ch_min, ch_max, &mut output_callback);
+            frames_processed += 1;
+            if frames_processed % progress_interval == 0 {
+                if let Some(cb) = progress_cb.as_mut() {
+                    if total_frames > 0 {
+                        cb(frames_processed as f32 / total_frames as f32);
+                    } else {
+                        // total_frames 未知时，基于文件大小估算
+                        let estimated_total = source_file_size / ((channels as u64) * 4).max(1);
+                        cb((frames_processed as f32 / estimated_total as f32).min(0.99));
+                    }
+                }
+            }
         }
     }
 

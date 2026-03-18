@@ -22,9 +22,10 @@ import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./constants";
 import { framesToTime, timeToPixel } from "./utils";
 import { resolveSecondaryOverlayValues } from "./secondaryOverlaySelection";
 import {
-    processWaveformPeaks,
-    renderWaveformCanvas,
+    renderWaveform,
+    type WaveformRenderParams,
 } from "../../../utils/waveformRenderer";
+import { buildWaveformDataFromRaw, extractMinMax, toInterleavedFloat32 } from "../../../utils/waveformDataAdapter";
 import { resolveScaleNotes } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
 
@@ -675,40 +676,34 @@ export function drawPianoRoll(args: {
         // 计算可见区域的像素宽度
         const visibleSourceColsPx = (visibleSourceDurSec / pr) * pxPerSec;
 
-        // 动态降采样：根据可见宽度计算目标采样数
-        // 每像素 2 个采样点，保证精度同时控制数据量
+        // 使用 waveform-data.js 进行 resample 降采样
+        // 构建 WaveformData 对象（仅覆盖可见 source 范围的 peaks）
+        const sliceMin = pMin.slice(sourceStartCol, sourceEndCol);
+        const sliceMax = pMax.slice(sourceStartCol, sourceEndCol);
+
+        // 目标采样宽度：每像素 2 个采样点，保证精度同时控制数据量
         const targetRenderWidth = Math.max(
             2,
-            Math.floor(visibleSourceColsPx * 2),
+            Math.min(Math.floor(visibleSourceColsPx * 2), visibleCols),
         );
 
-        const processed = processWaveformPeaks({
-            min: pMin,
-            max: pMax,
-            startSec: 0,
-            durSec: pDurSec,
-            visibleStartSec: visibleSourceStartSec,
-            visibleDurSec: visibleSourceDurSec,
-            targetWidth: Math.min(targetRenderWidth, visibleCols),
-        });
+        // 构建 WaveformData 并 resample
+        const wfData = buildWaveformDataFromRaw(sliceMin, sliceMax, entry.peaks?.columns ?? sliceMin.length);
+        const resampledWidth = Math.max(1, Math.min(targetRenderWidth, wfData.length));
+        const resampled = resampledWidth < wfData.length
+            ? wfData.resample({ width: resampledWidth })
+            : wfData;
+        const { min: resMin, max: resMax } = extractMinMax(resampled);
 
-        // 使用 renderWaveformCanvas 渲染到离屏 canvas（考虑 DPR）
-        const displayedOffW = Math.max(1, processed.min.length);
+        // 转换为 renderWaveform 需要的 interleaved Float32Array 格式
+        const interleavedPeaks = toInterleavedFloat32(resMin, resMax);
+
+        // 使用 renderWaveform（jitter 模式）渲染到离屏 canvas
+        const displayedOffW = Math.max(1, Math.ceil(visibleSourceColsPx));
         const displayedOffH = Math.max(1, h);
-        const dpr = Math.max(1, window.devicePixelRatio || 1);
-        const internalOffW = Math.max(1, Math.floor(displayedOffW * dpr));
-        const internalOffH = Math.max(1, Math.floor(displayedOffH * dpr));
-
-        console.log(`[PianoRoll Render Debug] Render params:`, {
-            clipStartX,
-            clipWidthPx,
-            visibleSourceColsPx,
-            processedMinLength: processed.min.length,
-            targetRenderWidth: Math.min(targetRenderWidth, visibleCols),
-            dpr,
-            internalOffW,
-            internalOffH,
-        });
+        const offDpr = Math.max(1, window.devicePixelRatio || 1);
+        const internalOffW = Math.max(1, Math.floor(displayedOffW * offDpr));
+        const internalOffH = Math.max(1, Math.floor(displayedOffH * offDpr));
 
         // 设置离屏 canvas 内部像素尺寸并缩放上下文以考虑 DPR
         offCanvas.width = internalOffW;
@@ -719,28 +714,34 @@ export function drawPianoRoll(args: {
         if (!offCtx) continue;
 
         // 使用像素缩放，使后续绘制逻辑仍接收 CSS 像素尺寸
-        offCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        offCtx.setTransform(offDpr, 0, 0, offDpr, 0, 0);
 
         // 清空离屏 canvas（以 CSS 像素为单位）
         offCtx.clearRect(0, 0, displayedOffW, displayedOffH);
 
-        // 在离屏 canvas 上渲染波形（传入 CSS 像素尺寸）
-        renderWaveformCanvas(offCtx, processed, {
-            width: displayedOffW,
-            height: displayedOffH,
-            fillColor: waveformColors.fill,
-            strokeColor: waveformColors.stroke,
-            mode: "stroke-jitter",
-            strokeWidth: 0.5,
-            barWidth: 1.5,
-            centerY: displayedOffH * 0.5,
-            amplitude: displayedOffH * 0.5,
-        });
+        // 构建 renderWaveform 参数：将数据均匀映射到离屏 canvas 的宽度上
+        // PianoRoll 中波形仅作为背景参考，无需 clip 级别的增益/淡入淡出
+        const pianoRollWfParams: WaveformRenderParams = {
+            canvasWidth: displayedOffW,
+            canvasHeight: displayedOffH,
+            centerY: displayedOffH / 2,
+            sourceStartSec: visibleSourceStartSec,
+            clipDuration: visibleSourceDurSec / pr,
+            playbackRate: pr,
+            sourceDurationSec: sourceDurSec,
+            volumeGain: 1,
+            fadeInSec: 0,
+            fadeOutSec: 0,
+            fadeInCurve: "linear",
+            fadeOutCurve: "linear",
+            dataStartSec: visibleSourceStartSec,
+            dataDurationSec: visibleSourceDurSec,
+        };
 
-        // 计算渲染目标位置
-        // clipStartX 是 clip 在 canvas 上的起始位置
-        // trimOffsetPx 是 sourceStart 在 source 时间线上的偏移（已考虑 playbackRate）
-        // destX 需要考虑滚动偏移
+        // 渲染波形（jitter 抖动线模式）
+        renderWaveform(offCtx, interleavedPeaks, pianoRollWfParams, waveformColors.stroke, 0.5, "jitter");
+
+        // 计算渲染目标位置：clip 在主 canvas 上的起始位置
         const destX = clipStartX;
 
         // 裁剪到 clip 的可视 x 范围，避免溢出到相邻 clip
@@ -749,8 +750,7 @@ export function drawPianoRoll(args: {
         ctx.rect(clipStartX, 0, clipWidthPx, h);
         ctx.clip();
 
-        // 使用 drawImage 精确绘制，避免 scale 导致的坐标变换问题
-        // 将离屏 canvas（内部像素）按目标尺寸绘制到主 canvas
+        // 使用 drawImage 精确绘制
         ctx.drawImage(
             offCanvas,
             0,

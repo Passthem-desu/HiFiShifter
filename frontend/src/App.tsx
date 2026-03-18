@@ -309,6 +309,13 @@ function AppInner() {
     clipName: string | null;
   }>({ active: false, clipName: null });
 
+  // 波形分析进度状态
+  const [waveformAnalysis, setWaveformAnalysis] = useState<{
+    active: boolean;
+    sourcePath: string | null;
+    progress: number | null;
+  }>({ active: false, sourcePath: null, progress: null });
+
   // Listen for backend stretch progress notifications (Tauri only).
   useEffect(() => {
     let disposed = false;
@@ -337,6 +344,65 @@ function AppInner() {
     return () => {
       disposed = true;
       if (unlisten) unlisten();
+    };
+  }, []);
+
+  // 监听后端波形分析进度事件 (waveform_analysis_progress)
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: null | (() => void) = null;
+    let fadeOutTimer: ReturnType<typeof setTimeout> | null = null;
+
+    async function setup() {
+      try {
+        const mod = await import("@tauri-apps/api/event");
+        unlisten = await mod.listen("waveform_analysis_progress", (event: any) => {
+          if (disposed) return;
+          const payload = (event?.payload ?? {}) as {
+            sourcePath?: string;
+            progress?: number;
+            status?: string;
+          };
+          const status = payload?.status ?? "";
+          const sourcePath = typeof payload?.sourcePath === "string" ? payload.sourcePath : null;
+          const p = typeof payload?.progress === "number" && Number.isFinite(payload.progress)
+            ? Math.max(0, Math.min(1, payload.progress))
+            : null;
+
+          if (status === "computing") {
+            // 清除之前的淡出定时器
+            if (fadeOutTimer) {
+              clearTimeout(fadeOutTimer);
+              fadeOutTimer = null;
+            }
+            // 提取文件名（不含路径和扩展名）
+            const fileName = sourcePath
+              ? sourcePath.replace(/\\/g, "/").split("/").pop()?.replace(/\.[^.]+$/, "") ?? sourcePath
+              : null;
+            setWaveformAnalysis({ active: true, sourcePath: fileName, progress: p });
+          } else if (status === "done" || status === "cached") {
+            // 完成后延迟 1.5 秒隐藏，让用户有时间看到 100%
+            if (status === "done") {
+              setWaveformAnalysis({ active: true, sourcePath: null, progress: 1.0 });
+              fadeOutTimer = setTimeout(() => {
+                if (!disposed) {
+                  setWaveformAnalysis({ active: false, sourcePath: null, progress: null });
+                }
+              }, 1500);
+            }
+            // cached 状态不显示进度条
+          }
+        });
+      } catch {
+        // Safe no-op for non-Tauri builds.
+      }
+    }
+
+    void setup();
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+      if (fadeOutTimer) clearTimeout(fadeOutTimer);
     };
   }, []);
 
@@ -1216,6 +1282,23 @@ function AppInner() {
             >
               {t("status_stretching")}
               {stretching.clipName ? ` "${stretching.clipName}"` : ""}
+            </span>
+          ) : null}
+          {waveformAnalysis.active ? (
+            <span
+              className="shrink-0 rounded px-1 py-0 text-xs font-medium"
+              style={{
+                background: "var(--accent-3)",
+                color: "var(--accent-11)",
+                fontSize: "11px",
+                lineHeight: "16px",
+              }}
+            >
+              {"Analyzing waveform"}
+              {waveformAnalysis.sourcePath ? ` "${waveformAnalysis.sourcePath}"` : ""}
+              {waveformAnalysis.progress != null
+                ? ` ${Math.round(waveformAnalysis.progress * 100)}%`
+                : ""}
             </span>
           ) : null}
           {pitchAnalysisText ? (

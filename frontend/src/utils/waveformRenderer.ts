@@ -1,29 +1,18 @@
 /**
- * 波形渲染工具模块（重写版）
+ * 波形渲染工具模块
  *
- * 核心改进：
- * 1. 高精度降采样：每像素至少 4 个采样点，移除 stride<=16 的限制
- * 2. 支持增益应用：clip 音量 + 淡入淡出曲线
- * 3. 高性能：Float32Array 存储，避免频繁内存分配
- * 4. per-pixel min/max 竖线模式：DAW 标准波形渲染，无锯齿
+ * 核心功能：
+ * 1. 支持增益应用：clip 音量 + 淡入淡出曲线（applyGainsToPeaks）
+ * 2. per-pixel min/max 渲染：支持竖线模式（line）和抖动线模式（jitter）（renderWaveform）
+ * 3. SVG 路径生成（renderWaveformSvg）
+ *
+ * 降采样由 waveform-data.js 负责（见 waveformDataAdapter.ts）。
  *
  * @module waveformRenderer
  */
 
 import type { FadeCurveType } from "../components/layout/timeline/paths";
 import { fadeCurveGain } from "../components/layout/timeline/paths";
-
-/** 波形峰值数据（原始格式） */
-export interface WavePeaksData {
-    /** 最小值数组（负振幅） */
-    min: number[];
-    /** 最大值数组（正振幅） */
-    max: number[];
-    /** 数据起始时间（秒） */
-    startSec: number;
-    /** 数据持续时间（秒） */
-    durSec: number;
-}
 
 /** 处理后的波形数据 */
 export interface ProcessedWaveformData {
@@ -35,46 +24,6 @@ export interface ProcessedWaveformData {
     timestamps: number[];
     /** 采样步长 */
     stride: number;
-}
-
-/** 波形处理配置 */
-export interface WaveformProcessOptions {
-    /** 原始最小值数组 */
-    min: number[];
-    /** 原始最大值数组 */
-    max: number[];
-    /** 数据起始时间（秒） */
-    startSec: number;
-    /** 数据持续时间（秒） */
-    durSec: number;
-    /** 可见区域起始时间（秒） */
-    visibleStartSec: number;
-    /** 可见区域持续时间（秒） */
-    visibleDurSec: number;
-    /** 目标渲染宽度（像素），用于计算最优采样 */
-    targetWidth: number;
-}
-
-/** Canvas 渲染配置 */
-export interface CanvasRenderOptions {
-    /** Canvas 宽度 */
-    width: number;
-    /** Canvas 高度 */
-    height: number;
-    /** 填充颜色 */
-    fillColor?: string;
-    /** 描边颜色 */
-    strokeColor?: string;
-    /** 渲染模式：'bars'（默认填充条）|'stroke'（边缘线）|'stroke-jitter'（交替抖动细线） */
-    mode?: "bars" | "stroke" | "stroke-jitter";
-    /** 描边宽度（像素） */
-    strokeWidth?: number;
-    /** 竖条宽度（像素） */
-    barWidth?: number;
-    /** 中心 Y 坐标（默认 height * 0.5） */
-    centerY?: number;
-    /** 振幅范围（默认 height * 0.45） */
-    amplitude?: number;
 }
 
 /** SVG 渲染配置 */
@@ -89,193 +38,6 @@ export interface SvgRenderOptions {
     halfHeight: number;
     /** 振幅缩放系数（默认 1.0） */
     amplitudeScale?: number;
-}
-
-/**
- * 处理波形峰值数据
- *
- * 根据可见时间范围和目标宽度对原始 peaks 数据进行采样、裁剪和归一化。
- *
- * @param options - 处理配置
- * @returns 处理后的波形数据
- *
- * @example
- * ```typescript
- * const processed = processWaveformPeaks({
- *   min: [-0.5, -0.3, -0.8],
- *   max: [0.6, 0.4, 0.9],
- *   startSec: 0,
- *   durSec: 3,
- *   visibleStartSec: 0,
- *   visibleDurSec: 3,
- *   targetWidth: 300
- * });
- * ```
- */
-export function processWaveformPeaks(
-    options: WaveformProcessOptions,
-): ProcessedWaveformData {
-    const {
-        min,
-        max,
-        startSec,
-        durSec,
-        visibleStartSec,
-        visibleDurSec,
-        targetWidth,
-    } = options;
-
-    const n = Math.min(min.length, max.length);
-    if (n === 0) {
-        return { min: [], max: [], timestamps: [], stride: 1 };
-    }
-
-    const v0 = visibleStartSec;
-    const v1 = visibleStartSec + Math.max(1e-9, visibleDurSec);
-    const endSec = startSec + Math.max(1e-9, durSec);
-
-    // 第一步：将时间范围映射到数组索引，找到可见区域的 startIdx / endIdx
-    // 每个数据点 i 对应时间区间 [startSec + i/n*durSec, startSec + (i+1)/n*durSec)
-    const startIdx = Math.max(
-        0,
-        Math.floor(((v0 - startSec) / Math.max(1e-9, endSec - startSec)) * n),
-    );
-    const endIdx = Math.min(
-        n,
-        Math.ceil(((v1 - startSec) / Math.max(1e-9, endSec - startSec)) * n),
-    );
-
-    const visiblePoints = endIdx - startIdx;
-    if (visiblePoints <= 0) {
-        return { min: [], max: [], timestamps: [], stride: 1 };
-    }
-
-    // 第二步：基于可见点数和目标宽度计算 stride（上限 16，防止极端情况）
-    const stride = Math.max(
-        1,
-        Math.min(16, Math.ceil(visiblePoints / Math.max(1, targetWidth))),
-    );
-
-    const resultMin: number[] = [];
-    const resultMax: number[] = [];
-    const resultTimestamps: number[] = [];
-
-    // 第三步：窗口聚合采样——每个窗口内取 min/max，保留峰值细节
-    for (let i = startIdx; i < endIdx; i += stride) {
-        const windowEnd = Math.min(i + stride, endIdx);
-
-        let wMin = Infinity;
-        let wMax = -Infinity;
-        for (let j = i; j < windowEnd; j++) {
-            const v = min[j] ?? 0;
-            if (v < wMin) wMin = v;
-            const u = max[j] ?? 0;
-            if (u > wMax) wMax = u;
-        }
-
-        // 窗口中心点对应的时间戳
-        const midIdx = (i + windowEnd) / 2;
-        const t = startSec + (midIdx / n) * durSec;
-
-        resultMin.push(wMin === Infinity ? 0 : wMin);
-        resultMax.push(wMax === -Infinity ? 0 : wMax);
-        resultTimestamps.push(t);
-    }
-
-    return {
-        min: resultMin,
-        max: resultMax,
-        timestamps: resultTimestamps,
-        stride,
-    };
-}
-
-/**
- * 在 Canvas 上渲染波形
- *
- * 使用 fillRect 绘制竖条形式的波形，支持自定义颜色和描边。
- *
- * @param ctx - Canvas 2D 渲染上下文
- * @param data - 处理后的波形数据
- * @param options - 渲染配置
- *
- * @example
- * ```typescript
- * const ctx = canvas.getContext('2d')!;
- * renderWaveformCanvas(ctx, processedData, {
- *   width: 800,
- *   height: 400,
- *   fillColor: 'rgba(255,255,255,0.2)',
- *   strokeColor: 'rgba(255,255,255,0.7)',
- *   barWidth: 1.5
- * });
- * ```
- */
-export function renderWaveformCanvas(
-    ctx: CanvasRenderingContext2D,
-    data: ProcessedWaveformData,
-    options: CanvasRenderOptions,
-): void {
-    const {
-        width,
-        height,
-        fillColor = "rgba(255,255,255,0.2)",
-        strokeColor = "rgba(255,255,255,0.7)",
-        barWidth: _barWidth = 1.5,
-        mode = "bars",
-        strokeWidth = 1,
-    } = options;
-
-    const centerY = options.centerY ?? height * 0.5;
-    const amplitude = options.amplitude ?? height * 0.45;
-
-    const { min, max } = data;
-    const n = min.length;
-    if (n === 0) return;
-
-    // 使用均匀分布 x 坐标：第一个点在 x=0，最后一个点在 x=width
-    const xOf = (i: number) => (n <= 1 ? 0 : (i / (n - 1)) * width);
-
-    if (mode === "bars") {
-        // 原有填充行为：构建闭合路径并填充
-        ctx.beginPath();
-        for (let i = 0; i < n; i++) {
-            const x = xOf(i);
-            const ma = max[i] ?? 0;
-            const y = centerY - ma * amplitude;
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
-        for (let i = n - 1; i >= 0; i--) {
-            const x = xOf(i);
-            const mi = min[i] ?? 0;
-            const y = centerY - mi * amplitude;
-            ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-        return;
-    }
-
-    // stroke 或 stroke-jitter: 仅绘制一条细线（无填充），在 visual 上呈现快速上下抖动
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-        const x = xOf(i);
-        const top = max[i] ?? 0;
-        const bot = min[i] ?? 0;
-        // jitter: 在包络内交替采样，产生快速上下抖动的线条
-        const t = mode === "stroke-jitter" ? (i % 2 === 0 ? 0.25 : 0.75) : 0.5;
-        const v = top + (bot - top) * t;
-        const y = centerY - v * amplitude;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = strokeWidth;
-    ctx.lineJoin = "round";
-    ctx.lineCap = "round";
-    ctx.stroke();
 }
 
 /**
@@ -503,16 +265,20 @@ export function applyGainsToPeaks(
 }
 
 /**
- * 波形渲染（Canvas，per-pixel min/max 竖线模式）
+ * 波形渲染（Canvas，per-pixel 模式）
  *
- * 核心算法（DAW 标准做法）：
+ * 支持两种渲染模式：
+ * - "line"（默认）：per-pixel min/max 竖线模式（DAW 标准做法）
+ * - "jitter"：抖动线模式，交替取 min/max 包络内 0.25/0.75 位置画折线
+ *
+ * 核心算法：
  * - 遍历画布的每个像素列
  * - 计算该像素列对应的源文件时间范围
  * - 在数据中找到该时间范围覆盖的所有采样点
- * - 取这些采样点的 min/max，画一条竖线
+ * - line 模式：取 min/max 画竖线；jitter 模式：交替取包络内点画折线
  *
  * 优点：
- * - 无论数据密度如何，每像素恰好一条竖线，无锯齿
+ * - 无论数据密度如何，每像素恰好一条竖线/一个采样点，无锯齿
  * - 数据过多时自动聚合（多个采样点合并到一个像素）
  * - 数据不足时优雅降级（相邻像素复用同一采样点）
  * - 支持数据裁剪：只渲染数据与 clip 范围重叠的部分
@@ -522,6 +288,7 @@ export function applyGainsToPeaks(
  * @param params - 渲染参数
  * @param strokeColor - 描边颜色
  * @param strokeWidth - 描边宽度
+ * @param mode - 渲染模式："line"（竖线）或 "jitter"（抖动线），默认 "jitter"
  */
 export function renderWaveform(
     ctx: CanvasRenderingContext2D,
@@ -529,6 +296,7 @@ export function renderWaveform(
     params: WaveformRenderParams,
     strokeColor: string = "currentColor",
     strokeWidth: number = 1,
+    mode: "line" | "jitter" = "line",
 ): void {
     const {
         canvasWidth, canvasHeight, centerY,
@@ -603,7 +371,8 @@ export function renderWaveform(
     // 设置绘制样式
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = strokeWidth;
-    ctx.lineCap = "butt";
+    ctx.lineJoin = "round";
+    ctx.lineCap = mode === "jitter" ? "round" : "butt";
 
     // ========================================
     // 滑动指针优化：O(W + N) 复杂度
@@ -611,6 +380,7 @@ export function renderWaveform(
     ctx.beginPath();
 
     let cursor = 0;
+    let jitterStarted = false; // jitter 模式下是否已 moveTo
 
     for (let px = localPxStart; px <= localPxEnd; px++) {
         // 计算该像素列覆盖的源文件时间范围
@@ -645,20 +415,38 @@ export function renderWaveform(
 
         if (pixelMin === Infinity) continue;
 
-        // 映射到 canvas Y 坐标
-        const yTop = centerY - pixelMax * amplitudeScale;
-        const yBot = centerY - pixelMin * amplitudeScale;
+        if (mode === "jitter") {
+            // ========================================
+            // 抖动线模式：交替取包络内 0.25/0.75 位置，画连续折线
+            // ========================================
+            const t = px % 2 === 0 ? 0.25 : 0.75;
+            const value = pixelMax + (pixelMin - pixelMax) * t;
+            const y = centerY - value * amplitudeScale;
 
-        // 确保静音段至少有最小可见高度（0.5px）
-        const minHeight = 0.5;
-        const midY = (yTop + yBot) / 2;
-
-        if (yBot - yTop < minHeight) {
-            ctx.moveTo(px, midY - minHeight / 2);
-            ctx.lineTo(px, midY + minHeight / 2);
+            if (!jitterStarted) {
+                ctx.moveTo(px, y);
+                jitterStarted = true;
+            } else {
+                ctx.lineTo(px, y);
+            }
         } else {
-            ctx.moveTo(px, yTop);
-            ctx.lineTo(px, yBot);
+            // ========================================
+            // 竖线模式：每像素画 min→max 竖线（DAW 标准做法）
+            // ========================================
+            const yTop = centerY - pixelMax * amplitudeScale;
+            const yBot = centerY - pixelMin * amplitudeScale;
+
+            // 确保静音段至少有最小可见高度（0.5px）
+            const minHeight = 0.5;
+            const midY = (yTop + yBot) / 2;
+
+            if (yBot - yTop < minHeight) {
+                ctx.moveTo(px, midY - minHeight / 2);
+                ctx.lineTo(px, midY + minHeight / 2);
+            } else {
+                ctx.moveTo(px, yTop);
+                ctx.lineTo(px, yBot);
+            }
         }
     }
 

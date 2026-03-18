@@ -3,11 +3,11 @@
  *
  * 实现类似 Reaper 的多级分辨率峰值缓存。
  *
- * Level 编号与后端 hfspeaks_v2.rs 对齐：
- *   Level 0 → division_factor=256   → 高精度/特写  （区块 5s）
- *   Level 1 → division_factor=1024  → 中等缩放      （区块 10s）
- *   Level 2 → division_factor=4096  → 小缩放        （区块 30s）
- *   Level 3 → division_factor=16384 → 远景/全景      （区块 60s）
+ * 【测试阶段】统一使用 Level 0 (division_factor=1024)
+ *   Level 0 → division_factor=1024  → 统一级别      （区块 5s）
+ *   Level 1 → division_factor=1024  → 暂不使用      （区块 10s）
+ *   Level 2 → division_factor=4096  → 暂不使用      （区块 30s）
+ *   Level 3 → division_factor=16384 → 暂不使用      （区块 60s）
  *
  * 核心特性：
  * - 四级固定区间缓存：每个级别使用固定的区块时长
@@ -19,6 +19,8 @@
 
 import { waveformApi } from "../services/api/waveform";
 import type { MipmapLevel } from "../types/api";
+import WaveformData from "waveform-data";
+import { buildWaveformData } from "./waveformDataAdapter";
 
 // ============================================
 // 类型定义
@@ -39,6 +41,12 @@ export interface PeaksData {
     timestamp: number;
     /** 最后访问时间（用于LRU） */
     lastAccessTime: number;
+    /**
+     * 缓存的 WaveformData 对象（由 waveform-data.js 构建）。
+     * 避免每次渲染时重复执行 WaveformData.create()（JSON 解析 + int16 转换）。
+     * 在 fetchPeaks / mergeBlocks 返回后自动构建并附加。
+     */
+    _waveformData?: WaveformData;
 }
 
 /** 缓存级别配置 */
@@ -69,8 +77,9 @@ const TIME_QUANT_STEP = 0.5;
 /**
  * 后端 DEFAULT_DIVISION_FACTORS，与 hfspeaks_v2.rs 保持一致。
  * Level 索引 → division_factor 一一对应。
+ * 测试阶段：统一使用 L0 (division_factor=1024)
  */
-const DIVISION_FACTORS: readonly number[] = [256, 1024, 4096, 16384];
+const DIVISION_FACTORS: readonly number[] = [1024, 1024, 4096, 16384];
 
 /**
  * 四级缓存配置（与后端 Level 索引对齐：L0=高精度 → L3=远景）
@@ -79,22 +88,22 @@ const CACHE_LEVEL_CONFIGS: Record<MipmapLevel, CacheLevelConfig> = {
     0: {
         blockDuration: 5,
         samplesPerPixelThreshold: 0,
-        description: "特写 (div=256)",
+        description: "统一级别 (div=1024)",
     },
     1: {
         blockDuration: 10,
         samplesPerPixelThreshold: 512,
-        description: "近景 (div=1024)",
+        description: "近景 (div=1024) - 暂不使用",
     },
     2: {
         blockDuration: 30,
         samplesPerPixelThreshold: 2048,
-        description: "中景 (div=4096)",
+        description: "中景 (div=4096) - 暂不使用",
     },
     3: {
         blockDuration: 60,
         samplesPerPixelThreshold: 8192,
-        description: "远景 (div=16384)",
+        description: "远景 (div=16384) - 暂不使用",
     },
 };
 
@@ -103,6 +112,9 @@ const MAX_CACHE_ENTRIES = 256;
 
 /** 预加载队列最大长度 */
 const MAX_PRELOAD_QUEUE = 10;
+
+/** 最大并发 IPC 请求数（防止 IPC 堆积） */
+const MAX_CONCURRENT_IPC = 4;
 
 /** 波形列数计算常量（精度再减半：512→256，进一步降低数据量提升性能） */
 const WAVEFORM_COLUMNS_PER_SEC = 256;
@@ -167,7 +179,7 @@ class MipmapCacheManager {
     /** 缓存键 -> 峰值数据 */
     private cache = new Map<string, PeaksData>();
 
-    /** 正在进行的请求 */
+    /** 正在进行的请求（去重用） */
     private pendingRequests = new Map<string, Promise<PeaksData | null>>();
 
     /** 预加载队列 */
@@ -175,6 +187,19 @@ class MipmapCacheManager {
 
     /** 预加载是否正在进行 */
     private isPreloading = false;
+
+    /** 当前活跃的 IPC 请求数 */
+    private activeIpcCount = 0;
+
+    /** 等待中的 IPC 请求队列（并发限制排队） */
+    private ipcQueue: Array<{ resolve: () => void }> = [];
+
+    /**
+     * 视口版本号（已弃用全局比对逻辑）。
+     * 现在仅用于 clear() 时递增，cancelQueuedIpcRequests 负责取消排队请求。
+     * 跨轨道请求不再互相取消——时效性由调用方自己的 requestIdRef 保证。
+     */
+    private generation = 0;
 
     /**
      * 根据 samplesPerPixel 选择最佳 mipmap 级别
@@ -187,18 +212,70 @@ class MipmapCacheManager {
      * - Level 0 (div=128,  特写): samplesPerPixel 较小
      * - Level 3 (div=8192, 远景): samplesPerPixel 较大
      */
-    selectMipmapLevel(samplesPerPixel: number): MipmapLevel {
-        const target = samplesPerPixel * 2;
-        let bestIdx = 0;
-        let bestDiff = Infinity;
-        for (let i = 0; i < DIVISION_FACTORS.length; i++) {
-            const diff = Math.abs(DIVISION_FACTORS[i] - target);
-            if (diff < bestDiff) {
-                bestDiff = diff;
-                bestIdx = i;
-            }
+    selectMipmapLevel(_samplesPerPixel: number): MipmapLevel {
+        // 测试阶段：统一使用 L0 (division_factor=1024)
+        // 恢复多级缓存时，取消下面的注释并删除 return 0
+        // const target = _samplesPerPixel * 2;
+        // let bestIdx = 0;
+        // let bestDiff = Infinity;
+        // for (let i = 0; i < DIVISION_FACTORS.length; i++) {
+        //     const diff = Math.abs(DIVISION_FACTORS[i] - target);
+        //     if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+        // }
+        // return bestIdx as MipmapLevel;
+        void DIVISION_FACTORS; // 保留引用，避免 TS6133
+        return 0 as MipmapLevel;
+    }
+
+    /**
+     * 获取 IPC 并发槽位
+     * 如果当前活跃请求数已达到上限，则排队等待
+     */
+    private async acquireIpcSlot(): Promise<void> {
+        if (this.activeIpcCount < MAX_CONCURRENT_IPC) {
+            this.activeIpcCount++;
+            return;
         }
-        return bestIdx as MipmapLevel;
+        // 排队等待
+        return new Promise<void>((resolve) => {
+            this.ipcQueue.push({ resolve });
+        });
+    }
+
+    /**
+     * 释放 IPC 并发槽位
+     */
+    private releaseIpcSlot(): void {
+        const next = this.ipcQueue.shift();
+        if (next) {
+            // 把槽位转给下一个等待者（不递减计数）
+            next.resolve();
+        } else {
+            this.activeIpcCount--;
+        }
+    }
+
+    /**
+     * 取消所有排队中的 IPC 请求（视口变化时调用）
+     */
+    private cancelQueuedIpcRequests(): void {
+        // 排队中的请求直接释放，不会发出 IPC
+        const queued = this.ipcQueue.splice(0);
+        for (const item of queued) {
+            item.resolve(); // 让 await 继续，但 generation 检查会丢弃结果
+        }
+    }
+
+    /**
+     * 取消所有排队中的 IPC 请求。
+     * 调用方在发起新一批 getPeaks 之前调用，
+     * 以释放已排队但尚未获得槽位的旧请求。
+     *
+     * 注意：不再递增全局 generation / 不再对已发出的 IPC 做版本号比对。
+     * 跨轨道请求的时效性由各 WaveformTrackCanvas 自身的 requestIdRef 保证。
+     */
+    cancelQueued(): void {
+        this.cancelQueuedIpcRequests();
     }
 
     /**
@@ -256,6 +333,7 @@ class MipmapCacheManager {
      *
      * 将多个区块的 min/max 数组顺序拼接，
      * 并更新 startSec / durationSec 为合并后的完整范围。
+     * 合并后自动构建并缓存 WaveformData 对象。
      */
     private mergeBlocks(
         blocks: (PeaksData | null)[],
@@ -282,7 +360,7 @@ class MipmapCacheManager {
         const lastBlock = validBlocks[validBlocks.length - 1];
         const mergedEndSec = lastBlock.startSec + lastBlock.durationSec;
 
-        return {
+        const merged: PeaksData = {
             min: mergedMin,
             max: mergedMax,
             sampleRate: validBlocks[0].sampleRate,
@@ -293,12 +371,18 @@ class MipmapCacheManager {
             timestamp: now,
             lastAccessTime: now,
         };
+
+        // 自动构建 WaveformData 缓存
+        this.ensureWaveformData(merged);
+
+        return merged;
     }
 
     /**
      * 获取指定区块的数据
      *
-     * 这是核心的缓存获取方法，使用固定区块时长构建稳定的缓存键
+     * 这是核心的缓存获取方法，使用固定区块时长构建稳定的缓存键。
+     * 支持 generation 版本号检查，防止过期请求浪费资源。
      */
     private async getBlockData(
         sourcePath: string,
@@ -330,28 +414,30 @@ class MipmapCacheManager {
             return pending;
         }
 
-        // 发起新请求
-        const request = this.fetchPeaks(
-            sourcePath,
-            level,
-            startTime,
-            config.blockDuration,
-            columns,
-        );
+        // 发起新请求（带并发限制）
+        const request = (async () => {
+            // 等待 IPC 并发槽位
+            await this.acquireIpcSlot();
+
+            try {
+                return await this.fetchPeaks(
+                    sourcePath,
+                    level,
+                    startTime,
+                    config.blockDuration,
+                    columns,
+                );
+            } finally {
+                this.releaseIpcSlot();
+            }
+        })();
         this.pendingRequests.set(cacheKey, request);
 
         try {
             const data = await request;
             if (data) {
-                // debug log: expose fetched block sizes
-                try {
-                    console.log("[MipmapCache] fetched peaks", cacheKey, {
-                        startSec: data.startSec,
-                        durationSec: data.durationSec,
-                        minLen: data.min.length,
-                        maxLen: data.max.length,
-                    });
-                } catch (_) {}
+                // 自动构建 WaveformData 缓存（在入缓存前一次性完成）
+                this.ensureWaveformData(data);
                 this.addToCache(cacheKey, data);
             }
             return data;
@@ -569,6 +655,8 @@ class MipmapCacheManager {
         this.cache.clear();
         this.pendingRequests.clear();
         this.preloadQueue = [];
+        this.cancelQueuedIpcRequests();
+        this.generation++;
     }
 
     /**
@@ -597,6 +685,21 @@ class MipmapCacheManager {
      */
     getLevelConfig(level: MipmapLevel): CacheLevelConfig {
         return CACHE_LEVEL_CONFIGS[level];
+    }
+
+    /**
+     * 确保 PeaksData 上已附加 WaveformData 缓存。
+     * 如果尚未构建，则调用 buildWaveformData 一次性生成。
+     * 后续 resample 时可直接复用，无需重复 JSON 解析 + int16 转换。
+     */
+    private ensureWaveformData(data: PeaksData): void {
+        if (!data._waveformData && data.min.length >= 2) {
+            try {
+                data._waveformData = buildWaveformData(data);
+            } catch (e) {
+                console.warn("[MipmapCache] Failed to build WaveformData:", e);
+            }
+        }
     }
 }
 
