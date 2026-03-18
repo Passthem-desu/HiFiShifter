@@ -421,7 +421,7 @@ export const zhCN = {
     menu_transpose_cents: "按指定音分移调...",
     menu_transpose_degrees: "按指定度数移调...",
     menu_set_pitch: "音高设置...",
-    menu_average: "平均化",
+    menu_average: "平均化...",
     menu_smooth: "平滑化...",
     menu_add_vibrato: "添加颤音...",
     menu_quantize: "量化...",
@@ -447,6 +447,7 @@ export const zhCN = {
     // Smooth dialog
     smooth_title: "平滑化",
     smooth_strength: "平滑度",
+    average_strength: "平均度",
 
     // Add vibrato dialog
     vibrato_title: "添加颤音",
@@ -492,6 +493,7 @@ export const zhCN = {
     dlg_midi_note: "MIDI 音符",
     dlg_strength: "平滑度",
     dlg_smoothness: "平滑度",
+    dlg_average_strength: "平均度",
     dlg_depth_cents: "振幅（音分）",
     dlg_amplitude_cents: "振幅（音分）",
     dlg_amplitude: "振幅",

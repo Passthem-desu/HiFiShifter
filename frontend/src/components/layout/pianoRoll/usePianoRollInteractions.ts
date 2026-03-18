@@ -41,6 +41,7 @@ import {
 } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
 import { getParamEditorWheelAction } from "./wheelGesture";
+import { transformSelectionByRightDrag } from "./selectionTransforms";
 
 type CanvasCursor =
     | "default"
@@ -847,7 +848,7 @@ export function usePianoRollInteractions(args: {
                 // 需要弹出对话框的操作列表
                 const dialogOps = new Set([
                     "transposeCents", "transposeDegrees", "setPitch",
-                    "smooth", "addVibrato", "quantize", "meanQuantize",
+                    "average", "smooth", "addVibrato", "quantize", "meanQuantize",
                 ]);
                 for (const [actionId, kb] of editActionEntries) {
                     if (kb.modifierOnly) continue;
@@ -1968,26 +1969,77 @@ export function usePianoRollInteractions(args: {
                                         selEndIdx + 1,
                                     );
 
-                                    const validMask = origValues.map((v) =>
-                                        editParam === "pitch"
-                                            ? Number.isFinite(v) && v !== 0
-                                            : Number.isFinite(v),
-                                    );
-                                    const validValues = origValues.filter((_, i) =>
-                                        validMask[i],
-                                    );
-                                    const mean =
-                                        validValues.length > 0
-                                            ? validValues.reduce((acc, v) => acc + v, 0) /
-                                              validValues.length
-                                            : 0;
-
                                     let didDrag = false;
                                     let latestDense = origValues.slice();
+                                    let latestAppliedStartFrame = selStartFrame;
+                                    let latestAppliedDense = origValues.slice();
 
                                     ensureLiveEditBase(pv);
                                     if (liveEditActiveRef)
                                         liveEditActiveRef.current = true;
+
+                                    const buildRightDragDense = (
+                                        pvNow: ParamViewSegment,
+                                        nextSelectionValues: number[],
+                                    ) => {
+                                        const selLen = nextSelectionValues.length;
+                                        const maxTransitionFrames = Math.floor(selLen / 2);
+                                        const transitionFrames =
+                                            Number(edgeSmoothnessPercent) > 0 && maxTransitionFrames > 0
+                                                ? Math.round(
+                                                    (clamp(Number(edgeSmoothnessPercent) || 0, 0, 100) / 100) *
+                                                        maxTransitionFrames,
+                                                )
+                                                : 0;
+                                        const extraEdgeFrames =
+                                            Math.max(0, Math.ceil(transitionFrames / 2)) * stride;
+                                        const denseStartFrame = Math.max(0, selStartFrame - extraEdgeFrames);
+                                        const denseEndFrame = selEndFrame + extraEdgeFrames;
+                                        const denseLength =
+                                            Math.floor((denseEndFrame - denseStartFrame) / stride) + 1;
+                                        const dense = new Array<number>(denseLength);
+
+                                        for (let index = 0; index < denseLength; index += 1) {
+                                            const globalIdx = Math.round(
+                                                (denseStartFrame + index * stride - pvNow.startFrame) / stride,
+                                            );
+                                            dense[index] =
+                                                globalIdx >= 0 && globalIdx < pvNow.edit.length
+                                                    ? pvNow.edit[globalIdx]
+                                                    : 0;
+                                        }
+
+                                        const denseBefore = dense.slice();
+                                        const selectionStartDenseIdx = Math.round(
+                                            (selStartFrame - denseStartFrame) / stride,
+                                        );
+
+                                        for (let index = 0; index < nextSelectionValues.length; index += 1) {
+                                            const denseIdx = selectionStartDenseIdx + index;
+                                            if (denseIdx >= 0 && denseIdx < dense.length) {
+                                                dense[denseIdx] = nextSelectionValues[index] ?? 0;
+                                            }
+                                        }
+
+                                        const changeFactor = computeSelectionChangeFactor(
+                                            denseBefore,
+                                            dense,
+                                            selectionStartDenseIdx,
+                                            selLen,
+                                        );
+                                        applyEdgeSmoothingToDense(
+                                            dense,
+                                            selectionStartDenseIdx,
+                                            selLen,
+                                            changeFactor,
+                                        );
+
+                                        return {
+                                            denseStartFrame,
+                                            denseEndFrame,
+                                            dense,
+                                        };
+                                    };
 
                                     const suppressContextMenu = (ev: Event) => {
                                         ev.preventDefault();
@@ -2002,25 +2054,26 @@ export function usePianoRollInteractions(args: {
                                             didDrag = true;
                                         }
 
-                                        const deviationPercent = dy * 2;
-                                        const scale = Math.max(
-                                            0,
-                                            1 + deviationPercent / 100,
+                                        latestDense = transformSelectionByRightDrag(
+                                            origValues,
+                                            editParam,
+                                            dy,
                                         );
-
-                                        latestDense = origValues.map((v, idx) => {
-                                            if (!validMask[idx]) return v;
-                                            return mean + (v - mean) * scale;
-                                        });
 
                                         const pvNow = paramViewRef.current;
                                         if (!pvNow) return;
+                                        const nextApplied = buildRightDragDense(
+                                            pvNow,
+                                            latestDense,
+                                        );
+                                        latestAppliedStartFrame = nextApplied.denseStartFrame;
+                                        latestAppliedDense = nextApplied.dense;
                                         applyDenseToLiveEdit(
                                             pvNow,
-                                            selStartFrame,
-                                            latestDense,
-                                            selStartFrame,
-                                            selEndFrame,
+                                            nextApplied.denseStartFrame,
+                                            nextApplied.dense,
+                                            nextApplied.denseStartFrame,
+                                            nextApplied.denseEndFrame,
                                             "draw",
                                         );
                                         invalidate();
@@ -2063,10 +2116,13 @@ export function usePianoRollInteractions(args: {
                                         }
 
                                         const nextEdit = pvNow.edit.slice();
-                                        for (let i = 0; i < latestDense.length; i += 1) {
-                                            const idx = selStartIdx + i;
+                                        for (let i = 0; i < latestAppliedDense.length; i += 1) {
+                                            const frame = latestAppliedStartFrame + i * stride;
+                                            const idx = Math.round(
+                                                (frame - pvNow.startFrame) / stride,
+                                            );
                                             if (idx >= 0 && idx < nextEdit.length) {
-                                                nextEdit[idx] = latestDense[i];
+                                                nextEdit[idx] = latestAppliedDense[i] ?? 0;
                                             }
                                         }
                                         setParamView({ ...pvNow, edit: nextEdit });
@@ -2076,8 +2132,8 @@ export function usePianoRollInteractions(args: {
                                             await paramsApi.setParamFrames(
                                                 rootTrackId,
                                                 editParam,
-                                                selStartFrame,
-                                                latestDense,
+                                                latestAppliedStartFrame,
+                                                latestAppliedDense,
                                                 true,
                                             );
                                             if (liveEditActiveRef) {

@@ -67,6 +67,10 @@ import {
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./pianoRoll/constants";
 import { drawPianoRoll } from "./pianoRoll/render";
 import type { DetectedPitchCurve } from "./pianoRoll/render";
+import {
+    averageSelectionValues,
+    smoothSelectionValues,
+} from "./pianoRoll/selectionTransforms";
 import { usePianoRollData } from "./pianoRoll/usePianoRollData";
 import { useClipsPeaksForPianoRoll } from "./pianoRoll/useClipsPeaksForPianoRoll";
 import { usePianoRollInteractions } from "./pianoRoll/usePianoRollInteractions";
@@ -1644,6 +1648,12 @@ export const PianoRollPanel: React.FC = () => {
                     break;
                 }
                 case "average": {
+                    const strengthPercent = clamp(
+                        Number(data?.strength ?? 100) || 0,
+                        0,
+                        100,
+                    );
+                    if (strengthPercent <= 0) return;
                     const res = await paramsApi.getParamFrames(
                         rootTrackId,
                         editParam,
@@ -1657,20 +1667,11 @@ export const PianoRollPanel: React.FC = () => {
                         (v) => Number(v) || 0,
                     );
                     if (vals.length === 0) return;
-                    // pitch=0 视为未编辑，不参与平均值计算（与平滑化一致）
-                    let avg: number;
-                    if (editParam === "pitch") {
-                        const validVals = vals.filter((v) => v !== 0);
-                        avg = validVals.length > 0
-                            ? validVals.reduce((a, b) => a + b, 0) / validVals.length
-                            : 0;
-                    } else {
-                        avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-                    }
-                    const result =
-                        editParam === "pitch"
-                            ? vals.map((v) => (v === 0 ? 0 : avg))
-                            : vals.map(() => avg);
+                    const result = averageSelectionValues(
+                        vals,
+                        editParam,
+                        strengthPercent,
+                    );
                     await paramsApi.setParamFrames(
                         rootTrackId,
                         editParam,
@@ -1752,7 +1753,12 @@ export const PianoRollPanel: React.FC = () => {
                     break;
                 }
                 case "smooth": {
-                    const strength = Number(data?.strength ?? 50) / 100;
+                    const strength = clamp(
+                        (Number(data?.strength ?? 50) || 0) / 100,
+                        0,
+                        1,
+                    );
+                    if (strength <= 0) return;
                     const res = await paramsApi.getParamFrames(
                         rootTrackId,
                         editParam,
@@ -1763,39 +1769,7 @@ export const PianoRollPanel: React.FC = () => {
                     if (!res?.ok) return;
                     const payload = res as ParamFramesPayload;
                     const vals = (payload.edit ?? []).map((v) => Number(v));
-                    // Use absolute radius: strength 0→1 maps to ~1..50 frames
-                    const radius = Math.max(1, Math.round(strength * 50));
-                    // Multi-pass Gaussian-like smoothing via iterated box filter
-                    const passes = Math.max(1, Math.round(strength * 3));
-                    let buf = vals.slice();
-                    for (let p = 0; p < passes; p++) {
-                        const next = new Array<number>(buf.length);
-                        for (let i = 0; i < buf.length; i++) {
-                            const lo = Math.max(0, i - radius);
-                            const hi = Math.min(buf.length - 1, i + radius);
-                            let sum = 0;
-                            let count = 0;
-                            for (let j = lo; j <= hi; j++) {
-                                // pitch=0 视为未编辑，不参与平滑
-                                if (editParam === "pitch" && vals[j] === 0)
-                                    continue;
-                                sum += buf[j];
-                                count++;
-                            }
-                            next[i] =
-                                editParam === "pitch" && vals[i] === 0
-                                    ? 0
-                                    : count > 0
-                                        ? sum / count
-                                        : buf[i];
-                        }
-                        buf = next;
-                    }
-                    const result = vals.map((v, i) =>
-                        editParam === "pitch" && v === 0
-                            ? 0
-                            : v + (buf[i] - v) * strength,
-                    );
+                    const result = smoothSelectionValues(vals, editParam, strength);
                     await paramsApi.setParamFrames(
                         rootTrackId,
                         editParam,
@@ -2766,7 +2740,7 @@ export const PianoRollPanel: React.FC = () => {
                         openEditDialog("transposeDegrees")
                     }
                     onSetPitch={() => openEditDialog("setPitch")}
-                    onAverage={() => void handleEditOp("average")}
+                    onAverage={() => openEditDialog("average")}
                     onSmooth={() => openEditDialog("smooth")}
                     onAddVibrato={() => openEditDialog("addVibrato")}
                     onQuantize={() => openEditDialog("quantize")}

@@ -36,6 +36,7 @@ import {
     TransposeCentsDialog,
     TransposeDegreesDialog,
     SetPitchDialog,
+    AverageDialog,
     SmoothDialog,
     VibratoDialog,
     QuantizeDialog,
@@ -69,6 +70,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const [transposeCentsOpen, setTransposeCentsOpen] = useState(false);
     const [transposeDegreesOpen, setTransposeDegreesOpen] = useState(false);
     const [setPitchOpen, setSetPitchOpen] = useState(false);
+    const [averageOpen, setAverageOpen] = useState(false);
     const [smoothOpen, setSmoothOpen] = useState(false);
     const [vibratoOpen, setVibratoOpen] = useState(false);
     const [vibratoParamRange, setVibratoParamRange] = useState<{ min: number; max: number } | undefined>(undefined);
@@ -97,6 +99,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 case "transposeCents": setTransposeCentsOpen(true); break;
                 case "transposeDegrees": setTransposeDegreesOpen(true); break;
                 case "setPitch": setSetPitchOpen(true); break;
+                case "average": setAverageOpen(true); break;
                 case "smooth": setSmoothOpen(true); break;
                 case "addVibrato": setVibratoParamRange((e as CustomEvent).detail?.paramRange); setVibratoOpen(true); break;
                 case "quantize": setQuantizeOpen(true); break;
@@ -361,7 +364,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         </>
                     )}
                     <DropdownMenu.Separator />
-                    <DropdownMenu.Item onSelect={() => dispatchEditOp("average")}>
+                    <DropdownMenu.Item onSelect={() => setAverageOpen(true)}>
                         {tAny("menu_average")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("edit.average")}
@@ -616,6 +619,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         edgeSmoothnessPercent,
                     })
                 }
+            />
+            <AverageDialog
+                open={averageOpen}
+                onOpenChange={setAverageOpen}
+                onConfirm={(strength) => {
+                    dispatchEditOp("average", { strength });
+                }}
             />
             <SmoothDialog
                 open={smoothOpen}

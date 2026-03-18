@@ -429,7 +429,7 @@ export const koKR = {
     menu_transpose_cents: "센트 단위로 이조...",
     menu_transpose_degrees: "도 단위로 이조...",
     menu_set_pitch: "피치 설정...",
-    menu_average: "평균화",
+    menu_average: "평균화...",
     menu_smooth: "스무딩...",
     menu_add_vibrato: "비브라토 추가...",
     menu_quantize: "퀀타이즈...",
@@ -455,6 +455,7 @@ export const koKR = {
     // 스무딩 다이얼로그
     smooth_title: "스무딩",
     smooth_strength: "스무딩 강도",
+    average_strength: "평균 강도",
 
     // 비브라토 추가 다이얼로그
     vibrato_title: "비브라토 추가",
@@ -500,6 +501,7 @@ export const koKR = {
     dlg_midi_note: "MIDI 노트",
     dlg_strength: "스무딩 강도",
     dlg_smoothness: "스무딩 강도",
+    dlg_average_strength: "평균 강도",
     dlg_depth_cents: "진폭 (센트)",
     dlg_amplitude_cents: "진폭 (센트)",
     dlg_amplitude: "진폭",
