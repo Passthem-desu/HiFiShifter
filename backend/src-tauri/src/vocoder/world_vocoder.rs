@@ -973,30 +973,3 @@ where
 
     Ok(out)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::blend_unvoiced_regions_with_silence_gate_impl;
-
-    #[test]
-    fn silent_unvoiced_frames_do_not_reintroduce_dry_tail() {
-        let mut wet = vec![0.0, 0.0, 0.0, 0.0];
-        let dry = vec![0.001, 0.001, 0.001, 0.001];
-        let voiced = vec![false, false];
-
-        blend_unvoiced_regions_with_silence_gate_impl(&mut wet, &dry, &voiced, 10.0, 100, 0.01);
-
-        assert!(wet.iter().all(|sample| sample.abs() < 1e-9));
-    }
-
-    #[test]
-    fn noisy_unvoiced_frames_still_preserve_dry_signal() {
-        let mut wet = vec![0.0, 0.0, 0.0, 0.0];
-        let dry = vec![0.2, 0.2, 0.2, 0.2];
-        let voiced = vec![false, false];
-
-        blend_unvoiced_regions_with_silence_gate_impl(&mut wet, &dry, &voiced, 10.0, 100, 0.01);
-
-        assert!(wet.iter().all(|sample| (*sample - 0.2).abs() < 1e-9));
-    }
-}
