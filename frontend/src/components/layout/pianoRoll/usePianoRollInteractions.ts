@@ -397,6 +397,13 @@ export function usePianoRollInteractions(args: {
         frequency: number;
         shiftHeld: boolean;
     } | null>(null);
+    // Track last pointer position so we can synthesize pointermove when modifiers change
+    const lastPointerPosRef = useRef<{ clientX: number; clientY: number; pointerId?: number; buttons?: number }>({
+        clientX: 0,
+        clientY: 0,
+        pointerId: 0,
+        buttons: 0,
+    });
 
     const setMorphOverlay = useCallback(
         (next: ParamMorphOverlay | null) => {
@@ -759,6 +766,60 @@ export function usePianoRollInteractions(args: {
         if (!morphModifierDownRef.current || morphDragRef.current) return;
         setMorphOverlay(buildMorphOverlayFromSelection());
     }, [buildMorphOverlayFromSelection, selectionUi, setMorphOverlay, toolMode]);
+
+    // Track last pointer position and synthesize pointermove on key changes
+    useEffect(() => {
+        const updatePos = (ev: globalThis.PointerEvent) => {
+            lastPointerPosRef.current = {
+                clientX: ev.clientX,
+                clientY: ev.clientY,
+                pointerId: ev.pointerId,
+                buttons: ev.buttons,
+            };
+        };
+
+        const onKeyMod = (e: globalThis.KeyboardEvent) => {
+            // If no active stroke, nothing to refresh here
+            const st = strokeRef.current;
+            if (!st) return;
+
+            const last = lastPointerPosRef.current;
+            if (!last) {
+                invalidate();
+                return;
+            }
+
+            try {
+                const pe = new PointerEvent("pointermove", {
+                    clientX: last.clientX,
+                    clientY: last.clientY,
+                    pointerId: st.pointerId ?? last.pointerId ?? 1,
+                    buttons: last.buttons ?? 1,
+                    bubbles: true,
+                    cancelable: true,
+                    composed: true,
+                    ctrlKey: e.ctrlKey,
+                    shiftKey: e.shiftKey,
+                    altKey: e.altKey,
+                    metaKey: e.metaKey,
+                } as PointerEventInit);
+                window.dispatchEvent(pe);
+            } catch (err) {
+                // Fallback: force redraw
+                invalidate();
+            }
+        };
+
+        window.addEventListener("pointermove", updatePos, { passive: true });
+        window.addEventListener("keydown", onKeyMod);
+        window.addEventListener("keyup", onKeyMod);
+
+        return () => {
+            window.removeEventListener("pointermove", updatePos);
+            window.removeEventListener("keydown", onKeyMod);
+            window.removeEventListener("keyup", onKeyMod);
+        };
+    }, [strokeRef, invalidate]);
 
     const pointerBeat = useCallback(
         (clientX: number): number => {
