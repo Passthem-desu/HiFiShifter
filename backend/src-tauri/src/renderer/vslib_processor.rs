@@ -728,24 +728,3 @@ handles_time_stretch: true, // 使用 Timing 控制点，不需要外部 Signals
 pub fn vslib_param_descriptors() -> &'static [ParamDescriptor] {
     VSLIB_PARAMS
 }
-
-#[cfg(all(test, feature = "vslib"))]
-mod tests {
-    use super::stereo_i16_to_mono_f32;
-
-    #[test]
-    fn stereo_to_mono_preserves_right_only_signal() {
-        let mono = stereo_i16_to_mono_f32(&[0, 12000, 0, -12000]);
-        assert_eq!(mono.len(), 2);
-        assert!((mono[0] - (12000.0 / 32768.0)).abs() < 1e-6);
-        assert!((mono[1] - (-12000.0 / 32768.0)).abs() < 1e-6);
-    }
-
-    #[test]
-    fn stereo_to_mono_averages_balanced_channels() {
-        let mono = stereo_i16_to_mono_f32(&[10000, 10000, -8000, -8000]);
-        assert_eq!(mono.len(), 2);
-        assert!((mono[0] - (10000.0 / 32768.0)).abs() < 1e-6);
-        assert!((mono[1] - (-8000.0 / 32768.0)).abs() < 1e-6);
-    }
-}

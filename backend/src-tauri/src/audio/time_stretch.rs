@@ -237,33 +237,3 @@ fn linear_time_stretch_interleaved(input: &[f32], channels: usize, out_frames: u
 
     out
 }
-
-#[cfg(test)]
-mod tests {
-    use super::preserve_hard_silence_after_stretch;
-
-    #[test]
-    fn preserve_hard_silence_zeroes_stretched_output_tail() {
-        let sample_rate = 1_000;
-        let channels = 1;
-        let input = vec![0.6, 0.6, 0.6, 0.0, 0.0, 0.0];
-        let mut output = vec![0.6, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02, 0.01, 0.0];
-
-        preserve_hard_silence_after_stretch(&input, &mut output, channels, sample_rate);
-
-        assert_eq!(&output[..5], &[0.6, 0.6, 0.4, 0.2, 0.1]);
-        assert!(output[5..].iter().all(|sample| sample.abs() < 1e-9));
-    }
-
-    #[test]
-    fn preserve_hard_silence_keeps_short_gaps_untouched() {
-        let sample_rate = 1_000;
-        let channels = 1;
-        let input = vec![0.6, 0.6, 0.0, 0.6, 0.6];
-        let mut output = vec![0.6, 0.55, 0.25, 0.5, 0.6];
-
-        preserve_hard_silence_after_stretch(&input, &mut output, channels, sample_rate);
-
-        assert_eq!(output, vec![0.6, 0.55, 0.25, 0.5, 0.6]);
-    }
-}

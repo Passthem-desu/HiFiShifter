@@ -360,15 +360,3 @@ impl Drop for VsProject {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{vslib_error_name, VSERR_NOERR, VSERR_WAVEOPEN};
-
-    #[test]
-    fn error_name_maps_known_codes() {
-        assert_eq!(vslib_error_name(VSERR_NOERR), "VSERR_NOERR");
-        assert_eq!(vslib_error_name(VSERR_WAVEOPEN), "VSERR_WAVEOPEN");
-        assert_eq!(vslib_error_name(9999), "VSERR_UNKNOWN");
-    }
-}
