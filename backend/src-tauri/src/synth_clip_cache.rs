@@ -101,18 +101,8 @@ impl SynthClipCache {
 
     /// 使指定 clip_id 的所有缓存失效（不论 param_hash）。
     pub fn invalidate(&mut self, clip_id: &str) {
-        let keys_to_remove: Vec<SynthClipCacheKey> = self
-            .inner
-            .keys()
-            .filter(|k| k.clip_id == clip_id)
-            .cloned()
-            .collect();
-        for k in &keys_to_remove {
-            self.inner.remove(k);
-            if let Some(pos) = self.order.iter().position(|o| o == k) {
-                self.order.remove(pos);
-            }
-        }
+        self.inner.retain(|k, _| k.clip_id != clip_id);
+        self.order.retain(|k| k.clip_id != clip_id);
     }
 
     /// 清空所有缓存。
@@ -415,18 +405,8 @@ impl RenderedClipCache {
 
     /// 使指定 clip_id 的所有缓存失效（不论 param_hash）。
     pub fn invalidate(&mut self, clip_id: &str) {
-        let keys_to_remove: Vec<RenderedClipCacheKey> = self
-            .inner
-            .keys()
-            .filter(|k| k.clip_id == clip_id)
-            .cloned()
-            .collect();
-        for k in &keys_to_remove {
-            self.inner.remove(k);
-            if let Some(pos) = self.order.iter().position(|o| o == k) {
-                self.order.remove(pos);
-            }
-        }
+        self.inner.retain(|k, _| k.clip_id != clip_id);
+        self.order.retain(|k| k.clip_id != clip_id);
     }
 
     /// 清空所有缓存。
@@ -574,6 +554,10 @@ pub fn compute_rendered_clip_hash(
     let mut sorted_curves: Vec<(&String, &Vec<f32>)> = extra_curves.iter().collect();
     sorted_curves.sort_by_key(|(k, _)| k.as_str());
     for (k, v) in sorted_curves {
+        // 调用已定义好的过滤函数，防止后处理参数改变引发灾难级的底层重渲染
+        if !include_rendered_extra_curve(renderer_id, k) {
+            continue;
+        }
         mix_bytes!(k.as_bytes());
         let curve_lo = start_idx.min(v.len());
         let curve_hi = end_idx.min(v.len());
@@ -730,18 +714,8 @@ impl TensionRenderedClipCache {
     }
 
     pub fn invalidate(&mut self, clip_id: &str) {
-        let keys_to_remove: Vec<TensionRenderedClipCacheKey> = self
-            .inner
-            .keys()
-            .filter(|key| key.clip_id == clip_id)
-            .cloned()
-            .collect();
-        for key in &keys_to_remove {
-            self.inner.remove(key);
-            if let Some(pos) = self.order.iter().position(|item| item == key) {
-                self.order.remove(pos);
-            }
-        }
+        self.inner.retain(|k, _| k.clip_id != clip_id);
+        self.order.retain(|k| k.clip_id != clip_id);
     }
 
     /// 确保缓存容量不小于给定值（仅增不减）。
@@ -763,6 +737,79 @@ static GLOBAL_TENSION_RENDERED_CLIP_CACHE: OnceLock<Mutex<TensionRenderedClipCac
 pub fn global_tension_rendered_clip_cache() -> &'static Mutex<TensionRenderedClipCache> {
     GLOBAL_TENSION_RENDERED_CLIP_CACHE
         .get_or_init(|| Mutex::new(TensionRenderedClipCache::new(rendered_clip_capacity())))
+}
+
+/// 使指定 clip 的所有渲染缓存失效（SynthClipCache + RenderedClipCache + TensionRenderedClipCache）。
+///
+/// 此函数应在 pitch_edit 或其他影响合成的参数发生变化时调用，
+/// 确保旧的预渲染结果不会被错误复用。
+///
+/// # 诊断
+/// 会打印诊断日志帮助调试缓存失效相关问题。
+pub fn invalidate_clip_all_caches(clip_id: &str) {
+    // 1. SynthClipCache 失效（per-segment 合成缓存）
+    {
+        let mut cache = global_synth_clip_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let had_entry = cache.inner.keys().any(|k| k.clip_id == clip_id);
+        cache.invalidate(clip_id);
+        if had_entry {
+            eprintln!(
+                "[cache:invalidate] clip_id={} SynthClipCache invalidated",
+                clip_id
+            );
+        }
+    }
+
+    // 2. RenderedClipCache 失效（整 Clip 预渲染缓存）
+    {
+        let mut cache = global_rendered_clip_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let had_entry = cache.inner.keys().any(|k| k.clip_id == clip_id);
+        cache.invalidate(clip_id);
+        if had_entry {
+            eprintln!(
+                "[cache:invalidate] clip_id={} RenderedClipCache invalidated (had {} entries)",
+                clip_id,
+                cache.order.len()
+            );
+        }
+    }
+
+    // 3. TensionRenderedClipCache 失效（HiFiGAN tension 专用缓存）
+    {
+        let mut cache = global_tension_rendered_clip_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let had_entry = cache.inner.keys().any(|k| k.clip_id == clip_id);
+        cache.invalidate(clip_id);
+        if had_entry {
+            eprintln!(
+                "[cache:invalidate] clip_id={} TensionRenderedClipCache invalidated",
+                clip_id
+            );
+        }
+    }
+
+    // 4. pending_rendered_keys 清除（渲染线程正在处理的 clip）
+    {
+        let mut map = global_pending_rendered_keys()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if map.remove(clip_id).is_some() {
+            eprintln!(
+                "[cache:invalidate] clip_id={} pending_rendered_key removed",
+                clip_id
+            );
+        }
+    }
+
+    eprintln!(
+        "[cache:invalidate] clip_id={} all caches invalidated",
+        clip_id
+    );
 }
 
 #[cfg(test)]

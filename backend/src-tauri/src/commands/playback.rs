@@ -5,7 +5,29 @@ use tauri::State;
 
 use super::common::{guard_json_command, ok_bool, PlaybackRenderingStateEvent};
 
-// ===================== playback clock =====================
+/// 检查 clip 的音高分析是否完成（clip_midi 非空）。
+///
+/// 当音高分析未完成时，不应将渲染结果存入 RenderedClipCache，
+/// 否则后续 snapshot rebuild 会命中这个"未编辑"的缓存，导致音高编辑不生效。
+fn is_clip_pitch_analysis_ready(
+    timeline: &crate::state::TimelineState,
+    clip: &crate::state::Clip,
+) -> bool {
+    let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
+        return false;
+    };
+    let Some(entry) = timeline.params_by_root_track.get(&clip_root) else {
+        return false;
+    };
+    // 检查 clip_pitch（原始 MIDI 曲线）是否已分析
+    let clip_pitch = crate::pitch_clip::get_or_compute_clip_pitch_midi_global(
+        timeline,
+        clip,
+        &clip_root,
+        entry.frame_period_ms.max(0.1),
+    );
+    clip_pitch.is_some()
+}
 
 pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde_json::Value {
     guard_json_command("play_original", || {
@@ -80,6 +102,10 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 // 收集需要预渲染的 clip 列表，按时间线顺序排序
                 let mut clips_to_render = collect_clips_needing_render(&tl_for_render, engine_sr);
                 clips_to_render.sort_by(|a, b| a.clip.start_sec.total_cmp(&b.clip.start_sec));
+                clips_to_render
+                    .retain(|info| is_clip_pitch_analysis_ready(&tl_for_render, &info.clip));
+
+                clips_to_render.sort_by(|a, b| a.clip.start_sec.total_cmp(&b.clip.start_sec));
 
                 // 防呆：当 pitch_edit_user_modified 为 true 但当前时间线中并没有任何 clip
                 // 在播放窗口内需要 pitch edit（例如用户把所有点都清空为 0），
@@ -134,6 +160,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                         cache.get(&clip_render_info.cache_key).cloned()
                     };
 
+                    // 由于上面已经通过 retain 过滤过了，这里直接放行
                     if base_entry.is_some() {
                         crate::synth_clip_cache::register_pending_rendered_key(
                             &clip_render_info.clip.id,
@@ -142,6 +169,17 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     }
 
                     if base_entry.is_none() {
+                        if let Ok(mut state_mgr) =
+                            crate::clip_rendering_state::global_clip_rendering_state().lock()
+                        {
+                            state_mgr.set_state(
+                                &clip_render_info.clip.id,
+                                crate::clip_rendering_state::ClipRenderingState::Rendering,
+                                0.0,
+                                None,
+                            );
+                        }
+
                         match render_single_clip(
                             &tl_for_render,
                             &clip_render_info.clip,
@@ -155,10 +193,10 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                     let nonzero =
                                         stereo_pcm.iter().filter(|&&v| v.abs() > 1e-6).count();
                                     eprintln!(
-                                        "[play_original] clip rendered: id={} pcm_len={} nonzero={} hash={:#018x}",
-                                        clip_render_info.clip.id, stereo_pcm.len(), nonzero,
-                                        clip_render_info.cache_key.param_hash
-                                    );
+                        "[play_original] clip rendered: id={} pcm_len={} nonzero={} hash={:#018x}",
+                        clip_render_info.clip.id, stereo_pcm.len(), nonzero,
+                        clip_render_info.cache_key.param_hash
+                    );
                                 }
                                 let frames = (stereo_pcm.len() / 2) as u64;
                                 let entry = crate::synth_clip_cache::RenderedClipCacheEntry {
@@ -169,6 +207,8 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                     frames,
                                     sample_rate: clip_render_info.sr,
                                 };
+
+                                // 现在存入缓存
                                 let mut cache =
                                     crate::synth_clip_cache::global_rendered_clip_cache()
                                         .lock()
@@ -178,6 +218,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                     &clip_render_info.clip.id,
                                     clip_render_info.cache_key.clone(),
                                 );
+
                                 base_entry = Some(entry);
                             }
                             Err(e) => {
@@ -414,6 +455,9 @@ fn collect_clips_needing_render(
             timeline.clips.len()
         );
     }
+    // 预构建轨道的 O(1) 查找表，消除内部的 O(N) 线性扫描
+    let tracks_by_id: std::collections::HashMap<&str, &crate::state::Track> =
+        timeline.tracks.iter().map(|t| (t.id.as_str(), t)).collect();
 
     for clip in &timeline.clips {
         if clip.muted {
@@ -452,8 +496,8 @@ fn collect_clips_needing_render(
             Some(e) => e,
             None => continue,
         };
-        let track = match timeline.tracks.iter().find(|t| t.id == clip_root) {
-            Some(t) => t,
+        let track = match tracks_by_id.get(clip_root.as_str()) {
+            Some(&t) => t,
             None => continue,
         };
         let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
