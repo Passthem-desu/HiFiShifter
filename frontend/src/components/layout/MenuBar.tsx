@@ -150,15 +150,14 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     }, [dispatch, s.playheadSec, s.selectedTrackId]);
 
     async function handleExport() {
-        const outputPath = s.outputPath?.trim();
-        if (!outputPath) {
-            const picked = await dispatch(pickOutputPath()).unwrap();
-            if (picked.ok && !picked.canceled && picked.path) {
-                await dispatch(exportAudio(picked.path));
-            }
+        // 每次导出必定弹窗询问路径
+        const picked = await dispatch(pickOutputPath()).unwrap();
+        // 如果用户取消了选择，直接返回
+        if (!picked.ok || picked.canceled || !picked.path) {
             return;
         }
-        await dispatch(exportAudio(outputPath));
+        // 拿到最新路径后，派发导出命令
+        await dispatch(exportAudio(picked.path));
     }
 
     async function handleExportSeparated() {
