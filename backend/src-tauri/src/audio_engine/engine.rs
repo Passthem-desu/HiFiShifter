@@ -622,15 +622,10 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
             .unwrap_or(false); // 首次 timeline，不触发重新合成
 
         if pitch_changed {
-            // 使用统一的缓存失效函数，使 clip 的所有相关缓存失效：
-            // - SynthClipCache（per-segment 合成缓存）
-            // - RenderedClipCache（整 Clip 预渲染缓存）
-            // - TensionRenderedClipCache（HiFiGAN tension 专用缓存）
-            // - pending_rendered_keys（渲染线程正在处理的 clip）
-            //
-            // 关键：必须失效所有缓存，否则旧的预渲染结果会被错误复用，
-            // 导致音高编辑不生效（只播放原始音频）。
-            crate::synth_clip_cache::invalidate_clip_all_caches(&clip.id);
+            // 修改：不再暴力清除全部缓存，而是仅清除片段缓存和解绑 pending_key。
+            // 这样系统会自然计算出新的 Hash，并在新 Hash 未渲染完成时，
+            // 利用留存下来的 RenderedClipCache 进行无缝垫音播放
+            crate::synth_clip_cache::invalidate_clip_for_pitch_edit(&clip.id);
         }
     }
 

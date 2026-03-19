@@ -811,3 +811,42 @@ pub fn invalidate_clip_all_caches(clip_id: &str) {
         clip_id
     );
 }
+
+/// 专门为音高编辑提供的“柔性”缓存失效策略，仅失效片段级合成缓存和解除旧 Hash 绑定，
+/// 保留 RenderedClipCache，使得在新的预渲染完成前，系统可以无缝回退播放上一次渲染的音频！
+pub fn invalidate_clip_for_pitch_edit(clip_id: &str) {
+    // 1. SynthClipCache 失效
+    {
+        let mut cache = global_synth_clip_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        cache.invalidate(clip_id);
+    }
+    // 2. pending_rendered_keys 清除
+    {
+        let mut map = global_pending_rendered_keys()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        map.remove(clip_id);
+    }
+}
+
+/// 获取指定 clip 最近一次成功的整 clip 渲染结果（用作平滑过渡的垫音）
+pub fn get_latest_rendered_pcm(clip_id: &str) -> Option<(Arc<Vec<f32>>, Option<Arc<Vec<f32>>>)> {
+    let mut cache = global_rendered_clip_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let found_key = cache.order.iter().find(|k| k.clip_id == clip_id).cloned()?;
+    let entry = cache.inner.get(&found_key)?;
+    Some((entry.pcm_stereo.clone(), entry.breath_noise_stereo.clone()))
+}
+
+/// 获取指定 clip 最近一次成功的 Tension 渲染结果（用作平滑过渡的垫音）
+pub fn get_latest_tension_rendered_pcm(clip_id: &str) -> Option<Arc<Vec<f32>>> {
+    let mut cache = global_tension_rendered_clip_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let found_key = cache.order.iter().find(|k| k.clip_id == clip_id).cloned()?;
+    let entry = cache.inner.get(&found_key)?;
+    Some(entry.pcm_stereo.clone())
+}
