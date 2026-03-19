@@ -1,4 +1,4 @@
-﻿import { PitchSnapSettingsDialog } from "./PitchSnapSettingsDialog";
+import { PitchSnapSettingsDialog } from "./PitchSnapSettingsDialog";
 import React, {
     type CSSProperties,
     useCallback,
@@ -77,6 +77,7 @@ import { usePianoRollInteractions } from "./pianoRoll/usePianoRollInteractions";
 import { useLiveParamEditing } from "./pianoRoll/useLiveParamEditing";
 import { getParamShiftStep } from "./pianoRoll/paramShiftStep";
 import { getParamEditorWheelAction } from "./pianoRoll/wheelGesture";
+import { pianoKeySound } from "../../utils/PianoKeySound";
 import {
     getActiveSecondaryParamId,
     toggleSecondaryParamVisibility,
@@ -1311,6 +1312,83 @@ export const PianoRollPanel: React.FC = () => {
         scrollHorizontalKb,
         scrollVerticalKb,
     ]);
+
+    // Piano keys (axis) hover: play sine wave sound when pointer moves over keys
+    useEffect(() => {
+        const el = axisWrapRef.current;
+        if (!el) return;
+
+        let isPointerDown = false;
+        let activeMidiNote: number | null = null;
+
+        const getMidiNoteFromY = (clientY: number): number => {
+            const bounds = el.getBoundingClientRect();
+            const y = clientY - bounds.top;
+            const h = Math.max(1, bounds.height);
+            const t = 1 - clamp(y / h, 0, 1);
+            const absMin = PITCH_MIN_MIDI;
+            const absMax = PITCH_MAX_MIDI;
+            const view = pitchViewRef.current;
+            const span = clamp(view.span, 1e-6, absMax - absMin);
+            const min = clamp(view.center - span / 2, absMin, absMax - span);
+            // 使用 floor 与渲染逻辑一致
+            return Math.floor(clamp(min + t * span, absMin, absMax));
+        };
+
+        const playNoteIfChanged = (midiNote: number) => {
+            if (midiNote !== activeMidiNote) {
+                if (activeMidiNote !== null) {
+                    pianoKeySound.stop(activeMidiNote);
+                }
+                activeMidiNote = midiNote;
+                pianoKeySound.play(midiNote, 0.25);
+            }
+        };
+
+        const stopNote = () => {
+            if (activeMidiNote !== null) {
+                pianoKeySound.stop(activeMidiNote);
+                activeMidiNote = null;
+            }
+        };
+
+        const onPointerDown = (e: PointerEvent) => {
+            if (e.button !== 0) return;
+            isPointerDown = true;
+            const midiNote = getMidiNoteFromY(e.clientY);
+            playNoteIfChanged(midiNote);
+        };
+
+        const onPointerMove = (e: PointerEvent) => {
+            if (!isPointerDown) return;
+            const midiNote = getMidiNoteFromY(e.clientY);
+            playNoteIfChanged(midiNote);
+        };
+
+        const onPointerUp = () => {
+            isPointerDown = false;
+            stopNote();
+        };
+
+        const onPointerLeave = () => {
+            if (isPointerDown) {
+                stopNote();
+            }
+        };
+
+        el.addEventListener("pointerdown", onPointerDown);
+        el.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+        el.addEventListener("pointerleave", onPointerLeave);
+
+        return () => {
+            el.removeEventListener("pointerdown", onPointerDown);
+            el.removeEventListener("pointermove", onPointerMove);
+            window.removeEventListener("pointerup", onPointerUp);
+            el.removeEventListener("pointerleave", onPointerLeave);
+            stopNote();
+        };
+    }, [pitchViewRef]);
 
     // Silence unused state warnings; selectionUi is future UI.
     void selectionUi;
