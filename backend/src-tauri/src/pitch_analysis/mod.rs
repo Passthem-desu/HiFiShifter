@@ -12,15 +12,16 @@ pub(crate) mod analysis;
 pub(crate) mod schedule;
 
 // 公开 API — 供 crate 内其他模块使用
-pub use schedule::maybe_schedule_pitch_orig;
 pub(crate) use analysis::{build_pitch_job, compute_pitch_curve};
-
+pub use schedule::maybe_schedule_pitch_orig;
 
 pub(crate) fn hz_to_midi(hz: f64) -> f32 {
     if !(hz.is_finite() && hz > 1e-6) {
         return 0.0;
     }
-    let midi = 69.0 + 12.0 * (hz / 440.0).log2();
+    // 利用对数公式抹除浮点除法
+    // 69.0 - 12.0 * log2(440.0) ≈ -36.3763165622959
+    let midi = 12.0 * hz.log2() - 36.3763165622959;
     if midi.is_finite() {
         midi as f32
     } else {
@@ -193,19 +194,20 @@ pub(crate) fn resample_curve_linear(values: &[f32], out_len: usize) -> Vec<f32> 
 
     let in_len = values.len();
     let scale = (in_len - 1) as f64 / (out_len - 1) as f64;
-    let mut out = vec![0.0f32; out_len];
-    for (of, out_v) in out.iter_mut().enumerate() {
-        let t_in = (of as f64) * scale;
-        let i0 = t_in.floor() as usize;
-        let i1 = (i0 + 1).min(in_len - 1);
-        let frac = (t_in - (i0 as f64)) as f32;
-        let a = values[i0];
-        let b = values[i1];
-        *out_v = a + (b - a) * frac;
-    }
-    out
-}
 
+    // 使用迭代器直接分配并写入，消灭 vec![0.0] 造成的额外 memset
+    (0..out_len)
+        .map(|of| {
+            let t_in = (of as f64) * scale;
+            let i0 = t_in.floor() as usize;
+            let i1 = (i0 + 1).min(in_len - 1);
+            let frac = (t_in - (i0 as f64)) as f32;
+            let a = values[i0];
+            let b = values[i1];
+            a + (b - a) * frac
+        })
+        .collect()
+}
 
 // Task 3.6: PitchProgressPayload for frontend API
 #[derive(Debug, Clone, Serialize)]
