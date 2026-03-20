@@ -606,25 +606,24 @@ handles_time_stretch: true, // 使用 Timing 控制点，不需要外部 Signals
             }
         }
 
-        // ── 8. Timing 控制点（时间拉伸）──────────────────────────────────────
-        //  VslibAddTimeCtrlPnt 的 time1/time2 单位为毫秒（ms）。
-        //  time1 = 音频总时长（ms），time2 = time1 / playback_rate（输出时长 ms）。
-        //  playback_rate > 1 → 压缩（更少输出 ms），< 1 → 拉伸（更多输出 ms）。
+        // ── 8. Timing 控制点（时間拉伸）──────────────────────────────────────
+        //  VslibAddTimeCtrlPnt 的 time1/time2 单位为采样数（sample），参见 vslib 文档。
+        //  time1 = 原始音频总采样数（编辑前），time2 = time1 / playback_rate（编辑后采样数）。
+        //  playback_rate > 1 → 压缩（time2 < time1），< 1 → 拉伸（time2 > time1）。
         //  注意：即使此步骤失败也不中止，后续步骤仍可产生音高变化后的音频（不带时间拉伸）。
         if (ctx.playback_rate - 1.0).abs() > 1e-6 && sample_org > 0 {
-            let sr = ctx.sample_rate.max(1) as f64;
-            let source_ms = (sample_org as f64 * 1000.0 / sr).round() as c_int;
-            let time2 = (source_ms as f64 / ctx.playback_rate).round() as c_int;
+            let time1 = sample_org as c_int; // 编辑前采样数
+            let time2 = (sample_org as f64 / ctx.playback_rate).round() as c_int; // 编辑后采样数
             eprintln!(
-                "[vslib] time_stretch: clip_id={} sample_org={} source_ms={} time2={} rate={:.3}",
-                ctx.clip_id, sample_org, source_ms, time2, ctx.playback_rate
+                "[vslib] time_stretch: clip_id={} sample_org={} time1={} time2={} rate={:.3}",
+                ctx.clip_id, sample_org, time1, time2, ctx.playback_rate
             );
-            if source_ms > 0 && time2 > 0 {
+            if time1 > 0 && time2 > 0 {
                 if let Err(e) = check(unsafe {
-                    VslibAddTimeCtrlPnt(proj.0, item_num, source_ms, time2)
+                    VslibAddTimeCtrlPnt(proj.0, item_num, time1, time2)
                 }) {
                     eprintln!(
-                        "[vslib] WARNING: VslibAddTimeCtrlPnt({source_ms}, {time2}): {e} — time stretch skipped"
+                        "[vslib] WARNING: VslibAddTimeCtrlPnt({time1}, {time2}): {e} — time stretch skipped"
                     );
                 }
             }
