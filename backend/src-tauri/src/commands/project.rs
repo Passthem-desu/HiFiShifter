@@ -3,6 +3,7 @@ use crate::project::{
     CustomScale, ProjectFile,
 };
 use crate::state::AppState;
+use crate::synth_clip_cache;
 use std::fs;
 use std::path::PathBuf;
 use tauri::{State, Window};
@@ -27,9 +28,8 @@ fn normalize_beats_per_bar(raw: u32) -> u32 {
 
 fn normalize_grid_size(raw: &str) -> String {
     const VALID: [&str; 21] = [
-        "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64", "1/1d", "1/2d", "1/4d",
-        "1/8d", "1/16d", "1/32d", "1/64d", "1/1t", "1/2t", "1/4t", "1/8t", "1/16t", "1/32t",
-        "1/64t",
+        "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64", "1/1d", "1/2d", "1/4d", "1/8d",
+        "1/16d", "1/32d", "1/64d", "1/1t", "1/2t", "1/4t", "1/8t", "1/16t", "1/32t", "1/64t",
     ];
     if VALID.contains(&raw) {
         return raw.to_string();
@@ -75,7 +75,14 @@ pub(crate) fn save_project_to_path_inner(
     pf.custom_scale = custom_scale;
     // 使用 MessagePack 格式保存（v2），体积更小、解析更快。
     let bytes = rmp_serde::to_vec_named(&pf).map_err(|e| e.to_string())?;
-    fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    // 使用原子保存，防止程序崩溃或断电导致工程文件损坏
+    let tmp_path = path.with_extension("tmp_save");
+    fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
+    // fs::rename 在主流操作系统下会原子性地替换目标文件
+    fs::rename(&tmp_path, &path).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path); // 如果 rename 失败，顺手清理临时文件
+        e.to_string()
+    })?;
 
     {
         let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
@@ -101,17 +108,14 @@ pub(crate) fn save_project_to_path_inner(
     Ok(get_timeline_state_from_ref(state))
 }
 
-
-
-
 pub(super) fn get_project_meta(state: State<'_, AppState>) -> crate::models::ProjectMetaPayload {
     state.project_meta_payload()
 }
 
-
-
-
-pub(super) fn new_project(state: State<'_, AppState>, window: Window) -> crate::models::TimelineStatePayload {
+pub(super) fn new_project(
+    state: State<'_, AppState>,
+    window: Window,
+) -> crate::models::TimelineStatePayload {
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         *tl = crate::state::TimelineState::default();
@@ -133,9 +137,6 @@ pub(super) fn new_project(state: State<'_, AppState>, window: Window) -> crate::
     get_timeline_state(state)
 }
 
-
-
-
 pub(super) fn open_project_dialog() -> serde_json::Value {
     let picked = rfd::FileDialog::new()
         .add_filter("HiFiShifter Project", &["hshp", "hsp", "json"])
@@ -147,9 +148,6 @@ pub(super) fn open_project_dialog() -> serde_json::Value {
         }
     }
 }
-
-
-
 
 pub(super) fn open_project(
     state: State<'_, AppState>,
@@ -171,8 +169,9 @@ pub(super) fn open_project(
         .timeline
         .clips
         .iter()
-        .filter_map(|clip| clip.source_path.clone())
+        .filter_map(|clip| clip.source_path.as_deref()) // 转为借用，消除 99% 的堆分配
         .filter(|sp| !sp.trim().is_empty() && !std::path::Path::new(sp).exists())
+        .map(|sp| sp.to_string()) // 只有确诊丢失的文件，才分配内存收集
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
@@ -183,6 +182,14 @@ pub(super) fn open_project(
             clip.source_end_sec = clip.duration_sec.unwrap_or(clip.length_sec);
         }
     }
+
+    // 打开工程时清除所有渲染缓存，确保旧的预渲染结果不会影响新的播放。
+    // 这是修复"音高分析未完成时播放导致音高编辑不生效"问题的关键步骤。
+    eprintln!("[open_project] Clearing all render caches before loading project...");
+    for clip in &pf.timeline.clips {
+        synth_clip_cache::invalidate_clip_all_caches(&clip.id);
+    }
+
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         *tl = pf.timeline.clone();
@@ -223,9 +230,6 @@ pub(super) fn open_project(
     payload
 }
 
-
-
-
 pub(super) fn save_project(state: State<'_, AppState>, window: Window) -> serde_json::Value {
     let existing_path = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
@@ -237,9 +241,6 @@ pub(super) fn save_project(state: State<'_, AppState>, window: Window) -> serde_
     // No path yet -> Save As
     save_project_as(state, window)
 }
-
-
-
 
 pub(super) fn save_project_as(state: State<'_, AppState>, window: Window) -> serde_json::Value {
     let default_name = {
@@ -260,7 +261,11 @@ pub(super) fn save_project_as(state: State<'_, AppState>, window: Window) -> ser
     }
 }
 
-fn save_project_to_path(state: State<'_, AppState>, window: Window, project_path: String) -> serde_json::Value {
+fn save_project_to_path(
+    state: State<'_, AppState>,
+    window: Window,
+    project_path: String,
+) -> serde_json::Value {
     match save_project_to_path_inner(state.inner(), &window, project_path.clone()) {
         Ok(timeline) => {
             serde_json::json!({"ok": true, "canceled": false, "path": project_path, "timeline": timeline })
@@ -268,9 +273,6 @@ fn save_project_to_path(state: State<'_, AppState>, window: Window, project_path
         Err(e) => serde_json::json!({"ok": false, "error": e}),
     }
 }
-
-
-
 
 pub(super) fn close_window(window: Window) -> serde_json::Value {
     let _ = window.close();

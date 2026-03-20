@@ -9,9 +9,9 @@
 //! 两条链路切换时无需重新分析，直接复用已有的 `clip_midi`。
 //! 若 `clip_midi` 为空（Harvest 尚未完成），则跳过推理并返回原始 PCM。
 
-use crate::state::SynthPipelineKind;
-use super::traits::{Renderer, RenderContext, RendererCapabilities};
+use super::traits::{RenderContext, Renderer, RendererCapabilities};
 use super::utils::{clip_midi_at_time, edit_midi_at_time_or_none};
+use crate::state::SynthPipelineKind;
 
 /// 基于 NSF-HiFiGAN ONNX 的渲染器。
 pub struct HiFiGanRenderer;
@@ -79,15 +79,18 @@ impl HiFiGanRenderer {
         let sr = ctx.sample_rate;
         let seg_start_frame = (ctx.seg_start_sec * sr as f64).round().max(0.0) as u64;
         let seg_end_frame = (ctx.seg_end_sec * sr as f64).round().max(0.0) as u64;
+        // 直接引用上下文里的 pitch_edit，不再 to_vec()
         let curves_snapshot = crate::pitch_editing::PitchCurvesSnapshot {
             frame_period_ms: fp,
-            pitch_orig: vec![],  // 离线路径不需要 pitch_orig 参与 hash
-            pitch_edit: pitch_edit.to_vec(),
+            pitch_orig: &[],
+            pitch_edit,
         };
-        let mut extra_curves = std::collections::HashMap::new();
-        if let Some(curve) = formant_shift_curve {
-            extra_curves.insert("formant_shift_cents".to_string(), curve.clone());
-        }
+
+        // 构建元组数组，不再 new() HashMap 并 clone() 大数组
+        let extra_curves = formant_shift_curve
+            .map(|c| vec![("formant_shift_cents", c.as_slice())])
+            .unwrap_or_default();
+
         let param_hash = crate::synth_clip_cache::compute_param_hash(
             ctx.clip_id,
             seg_start_frame,
@@ -95,25 +98,27 @@ impl HiFiGanRenderer {
             sr,
             self.id(),
             &curves_snapshot,
-            &extra_curves,
-            &std::collections::HashMap::new(), // HiFiGAN 不支持 extra_params
+            extra_curves,
+            &std::collections::HashMap::new(),
         );
         let cache_key = crate::synth_clip_cache::SynthClipCacheKey {
             clip_id: ctx.clip_id.to_string(),
             param_hash,
         };
-
         // 命中缓存：直接返回 mono PCM（从 stereo 取左声道）
         {
             let mut cache = crate::synth_clip_cache::global_synth_clip_cache()
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             if let Some(entry) = cache.get(&cache_key) {
-                let frames = (entry.pcm_stereo.len() / 2).min(ctx.mono_pcm.len());
-                let mut mono_out = vec![0.0f32; ctx.mono_pcm.len()];
-                for f in 0..frames {
-                    mono_out[f] = entry.pcm_stereo[f * 2];
-                }
+                let mut mono_out: Vec<f32> = entry
+                    .pcm_stereo
+                    .iter()
+                    .step_by(2)
+                    .take(ctx.mono_pcm.len())
+                    .copied()
+                    .collect();
+                mono_out.resize(ctx.mono_pcm.len(), 0.0);
                 return Ok(mono_out);
             }
         }
@@ -126,13 +131,20 @@ impl HiFiGanRenderer {
         let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
 
         // 构造共振峰偏移回调
-        let formant_curve_owned: Option<Vec<f32>> = formant_shift_curve.cloned();
+        let fp_local = fp.max(0.1);
+        let time_to_idx_mul = 1000.0 / fp_local;
+
         let formant_shift_fn = move |abs_time_sec: f64| -> f32 {
-            let Some(ref curve) = formant_curve_owned else { return 0.0 };
-            if curve.is_empty() { return 0.0; }
-            let fp_local = fp.max(0.1);
-            let idx_f = (abs_time_sec.max(0.0) * 1000.0) / fp_local;
-            if !idx_f.is_finite() { return 0.0; }
+            let Some(curve) = formant_shift_curve else {
+                return 0.0;
+            };
+            if curve.is_empty() {
+                return 0.0;
+            }
+            let idx_f = abs_time_sec.max(0.0) * time_to_idx_mul;
+            if !idx_f.is_finite() {
+                return 0.0;
+            }
             let i0 = idx_f.floor().max(0.0) as usize;
             let i1 = (i0 + 1).min(curve.len().saturating_sub(1));
             let frac = (idx_f - i0 as f64).clamp(0.0, 1.0) as f32;
@@ -156,7 +168,11 @@ impl HiFiGanRenderer {
                     Some(v) => v,
                     None => orig,
                 };
-                if target.is_finite() && target > 0.0 { target } else { 0.0 }
+                if target.is_finite() && target > 0.0 {
+                    target
+                } else {
+                    0.0
+                }
             },
             formant_shift_fn,
             chunk_sec,
@@ -217,13 +233,20 @@ impl HiFiGanRenderer {
         let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
 
         // 构造共振峰偏移回调
-        let formant_curve_owned: Option<Vec<f32>> = formant_shift_curve.cloned();
+        let fp_local = fp.max(0.1);
+        let time_to_idx_mul = 1000.0 / fp_local;
+
         let formant_shift_fn = move |abs_time_sec: f64| -> f32 {
-            let Some(ref curve) = formant_curve_owned else { return 0.0 };
-            if curve.is_empty() { return 0.0; }
-            let fp_local = fp.max(0.1);
-            let idx_f = (abs_time_sec.max(0.0) * 1000.0) / fp_local;
-            if !idx_f.is_finite() { return 0.0; }
+            let Some(curve) = formant_shift_curve else {
+                return 0.0;
+            };
+            if curve.is_empty() {
+                return 0.0;
+            }
+            let idx_f = abs_time_sec.max(0.0) * time_to_idx_mul;
+            if !idx_f.is_finite() {
+                return 0.0;
+            }
             let i0 = idx_f.floor().max(0.0) as usize;
             let i1 = (i0 + 1).min(curve.len().saturating_sub(1));
             let frac = (idx_f - i0 as f64).clamp(0.0, 1.0) as f32;
@@ -246,7 +269,11 @@ impl HiFiGanRenderer {
                     Some(v) => v,
                     None => orig,
                 };
-                if target.is_finite() && target > 0.0 { target } else { 0.0 }
+                if target.is_finite() && target > 0.0 {
+                    target
+                } else {
+                    0.0
+                }
             },
             formant_shift_fn,
             chunk_sec,
