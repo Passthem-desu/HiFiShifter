@@ -74,7 +74,7 @@ export const enUS = {
     output_path: "Output Path",
     hints: "Hints",
     hint_drag_clip:
-        "Drag clips on timeline to move start (snap depends on Grid Snap; hold modifier to toggle)",
+        "Drag clips on timeline to move start (snaps to grid; hold Shift for free movement)",
     hint_add_point: "Double click in parameter panel to add points",
     hint_drag_point: "Drag points to edit the curve",
     hint_drop_audio: "Drop audio file onto app to import and analyze",
@@ -294,7 +294,7 @@ export const enUS = {
     kb_pianoroll_shift_param_down_selection: "Shift Param Down (selection range)",
     kb_modifier_slip_edit: "Slip Edit (hold while dragging clip)",
     kb_modifier_stretch: "Time Stretch (hold while dragging edge)",
-    kb_modifier_no_snap: "Toggle Snap (hold while dragging)",
+    kb_modifier_no_snap: "Free Movement (hold while dragging clip)",
     kb_modifier_copy_drag: "Copy Drag (hold while dragging clip)",
     kb_modifier_pr_vzoom: "Vertical Zoom (hold + scroll)",
     kb_modifier_param_morph: "Param Morph (hold inside param selection)",
@@ -411,9 +411,9 @@ export const enUS = {
     scale_highlight_off: "Off",
 
     // Modifier key rename
-    kb_modifier_toggle_snap: "Toggle Snap (hold while dragging)",
+    kb_modifier_toggle_snap: "Free Movement (hold while dragging clip)",
     hint_toggle_snap:
-        "Hold modifier to toggle snap behavior (snap/free depending on Grid Snap setting)",
+        "Hold Shift while dragging a clip for free movement; otherwise clip dragging snaps to grid",
 
     // File browser enhancements
     fb_regex: "Regex",

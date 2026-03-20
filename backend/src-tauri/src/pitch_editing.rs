@@ -543,12 +543,25 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let formant_processing = matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
         && hifigan_formant_shift_active_for_clip(entry, clip, clip_start_sec);
 
+    // 当处理器声明 handles_time_stretch 且 playback_rate != 1.0 时，
+    // 即使用户没有编辑音高/张力/共振峰，也需要触发处理器渲染以执行 mel 域拉伸。
+    let needs_processor_stretch = {
+        let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+        let handles = crate::renderer::get_processor(kind)
+            .capabilities()
+            .handles_time_stretch;
+        let rate = (clip.playback_rate as f64).max(1e-6);
+        handles && (rate - 1.0).abs() > 1e-6
+    };
+
     // v2 semantics: do nothing until the user actually modified the edit curve.
     // This avoids treating auto-synced `pitch_edit` (e.g. copied from pitch_orig) as an edit.
+    // 例外：needs_processor_stretch 时必须进入处理器以执行 mel 拉伸。
     if !entry.pitch_edit_user_modified
         && !extra_processing
         && !tension_processing
         && !formant_processing
+        && !needs_processor_stretch
     {
         return Ok(false);
     }
@@ -578,7 +591,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let seg_end_sec = seg_start_sec + (expected_out_frames as f64) / (sample_rate.max(1) as f64);
     let has_pitch_user_edit =
         any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec);
-    if !has_pitch_user_edit && !extra_processing && !tension_processing && !formant_processing {
+    if !has_pitch_user_edit && !extra_processing && !tension_processing && !formant_processing && !needs_processor_stretch {
         return Ok(false);
     }
 
@@ -648,7 +661,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
                 seg_end_sec,
             );
             if !has_effective_pitch_change
-                && !(extra_processing || tension_processing || formant_processing)
+                && !(extra_processing || tension_processing || formant_processing || needs_processor_stretch)
             {
                 return Ok(false);
             }
@@ -853,18 +866,31 @@ pub fn does_clip_need_processor_render(
     let formant_processing = matches!(algo, PitchEditAlgorithm::NsfHifiganOnnx)
         && hifigan_formant_shift_active_for_clip(entry, clip, clip_start_sec);
 
+    // 当处理器声明 handles_time_stretch 且 playback_rate != 1.0 时，
+    // 即使用户没有编辑音高，也需要触发处理器预渲染以执行 mel 域拉伸。
+    let needs_processor_stretch = {
+        let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+        let handles = crate::renderer::get_processor(kind)
+            .capabilities()
+            .handles_time_stretch;
+        let rate = (clip.playback_rate as f64).max(1e-6);
+        handles && (rate - 1.0).abs() > 1e-6
+    };
+
     // v2 semantics: only treat pitch edit as active after the user modified the edit curve.
     // Otherwise `pitch_edit` may be auto-synced to `pitch_orig` and contain non-zero MIDI values,
     // which should NOT trigger synthesis / prerender.
+    // 例外：needs_processor_stretch 时必须触发预渲染以执行 mel 拉伸。
     if !entry.pitch_edit_user_modified
         && !extra_processing
         && !tension_processing
         && !formant_processing
+        && !needs_processor_stretch
     {
         return false;
     }
 
-    if extra_processing || tension_processing || formant_processing {
+    if extra_processing || tension_processing || formant_processing || needs_processor_stretch {
         return true;
     }
 

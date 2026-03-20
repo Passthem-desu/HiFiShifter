@@ -221,7 +221,13 @@ export function useEditDrag(deps: {
                 drag.type === "trim_right" ||
                 drag.type === "stretch_left" ||
                 drag.type === "stretch_right";
-            if (shouldSnap && (gridSnapEnabled !== isModifierActive(noSnapKb, ev))) beat = snapBeat(beat);
+            if (
+                shouldSnap &&
+                gridSnapEnabled &&
+                !isModifierActive(noSnapKb, ev)
+            ) {
+                beat = snapBeat(beat);
+            }
 
             const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
             if (!clipNow) return;

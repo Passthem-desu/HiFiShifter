@@ -4,6 +4,9 @@ use tauri::State;
 
 use super::common::guard_waveform_command;
 
+const WAVEFORM_COLUMNS_MIN: usize = 16;
+const WAVEFORM_COLUMNS_MAX: usize = 65_536;
+
 // ===================== waveform peaks =====================
 
 pub(super) fn get_waveform_peaks_segment(
@@ -14,7 +17,7 @@ pub(super) fn get_waveform_peaks_segment(
     columns: usize,
 ) -> waveform::WaveformPeaksSegmentPayload {
     let hop = 256usize;
-    let cols = columns.clamp(16, 8192);
+    let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
 
     let peaks = match state.get_or_compute_waveform_peaks(&source_path, hop) {
         Ok(p) => p,
@@ -116,7 +119,7 @@ pub(super) fn get_root_mix_waveform_peaks_segment(
             c.muted = false;
         }
 
-        let cols = columns.clamp(16, 8192);
+        let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
         let opts = crate::mixdown::MixdownOptions {
             sample_rate: 44100,
             start_sec,
@@ -255,7 +258,7 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
             c.muted = false;
         }
 
-        let cols = columns.clamp(16, 8192);
+        let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
         let opts = crate::mixdown::MixdownOptions {
             sample_rate: 44100,
             start_sec,
@@ -324,4 +327,37 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
             max: out_max,
         }
     })
+}
+
+// ===================== v2 mipmap 二进制传输 =====================
+
+/// 获取指定级别的波形 mipmap 数据（二进制格式）
+///
+/// 返回 Vec<u8>，Tauri 会传输为 number[]（JS 侧需转 ArrayBuffer），
+/// 前端通过 DataView + Float32Array 直接读取。
+///
+/// 二进制协议：[Header 20B] [min f32[]] [max f32[]]
+pub(super) fn get_waveform_mipmap_binary(
+    state: State<'_, AppState>,
+    source_path: String,
+    level: u8,
+) -> Vec<u8> {
+    let level = (level as usize).min(2);
+    match state.get_or_compute_waveform_peaks_v2(&source_path) {
+        Ok(data) => data.to_binary_level(level),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// 预加载所有级别的 mipmap 数据（音频加载时调用）
+///
+/// 触发 mipmap 计算并缓存到内存 + 磁盘，避免首次渲染时的延迟。
+pub(super) fn preload_waveform_mipmap(
+    state: State<'_, AppState>,
+    source_path: String,
+) -> serde_json::Value {
+    match state.get_or_compute_waveform_peaks_v2(&source_path) {
+        Ok(_) => serde_json::json!({"ok": true}),
+        Err(e) => serde_json::json!({"ok": false, "error": e}),
+    }
 }

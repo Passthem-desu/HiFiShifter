@@ -52,17 +52,19 @@ const TimeRulerMarks = React.memo(function TimeRulerMarks({
     return bars.slice(start, end);
   }, [bars, secPerBeat, pxPerSec, scrollLeft, viewportWidth]);
 
-  return (
-    <>
-      {visibleBars.map((m) => (
-        <div
-          key={m.beat}
-          className="absolute top-0 bottom-0 text-[10px] text-qt-text-muted pt-1"
-          style={{ left: m.beat * secPerBeat * pxPerSec }}
-        >
-          <div className="pl-1 border-l border-qt-border h-2">{m.label}</div>
-        </div>
-      ))}
+    return (
+        <>
+            {visibleBars.map((m) => (
+                <div
+                    key={m.beat}
+                    className="absolute top-0 bottom-0 text-[10px] text-qt-text-muted pt-1"
+                    style={{ left: m.beat * secPerBeat * pxPerSec }}
+                >
+                    <div className="pl-1 border-l border-qt-border h-2">
+                        {m.label}
+                    </div>
+                </div>
+            ))}
 
       {Number.isFinite(boundaryLeft) && boundaryLeft >= -2 ? (
         <div

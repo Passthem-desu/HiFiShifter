@@ -38,6 +38,7 @@ export const ClipEdgeHandles: React.FC<{
                     cursor: altPressed ? "col-resize" : "ew-resize",
                 }}
                 onPointerDown={(e) => {
+                    if (e.button !== 0) return;
                     e.preventDefault();
                     e.stopPropagation();
                     if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
@@ -91,6 +92,7 @@ export const ClipEdgeHandles: React.FC<{
                     cursor: altPressed ? "col-resize" : "ew-resize",
                 }}
                 onPointerDown={(e) => {
+                    if (e.button !== 0) return;
                     e.preventDefault();
                     e.stopPropagation();
                     if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
