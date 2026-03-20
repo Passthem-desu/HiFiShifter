@@ -1,3 +1,15 @@
+/**
+ * PianoRoll 渲染模块
+ *
+ * 负责钢琴卷帘界面的可视化渲染，包括：
+ * - 音高网格和键盘可视化
+ * - 音频波形渲染
+ * - 参数曲线绘制（音高、音量等）
+ * - 选区、播放头等交互元素
+ *
+ * @module render
+ */
+
 import type {
     ParamMorphOverlay,
     ParamName,
@@ -10,8 +22,8 @@ import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./constants";
 import { framesToTime, timeToPixel } from "./utils";
 import { resolveSecondaryOverlayValues } from "./secondaryOverlaySelection";
 import {
-    processWaveformPeaks,
-    renderWaveformCanvas,
+    renderWaveform,
+    type WaveformRenderParams,
 } from "../../../utils/waveformRenderer";
 import { resolveScaleNotes } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
@@ -346,7 +358,7 @@ export function drawPianoRoll(args: {
         pitchAnalysisPending,
         waveformColors = {
             fill: "rgba(255,255,255,0.2)",
-            stroke: "rgba(255,255,255,0.7)",
+            stroke: "rgba(255,255,255,0.5)",
         },
         detectedPitchCurves,
         isDark = true,
@@ -593,10 +605,13 @@ export function drawPianoRoll(args: {
                 : false;
 
             if (isScaleNote) {
-                ctx.strokeStyle = isDark ? "rgba(255,200,80,0.22)" : "rgba(200,120,20,0.22)";
+                ctx.strokeStyle = isDark
+                    ? "rgba(255,200,80,0.22)"
+                    : "rgba(200,120,20,0.22)";
                 ctx.lineWidth = 2;
             } else {
-                ctx.strokeStyle = pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
+                ctx.strokeStyle =
+                    pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
                 ctx.lineWidth = 1;
             }
             ctx.beginPath();
@@ -605,6 +620,30 @@ export function drawPianoRoll(args: {
             ctx.stroke();
         }
     }
+
+    // 创建离屏 canvas 缓冲（复用，避免每帧创建）
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const drawPianoRollRef = drawPianoRoll as unknown as {
+        _offCanvas?: HTMLCanvasElement;
+    };
+    const offCanvas =
+        drawPianoRollRef._offCanvas || document.createElement("canvas");
+    drawPianoRollRef._offCanvas = offCanvas;
+    const offDpr = Math.max(1, window.devicePixelRatio || 1);
+    const displayedOffW = Math.max(1, w);
+    const displayedOffH = Math.max(1, h);
+    const internalOffW = Math.max(1, Math.floor(displayedOffW * offDpr));
+    const internalOffH = Math.max(1, Math.floor(displayedOffH * offDpr));
+    if (offCanvas.width !== internalOffW) {
+        offCanvas.width = internalOffW;
+    }
+    if (offCanvas.height !== internalOffH) {
+        offCanvas.height = internalOffH;
+    }
+    offCanvas.style.width = `${displayedOffW}px`;
+    offCanvas.style.height = `${displayedOffH}px`;
+    const offCtx = offCanvas.getContext("2d");
+    if (!offCtx) return;
 
     // Background waveform: per-clip 叠加绘制
     // peaks 数据覆盖整个 source 文件，渲染时根据 sourceStartSec/playbackRate 计算偏移，
@@ -619,54 +658,147 @@ export function drawPianoRoll(args: {
         const sourceDurSec =
             entry.sourceDurationSec > 0 ? entry.sourceDurationSec : pDurSec;
 
-        // clip 在 canvas 上的可视 x 范围
-        const clipStartX = entry.startSec * pxPerSec - scrollLeft;
+        const clipStartSec = entry.startSec;
+        const clipEndSec = clipStartSec + entry.lengthSec;
         const clipWidthPx = entry.lengthSec * pxPerSec;
         if (clipWidthPx <= 0) continue;
+
+        // 只渲染当前视口内的片段，避免高缩放时创建超大离屏 canvas
+        const visibleClipStartSec = Math.max(clipStartSec, visibleStartSec);
+        const visibleClipEndSec = Math.min(
+            clipEndSec,
+            visibleStartSec + visibleDurSec,
+        );
+        if (visibleClipEndSec <= visibleClipStartSec) continue;
+
+        const visibleClipStartX = visibleClipStartSec * pxPerSec - scrollLeft;
+        const visibleClipWidthPx = Math.max(
+            1,
+            Math.ceil((visibleClipEndSec - visibleClipStartSec) * pxPerSec),
+        );
 
         // peaks 覆盖整个 source 文件（0 ~ sourceDurSec），列数 = peaksCols
         const peaksCols = pMin.length;
 
-        // 整个 source 文件在 timeline 域的像素宽度 = (sourceDurSec / pr) * pxPerSec
-        const sourceWidthPx = (sourceDurSec / pr) * pxPerSec;
-        // sourceStart 对应的 timeline 域偏移量（像素）= (sourceStartSec / pr) * pxPerSec
-        const trimOffsetPx = (sourceStartSec / pr) * pxPerSec;
+        // 计算可见区域的 source 范围
+        const visibleSourceStartSec = Math.max(
+            0,
+            sourceStartSec + (visibleClipStartSec - clipStartSec) * pr,
+        );
+        const visibleSourceEndSec = Math.min(
+            sourceDurSec,
+            sourceStartSec + (visibleClipEndSec - clipStartSec) * pr,
+        );
+        const visibleSourceDurSec = Math.max(
+            0.001,
+            visibleSourceEndSec - visibleSourceStartSec,
+        );
 
-        // 处理波形：1:1 映射 peaks 列
-        const processed = processWaveformPeaks({
-            min: pMin,
-            max: pMax,
-            startSec: 0,
-            durSec: pDurSec,
-            visibleStartSec: 0,
-            visibleDurSec: pDurSec,
-            targetWidth: peaksCols,
-        });
+        // 计算在 peaks 数组中的范围（根据时间比例）
+        const startRatio = visibleSourceStartSec / sourceDurSec;
+        const endRatio = visibleSourceEndSec / sourceDurSec;
+        const sourceStartCol = Math.floor(startRatio * peaksCols);
+        const sourceEndCol = Math.min(
+            peaksCols,
+            Math.ceil(endRatio * peaksCols),
+        );
+        const visibleCols = Math.max(2, sourceEndCol - sourceStartCol);
+
+        // 计算可见区域的像素宽度
+        const visibleSourceColsPx = visibleClipWidthPx;
+
+        // 目标采样宽度：每像素 2 个采样点，保证精度同时控制数据量
+        const targetRenderWidth = Math.max(
+            2,
+            Math.min(Math.floor(visibleSourceColsPx * 2), visibleCols),
+        );
+
+        // 直接从 peaks 数据构建 interleaved Float32Array（内联 resample，不依赖 waveform-data.js）
+        const sliceMin = pMin.slice(sourceStartCol, sourceEndCol);
+        const sliceMax = pMax.slice(sourceStartCol, sourceEndCol);
+        const resampledWidth = Math.max(1, Math.min(targetRenderWidth, sliceMin.length));
+        const interleavedPeaks = new Float32Array(resampledWidth * 2);
+        const srcLen = sliceMin.length;
+        if (resampledWidth >= srcLen) {
+            // 上采样：线性插值
+            for (let i = 0; i < resampledWidth; i++) {
+                const srcPos = srcLen > 1 ? (i / (resampledWidth - 1)) * (srcLen - 1) : 0;
+                const idx = Math.floor(srcPos);
+                const frac = srcPos - idx;
+                if (idx >= srcLen - 1) {
+                    interleavedPeaks[i * 2] = sliceMin[srcLen - 1];
+                    interleavedPeaks[i * 2 + 1] = sliceMax[srcLen - 1];
+                } else {
+                    interleavedPeaks[i * 2] = sliceMin[idx] * (1 - frac) + sliceMin[idx + 1] * frac;
+                    interleavedPeaks[i * 2 + 1] = sliceMax[idx] * (1 - frac) + sliceMax[idx + 1] * frac;
+                }
+            }
+        } else {
+            // 降采样：每像素取 min/max 聚合
+            for (let i = 0; i < resampledWidth; i++) {
+                const srcStart = (i / resampledWidth) * srcLen;
+                const srcEnd = ((i + 1) / resampledWidth) * srcLen;
+                const iStart = Math.max(0, Math.floor(srcStart));
+                const iEnd = Math.min(srcLen - 1, Math.ceil(srcEnd));
+                let pMinV = Infinity;
+                let pMaxV = -Infinity;
+                for (let j = iStart; j <= iEnd; j++) {
+                    if (sliceMin[j] < pMinV) pMinV = sliceMin[j];
+                    if (sliceMax[j] > pMaxV) pMaxV = sliceMax[j];
+                }
+                interleavedPeaks[i * 2] = pMinV === Infinity ? 0 : pMinV;
+                interleavedPeaks[i * 2 + 1] = pMaxV === -Infinity ? 0 : pMaxV;
+            }
+        }
+
+        // 使用固定尺寸的离屏 canvas，避免缩放过程中频繁重设宽度导致闪烁
+        offCtx.setTransform(offDpr, 0, 0, offDpr, 0, 0);
+        offCtx.clearRect(0, 0, displayedOffW, displayedOffH);
+
+        // 构建 renderWaveform 参数：仅在离屏画布左侧渲染当前可见片段
+        // PianoRoll 中波形仅作为背景参考，无需 clip 级别的增益/淡入淡出
+        const pianoRollWfParams: WaveformRenderParams = {
+            canvasWidth: visibleClipWidthPx,
+            canvasHeight: displayedOffH,
+            centerY: displayedOffH / 2,
+            sourceStartSec: visibleSourceStartSec,
+            clipDuration: visibleSourceDurSec / pr,
+            playbackRate: pr,
+            sourceDurationSec: sourceDurSec,
+            volumeGain: 1,
+            fadeInSec: 0,
+            fadeOutSec: 0,
+            fadeInCurve: "linear",
+            fadeOutCurve: "linear",
+            dataStartSec: visibleSourceStartSec,
+            dataDurationSec: visibleSourceDurSec,
+        };
+
+        // 渲染波形（jitter 抖动线模式）
+        renderWaveform(offCtx, interleavedPeaks, pianoRollWfParams, waveformColors.stroke, 0.5, "jitter");
+
+        // 计算渲染目标位置：clip 在主 canvas 上的起始位置
+        const destX = visibleClipStartX;
 
         // 裁剪到 clip 的可视 x 范围，避免溢出到相邻 clip
         ctx.save();
         ctx.beginPath();
-        ctx.rect(clipStartX, 0, clipWidthPx, h);
+        ctx.rect(visibleClipStartX, 0, visibleClipWidthPx, h);
         ctx.clip();
 
-        // 平移：先到 clip 起始位置，再向左偏移 sourceStart 部分
-        // 这样 peaks 的 sourceStart 位置对齐到 clipStartX
-        ctx.translate(clipStartX - trimOffsetPx, 0);
-
-        // 缩放：将 peaksCols 列映射到整个 source 在 timeline 上的宽度
-        if (peaksCols > 0 && sourceWidthPx > 0) {
-            ctx.scale(sourceWidthPx / peaksCols, 1);
-        }
-
-        renderWaveformCanvas(ctx, processed, {
-            width: peaksCols,
-            height: h,
-            fillColor: waveformColors.fill,
-            strokeColor: waveformColors.stroke,
-            barWidth: 1.5,
-            centerY: h * 0.5,
-            amplitude: h * 0.5,
-        });
+        // 使用 drawImage 精确绘制
+        ctx.globalAlpha = 0.5;
+        ctx.drawImage(
+            offCanvas,
+            0,
+            0,
+            Math.max(1, Math.floor(visibleClipWidthPx * offDpr)),
+            internalOffH,
+            destX,
+            0,
+            visibleClipWidthPx,
+            h,
+        );
 
         ctx.restore();
     }

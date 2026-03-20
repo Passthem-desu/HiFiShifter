@@ -51,11 +51,13 @@ mod reaper_parser;
 #[path = "audio/sstretch.rs"]
 mod sstretch;
 mod state;
-#[path = "vocoder/streaming_world.rs"]
-mod streaming_world;
 mod temp_manager;
 #[path = "audio/time_stretch.rs"]
 mod time_stretch;
+#[path = "audio/waveform.rs"]
+mod waveform;
+#[path = "audio/waveform_disk_cache.rs"]
+mod waveform_disk_cache;
 #[path = "import/vocalshifter_clipboard.rs"]
 mod vocalshifter_clipboard;
 #[path = "import/vocalshifter_import.rs"]
@@ -63,14 +65,14 @@ mod vocalshifter_import;
 #[cfg(feature = "vslib")]
 #[path = "vocoder/vslib.rs"]
 mod vslib;
-#[path = "audio/waveform.rs"]
-mod waveform;
-#[path = "audio/waveform_disk_cache.rs"]
-mod waveform_disk_cache;
 #[path = "vocoder/world.rs"]
 mod world;
 #[path = "vocoder/world_vocoder.rs"]
 mod world_vocoder;
+#[path = "vocoder/streaming_world.rs"]
+mod streaming_world;
+#[path = "audio/hfspeaks_v2.rs"]
+mod hfspeaks_v2;
 
 use tauri::Manager;
 
@@ -177,10 +179,11 @@ pub fn run() {
             commands::pick_output_path,
             commands::pick_directory,
             commands::open_midi_dialog,
-            commands::get_waveform_peaks_segment,
             commands::get_root_mix_waveform_peaks_segment,
             commands::get_track_mix_waveform_peaks_segment,
             commands::clear_waveform_cache,
+            commands::get_waveform_mipmap_binary,
+            commands::preload_waveform_mipmap,
             commands::import_audio_item,
             commands::import_audio_bytes,
             commands::add_track,

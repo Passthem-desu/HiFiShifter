@@ -43,6 +43,8 @@ import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../features/keybindings/types";
 import { webApi } from "../../services/webviewApi";
+import { getDynamicProjectSec } from "../../features/session/projectBoundary";
+import { waveformMipmapStore } from "../../utils/waveformMipmapStore";
 
 import {
     BackgroundGrid,
@@ -738,9 +740,15 @@ export const TimelinePanel: React.FC = () => {
             onSingleSelect: handleSelectionRectSingleSelect,
         });
 
-    const contentWidth = useMemo(() => {
-        return Math.max(8 * (60 / Math.max(1, s.bpm)), s.projectSec) * pxPerSec;
-    }, [s.projectSec, pxPerSec, s.bpm]);
+    const dynamicProjectSec = useMemo(
+        () => getDynamicProjectSec(s.clips),
+        [s.clips],
+    );
+
+    const contentWidth = useMemo(
+        () => Math.max(1, Math.ceil(dynamicProjectSec * pxPerSec)),
+        [dynamicProjectSec, pxPerSec],
+    );
 
     const dropExtraRows =
         (dropPreview && !dropPreview.trackId ? 1 : 0) +
@@ -749,17 +757,51 @@ export const TimelinePanel: React.FC = () => {
 
     const bars = useMemo(() => {
         const beatsPerBar = Math.max(1, Math.round(s.beats || 4));
-        const secPerBeat = 60 / Math.max(1, s.bpm);
+        const secPerBeatLocal = 60 / Math.max(1, s.bpm);
         // totalBeats 必须用秒/每拍换算，确保覆盖整个 projectSec 范围
-        const totalBeats = Math.max(1, Math.ceil(s.projectSec / secPerBeat));
+        const totalBeats = Math.max(
+            1,
+            Math.ceil(dynamicProjectSec / secPerBeatLocal),
+        );
+        const totalBars = Math.max(1, Math.ceil(totalBeats / beatsPerBar));
+
+        let startBarIndex = 0;
+        let endBarIndex = totalBars;
+
+        if (Number.isFinite(viewportWidth) && viewportWidth > 0) {
+            const beatPx = Math.max(1e-9, secPerBeatLocal * pxPerSec);
+            const bufferPx = Math.max(240, viewportWidth * 0.5);
+            const leftPx = Math.max(0, scrollLeft - bufferPx);
+            const rightPx = scrollLeft + viewportWidth + bufferPx;
+
+            const leftBeat = leftPx / beatPx;
+            const rightBeat = rightPx / beatPx;
+
+            startBarIndex = Math.max(
+                0,
+                Math.floor(leftBeat / beatsPerBar) - 1,
+            );
+            endBarIndex = Math.min(
+                totalBars,
+                Math.ceil(rightBeat / beatsPerBar) + 1,
+            );
+        }
+
         const result: Array<{ beat: number; label: string }> = [];
-        let barIndex = 1;
-        for (let beat = 0; beat <= totalBeats; beat += beatsPerBar) {
-            result.push({ beat, label: `${barIndex}.1` });
-            barIndex += 1;
+        for (let barIndex = startBarIndex; barIndex <= endBarIndex; barIndex += 1) {
+            const beat = barIndex * beatsPerBar;
+            if (beat > totalBeats) break;
+            result.push({ beat, label: `${barIndex + 1}.1` });
         }
         return result;
-    }, [s.beats, s.projectSec, s.bpm]);
+    }, [
+        s.beats,
+        dynamicProjectSec,
+        s.bpm,
+        viewportWidth,
+        pxPerSec,
+        scrollLeft,
+    ]);
 
     const clipsByTrackId = useMemo(() => {
         const map = new Map<string, typeof s.clips>();
@@ -781,6 +823,20 @@ export const TimelinePanel: React.FC = () => {
         }
 
         return map;
+    }, [s.clips]);
+
+    // ========================================
+    // Mipmap 预加载：clip 列表变化时，对新 sourcePath 自动预加载三级波形数据
+    // ========================================
+    const preloadedPathsRef = useRef(new Set<string>());
+    useEffect(() => {
+        for (const clip of s.clips) {
+            const sp = clip.sourcePath;
+            if (sp && !preloadedPathsRef.current.has(sp)) {
+                preloadedPathsRef.current.add(sp);
+                void waveformMipmapStore.preload(sp);
+            }
+        }
     }, [s.clips]);
 
     /** 将客户端 X 坐标转换为秒（seconds-based，不受 BPM 影响） */
@@ -1718,7 +1774,7 @@ export const TimelinePanel: React.FC = () => {
                 {/* Tracks Area */}
                 <TimelineScrollArea
                     scrollRef={scrollRef}
-                    projectSec={s.projectSec}
+                    projectSec={dynamicProjectSec}
                     bpm={s.bpm}
                     pxPerSec={pxPerSec}
                     setPxPerSec={setPxPerSec}
@@ -2081,6 +2137,7 @@ export const TimelinePanel: React.FC = () => {
                                     rowHeight={rowHeight}
                                     pxPerSec={pxPerSec}
                                     bpm={s.bpm}
+                                    viewportWidthPx={viewportWidth}
                                     viewportStartSec={viewportStartSec}
                                     viewportEndSec={viewportEndSec}
                                     clipWaveforms={s.clipWaveforms}

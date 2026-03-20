@@ -74,7 +74,7 @@ export const koKR = {
     output_path: "출력 경로",
     hints: "힌트",
     hint_drag_clip:
-        "타임라인의 클립을 드래그하여 시작 위치 이동 (스냅은 그리드 스냅 설정에 따름; 수정 키로 전환)",
+        "타임라인의 클립을 드래그하여 시작 위치 이동 (기본은 그리드 스냅, Shift를 누르면 자유 이동)",
     hint_add_point: "파라미터 패널을 더블 클릭하여 포인트 추가",
     hint_drag_point: "포인트를 드래그하여 커브 편집",
     hint_drop_audio: "오디오 파일을 드롭하여 가져오기 및 분석",
@@ -294,7 +294,7 @@ export const koKR = {
         kb_pianoroll_shift_param_down_selection: "파라미터 라인 아래로 이동 (선택 범위)",
     kb_modifier_slip_edit: "Slip 편집 (클립 드래그 중 누르기)",
     kb_modifier_stretch: "타임 스트레치 (엣지 드래그 중 누르기)",
-    kb_modifier_no_snap: "스냅 전환 (드래그 중 누르기)",
+    kb_modifier_no_snap: "자유 이동 (클립 드래그 중 누르기)",
     kb_modifier_copy_drag: "복사 드래그 (클립 드래그 중 누르기)",
     kb_modifier_pr_vzoom: "수직 줌 (누른 채 스크롤)",
     kb_modifier_param_morph: "파라미터 형태 변형 (선택 영역에서 누르기)",
@@ -411,9 +411,9 @@ export const koKR = {
     scale_highlight_off: "끄기",
 
     // 수정 키 리네임
-    kb_modifier_toggle_snap: "스냅 전환 (드래그 중 누르기)",
+    kb_modifier_toggle_snap: "자유 이동 (클립 드래그 중 누르기)",
     hint_toggle_snap:
-        "수정 키를 누르면 스냅 동작 전환 (그리드 스냅 설정에 따라 스냅/자유)",
+        "클립을 드래그하는 동안 Shift를 누르면 자유 이동이 되고, 평소에는 그리드에 스냅됩니다",
 
     // 파일 브라우저 확장
     fb_regex: "정규식",
