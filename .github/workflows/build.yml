@@ -247,10 +247,35 @@ jobs:
         if: runner.os == 'Windows'
         id: determine-windows-arch
         run: |
+          $prod = ''
+          $ver = ''
+          $conf = 'backend/src-tauri/tauri.conf.json'
+          if (Test-Path $conf) {
+            try {
+              $j = Get-Content $conf -Raw | ConvertFrom-Json -ErrorAction Stop
+              if ($j.package) {
+                $prod = $j.package.productName -or $j.package.name
+                $ver = $j.package.version
+              }
+            } catch { }
+          }
+          if (-not $prod -and (Test-Path 'backend/src-tauri/Cargo.toml')) {
+            $toml = Get-Content 'backend/src-tauri/Cargo.toml' -Raw
+            if ($toml -match '^[ \t]*name[ \t]*=[ \t]*"(.*?)"') { $prod = $Matches[1] }
+            if ($toml -match '^[ \t]*version[ \t]*=[ \t]*"(.*?)"') { $ver = $Matches[1] }
+          }
+          if (-not $prod -and (Test-Path 'frontend/package.json')) {
+            try { $pj = Get-Content 'frontend/package.json' -Raw | ConvertFrom-Json -ErrorAction Stop; $prod = $pj.productName -or $pj.name; $ver = $ver -or $pj.version } catch { }
+          }
+          if (-not $prod) { $prod = 'HiFiShifter' }
+          if (-not $ver) { $ver = '0.0.0' }
+          $prodSafe = $prod -replace ' ', '_'
+          $verSafe = $ver -replace '^v', ''
           $rust_host = (rustc -vV | Select-String 'host:').ToString().Split(':')[1].Trim()
           if ($rust_host -match 'aarch64') { $arch = 'arm64' } elseif ($rust_host -match 'x86_64') { $arch = 'x86_64' } else { $arch = $env:PROCESSOR_ARCHITECTURE }
-          $artifact = "windows-$arch"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "artifact-name=$artifact"
+          $base = "${prodSafe}_v${verSafe}_windows-$arch"
+          Write-Host "Artifact base name: $base"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "artifact-name=$base"
         shell: pwsh
 
       - name: Upload portable ZIP (Windows)
@@ -522,6 +547,26 @@ jobs:
         if: runner.os != 'Windows'
         id: determine-platform-arch
         run: |
+          # Determine product and version from common locations (tauri conf, Cargo.toml, frontend package.json)
+          PROD=""
+          VER=""
+          if [ -f backend/src-tauri/tauri.conf.json ]; then
+            PROD=$(node -e "try{const p=require('./backend/src-tauri/tauri.conf.json'); console.log((p.package&&p.package.productName)||(p.package&&p.package.name)||'')}catch(e){console.log('')}" ) || true
+            VER=$(node -e "try{const p=require('./backend/src-tauri/tauri.conf.json'); console.log((p.package&&p.package.version)||'')}catch(e){console.log('')}" ) || true
+          fi
+          if [ -z "$PROD" ] && [ -f backend/src-tauri/Cargo.toml ]; then
+            PROD=$(grep -E '^name\s*=' backend/src-tauri/Cargo.toml | sed -E 's/.*=\s*"(.*)"/\1/' | head -n1)
+            VER=$(grep -E '^version\s*=' backend/src-tauri/Cargo.toml | sed -E 's/.*=\s*"(.*)"/\1/' | head -n1)
+          fi
+          if [ -z "$PROD" ] && [ -f frontend/package.json ]; then
+            PROD=$(node -e "try{const p=require('./frontend/package.json'); console.log(p.productName||p.name||'')}catch(e){console.log('')}" ) || true
+            VER=$(node -e "try{const p=require('./frontend/package.json'); console.log(p.version||'')}catch(e){console.log('')}" ) || true
+          fi
+          PROD=${PROD:-HiFiShifter}
+          VER=${VER:-0.0.0}
+          PROD_SAFE=$(echo "$PROD" | tr ' ' '_')
+          VER_SAFE=$(echo "$VER" | sed 's/^v//')
+
           OS_NAME=$(uname -s || echo unknown)
           ARCH=$(uname -m || echo unknown)
           ART_NAME="unknown-${OS_NAME}-${ARCH}"
@@ -549,7 +594,8 @@ jobs:
             *)
               ART_NAME="unknown-${OS_NAME}-${ARCH}";;
           esac
-          echo "artifact-name=$ART_NAME" >> $GITHUB_OUTPUT
+          FINAL="${PROD_SAFE}_v${VER_SAFE}_${ART_NAME}"
+          echo "artifact-name=$FINAL" >> $GITHUB_OUTPUT
         shell: bash
 
       - name: Upload Unix bundles
