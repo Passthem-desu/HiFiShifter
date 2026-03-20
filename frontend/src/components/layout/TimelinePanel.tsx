@@ -44,6 +44,7 @@ import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../features/keybindings/types";
 import { webApi } from "../../services/webviewApi";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
+import { waveformMipmapStore } from "../../utils/waveformMipmapStore";
 
 import {
     BackgroundGrid,
@@ -799,6 +800,20 @@ export const TimelinePanel: React.FC = () => {
         }
 
         return map;
+    }, [s.clips]);
+
+    // ========================================
+    // Mipmap 预加载：clip 列表变化时，对新 sourcePath 自动预加载三级波形数据
+    // ========================================
+    const preloadedPathsRef = useRef(new Set<string>());
+    useEffect(() => {
+        for (const clip of s.clips) {
+            const sp = clip.sourcePath;
+            if (sp && !preloadedPathsRef.current.has(sp)) {
+                preloadedPathsRef.current.add(sp);
+                void waveformMipmapStore.preload(sp);
+            }
+        }
     }, [s.clips]);
 
     /** 将客户端 X 坐标转换为秒（seconds-based，不受 BPM 影响） */

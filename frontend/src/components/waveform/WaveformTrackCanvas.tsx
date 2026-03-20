@@ -1,5 +1,5 @@
 /**
- * WaveformTrackCanvas - 轨道级波形 Canvas 组件
+ * WaveformTrackCanvas - 轨道级波形 Canvas 组件（v2 mipmap 缓存架构）
  *
  * 核心思想：每条轨道只有一个 Canvas，负责绘制该轨道上所有可见 clip 的波形。
  * 相比之前「每 clip 一个 Canvas」的方案，大幅减少 Canvas 上下文数量（从 O(clip) 降为 O(track)）。
@@ -7,8 +7,9 @@
  * 渲染流程：
  *   1. Canvas 宽度 = 视口可见宽度，通过 CSS left 偏移跟随水平滚动
  *   2. 遍历所有可见 clip，对每个 clip：
- *      a. mipmapCache.getPeaks() 获取该 clip 对应源文件的峰值数据
- *      b. resamplePeaks → toInterleavedFloat32 → applyGainsToPeaks
+ *      a. waveformMipmapStore.getResampledSlice() 获取该 clip 对应源文件的峰值数据
+ *         （整文件级三级 mipmap 缓存 + 零拷贝切片 + 内置 resample）
+ *      b. applyGainsToPeaks 应用增益/淡入淡出
  *      c. ctx.save() / ctx.clip() 限制绘制区域到 clip 的像素边界
  *      d. renderWaveform() 绘制波形
  *      e. ctx.restore()
@@ -17,17 +18,17 @@
  *   - 100+ clip 场景下只需 10-20 个 Canvas 上下文（= 轨道数）
  *   - 无 DOM 布局抖动：clip 拖拽时只需 requestAnimationFrame 重绘 Canvas
  *   - GPU 批量提交：单 Canvas 上所有 drawCall 合并为一次 GPU 提交
+ *   - 整文件级缓存：无 IPC 请求，数据已在前端内存中
+ *   - Float32Array 零拷贝切片：无需每帧分配新 buffer
  *
- * 数据流（完全复用现有基础设施）：
- *   mipmapCache → PeaksData → waveform-data resample → applyGainsToPeaks → renderWaveform
+ * 数据流（v2 mipmap 架构）：
+ *   waveformMipmapStore.getResampledSlice() → interleaved Float32Array → applyGainsToPeaks → renderWaveform
  */
 
 import React from "react";
 import type { ClipInfo } from "../../features/session/sessionTypes";
 import type { FadeCurveType } from "../layout/timeline/paths";
-import { mipmapCache } from "../../utils/mipmapCache";
-import type { PeaksData } from "../../utils/mipmapCache";
-import { resamplePeaks, toInterleavedFloat32 } from "../../utils/waveformDataAdapter";
+import { waveformMipmapStore } from "../../utils/waveformMipmapStore";
 import {
     applyGainsToPeaks,
     renderWaveform,
@@ -58,12 +59,6 @@ export interface WaveformTrackCanvasProps {
     strokeWidth?: number;
 }
 
-/** 单个 clip 的峰值数据缓存条目 */
-interface ClipPeakEntry {
-    clipId: string;
-    peakData: PeaksData;
-}
-
 export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
     props: WaveformTrackCanvasProps,
 ) {
@@ -79,16 +74,9 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
     } = props;
 
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
-    const requestIdRef = React.useRef<number>(0);
 
-    // 节流相关 ref
-    const throttleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-    const pendingFetchRef = React.useRef<(() => void) | null>(null);
-
-    // 每个 clip 的峰值数据映射
-    const [clipPeaks, setClipPeaks] = React.useState<Map<string, PeaksData>>(
-        () => new Map(),
-    );
+    // 强制重绘计数器（mipmap 数据加载完成时 +1 触发重绘）
+    const [redrawTick, setRedrawTick] = React.useState(0);
 
     // 计算视口可见像素宽度（Canvas 物理尺寸固定，不随缩放膨胀）
     const viewportWidthSec = viewportEndSec - viewportStartSec;
@@ -101,101 +89,23 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
     const bufferedEndSec = viewportEndSec + bufferSec;
 
     // ========================================
-    // 获取所有可见 clip 的峰值数据
+    // 监听 mipmap 缓存加载完成事件，触发重绘
     // ========================================
     React.useEffect(() => {
-        if (clips.length === 0) return;
-
-        const doFetch = async () => {
-            const fetchId = ++requestIdRef.current;
-            // 取消排队中的旧 IPC 请求（不影响已发出的请求和其他轨道）
-            mipmapCache.cancelQueued();
-            const newPeaks = new Map<string, PeaksData>();
-
-            // 并行获取所有可见 clip 的峰值数据
-            const promises = clips.map(async (clip) => {
-                if (!clip.sourcePath || !clip.durationSec || clip.durationSec <= 0) {
-                    return null;
-                }
-
-                const clipStart = clip.startSec;
-                const clipEnd = clip.startSec + clip.lengthSec;
-
-                // 计算 clip 与视口的交集（源文件坐标系）
-                const visStart = Math.max(clipStart, bufferedStartSec);
-                const visEnd = Math.min(clipEnd, bufferedEndSec);
-                if (visEnd <= visStart) return null;
-
-                const pr = Math.max(1e-6, clip.playbackRate);
-                const clipLen = clip.lengthSec;
-                const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
-
-                // 可见部分在 clip 内的比例
-                const ratioStart = (visStart - clipStart) / Math.max(1e-6, clipLen);
-                const ratioEnd = (visEnd - clipStart) / Math.max(1e-6, clipLen);
-
-                const stretchedDuration = (clip.durationSec - sourceStartSec) / pr;
-                const sourceTimeStart = Math.max(0, sourceStartSec + ratioStart * stretchedDuration * pr);
-                const sourceTimeEnd = Math.min(clip.durationSec, sourceStartSec + ratioEnd * stretchedDuration * pr);
-                const sourceDuration = Math.max(0.1, sourceTimeEnd - sourceTimeStart);
-
-                // 计算 samplesPerPixel
-                const sampleRate = clip.sourceSampleRate || 44100;
-                const samplesPerPixel = Math.max(1, Math.round(sampleRate / pxPerSec));
-
-                // 计算可见宽度像素
-                const visWidthPx = Math.max(1, Math.ceil((visEnd - visStart) * pxPerSec));
-
-                try {
-                    const data = await mipmapCache.getPeaks(
-                        clip.sourcePath,
-                        samplesPerPixel,
-                        sourceTimeStart,
-                        sourceDuration,
-                        visWidthPx,
-                    );
-                    if (data && fetchId === requestIdRef.current) {
-                        return { clipId: clip.id, peakData: data } as ClipPeakEntry;
-                    }
-                } catch (e) {
-                    console.warn("[WaveformTrackCanvas] Failed to fetch peaks for clip:", clip.id, e);
-                }
-                return null;
-            });
-
-            const results = await Promise.all(promises);
-            if (fetchId !== requestIdRef.current) return;
-
-            for (const r of results) {
-                if (r) newPeaks.set(r.clipId, r.peakData);
-            }
-
-            setClipPeaks(newPeaks);
-        };
-
-        // 节流：16ms 内最多触发一次
-        if (throttleTimerRef.current) {
-            pendingFetchRef.current = doFetch;
-        } else {
-            doFetch();
-            throttleTimerRef.current = setTimeout(() => {
-                throttleTimerRef.current = null;
-                if (pendingFetchRef.current) {
-                    const pending = pendingFetchRef.current;
-                    pendingFetchRef.current = null;
-                    pending();
-                }
-            }, 16);
+        // 收集本轮需要的 sourcePath 集合
+        const neededPaths = new Set<string>();
+        for (const clip of clips) {
+            if (clip.sourcePath) neededPaths.add(clip.sourcePath);
         }
 
-        return () => {
-            if (throttleTimerRef.current) {
-                clearTimeout(throttleTimerRef.current);
-                throttleTimerRef.current = null;
+        const unsub = waveformMipmapStore.addListener((sourcePath, status) => {
+            if (status === "done" && neededPaths.has(sourcePath)) {
+                setRedrawTick((t) => t + 1);
             }
-            pendingFetchRef.current = null;
-        };
-    }, [clips, pxPerSec, bufferedStartSec, bufferedEndSec]);
+        });
+
+        return unsub;
+    }, [clips]);
 
     // ========================================
     // 主渲染逻辑：在单个 Canvas 上绘制所有 clip 的波形
@@ -208,7 +118,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         const displayW = canvasWidthPx;
         const displayH = waveformHeight;
 
-        // Canvas 内部像素 = CSS 尺寸 × dpr（无需人为限制，因为尺寸已由固定像素缓冲控制）
+        // Canvas 内部像素 = CSS 尺寸 × dpr
         const internalW = Math.max(1, Math.floor(displayW * dpr));
         const internalH = Math.max(1, Math.floor(displayH * dpr));
 
@@ -231,16 +141,12 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         // 遍历所有 clip，绘制波形
         for (const clip of clips) {
             if (!clip.sourcePath || !clip.durationSec || clip.durationSec <= 0) continue;
-            if (clip.muted) continue; // 静音 clip 不绘制（改为半透明可选）
-
-            const peakData = clipPeaks.get(clip.id);
-            if (!peakData || peakData.min.length < 2) continue;
 
             const clipStartSec = clip.startSec;
             const clipEndSec = clipStartSec + clip.lengthSec;
             const clipWidthPx = clip.lengthSec * pxPerSec;
 
-            // clip 与视口交集的像素区域（相对于 canvas 左边缘）
+            // clip 与视口交集的像素区域
             const visStartSec = Math.max(clipStartSec, bufferedStartSec);
             const visEndSec = Math.min(clipEndSec, bufferedEndSec);
             if (visEndSec <= visStartSec) continue;
@@ -250,11 +156,38 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             const visRightPx = Math.min(displayW, (visEndSec - canvasStartSec) * pxPerSec);
             const visWidthPx = Math.max(1, Math.ceil(visRightPx - visLeftPx));
 
-            // resample 到可见宽度
-            const { min, max } = resamplePeaks(peakData, visWidthPx);
-            const interleaved = toInterleavedFloat32(min, max);
+            // ========================================
+            // 计算源文件时间范围（可见部分）
+            // ========================================
+            const pr = Math.max(1e-6, clip.playbackRate);
+            const clipLen = clip.lengthSec;
+            const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
+            const sampleRate = clip.sourceSampleRate || 44100;
+            const spp = Math.max(1, Math.round(sampleRate / pxPerSec));
 
-            // 计算 clip 内的偏移（可见区域相对于 clip 起始的偏移像素数）
+            // 可见部分在 clip 内的比例
+            const ratioStart = (visStartSec - clipStartSec) / Math.max(1e-6, clipLen);
+            const ratioEnd = (visEndSec - clipStartSec) / Math.max(1e-6, clipLen);
+
+            const stretchedDuration = (clip.durationSec - sourceStartSec) / pr;
+            const sourceTimeStart = Math.max(0, sourceStartSec + ratioStart * stretchedDuration * pr);
+            const sourceTimeEnd = Math.min(clip.durationSec, sourceStartSec + ratioEnd * stretchedDuration * pr);
+            const sourceDuration = Math.max(0.1, sourceTimeEnd - sourceTimeStart);
+
+            // ========================================
+            // 从 mipmap 缓存获取 resample 后的数据
+            // ========================================
+            const result = waveformMipmapStore.getResampledSlice(
+                clip.sourcePath,
+                spp,
+                sourceTimeStart,
+                sourceDuration,
+                visWidthPx,
+            );
+
+            if (!result || result.interleaved.length < 4) continue;
+
+            // 计算 clip 内的偏移
             const clipPixelOffset = Math.floor((visStartSec - clipStartSec) * pxPerSec);
 
             // 构建渲染参数
@@ -262,7 +195,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 canvasWidth: visWidthPx,
                 canvasHeight: displayH,
                 centerY: displayH / 2,
-                sourceStartSec: Number(clip.sourceStartSec ?? 0) || 0,
+                sourceStartSec,
                 clipDuration: clip.lengthSec,
                 playbackRate: Number(clip.playbackRate ?? 1) || 1,
                 sourceDurationSec: clip.durationSec,
@@ -271,14 +204,14 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 fadeOutSec: Number(clip.fadeOutSec ?? 0) || 0,
                 fadeInCurve: (clip.fadeInCurve as FadeCurveType) ?? "sine",
                 fadeOutCurve: (clip.fadeOutCurve as FadeCurveType) ?? "sine",
-                dataStartSec: peakData.startSec,
-                dataDurationSec: peakData.durationSec,
+                dataStartSec: result.dataStartSec,
+                dataDurationSec: result.dataDurationSec,
                 clipPixelOffset,
                 clipTotalWidthPx: Math.max(1, Math.floor(clipWidthPx)),
             };
 
             // 应用增益（音量 + 淡入淡出）
-            const withGains = applyGainsToPeaks(interleaved, params);
+            const withGains = applyGainsToPeaks(result.interleaved, params);
 
             // 使用 clip 裁剪区域绘制
             ctx.save();
@@ -302,7 +235,6 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         }
     }, [
         clips,
-        clipPeaks,
         canvasWidthPx,
         waveformHeight,
         pxPerSec,
@@ -310,12 +242,10 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         bufferedEndSec,
         strokeColor,
         strokeWidth,
+        redrawTick,
     ]);
 
     // Canvas CSS 定位：相对于 TrackLane 定位
-    // left = bufferedStartSec * pxPerSec（即 canvas 左边缘对应的像素位置）
-    // 但由于 TrackLane 内部 clip 的 left 是 clip.startSec * pxPerSec，
-    // Canvas 也需要使用相同的坐标系，所以 left = bufferedStartSec * pxPerSec
     const canvasLeftPx = bufferedStartSec * pxPerSec;
 
     return (
@@ -327,7 +257,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 top: waveformTop,
                 width: canvasWidthPx,
                 height: waveformHeight,
-                pointerEvents: "none", // 不拦截鼠标事件，交互由 DOM 层处理
+                pointerEvents: "none",
                 zIndex: 0,
             }}
         />

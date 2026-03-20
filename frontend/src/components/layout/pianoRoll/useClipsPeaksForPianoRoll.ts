@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ClipInfo } from "../../../features/session/sessionTypes";
 import { lruGet, lruSet } from "./peaksCache";
-import { mipmapCache } from "../../../utils/mipmapCache";
+import { waveformMipmapStore } from "../../../utils/waveformMipmapStore";
 
 /** 单个 clip 的 peaks 数据条目 */
 /** 单个 clip 的 peaks 数据条目 */
@@ -246,45 +246,39 @@ export function useClipsPeaksForPianoRoll(args: {
         // 异步获取未缓存的 clip peaks (Mipmap优化版)
         void (async () => {
             const results = await Promise.allSettled(
-                toFetch.map(async ({ clip, req, columns }) => {
-                    // Mipmap优化：使用 mipmapCache 获取最佳级别的峰值数据
-                    // getPeaks 内部根据 samplesPerPixel 自动选择级别
-                    
-                    // inflight 去重（使用 mipmap 缓存键）
-                    const level = mipmapCache.selectMipmapLevel(req.samplesPerPixel);
+                toFetch.map(async ({ clip, req }) => {
+                    // 使用 waveformMipmapStore（三级整文件缓存）获取峰值数据
+                    const level = waveformMipmapStore.selectLevel(req.samplesPerPixel);
                     const inflightKey = `${req.sourcePath}|${level}`;
                     let p = clipPeaksInflight.get(inflightKey);
                     if (!p) {
-                        // 使用 Mipmap 缓存获取数据（自动选级 + 跨区块合并）
-                        p = mipmapCache
-                            .getPeaks(
+                        p = (async () => {
+                            // 确保数据已预加载（preload 内部会去重并等待正在进行的加载）
+                            await waveformMipmapStore.preload(req.sourcePath);
+                            const slice = waveformMipmapStore.getSlice(
                                 req.sourcePath,
-                                req.samplesPerPixel,
+                                level,
                                 req.startSec,
                                 req.durSec,
-                                columns,
-                            )
-                            .then((data) => {
-                                if (!data) return null;
-                                const entry: CachedEntry = {
-                                    min: data.min,
-                                    max: data.max,
-                                    startSec: req.startSec,
-                                    durSec: data.min.length * data.divisionFactor / data.sampleRate,
-                                    t: data.timestamp,
-                                };
-                                // 同时更新旧缓存，保持兼容性
-                                lruSet(
-                                    clipPeaksCache,
-                                    req.cacheKey,
-                                    entry,
-                                    CLIP_PEAKS_CACHE_LIMIT,
-                                );
-                                return entry;
-                            })
-                            .finally(() => {
-                                clipPeaksInflight.delete(inflightKey);
-                            });
+                            );
+                            if (!slice) return null;
+                            const entry: CachedEntry = {
+                                min: Array.from(slice.min),
+                                max: Array.from(slice.max),
+                                startSec: req.startSec,
+                                durSec: req.durSec,
+                                t: Date.now(),
+                            };
+                            lruSet(
+                                clipPeaksCache,
+                                req.cacheKey,
+                                entry,
+                                CLIP_PEAKS_CACHE_LIMIT,
+                            );
+                            return entry;
+                        })().finally(() => {
+                            clipPeaksInflight.delete(inflightKey);
+                        });
                         clipPeaksInflight.set(inflightKey, p);
                     }
 

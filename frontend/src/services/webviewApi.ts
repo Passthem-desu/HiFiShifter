@@ -67,8 +67,7 @@ export const webApi = {
     openReaperDialog: projectApi.openReaperDialog,
     importReaperProject: projectApi.importReaperProject,
 
-    // Waveform peaks
-    getWaveformPeaksSegment: waveformApi.getWaveformPeaksSegment,
+    // Waveform peaks (Mix)
     getRootMixWaveformPeaksSegment: waveformApi.getRootMixWaveformPeaksSegment,
     getTrackMixWaveformPeaksSegment: waveformApi.getTrackMixWaveformPeaksSegment,
 

@@ -1,61 +1,17 @@
-import type { WaveformPeaksSegmentPayload, WaveformPeaksV2Payload, WaveformPeaksV2MetaPayload, MipmapLevel } from "../../types/api";
+import type { WaveformPeaksSegmentPayload } from "../../types/api";
 
 import { invoke } from "../invoke";
 
 export const waveformApi = {
-    getWaveformPeaksSegment: (
-        sourcePath: string,
-        startSec: number,
-        durationSec: number,
-        columns: number,
-    ) =>
-        invoke<WaveformPeaksSegmentPayload>(
-            "get_waveform_peaks_segment",
-            sourcePath,
-            startSec,
-            durationSec,
-            columns,
-        ),
+    // ============== Mipmap 二进制 API ==============
 
-    // ============== HFSPeaks v2 API ==============
+    /** 获取指定级别的 mipmap 数据（二进制格式，返回 number[] 需转 ArrayBuffer） */
+    getWaveformMipmapBinary: (sourcePath: string, level: number) =>
+        invoke<number[]>("get_waveform_mipmap_binary", sourcePath, level),
 
-    /** 获取 v2 波形峰值（自动选择 mipmap 级别） */
-    getWaveformPeaksV2: (
-        sourcePath: string,
-        startSec: number,
-        durationSec: number,
-        columns: number,
-        samplesPerPixel: number,
-    ) =>
-        invoke<WaveformPeaksV2Payload>(
-            "get_waveform_peaks_v2",
-            sourcePath,
-            startSec,
-            durationSec,
-            columns,
-            samplesPerPixel,
-        ),
-
-    /** 获取指定 mipmap 级别的波形峰值 */
-    getWaveformPeaksV2Level: (
-        sourcePath: string,
-        startSec: number,
-        durationSec: number,
-        columns: number,
-        level: MipmapLevel,
-    ) =>
-        invoke<WaveformPeaksV2Payload>(
-            "get_waveform_peaks_v2_level",
-            sourcePath,
-            startSec,
-            durationSec,
-            columns,
-            level,
-        ),
-
-    /** 获取波形文件元数据 */
-    getWaveformPeaksV2Meta: (sourcePath: string) =>
-        invoke<WaveformPeaksV2MetaPayload>("get_waveform_peaks_v2_meta", sourcePath),
+    /** 预加载所有级别的 mipmap 数据（音频加载时调用） */
+    preloadWaveformMipmap: (sourcePath: string) =>
+        invoke<{ ok: boolean; error?: string }>("preload_waveform_mipmap", sourcePath),
 
     // ============== Mix 波形 API ==============
 

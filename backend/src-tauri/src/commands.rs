@@ -205,17 +205,6 @@ pub fn open_midi_dialog() -> serde_json::Value {
 // ===================== waveform =====================
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn get_waveform_peaks_segment(
-    state: State<'_, AppState>,
-    source_path: String,
-    start_sec: f64,
-    duration_sec: f64,
-    columns: usize,
-) -> crate::waveform::WaveformPeaksSegmentPayload {
-    waveform::get_waveform_peaks_segment(state, source_path, start_sec, duration_sec, columns)
-}
-
-#[tauri::command(rename_all = "camelCase")]
 pub fn get_root_mix_waveform_peaks_segment(
     state: State<'_, AppState>,
     track_id: String,
@@ -242,38 +231,23 @@ pub fn clear_waveform_cache(state: State<'_, AppState>) -> serde_json::Value {
     waveform::clear_waveform_cache(state)
 }
 
-// ===================== waveform v2 =====================
+// ===================== waveform v2 (二进制 mipmap) =====================
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn get_waveform_peaks_v2(
+pub fn get_waveform_mipmap_binary(
     state: State<'_, AppState>,
     source_path: String,
-    start_sec: f64,
-    duration_sec: f64,
-    columns: usize,
-    samples_per_pixel: f64,
-) -> crate::hfspeaks_v2::PeaksSegmentResult {
-    waveform::get_waveform_peaks_v2(state, source_path, start_sec, duration_sec, columns, samples_per_pixel)
+    level: u8,
+) -> Vec<u8> {
+    waveform::get_waveform_mipmap_binary(state, source_path, level)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn get_waveform_peaks_v2_level(
+pub fn preload_waveform_mipmap(
     state: State<'_, AppState>,
     source_path: String,
-    start_sec: f64,
-    duration_sec: f64,
-    columns: usize,
-    level: usize,
-) -> crate::hfspeaks_v2::PeaksSegmentResult {
-    waveform::get_waveform_peaks_v2_level(state, source_path, start_sec, duration_sec, columns, level)
-}
-
-#[tauri::command(rename_all = "camelCase")]
-pub fn get_waveform_peaks_v2_meta(
-    state: State<'_, AppState>,
-    source_path: String,
-) -> crate::hfspeaks_v2::PeaksResponse {
-    waveform::get_waveform_peaks_v2_meta(state, source_path)
+) -> serde_json::Value {
+    waveform::preload_waveform_mipmap(state, source_path)
 }
 
 // ===================== timeline =====================

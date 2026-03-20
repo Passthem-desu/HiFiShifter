@@ -25,7 +25,6 @@ import {
     renderWaveform,
     type WaveformRenderParams,
 } from "../../../utils/waveformRenderer";
-import { buildWaveformDataFromRaw, extractMinMax, toInterleavedFloat32 } from "../../../utils/waveformDataAdapter";
 import { resolveScaleNotes } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
 
@@ -676,27 +675,49 @@ export function drawPianoRoll(args: {
         // 计算可见区域的像素宽度
         const visibleSourceColsPx = (visibleSourceDurSec / pr) * pxPerSec;
 
-        // 使用 waveform-data.js 进行 resample 降采样
-        // 构建 WaveformData 对象（仅覆盖可见 source 范围的 peaks）
-        const sliceMin = pMin.slice(sourceStartCol, sourceEndCol);
-        const sliceMax = pMax.slice(sourceStartCol, sourceEndCol);
-
         // 目标采样宽度：每像素 2 个采样点，保证精度同时控制数据量
         const targetRenderWidth = Math.max(
             2,
             Math.min(Math.floor(visibleSourceColsPx * 2), visibleCols),
         );
 
-        // 构建 WaveformData 并 resample
-        const wfData = buildWaveformDataFromRaw(sliceMin, sliceMax, entry.peaks?.columns ?? sliceMin.length);
-        const resampledWidth = Math.max(1, Math.min(targetRenderWidth, wfData.length));
-        const resampled = resampledWidth < wfData.length
-            ? wfData.resample({ width: resampledWidth })
-            : wfData;
-        const { min: resMin, max: resMax } = extractMinMax(resampled);
-
-        // 转换为 renderWaveform 需要的 interleaved Float32Array 格式
-        const interleavedPeaks = toInterleavedFloat32(resMin, resMax);
+        // 直接从 peaks 数据构建 interleaved Float32Array（内联 resample，不依赖 waveform-data.js）
+        const sliceMin = pMin.slice(sourceStartCol, sourceEndCol);
+        const sliceMax = pMax.slice(sourceStartCol, sourceEndCol);
+        const resampledWidth = Math.max(1, Math.min(targetRenderWidth, sliceMin.length));
+        const interleavedPeaks = new Float32Array(resampledWidth * 2);
+        const srcLen = sliceMin.length;
+        if (resampledWidth >= srcLen) {
+            // 上采样：线性插值
+            for (let i = 0; i < resampledWidth; i++) {
+                const srcPos = srcLen > 1 ? (i / (resampledWidth - 1)) * (srcLen - 1) : 0;
+                const idx = Math.floor(srcPos);
+                const frac = srcPos - idx;
+                if (idx >= srcLen - 1) {
+                    interleavedPeaks[i * 2] = sliceMin[srcLen - 1];
+                    interleavedPeaks[i * 2 + 1] = sliceMax[srcLen - 1];
+                } else {
+                    interleavedPeaks[i * 2] = sliceMin[idx] * (1 - frac) + sliceMin[idx + 1] * frac;
+                    interleavedPeaks[i * 2 + 1] = sliceMax[idx] * (1 - frac) + sliceMax[idx + 1] * frac;
+                }
+            }
+        } else {
+            // 降采样：每像素取 min/max 聚合
+            for (let i = 0; i < resampledWidth; i++) {
+                const srcStart = (i / resampledWidth) * srcLen;
+                const srcEnd = ((i + 1) / resampledWidth) * srcLen;
+                const iStart = Math.max(0, Math.floor(srcStart));
+                const iEnd = Math.min(srcLen - 1, Math.ceil(srcEnd));
+                let pMinV = Infinity;
+                let pMaxV = -Infinity;
+                for (let j = iStart; j <= iEnd; j++) {
+                    if (sliceMin[j] < pMinV) pMinV = sliceMin[j];
+                    if (sliceMax[j] > pMaxV) pMaxV = sliceMax[j];
+                }
+                interleavedPeaks[i * 2] = pMinV === Infinity ? 0 : pMinV;
+                interleavedPeaks[i * 2 + 1] = pMaxV === -Infinity ? 0 : pMaxV;
+            }
+        }
 
         // 使用 renderWaveform（jitter 模式）渲染到离屏 canvas
         const displayedOffW = Math.max(1, Math.ceil(visibleSourceColsPx));

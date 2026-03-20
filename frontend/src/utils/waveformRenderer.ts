@@ -6,7 +6,7 @@
  * 2. per-pixel min/max 渲染：支持竖线模式（line）和抖动线模式（jitter）（renderWaveform）
  * 3. SVG 路径生成（renderWaveformSvg）
  *
- * 降采样由 waveform-data.js 负责（见 waveformDataAdapter.ts）。
+ * 降采样由 waveformMipmapStore 内置 resample 负责。
  *
  * @module waveformRenderer
  */

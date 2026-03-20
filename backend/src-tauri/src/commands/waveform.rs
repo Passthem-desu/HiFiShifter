@@ -7,35 +7,6 @@ use super::common::guard_waveform_command;
 const WAVEFORM_COLUMNS_MIN: usize = 16;
 const WAVEFORM_COLUMNS_MAX: usize = 65_536;
 
-// ===================== waveform peaks =====================
-
-
-
-
-pub(super) fn get_waveform_peaks_segment(
-    state: State<'_, AppState>,
-    source_path: String,
-    start_sec: f64,
-    duration_sec: f64,
-    columns: usize,
-) -> waveform::WaveformPeaksSegmentPayload {
-    let hop = 64usize;
-    let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
-
-    let peaks = match state.get_or_compute_waveform_peaks(&source_path, hop) {
-        Ok(p) => p,
-        Err(_) => {
-            return waveform::WaveformPeaksSegmentPayload {
-                ok: false,
-                min: vec![],
-                max: vec![],
-            }
-        }
-    };
-
-    waveform::segment_from_cached(peaks.as_ref(), start_sec, duration_sec, cols)
-}
-
 
 
 
@@ -341,141 +312,35 @@ stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
     })
 }
 
-// ===================== v2 mipmap waveform peaks =====================
+// ===================== v2 mipmap 二进制传输 =====================
 
-/// V2 多级 mipmap 波形峰值查询
-/// 
-/// 根据缩放级别自动选择最佳 mipmap 级别，实现任意缩放级别的快速渲染。
-/// 
-/// # 参数
-/// - source_path: 音频文件路径
-/// - start_sec: 开始时间（秒）
-/// - duration_sec: 持续时间（秒）
-/// - columns: 输出列数
-/// - samples_per_pixel: 每像素对应的采样数（用于自动选择 mipmap 级别）
-pub(super) fn get_waveform_peaks_v2(
+/// 获取指定级别的波形 mipmap 数据（二进制格式）
+///
+/// 返回 Vec<u8>，Tauri 会传输为 number[]（JS 侧需转 ArrayBuffer），
+/// 前端通过 DataView + Float32Array 直接读取。
+///
+/// 二进制协议：[Header 20B] [min f32[]] [max f32[]]
+pub(super) fn get_waveform_mipmap_binary(
     state: State<'_, AppState>,
     source_path: String,
-    start_sec: f64,
-    duration_sec: f64,
-    columns: usize,
-    samples_per_pixel: f64,
-) -> crate::hfspeaks_v2::PeaksSegmentResult {
-    let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
-
-    // 获取或计算多级峰值数据
-    let peaks = match state.get_or_compute_waveform_peaks_v2(&source_path) {
-        Ok(p) => p,
-        Err(_) => {
-            return crate::hfspeaks_v2::PeaksSegmentResult {
-                ok: false,
-                min: vec![],
-                max: vec![],
-                level: 0,
-                sample_rate: 0,
-                division_factor: 0,
-                actual_start_sec: 0.0,
-                actual_duration_sec: 0.0,
-            }
-        }
-    };
-
-    // 自动选择最佳 mipmap 级别
-    let level = if samples_per_pixel > 0.0 {
-        peaks.select_mipmap_level(samples_per_pixel)
-    } else {
-        0
-    };
-
-    // 获取指定时间范围的峰值数据
-    peaks.get_peaks_segment(level, start_sec, duration_sec, cols)
+    level: u8,
+) -> Vec<u8> {
+    let level = (level as usize).min(2);
+    match state.get_or_compute_waveform_peaks_v2(&source_path) {
+        Ok(data) => data.to_binary_level(level),
+        Err(_) => Vec::new(),
+    }
 }
 
-/// V2 多级 mipmap 波形峰值查询（指定级别）
-/// 
-/// 直接指定 mipmap 级别，适用于需要特定分辨率峰值的场景。
-pub(super) fn get_waveform_peaks_v2_level(
+/// 预加载所有级别的 mipmap 数据（音频加载时调用）
+///
+/// 触发 mipmap 计算并缓存到内存 + 磁盘，避免首次渲染时的延迟。
+pub(super) fn preload_waveform_mipmap(
     state: State<'_, AppState>,
     source_path: String,
-    start_sec: f64,
-    duration_sec: f64,
-    columns: usize,
-    level: usize,
-) -> crate::hfspeaks_v2::PeaksSegmentResult {
-    let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
-
-    // 获取或计算多级峰值数据
-    let peaks = match state.get_or_compute_waveform_peaks_v2(&source_path) {
-        Ok(p) => p,
-        Err(_) => {
-            return crate::hfspeaks_v2::PeaksSegmentResult {
-                ok: false,
-                min: vec![],
-                max: vec![],
-                level: 0,
-                sample_rate: 0,
-                division_factor: 0,
-                actual_start_sec: 0.0,
-                actual_duration_sec: 0.0,
-            }
-        }
-    };
-
-    // 获取指定级别的峰值数据
-    peaks.get_peaks_segment(level, start_sec, duration_sec, cols)
-}
-
-/// 获取波形峰值文件的元数据
-pub(super) fn get_waveform_peaks_v2_meta(
-    state: State<'_, AppState>,
-    source_path: String,
-) -> crate::hfspeaks_v2::PeaksResponse {
-    // 获取或计算多级峰值数据
-    let peaks = match state.get_or_compute_waveform_peaks_v2(&source_path) {
-        Ok(p) => p,
-        Err(_) => {
-            return crate::hfspeaks_v2::PeaksResponse {
-                ok: false,
-                peaks: crate::hfspeaks_v2::PeaksSegmentResult {
-                    ok: false,
-                    min: vec![],
-                    max: vec![],
-                    level: 0,
-                    sample_rate: 0,
-                    division_factor: 0,
-                    actual_start_sec: 0.0,
-                    actual_duration_sec: 0.0,
-                },
-                sample_rate: 0,
-                duration_sec: 0.0,
-                mipmap_levels: 0,
-            }
-        }
-    };
-
-    let sample_rate = peaks.header.sample_rate;
-    let total_frames = peaks.header.total_frames;
-    let duration_sec = if sample_rate > 0 {
-        total_frames as f64 / sample_rate as f64
-    } else {
-        0.0
-    };
-    let mipmap_levels = peaks.header.mipmap_count;
-
-    crate::hfspeaks_v2::PeaksResponse {
-        ok: true,
-        peaks: crate::hfspeaks_v2::PeaksSegmentResult {
-            ok: true,
-            min: vec![],
-            max: vec![],
-            level: 0,
-            sample_rate,
-            division_factor: 0,
-            actual_start_sec: 0.0,
-            actual_duration_sec: 0.0,
-        },
-        sample_rate,
-        duration_sec,
-        mipmap_levels,
+) -> serde_json::Value {
+    match state.get_or_compute_waveform_peaks_v2(&source_path) {
+        Ok(_) => serde_json::json!({"ok": true}),
+        Err(e) => serde_json::json!({"ok": false, "error": e}),
     }
 }

@@ -327,33 +327,10 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "open_midi_dialog":
             return {};
 
-        case "get_waveform_peaks_segment":
-            return {
-                sourcePath: args[0],
-                startSec: args[1],
-                durationSec: args[2],
-                columns: args[3],
-            };
+        case "get_waveform_mipmap_binary":
+            return { sourcePath: args[0], level: args[1] };
 
-        case "get_waveform_peaks_v2":
-            return {
-                sourcePath: args[0],
-                startSec: args[1],
-                durationSec: args[2],
-                columns: args[3],
-                samplesPerPixel: args[4],
-            };
-
-        case "get_waveform_peaks_v2_level":
-            return {
-                sourcePath: args[0],
-                startSec: args[1],
-                durationSec: args[2],
-                columns: args[3],
-                level: args[4],
-            };
-
-        case "get_waveform_peaks_v2_meta":
+        case "preload_waveform_mipmap":
             return { sourcePath: args[0] };
 
         case "get_root_mix_waveform_peaks_segment":

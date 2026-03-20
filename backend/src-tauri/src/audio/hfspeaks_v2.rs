@@ -39,17 +39,24 @@ pub const MAGIC: &[u8; 4] = b"HFSP";
 pub const VERSION: u16 = 2;
 
 /// 最大 mipmap 级别数
-pub const MAX_MIPMAP_LEVELS: usize = 4;
+pub const MAX_MIPMAP_LEVELS: usize = 3;
 
 /// 默认 mipmap 除数因子 (针对 44.1kHz 优化)
-/// 参考 Reaper: 400 peaks/sec, 10 peaks/sec, 1 peak/sec
-/// 测试阶段：统一使用 L0 (division_factor=1024)
+/// 三级 mipmap 缓存方案：
+/// - L0 (div=64):   精细级，近距离对轨，spp ≤ 256
+/// - L1 (div=512):  中间级，日常编辑，256 < spp ≤ 2048
+/// - L2 (div=4096): 全局级，预览/导航，spp > 2048
 pub const DEFAULT_DIVISION_FACTORS: [u32; MAX_MIPMAP_LEVELS] = [
-    1024,   // Level 0: ~43 peaks/sec at 44.1kHz (测试阶段：统一使用 L0)
-    1024,   // Level 1: 暂时与 L0 相同
-    4096,   // Level 2: 暂不使用
-    16384,  // Level 3: 暂不使用
+    64,     // Level 0: ~689 peaks/sec at 44.1kHz (精细级，近距离对轨)
+    512,    // Level 1: ~86 peaks/sec at 44.1kHz (中间级，日常编辑)
+    4096,   // Level 2: ~11 peaks/sec at 44.1kHz (全局级，预览/导航)
 ];
+
+/// 级别选择的 spp (samples_per_pixel) 阈值
+/// spp ≤ SPP_THRESHOLDS[0] → L0
+/// SPP_THRESHOLDS[0] < spp ≤ SPP_THRESHOLDS[1] → L1
+/// spp > SPP_THRESHOLDS[1] → L2
+pub const SPP_THRESHOLDS: [f64; 2] = [256.0, 2048.0];
 
 // ============== 文件头结构 ==============
 
@@ -366,22 +373,65 @@ impl HfsPeakFile {
     /// # 返回
     /// 最佳 mipmap 级别索引
     pub fn select_mipmap_level(&self, samples_per_pixel: f64) -> usize {
-        // 找到 division_factor 最接近但不大于 samples_per_pixel * 2 的级别
-        // 这样可以确保有足够的精度
-        let target = samples_per_pixel * 2.0;
+        // 根据 spp 阈值选择最佳 mipmap 级别
+        // spp ≤ 256 → L0 (div=64, 精细级)
+        // 256 < spp ≤ 2048 → L1 (div=512, 中间级)
+        // spp > 2048 → L2 (div=4096, 全局级)
+        let max_level = self.mipmap_headers.len().saturating_sub(1);
         
-        let mut best_idx = 0;
-        let mut best_diff = f64::MAX;
-        
-        for (idx, mh) in self.mipmap_headers.iter().enumerate() {
-            let diff = (mh.division_factor as f64 - target).abs();
-            if diff < best_diff {
-                best_diff = diff;
-                best_idx = idx;
-            }
+        if samples_per_pixel <= SPP_THRESHOLDS[0] {
+            0
+        } else if samples_per_pixel <= SPP_THRESHOLDS[1] {
+            1.min(max_level)
+        } else {
+            2.min(max_level)
         }
-        
-        best_idx
+    }
+
+    /// 将指定级别的 mipmap 数据序列化为二进制格式
+    ///
+    /// 二进制协议格式：
+    /// ```text
+    /// [Header (20 bytes)] [min_data] [max_data]
+    ///
+    /// Header:
+    ///   bytes 0-3:   magic "WFPK" (4 bytes)
+    ///   bytes 4-7:   sample_rate (u32, little-endian)
+    ///   bytes 8-11:  division_factor (u32, little-endian)
+    ///   bytes 12-15: peak_count (u32, little-endian)
+    ///   bytes 16-19: level (u32, little-endian)
+    ///
+    /// min_data: peak_count × f32 (little-endian)
+    /// max_data: peak_count × f32 (little-endian)
+    /// ```
+    pub fn to_binary_level(&self, level: usize) -> Vec<u8> {
+        let level = level.min(self.mipmap_data.len().saturating_sub(1));
+        if self.mipmap_data.is_empty() {
+            return Vec::new();
+        }
+
+        let data = &self.mipmap_data[level];
+        let mh = &self.mipmap_headers[level];
+        let count = data.min.len();
+        let mut buf = Vec::with_capacity(20 + count * 8);
+
+        // Header (20 bytes)
+        buf.extend_from_slice(b"WFPK");
+        buf.extend_from_slice(&self.header.sample_rate.to_le_bytes());
+        buf.extend_from_slice(&mh.division_factor.to_le_bytes());
+        buf.extend_from_slice(&(count as u32).to_le_bytes());
+        buf.extend_from_slice(&(level as u32).to_le_bytes());
+
+        // min data
+        for &v in &data.min {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+        // max data
+        for &v in &data.max {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
+
+        buf
     }
 
     /// 获取指定级别的峰值数据（可选时间范围裁剪）
