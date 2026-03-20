@@ -752,9 +752,7 @@ fn render_single_clip(
         merged_extra_curves.extend(extra_curves.clone());
     }
 
-    // ── 构造 BreathNoiseCache key（与 RenderedClipCacheKey 相同，不含 formant_shift_cents）──
-    // 因为 formant_shift_cents 已从 compute_rendered_clip_hash 的排除列表中排除，
-    // 所以这里的 param_hash 天然不含 formant，可以直接用作 BreathNoiseCache 的 key。
+    // ── 构造 BreathNoiseCache key（显式排除 formant_shift_cents）──
     let breath_noise_cache_key = {
         let clip_root = timeline.resolve_root_track_id(&clip.track_id);
         let entry = clip_root.as_ref().and_then(|root| timeline.params_by_root_track.get(root));
@@ -766,7 +764,7 @@ fn render_single_clip(
                 let start_frame = (clip.start_sec.max(0.0) * out_rate as f64).round() as u64;
                 let end_frame = start_frame + (clip.length_sec.max(0.0) * out_rate as f64).round().max(1.0) as u64;
                 let source_path = clip.source_path.as_deref().unwrap_or("");
-                let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
+                let param_hash = crate::synth_clip_cache::compute_breath_noise_hash(
                     &clip.id,
                     source_path,
                     start_frame,

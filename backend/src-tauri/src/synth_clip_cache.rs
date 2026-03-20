@@ -516,7 +516,7 @@ pub fn compute_rendered_clip_hash(
         !(renderer_id == "nsf_hifigan_onnx"
             && matches!(
                 param_id,
-                "breath_gain" | "hifigan_tension" | "hifigan_volume" | "formant_shift_cents"
+                "breath_gain" | "hifigan_tension" | "hifigan_volume"
             ))
     }
 
@@ -575,6 +575,36 @@ pub fn compute_rendered_clip_hash(
     }
 
     h
+}
+
+pub fn compute_breath_noise_hash(
+    clip_id: &str,
+    source_path: &str,
+    start_frame: u64,
+    end_frame: u64,
+    sr: u32,
+    renderer_id: &str,
+    pitch_edit: &[f32],
+    frame_period_ms: f64,
+    playback_rate: f64,
+    extra_curves: &std::collections::HashMap<String, Vec<f32>>,
+    extra_params: &std::collections::HashMap<String, f64>,
+) -> u64 {
+    let mut filtered_curves = extra_curves.clone();
+    filtered_curves.remove("formant_shift_cents");
+    compute_rendered_clip_hash(
+        clip_id,
+        source_path,
+        start_frame,
+        end_frame,
+        sr,
+        renderer_id,
+        pitch_edit,
+        frame_period_ms,
+        playback_rate,
+        &filtered_curves,
+        extra_params,
+    )
 }
 
 fn curve_slice_bounds(
