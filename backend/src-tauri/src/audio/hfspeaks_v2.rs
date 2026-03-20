@@ -47,9 +47,9 @@ pub const MAX_MIPMAP_LEVELS: usize = 3;
 /// - L1 (div=512):  中间级，日常编辑，256 < spp ≤ 2048
 /// - L2 (div=4096): 全局级，预览/导航，spp > 2048
 pub const DEFAULT_DIVISION_FACTORS: [u32; MAX_MIPMAP_LEVELS] = [
-    64,     // Level 0: ~689 peaks/sec at 44.1kHz (精细级，近距离对轨)
-    512,    // Level 1: ~86 peaks/sec at 44.1kHz (中间级，日常编辑)
-    4096,   // Level 2: ~11 peaks/sec at 44.1kHz (全局级，预览/导航)
+    64,   // Level 0: ~689 peaks/sec at 44.1kHz (精细级，近距离对轨)
+    512,  // Level 1: ~86 peaks/sec at 44.1kHz (中间级，日常编辑)
+    4096, // Level 2: ~11 peaks/sec at 44.1kHz (全局级，预览/导航)
 ];
 
 /// 级别选择的 spp (samples_per_pixel) 阈值
@@ -121,23 +121,21 @@ impl HfsPeakHeader {
             channels: u16::from_le_bytes([bytes[6], bytes[7]]),
             sample_rate: u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]),
             total_frames: u64::from_le_bytes([
-                bytes[12], bytes[13], bytes[14], bytes[15],
-                bytes[16], bytes[17], bytes[18], bytes[19],
+                bytes[12], bytes[13], bytes[14], bytes[15], bytes[16], bytes[17], bytes[18],
+                bytes[19],
             ]),
             source_file_size: u64::from_le_bytes([
-                bytes[20], bytes[21], bytes[22], bytes[23],
-                bytes[24], bytes[25], bytes[26], bytes[27],
+                bytes[20], bytes[21], bytes[22], bytes[23], bytes[24], bytes[25], bytes[26],
+                bytes[27],
             ]),
             source_modified_ns: u64::from_le_bytes([
-                bytes[28], bytes[29], bytes[30], bytes[31],
-                bytes[32], bytes[33], bytes[34], bytes[35],
+                bytes[28], bytes[29], bytes[30], bytes[31], bytes[32], bytes[33], bytes[34],
+                bytes[35],
             ]),
-            mipmap_count: u32::from_le_bytes([
-                bytes[36], bytes[37], bytes[38], bytes[39],
-            ]),
+            mipmap_count: u32::from_le_bytes([bytes[36], bytes[37], bytes[38], bytes[39]]),
             reserved: [
-                bytes[40], bytes[41], bytes[42], bytes[43],
-                bytes[44], bytes[45], bytes[46], bytes[47],
+                bytes[40], bytes[41], bytes[42], bytes[43], bytes[44], bytes[45], bytes[46],
+                bytes[47],
             ],
         })
     }
@@ -145,7 +143,7 @@ impl HfsPeakHeader {
     /// 转换为字节数组
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let mut buf = [0u8; Self::SIZE];
-        
+
         buf[0..4].copy_from_slice(&self.magic);
         buf[4..6].copy_from_slice(&self.version.to_le_bytes());
         buf[6..8].copy_from_slice(&self.channels.to_le_bytes());
@@ -155,7 +153,7 @@ impl HfsPeakHeader {
         buf[28..36].copy_from_slice(&self.source_modified_ns.to_le_bytes());
         buf[36..40].copy_from_slice(&self.mipmap_count.to_le_bytes());
         buf[40..48].copy_from_slice(&self.reserved);
-        
+
         buf
     }
 }
@@ -198,8 +196,8 @@ impl MipmapHeader {
             division_factor: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
             peak_count: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
             data_offset: u64::from_le_bytes([
-                bytes[8], bytes[9], bytes[10], bytes[11],
-                bytes[12], bytes[13], bytes[14], bytes[15],
+                bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14],
+                bytes[15],
             ]),
         })
     }
@@ -207,11 +205,11 @@ impl MipmapHeader {
     /// 转换为字节数组
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let mut buf = [0u8; Self::SIZE];
-        
+
         buf[0..4].copy_from_slice(&self.division_factor.to_le_bytes());
         buf[4..8].copy_from_slice(&self.peak_count.to_le_bytes());
         buf[8..16].copy_from_slice(&self.data_offset.to_le_bytes());
-        
+
         buf
     }
 }
@@ -271,26 +269,30 @@ impl MipmapData {
     }
 
     /// 从 Reader 读取
-    pub fn read_from<R: Read>(reader: &mut R, peak_count: usize, channels: u16) -> std::io::Result<Self> {
+    pub fn read_from<R: Read>(
+        reader: &mut R,
+        peak_count: usize,
+        channels: u16,
+    ) -> std::io::Result<Self> {
         let total_values = peak_count * channels as usize;
-        
+
         let mut min = vec![0.0f32; total_values];
         let mut max = vec![0.0f32; total_values];
-        
+
         // 读取 min 值
         for v in &mut min {
             let mut buf = [0u8; 4];
             reader.read_exact(&mut buf)?;
             *v = f32::from_le_bytes(buf);
         }
-        
+
         // 读取 max 值
         for v in &mut max {
             let mut buf = [0u8; 4];
             reader.read_exact(&mut buf)?;
             *v = f32::from_le_bytes(buf);
         }
-        
+
         Ok(Self { min, max })
     }
 }
@@ -343,19 +345,20 @@ impl HfsPeakFile {
     /// 添加一个 mipmap 级别
     pub fn add_mipmap(&mut self, division_factor: u32, data: MipmapData) {
         let peak_count = data.len() as u32;
-        
+
         // 计算数据偏移量
         let data_offset = if self.mipmap_headers.is_empty() {
             // 第一个 mipmap 数据紧跟在所有头部之后
             let header_size = HfsPeakHeader::SIZE as u64;
-            let mipmap_headers_size = (self.mipmap_headers.len() + 1) as u64 * MipmapHeader::SIZE as u64;
+            let mipmap_headers_size =
+                (self.mipmap_headers.len() + 1) as u64 * MipmapHeader::SIZE as u64;
             header_size + mipmap_headers_size
         } else {
             // 后续 mipmap 数据在前一个 mipmap 数据之后
             let last = self.mipmap_headers.last().unwrap();
             last.data_offset + last.peak_count as u64 * self.header.channels as u64 * 8
         };
-        
+
         self.mipmap_headers.push(MipmapHeader {
             division_factor,
             peak_count,
@@ -366,10 +369,10 @@ impl HfsPeakFile {
     }
 
     /// 根据缩放级别选择最佳 mipmap 级别
-    /// 
+    ///
     /// # 参数
     /// - `samples_per_pixel`: 每像素对应的采样数
-    /// 
+    ///
     /// # 返回
     /// 最佳 mipmap 级别索引
     pub fn select_mipmap_level(&self, samples_per_pixel: f64) -> usize {
@@ -378,7 +381,7 @@ impl HfsPeakFile {
         // 256 < spp ≤ 2048 → L1 (div=512, 中间级)
         // spp > 2048 → L2 (div=4096, 全局级)
         let max_level = self.mipmap_headers.len().saturating_sub(1);
-        
+
         if samples_per_pixel <= SPP_THRESHOLDS[0] {
             0
         } else if samples_per_pixel <= SPP_THRESHOLDS[1] {
@@ -435,13 +438,13 @@ impl HfsPeakFile {
     }
 
     /// 获取指定级别的峰值数据（可选时间范围裁剪）
-    /// 
+    ///
     /// # 参数
     /// - `level`: mipmap 级别
     /// - `start_sec`: 开始时间（秒）
     /// - `duration_sec`: 持续时间（秒）
     /// - `columns`: 输出列数
-    /// 
+    ///
     /// # 返回
     /// 裁剪后的峰值数据
     pub fn get_peaks_segment(
@@ -466,7 +469,7 @@ impl HfsPeakFile {
 
         let data = &self.mipmap_data[level];
         let mh = &self.mipmap_headers[level];
-        
+
         if columns == 0 || !start_sec.is_finite() || !duration_sec.is_finite() {
             return PeaksSegmentResult {
                 ok: false,
@@ -482,11 +485,11 @@ impl HfsPeakFile {
 
         let sr = self.header.sample_rate.max(1) as f64;
         let division_factor = mh.division_factor.max(1) as f64;
-        
+
         // 计算峰值索引范围
         let start_frame = (start_sec.max(0.0) * sr).floor() as i64;
         let frames = (duration_sec.max(0.0) * sr).ceil() as i64;
-        
+
         if frames <= 0 {
             return PeaksSegmentResult {
                 ok: true,
@@ -503,7 +506,7 @@ impl HfsPeakFile {
         // 每个峰值代表 division_factor 个采样
         let start_peak = ((start_frame as f64) / division_factor).floor() as i64;
         let end_peak = (((start_frame + frames) as f64) / division_factor).ceil() as i64;
-        
+
         let len = data.len() as i64;
         let i0 = start_peak.max(0).min(len);
         let i1 = end_peak.max(0).min(len);
@@ -511,7 +514,7 @@ impl HfsPeakFile {
         // 计算实际覆盖的时间范围（由 floor/ceil 取整后的峰值索引决定）
         let actual_start_sec = (i0 as f64 * division_factor) / sr;
         let actual_duration_sec = ((i1 - i0) as f64 * division_factor) / sr;
-        
+
         if i1 <= i0 {
             return PeaksSegmentResult {
                 ok: true,
@@ -529,17 +532,17 @@ impl HfsPeakFile {
         let span = (i1 - i0).max(1) as f64;
         let mut out_min = vec![f32::INFINITY; columns];
         let mut out_max = vec![f32::NEG_INFINITY; columns];
-        
+
         for idx in i0..i1 {
             let rel = (idx - i0) as f64;
             let x = ((rel * columns as f64) / span).floor() as usize;
             if x >= columns {
                 continue;
             }
-            
+
             let mi = data.min[idx as usize];
             let ma = data.max[idx as usize];
-            
+
             if mi < out_min[x] {
                 out_min[x] = mi;
             }
@@ -547,7 +550,7 @@ impl HfsPeakFile {
                 out_max[x] = ma;
             }
         }
-        
+
         // 处理无效值
         for i in 0..columns {
             if !out_min[i].is_finite() {
@@ -619,7 +622,7 @@ pub fn calculate_division_factors(sample_rate: u32) -> Vec<u32> {
     // 以 44100Hz 为基准，按比例调整
     let base_rate = 44100.0;
     let scale = sample_rate as f64 / base_rate;
-    
+
     DEFAULT_DIVISION_FACTORS
         .iter()
         .map(|&d| (d as f64 * scale).round() as u32)
@@ -643,10 +646,10 @@ mod tests {
             mipmap_count: 4,
             reserved: [0; 8],
         };
-        
+
         let bytes = header.to_bytes();
         assert_eq!(bytes.len(), HfsPeakHeader::SIZE);
-        
+
         let parsed = HfsPeakHeader::from_bytes(&bytes).unwrap();
         assert_eq!(parsed.version, VERSION);
         assert_eq!(parsed.channels, 2);
@@ -660,10 +663,10 @@ mod tests {
             peak_count: 1000,
             data_offset: 100,
         };
-        
+
         let bytes = header.to_bytes();
         assert_eq!(bytes.len(), MipmapHeader::SIZE);
-        
+
         let parsed = MipmapHeader::from_bytes(&bytes).unwrap();
         assert_eq!(parsed.division_factor, 128);
         assert_eq!(parsed.peak_count, 1000);
@@ -674,7 +677,7 @@ mod tests {
         // 44.1kHz
         let factors_44 = calculate_division_factors(44100);
         assert_eq!(factors_44, DEFAULT_DIVISION_FACTORS.to_vec());
-        
+
         // 48kHz
         let factors_48 = calculate_division_factors(48000);
         assert!(factors_48[0] > DEFAULT_DIVISION_FACTORS[0]);
@@ -703,10 +706,11 @@ impl MipmapPeakCalculator {
     /// 创建新的计算器
     pub fn new(sample_rate: u32, channels: u16, total_frames: u64) -> Self {
         let division_factors = calculate_division_factors(sample_rate);
-        let accumulators = division_factors.iter()
+        let accumulators = division_factors
+            .iter()
             .map(|_| (f32::INFINITY, f32::NEG_INFINITY, 0usize))
             .collect();
-        
+
         Self {
             sample_rate,
             channels,
@@ -717,7 +721,7 @@ impl MipmapPeakCalculator {
     }
 
     /// 处理一帧数据
-    /// 
+    ///
     /// # 参数
     /// - `frame_values`: 各声道的采样值 (取极值后传入)
     /// - `frame_min`: 该帧的最小值
@@ -729,7 +733,8 @@ impl MipmapPeakCalculator {
         frame_max: f32,
         output_callback: &mut F,
     ) {
-        for (level_idx, (acc_min, acc_max, frame_count)) in self.accumulators.iter_mut().enumerate() {
+        for (level_idx, (acc_min, acc_max, frame_count)) in self.accumulators.iter_mut().enumerate()
+        {
             // 更新累积器
             if frame_min < *acc_min {
                 *acc_min = frame_min;
@@ -738,7 +743,7 @@ impl MipmapPeakCalculator {
                 *acc_max = frame_max;
             }
             *frame_count += 1;
-            
+
             // 检查是否需要输出
             let divisor = self.division_factors[level_idx] as usize;
             if *frame_count >= divisor {
@@ -747,7 +752,7 @@ impl MipmapPeakCalculator {
                     if acc_min.is_finite() { *acc_min } else { 0.0 },
                     if acc_max.is_finite() { *acc_max } else { 0.0 },
                 );
-                
+
                 // 重置累积器
                 *acc_min = f32::INFINITY;
                 *acc_max = f32::NEG_INFINITY;
@@ -758,14 +763,15 @@ impl MipmapPeakCalculator {
 
     /// 刷新剩余的累积数据
     pub fn flush<F: FnMut(usize, f32, f32)>(&mut self, mut output_callback: F) {
-        for (level_idx, (acc_min, acc_max, frame_count)) in self.accumulators.iter_mut().enumerate() {
+        for (level_idx, (acc_min, acc_max, frame_count)) in self.accumulators.iter_mut().enumerate()
+        {
             if *frame_count > 0 {
                 output_callback(
                     level_idx,
                     if acc_min.is_finite() { *acc_min } else { 0.0 },
                     if acc_max.is_finite() { *acc_max } else { 0.0 },
                 );
-                
+
                 // 重置
                 *acc_min = f32::INFINITY;
                 *acc_max = f32::NEG_INFINITY;
@@ -776,14 +782,12 @@ impl MipmapPeakCalculator {
 }
 
 /// 从音频文件计算多级 mipmap 峰值
-/// 
+///
 /// 支持 WAV (通过 hound) 和其他格式 (通过 symphonia)
-/// 
+///
 /// # 参数
 /// - `progress_cb`: 可选的进度回调，参数为 0.0~1.0 的进度值
-pub fn compute_mipmap_peaks(
-    path: &Path,
-) -> Result<HfsPeakFile, String> {
+pub fn compute_mipmap_peaks(path: &Path) -> Result<HfsPeakFile, String> {
     compute_mipmap_peaks_with_progress(path, None::<fn(f32)>)
 }
 
@@ -795,24 +799,28 @@ pub fn compute_mipmap_peaks_with_progress<F: FnMut(f32)>(
     // 获取文件元数据
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
     let source_file_size = meta.len();
-    let source_modified_ns = meta.modified()
+    let source_modified_ns = meta
+        .modified()
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
 
     // 尝试用 hound 处理 WAV 文件
-    let is_wav = path.extension()
+    let is_wav = path
+        .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case("wav"))
         .unwrap_or(false);
 
     if is_wav {
-        if let Ok(peaks) = compute_mipmap_peaks_hound(path, source_file_size, source_modified_ns, &mut progress_cb) {
+        if let Ok(peaks) =
+            compute_mipmap_peaks_hound(path, source_file_size, source_modified_ns, &mut progress_cb)
+        {
             return Ok(peaks);
         }
     }
-    
+
     // 回退到 symphonia
     compute_mipmap_peaks_symphonia(path, source_file_size, source_modified_ns, &mut progress_cb)
 }
@@ -828,7 +836,7 @@ fn compute_mipmap_peaks_hound<F: FnMut(f32)>(
 
     let reader = WavReader::open(path).map_err(|e| e.to_string())?;
     let spec = reader.spec();
-    
+
     if spec.sample_rate == 0 || spec.channels == 0 {
         return Err("invalid wav spec".to_string());
     }
@@ -839,9 +847,8 @@ fn compute_mipmap_peaks_hound<F: FnMut(f32)>(
 
     // 初始化输出缓冲区
     let division_factors = calculate_division_factors(sample_rate);
-    let mut output_buffers: Vec<Vec<(f32, f32)>> = division_factors.iter()
-        .map(|_| Vec::new())
-        .collect();
+    let mut output_buffers: Vec<Vec<(f32, f32)>> =
+        division_factors.iter().map(|_| Vec::new()).collect();
 
     // 创建计算器
     let mut calculator = MipmapPeakCalculator::new(sample_rate, channels, total_frames);
@@ -946,8 +953,14 @@ fn compute_mipmap_peaks_hound<F: FnMut(f32)>(
     calculator.flush(&mut output_callback);
 
     // 构建 HfsPeakFile
-    let mut file = HfsPeakFile::new(channels, sample_rate, total_frames, source_file_size, source_modified_ns);
-    
+    let mut file = HfsPeakFile::new(
+        channels,
+        sample_rate,
+        total_frames,
+        source_file_size,
+        source_modified_ns,
+    );
+
     for (level_idx, buffer) in output_buffers.into_iter().enumerate() {
         let data = MipmapData {
             min: buffer.iter().map(|(min, _)| *min).collect(),
@@ -981,28 +994,36 @@ fn compute_mipmap_peaks_symphonia<F: FnMut(f32)>(
     }
 
     let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
         .map_err(|e| e.to_string())?;
-    
+
     let mut format = probed.format;
-    let track = format.default_track().ok_or_else(|| "no default track".to_string())?;
+    let track = format
+        .default_track()
+        .ok_or_else(|| "no default track".to_string())?;
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| e.to_string())?;
 
     let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
-    let channels = track.codec_params.channels
+    let channels = track
+        .codec_params
+        .channels
         .map(|c| c.count() as u16)
         .unwrap_or(1);
-    
+
     // 估算总帧数（可能不精确）
     let total_frames = track.codec_params.n_frames.unwrap_or(0);
 
     // 初始化输出缓冲区
     let division_factors = calculate_division_factors(sample_rate);
-    let mut output_buffers: Vec<Vec<(f32, f32)>> = division_factors.iter()
-        .map(|_| Vec::new())
-        .collect();
+    let mut output_buffers: Vec<Vec<(f32, f32)>> =
+        division_factors.iter().map(|_| Vec::new()).collect();
 
     // 创建计算器
     let mut calculator = MipmapPeakCalculator::new(sample_rate, channels, total_frames);
@@ -1016,7 +1037,11 @@ fn compute_mipmap_peaks_symphonia<F: FnMut(f32)>(
 
     // 进度跟踪
     let mut frames_processed: u64 = 0;
-    let progress_interval = if total_frames > 0 { (total_frames / 20).max(1) } else { 44100 }; // symphonia 可能没有精确 total_frames
+    let progress_interval = if total_frames > 0 {
+        (total_frames / 20).max(1)
+    } else {
+        44100
+    }; // symphonia 可能没有精确 total_frames
 
     // 解码循环
     let track_id = track.id;
@@ -1052,8 +1077,12 @@ fn compute_mipmap_peaks_symphonia<F: FnMut(f32)>(
             let mut ch_max = f32::NEG_INFINITY;
             for ch in 0..channels as usize {
                 let v = samples.get(base + ch).copied().unwrap_or(0.0);
-                if v < ch_min { ch_min = v; }
-                if v > ch_max { ch_max = v; }
+                if v < ch_min {
+                    ch_min = v;
+                }
+                if v > ch_max {
+                    ch_max = v;
+                }
             }
             calculator.process_frame(ch_min, ch_max, &mut output_callback);
             frames_processed += 1;
@@ -1075,8 +1104,14 @@ fn compute_mipmap_peaks_symphonia<F: FnMut(f32)>(
     calculator.flush(&mut output_callback);
 
     // 构建 HfsPeakFile
-    let mut file = HfsPeakFile::new(channels, sample_rate, total_frames, source_file_size, source_modified_ns);
-    
+    let mut file = HfsPeakFile::new(
+        channels,
+        sample_rate,
+        total_frames,
+        source_file_size,
+        source_modified_ns,
+    );
+
     for (level_idx, buffer) in output_buffers.into_iter().enumerate() {
         let data = MipmapData {
             min: buffer.iter().map(|(min, _)| *min).collect(),
@@ -1096,8 +1131,12 @@ fn compute_channel_extremes_i16(buf: &[i16]) -> (f32, f32) {
     let mut max = f32::NEG_INFINITY;
     for &x in buf {
         let v = x as f32 / i16::MAX as f32;
-        if v < min { min = v; }
-        if v > max { max = v; }
+        if v < min {
+            min = v;
+        }
+        if v > max {
+            max = v;
+        }
     }
     (min, max)
 }
@@ -1108,8 +1147,12 @@ fn compute_channel_extremes_i32(buf: &[i32], denom: f32) -> (f32, f32) {
     let mut max = f32::NEG_INFINITY;
     for &x in buf {
         let v = x as f32 / denom;
-        if v < min { min = v; }
-        if v > max { max = v; }
+        if v < min {
+            min = v;
+        }
+        if v > max {
+            max = v;
+        }
     }
     (min, max)
 }
@@ -1119,8 +1162,12 @@ fn compute_channel_extremes_f32(buf: &[f32]) -> (f32, f32) {
     let mut min = f32::INFINITY;
     let mut max = f32::NEG_INFINITY;
     for &x in buf {
-        if x < min { min = x; }
-        if x > max { max = x; }
+        if x < min {
+            min = x;
+        }
+        if x > max {
+            max = x;
+        }
     }
     (min, max)
 }
@@ -1173,27 +1220,35 @@ impl HfsPeakFile {
         // 读取文件头
         let mut header_buf = [0u8; HfsPeakHeader::SIZE];
         reader.read_exact(&mut header_buf)?;
-        
-        let header = HfsPeakHeader::from_bytes(&header_buf)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid header"))?;
+
+        let header = HfsPeakHeader::from_bytes(&header_buf).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid header")
+        })?;
 
         // 验证魔数和版本
         if &header.magic != MAGIC {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid magic"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid magic",
+            ));
         }
         if header.version > VERSION {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unsupported version"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "unsupported version",
+            ));
         }
 
         // 读取 mipmap headers
         let mipmap_count = header.mipmap_count as usize;
         let mut mipmap_headers = Vec::with_capacity(mipmap_count);
-        
+
         for _ in 0..mipmap_count {
             let mut mh_buf = [0u8; MipmapHeader::SIZE];
             reader.read_exact(&mut mh_buf)?;
-            let mh = MipmapHeader::from_bytes(&mh_buf)
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid mipmap header"))?;
+            let mh = MipmapHeader::from_bytes(&mh_buf).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid mipmap header")
+            })?;
             mipmap_headers.push(mh);
         }
 
@@ -1213,30 +1268,38 @@ impl HfsPeakFile {
 
     /// 从文件加载，仅读取指定级别的 mipmap 数据
     /// 用于按需加载，减少内存占用
-    pub fn load_mipmap_level(path: &Path, level: usize) -> std::io::Result<(HfsPeakHeader, MipmapHeader, MipmapData)> {
+    pub fn load_mipmap_level(
+        path: &Path,
+        level: usize,
+    ) -> std::io::Result<(HfsPeakHeader, MipmapHeader, MipmapData)> {
         let file = File::open(path)?;
         let mut reader = BufReader::new(file);
 
         // 读取文件头
         let mut header_buf = [0u8; HfsPeakHeader::SIZE];
         reader.read_exact(&mut header_buf)?;
-        
-        let header = HfsPeakHeader::from_bytes(&header_buf)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid header"))?;
+
+        let header = HfsPeakHeader::from_bytes(&header_buf).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid header")
+        })?;
 
         if level >= header.mipmap_count as usize {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "level out of range"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "level out of range",
+            ));
         }
 
         // 跳过前面的 mipmap headers
         let mipmap_count = header.mipmap_count as usize;
         let mut mipmap_headers = Vec::with_capacity(mipmap_count);
-        
+
         for _ in 0..mipmap_count {
             let mut mh_buf = [0u8; MipmapHeader::SIZE];
             reader.read_exact(&mut mh_buf)?;
-            let mh = MipmapHeader::from_bytes(&mh_buf)
-                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid mipmap header"))?;
+            let mh = MipmapHeader::from_bytes(&mh_buf).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid mipmap header")
+            })?;
             mipmap_headers.push(mh);
         }
 
@@ -1245,7 +1308,7 @@ impl HfsPeakFile {
         // 跳到目标数据位置
         let current_pos = HfsPeakHeader::SIZE + mipmap_count * MipmapHeader::SIZE;
         let target_pos = target_mh.data_offset as u64;
-        
+
         if target_pos > current_pos as u64 {
             // 需要跳过前面级别的数据
             let skip_bytes = target_pos - current_pos as u64;
@@ -1253,7 +1316,8 @@ impl HfsPeakFile {
         }
 
         // 读取目标数据
-        let data = MipmapData::read_from(&mut reader, target_mh.peak_count as usize, header.channels)?;
+        let data =
+            MipmapData::read_from(&mut reader, target_mh.peak_count as usize, header.channels)?;
 
         Ok((header, *target_mh, data))
     }
@@ -1279,10 +1343,12 @@ impl HfsPeaksCache {
     }
 
     /// 计算缓存文件路径
-    /// 
+    ///
     /// 使用文件路径 + 大小 + 修改时间的哈希作为缓存键
     pub fn cache_file_path(&self, source_path: &Path) -> PathBuf {
-        let canonical = source_path.canonicalize().unwrap_or_else(|_| source_path.to_path_buf());
+        let canonical = source_path
+            .canonicalize()
+            .unwrap_or_else(|_| source_path.to_path_buf());
         let (len, mtime_ns) = get_metadata_fingerprint(&canonical);
 
         let mut hasher = blake3::Hasher::new();
@@ -1300,7 +1366,7 @@ impl HfsPeaksCache {
     /// 尝试从缓存加载
     pub fn try_load(&self, source_path: &Path) -> Option<HfsPeakFile> {
         let cache_path = self.cache_file_path(source_path);
-        
+
         // 验证缓存是否有效
         if !cache_path.exists() {
             return None;
@@ -1308,10 +1374,12 @@ impl HfsPeaksCache {
 
         // 加载并验证
         let file = HfsPeakFile::load(&cache_path).ok()?;
-        
+
         // 验证源文件指纹
         let (current_len, current_mtime) = get_metadata_fingerprint(source_path);
-        if file.header.source_file_size != current_len || file.header.source_modified_ns != current_mtime {
+        if file.header.source_file_size != current_len
+            || file.header.source_modified_ns != current_mtime
+        {
             // 源文件已更改，缓存无效
             return None;
         }
@@ -1327,7 +1395,7 @@ impl HfsPeaksCache {
     }
 
     /// 获取或计算峰值数据
-    /// 
+    ///
     /// 优先从缓存加载，缓存不存在时计算并保存
     pub fn get_or_compute(&self, source_path: &Path) -> Result<HfsPeakFile, String> {
         // 尝试从缓存加载
@@ -1358,13 +1426,14 @@ impl HfsPeaksCache {
         for entry in std::fs::read_dir(&self.cache_dir)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.is_file() {
-                let is_peaks = path.extension()
+                let is_peaks = path
+                    .extension()
                     .and_then(|s| s.to_str())
                     .map(|s| s.eq_ignore_ascii_case("hfspeaks"))
                     .unwrap_or(false);
-                
+
                 if is_peaks {
                     if let Ok(meta) = entry.metadata() {
                         removed_bytes += meta.len();
@@ -1380,15 +1449,19 @@ impl HfsPeaksCache {
     }
 
     /// 尝试从旧版缓存迁移
-    /// 
+    ///
     /// 查找旧版缓存文件，如果存在则迁移到 v2 格式
-    pub fn try_migrate_from_v1(&self, source_path: &Path, old_cache_path: &Path) -> Option<HfsPeakFile> {
+    pub fn try_migrate_from_v1(
+        &self,
+        source_path: &Path,
+        old_cache_path: &Path,
+    ) -> Option<HfsPeakFile> {
         // 尝试加载旧格式
         let legacy = try_load_v1_format(old_cache_path)?;
-        
+
         // 迁移到 v2 格式
         let v2 = migrate_v1_to_v2(legacy, source_path);
-        
+
         // 保存 v2 格式
         if let Err(e) = self.save(source_path, &v2) {
             eprintln!("Warning: failed to save migrated v2 cache: {}", e);
@@ -1396,7 +1469,7 @@ impl HfsPeaksCache {
             // 删除旧版缓存文件
             let _ = std::fs::remove_file(old_cache_path);
         }
-        
+
         Some(v2)
     }
 }
@@ -1407,14 +1480,15 @@ fn get_metadata_fingerprint(path: &Path) -> (u64, u64) {
         Ok(m) => m,
         Err(_) => return (0, 0),
     };
-    
+
     let len = meta.len();
-    let mtime_ns = meta.modified()
+    let mtime_ns = meta
+        .modified()
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
-    
+
     (len, mtime_ns)
 }
 
@@ -1434,7 +1508,7 @@ pub struct LegacyCachedPeaks {
 }
 
 /// 尝试从旧版 v1 格式加载
-/// 
+///
 /// v1 格式结构：
 /// - MAGIC: 8 bytes "HFSPEAKS"
 /// - VERSION: 4 bytes u32 = 1
@@ -1446,7 +1520,7 @@ pub struct LegacyCachedPeaks {
 /// - max[]: len * 4 bytes f32
 pub fn try_load_v1_format(path: &Path) -> Option<LegacyCachedPeaks> {
     use std::io::Read;
-    
+
     let mut f = File::open(path).ok()?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf).ok()?;
@@ -1465,7 +1539,7 @@ pub fn try_load_v1_format(path: &Path) -> Option<LegacyCachedPeaks> {
     if take(8)? != V1_MAGIC {
         return None;
     }
-    
+
     // 验证 VERSION
     let ver = u32::from_le_bytes(take(4)?.try_into().ok()?);
     if ver != V1_VERSION {
@@ -1476,7 +1550,7 @@ pub fn try_load_v1_format(path: &Path) -> Option<LegacyCachedPeaks> {
     let hop = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
     let total_frames = u64::from_le_bytes(take(8)?.try_into().ok()?);
     let len = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
-    
+
     if len == 0 || len > 10_000_000 {
         return None;
     }
@@ -1505,58 +1579,64 @@ pub fn try_load_v1_format(path: &Path) -> Option<LegacyCachedPeaks> {
 }
 
 /// 将旧版 v1 格式迁移到 v2 多级 mipmap 格式
-/// 
+///
 /// 由于 v1 只有一级峰值，迁移策略：
 /// - Level 0: 直接使用 v1 数据（如果 hop 接近 128）
 /// - Level 1-3: 从 Level 0 降采样生成
 pub fn migrate_v1_to_v2(legacy: LegacyCachedPeaks, source_path: &Path) -> HfsPeakFile {
     let (source_file_size, source_modified_ns) = get_metadata_fingerprint(source_path);
-    
+
     // 确定最佳 mipmap 分配
     // v1 的 hop 通常是根据请求的 columns 动态计算的
     // 我们需要根据实际 hop 值决定如何分配
-    
+
     let sample_rate = legacy.sample_rate;
     let total_frames = legacy.total_frames;
     let channels = 1u16; // v1 不存储声道数，假设为单声道
-    
+
     // 构建 mipmap 数据
     let mut mipmap_headers = Vec::new();
     let mut mipmap_data = Vec::new();
     let mut data_offset: u64 = (HfsPeakHeader::SIZE + 4 * MipmapHeader::SIZE) as u64; // 4 级 mipmap
-    
+
     // Level 0: 使用原始数据或插值
     let level0_div = DEFAULT_DIVISION_FACTORS[0];
     let level0_min = legacy.min.clone();
     let level0_max = legacy.max.clone();
-    
+
     let level0_count = level0_min.len() as u32;
     mipmap_headers.push(MipmapHeader {
         division_factor: level0_div,
         peak_count: level0_count,
         data_offset,
     });
-    mipmap_data.push(MipmapData { min: level0_min, max: level0_max });
+    mipmap_data.push(MipmapData {
+        min: level0_min,
+        max: level0_max,
+    });
     data_offset += level0_count as u64 * 8; // 每个 min/max 对 8 bytes
-    
+
     // Level 1-3: 降采样生成
     for level in 1..4 {
         let div_factor = DEFAULT_DIVISION_FACTORS[level];
         let prev_data = &mipmap_data[level - 1];
         let downsampled = downsample_mipmap(&prev_data.min, &prev_data.max, 4);
-        
+
         // 计算实际的 peak count
         let peak_count = downsampled.0.len() as u32;
-        
+
         mipmap_headers.push(MipmapHeader {
             division_factor: div_factor,
             peak_count,
             data_offset,
         });
-        mipmap_data.push(MipmapData { min: downsampled.0, max: downsampled.1 });
+        mipmap_data.push(MipmapData {
+            min: downsampled.0,
+            max: downsampled.1,
+        });
         data_offset += peak_count as u64 * 8;
     }
-    
+
     // 构建文件头
     let header = HfsPeakHeader {
         magic: *MAGIC,
@@ -1569,7 +1649,7 @@ pub fn migrate_v1_to_v2(legacy: LegacyCachedPeaks, source_path: &Path) -> HfsPea
         mipmap_count: 4,
         reserved: [0; 8],
     };
-    
+
     HfsPeakFile {
         header,
         mipmap_headers,
@@ -1582,28 +1662,30 @@ fn downsample_mipmap(min: &[f32], max: &[f32], factor: usize) -> (Vec<f32>, Vec<
     if factor <= 1 || min.is_empty() {
         return (min.to_vec(), max.to_vec());
     }
-    
+
     let n = min.len();
     let mut result_min = Vec::new();
     let mut result_max = Vec::new();
-    
+
     for i in (0..n).step_by(factor) {
         let end = (i + factor).min(n);
         let mut w_min = f32::INFINITY;
         let mut w_max = f32::NEG_INFINITY;
-        
+
         for j in i..end {
             let min_val = min[j];
             let max_val = max[j];
-            if min_val < w_min { w_min = min_val; }
-            if max_val > w_max { w_max = max_val; }
+            if min_val < w_min {
+                w_min = min_val;
+            }
+            if max_val > w_max {
+                w_max = max_val;
+            }
         }
-        
+
         result_min.push(if w_min.is_infinite() { 0.0 } else { w_min });
         result_max.push(if w_max.is_infinite() { 0.0 } else { w_max });
     }
-    
+
     (result_min, result_max)
 }
-
-

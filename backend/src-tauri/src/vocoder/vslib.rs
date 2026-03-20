@@ -277,6 +277,18 @@ extern "system" {
     ) -> c_int;
 
     // 混音输出
+    pub fn VslibGetStretchOrgSample(
+        hVsprj: HVSPRJ,
+        itemNum: c_int,
+        time_edt: c_double,
+        time_org: *mut c_double,
+    ) -> c_int;
+    pub fn VslibGetStretchEditSample(
+        hVsprj: HVSPRJ,
+        itemNum: c_int,
+        time_org: c_double,
+        time_edt: *mut c_double,
+    ) -> c_int;
     pub fn VslibGetMixSample(hVsprj: HVSPRJ, mixSample: *mut c_int) -> c_int;
     pub fn VslibGetMixData(
         hVsprj: HVSPRJ,

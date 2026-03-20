@@ -477,7 +477,7 @@ fn process_item(
 
     // 读取音频文件信息
     // 只读 header/codec params 获取时长与采样率，不生成 waveform_preview（避免全量解码）。
-    // 波形 peaks 由前端按需通过 get_waveform_peaks_segment 命令懒加载（有磁盘缓存）。
+    // 波形数据由前端按需通过当前 waveform API 懒加载。
     let audio_info = try_read_audio_header_only(Path::new(&audio_path));
     let (duration_sec, duration_frames, source_sr) = match &audio_info {
         Some(info) => (

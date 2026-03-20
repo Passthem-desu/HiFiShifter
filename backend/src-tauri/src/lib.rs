@@ -41,6 +41,8 @@ mod hnsep_onnx_stub;
 use hnsep_onnx_stub as hnsep_onnx;
 
 mod config;
+#[path = "audio/hfspeaks_v2.rs"]
+mod hfspeaks_v2;
 #[path = "import/midi_import.rs"]
 mod midi_import;
 mod project;
@@ -51,13 +53,11 @@ mod reaper_parser;
 #[path = "audio/sstretch.rs"]
 mod sstretch;
 mod state;
+#[path = "vocoder/streaming_world.rs"]
+mod streaming_world;
 mod temp_manager;
 #[path = "audio/time_stretch.rs"]
 mod time_stretch;
-#[path = "audio/waveform.rs"]
-mod waveform;
-#[path = "audio/waveform_disk_cache.rs"]
-mod waveform_disk_cache;
 #[path = "import/vocalshifter_clipboard.rs"]
 mod vocalshifter_clipboard;
 #[path = "import/vocalshifter_import.rs"]
@@ -65,14 +65,14 @@ mod vocalshifter_import;
 #[cfg(feature = "vslib")]
 #[path = "vocoder/vslib.rs"]
 mod vslib;
+#[path = "audio/waveform.rs"]
+mod waveform;
+#[path = "audio/waveform_disk_cache.rs"]
+mod waveform_disk_cache;
 #[path = "vocoder/world.rs"]
 mod world;
 #[path = "vocoder/world_vocoder.rs"]
 mod world_vocoder;
-#[path = "vocoder/streaming_world.rs"]
-mod streaming_world;
-#[path = "audio/hfspeaks_v2.rs"]
-mod hfspeaks_v2;
 
 use tauri::Manager;
 

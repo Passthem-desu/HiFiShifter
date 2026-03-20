@@ -7,32 +7,6 @@ use super::common::guard_waveform_command;
 const WAVEFORM_COLUMNS_MIN: usize = 16;
 const WAVEFORM_COLUMNS_MAX: usize = 65_536;
 
-// ===================== waveform peaks =====================
-
-pub(super) fn get_waveform_peaks_segment(
-    state: State<'_, AppState>,
-    source_path: String,
-    start_sec: f64,
-    duration_sec: f64,
-    columns: usize,
-) -> waveform::WaveformPeaksSegmentPayload {
-    let hop = 256usize;
-    let cols = columns.clamp(WAVEFORM_COLUMNS_MIN, WAVEFORM_COLUMNS_MAX);
-
-    let peaks = match state.get_or_compute_waveform_peaks(&source_path, hop) {
-        Ok(p) => p,
-        Err(_) => {
-            return waveform::WaveformPeaksSegmentPayload {
-                ok: false,
-                min: vec![],
-                max: vec![],
-            }
-        }
-    };
-
-    waveform::segment_from_cached(peaks.as_ref(), start_sec, duration_sec, cols)
-}
-
 pub(super) fn clear_waveform_cache(state: State<'_, AppState>) -> serde_json::Value {
     let stats = state.clear_waveform_cache();
     let dir = {

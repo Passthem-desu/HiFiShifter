@@ -863,7 +863,7 @@ impl AppState {
     }
 
     /// 获取或计算 v2 多级 mipmap 峰值数据
-    /// 
+    ///
     /// 优先从内存缓存读取，其次从磁盘缓存读取，最后计算
     /// 首次计算时会通过 Tauri 事件推送进度（waveform_analysis_progress）
     pub fn get_or_compute_waveform_peaks_v2(
@@ -884,11 +884,14 @@ impl AppState {
                 // 缓存命中：发送 cached 状态事件
                 if let Some(handle) = self.app_handle.get() {
                     use tauri::Emitter;
-                    let _ = handle.emit("waveform_analysis_progress", serde_json::json!({
-                        "sourcePath": source_path,
-                        "progress": 1.0,
-                        "status": "cached",
-                    }));
+                    let _ = handle.emit(
+                        "waveform_analysis_progress",
+                        serde_json::json!({
+                            "sourcePath": source_path,
+                            "progress": 1.0,
+                            "status": "cached",
+                        }),
+                    );
                 }
                 return Ok(found.clone() as std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile>);
             }
@@ -901,13 +904,14 @@ impl AppState {
                 .unwrap_or_else(|e| e.into_inner())
                 .clone()
         };
-        
+
         let hfs_cache = crate::hfspeaks_v2::HfsPeaksCache::new(cache_dir);
         let path = std::path::Path::new(source_path);
-        
+
         // 尝试从磁盘加载
         if let Some(cached) = hfs_cache.try_load(path) {
-            let cached: std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile> = std::sync::Arc::new(cached);
+            let cached: std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile> =
+                std::sync::Arc::new(cached);
             let mut cache = self
                 .waveform_cache_v2
                 .lock()
@@ -916,11 +920,14 @@ impl AppState {
             // 磁盘缓存命中：发送 cached 状态事件
             if let Some(handle) = self.app_handle.get() {
                 use tauri::Emitter;
-                let _ = handle.emit("waveform_analysis_progress", serde_json::json!({
-                    "sourcePath": source_path,
-                    "progress": 1.0,
-                    "status": "cached",
-                }));
+                let _ = handle.emit(
+                    "waveform_analysis_progress",
+                    serde_json::json!({
+                        "sourcePath": source_path,
+                        "progress": 1.0,
+                        "status": "cached",
+                    }),
+                );
             }
             return Ok(cached);
         }
@@ -929,11 +936,14 @@ impl AppState {
         let source_path_owned = source_path.to_string();
         if let Some(handle) = self.app_handle.get() {
             use tauri::Emitter;
-            let _ = handle.emit("waveform_analysis_progress", serde_json::json!({
-                "sourcePath": &source_path_owned,
-                "progress": 0.0,
-                "status": "computing",
-            }));
+            let _ = handle.emit(
+                "waveform_analysis_progress",
+                serde_json::json!({
+                    "sourcePath": &source_path_owned,
+                    "progress": 0.0,
+                    "status": "computing",
+                }),
+            );
         }
 
         // 构建进度回调：通过 app_handle emit 事件
@@ -942,16 +952,20 @@ impl AppState {
         let progress_cb = move |progress: f32| {
             if let Some(ref handle) = app_handle_for_cb {
                 use tauri::Emitter;
-                let _ = handle.emit("waveform_analysis_progress", serde_json::json!({
-                    "sourcePath": &source_path_for_cb,
-                    "progress": progress.clamp(0.0, 1.0),
-                    "status": "computing",
-                }));
+                let _ = handle.emit(
+                    "waveform_analysis_progress",
+                    serde_json::json!({
+                        "sourcePath": &source_path_for_cb,
+                        "progress": progress.clamp(0.0, 1.0),
+                        "status": "computing",
+                    }),
+                );
             }
         };
 
         // 计算新的峰值数据（带进度回调）
-        let peaks = crate::hfspeaks_v2::compute_mipmap_peaks_with_progress(path, Some(progress_cb))?;
+        let peaks =
+            crate::hfspeaks_v2::compute_mipmap_peaks_with_progress(path, Some(progress_cb))?;
 
         // 保存到磁盘缓存
         if let Err(e) = hfs_cache.save(path, &peaks) {
@@ -961,11 +975,14 @@ impl AppState {
         // 发送 done 状态事件
         if let Some(handle) = self.app_handle.get() {
             use tauri::Emitter;
-            let _ = handle.emit("waveform_analysis_progress", serde_json::json!({
-                "sourcePath": &source_path_owned,
-                "progress": 1.0,
-                "status": "done",
-            }));
+            let _ = handle.emit(
+                "waveform_analysis_progress",
+                serde_json::json!({
+                    "sourcePath": &source_path_owned,
+                    "progress": 1.0,
+                    "status": "done",
+                }),
+            );
         }
 
         let peaks = std::sync::Arc::new(peaks);

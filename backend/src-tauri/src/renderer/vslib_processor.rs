@@ -379,8 +379,9 @@ impl ClipProcessor for VslibProcessor {
     fn process(&self, ctx: &ClipProcessContext<'_>) -> Result<Vec<f32>, String> {
         use crate::vslib::{
             check, VsProject, VslibAddItemEx, VslibAddTimeCtrlPnt, VslibGetCtrlPntInfoEx2,
-            VslibGetMixData, VslibGetProjectInfo, VslibGetTimeCtrlPnt, VslibGetTimeCtrlPntNum,
-            VslibGetVersion, VslibSetCtrlPntInfoEx2, VslibSetItemInfo, VslibSetProjectInfo,
+            VslibGetMixData, VslibGetProjectInfo, VslibGetStretchEditSample,
+            VslibGetStretchOrgSample, VslibGetTimeCtrlPnt, VslibGetTimeCtrlPntNum, VslibGetVersion,
+            VslibSetCtrlPntInfoEx2, VslibSetItemInfo, VslibSetProjectInfo, VslibSetTimeCtrlPnt,
             ANALYZE_OPTION_VOCAL_SHIFTER, SYNTHMODE_MF, VSCPINFOEX2, VSPRJINFO,
         };
         use std::ffi::{c_int, CString};
@@ -617,23 +618,53 @@ impl ClipProcessor for VslibProcessor {
                 ctx.clip_id, sample_org, sample_org, end_time2, ctx.playback_rate
             );
 
-            for (time1, time2) in stretch_points {
-                if time1 < 0 || time2 < 0 {
-                    continue;
-                }
-                if let Err(e) =
-                    check(unsafe { VslibAddTimeCtrlPnt(proj.0, item_num, time1, time2) })
-                {
-                    eprintln!(
-                        "[vslib] WARNING: VslibAddTimeCtrlPnt({time1}, {time2}): {e} - time stretch skipped"
-                    );
-                }
-            }
-
             let mut stretch_pnt_num: c_int = 0;
             if check(unsafe { VslibGetTimeCtrlPntNum(proj.0, item_num, &mut stretch_pnt_num) })
                 .is_ok()
             {
+                if stretch_pnt_num >= 1 {
+                    let (time1, time2) = stretch_points[0];
+                    if let Err(e) =
+                        check(unsafe { VslibSetTimeCtrlPnt(proj.0, item_num, 0, time1, time2) })
+                    {
+                        eprintln!("[vslib] WARNING: VslibSetTimeCtrlPnt(0, {time1}, {time2}): {e}");
+                    }
+                } else {
+                    let (time1, time2) = stretch_points[0];
+                    if let Err(e) =
+                        check(unsafe { VslibAddTimeCtrlPnt(proj.0, item_num, time1, time2) })
+                    {
+                        eprintln!("[vslib] WARNING: VslibAddTimeCtrlPnt({time1}, {time2}): {e}");
+                    } else {
+                        stretch_pnt_num += 1;
+                    }
+                }
+
+                if stretch_pnt_num >= 2 {
+                    let (time1, time2) = stretch_points[1];
+                    let last_index = stretch_pnt_num - 1;
+                    if let Err(e) = check(unsafe {
+                        VslibSetTimeCtrlPnt(proj.0, item_num, last_index, time1, time2)
+                    }) {
+                        eprintln!(
+                            "[vslib] WARNING: VslibSetTimeCtrlPnt({}, {time1}, {time2}): {e}",
+                            last_index
+                        );
+                    }
+                } else {
+                    let (time1, time2) = stretch_points[1];
+                    if let Err(e) =
+                        check(unsafe { VslibAddTimeCtrlPnt(proj.0, item_num, time1, time2) })
+                    {
+                        eprintln!("[vslib] WARNING: VslibAddTimeCtrlPnt({time1}, {time2}): {e}");
+                    } else {
+                        stretch_pnt_num += 1;
+                    }
+                }
+
+                let _ = check(unsafe {
+                    VslibGetTimeCtrlPntNum(proj.0, item_num, &mut stretch_pnt_num)
+                });
                 eprintln!(
                     "[vslib] time_stretch_ctrl_points: clip_id={} count={}",
                     ctx.clip_id, stretch_pnt_num
@@ -652,6 +683,32 @@ impl ClipProcessor for VslibProcessor {
                         );
                     }
                 }
+            }
+
+            let end_time1 = sample_org as f64;
+            let end_time2_f64 = end_time2 as f64;
+            let mut mapped_edit_sample = 0.0f64;
+            if check(unsafe {
+                VslibGetStretchEditSample(proj.0, item_num, end_time1, &mut mapped_edit_sample)
+            })
+            .is_ok()
+            {
+                eprintln!(
+                    "[vslib] stretch_verify_edit: time1={:.3} -> time2={:.3} expected={:.3}",
+                    end_time1, mapped_edit_sample, end_time2_f64
+                );
+            }
+
+            let mut mapped_org_sample = 0.0f64;
+            if check(unsafe {
+                VslibGetStretchOrgSample(proj.0, item_num, end_time2_f64, &mut mapped_org_sample)
+            })
+            .is_ok()
+            {
+                eprintln!(
+                    "[vslib] stretch_verify_org: time2={:.3} -> time1={:.3} expected={:.3}",
+                    end_time2_f64, mapped_org_sample, end_time1
+                );
             }
         }
 
