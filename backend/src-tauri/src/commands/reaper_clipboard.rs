@@ -53,7 +53,15 @@ fn read_reaper_clipboard() -> Result<Vec<u8>, String> {
     if len == 0 {
         return Err("clipboard_empty".to_string());
     }
-    let ptr = data.bytes().cast::<u8>();
+    // `objc2` / `objc2-foundation` may expose different helper methods across
+    // versions; prefer converting via a safe slice view if available.
+    // Try calling `bytes` via objc runtime as a fallback for compatibility
+    use objc2::msg_send;
+    use std::ffi::c_void;
+    // `Retained<NSData>` does not implement `MessageReceiver`; take a reference
+    // to the underlying object so `msg_send!` accepts it (e.g. `&T`).
+    let raw_ptr: *const c_void = unsafe { msg_send![&*data, bytes] };
+    let ptr = raw_ptr as *const u8;
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
     Ok(bytes.to_vec())
 }
@@ -139,7 +147,10 @@ fn read_midi_clipboard() -> Result<Vec<u8>, String> {
     if len == 0 {
         return Err("midi_clipboard_empty".to_string());
     }
-    let ptr = data.bytes().cast::<u8>();
+    use objc2::msg_send;
+    use std::ffi::c_void;
+    let raw_ptr: *const c_void = unsafe { msg_send![&*data, bytes] };
+    let ptr = raw_ptr as *const u8;
     let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
     Ok(bytes.to_vec())
 }

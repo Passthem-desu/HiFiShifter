@@ -1,9 +1,17 @@
 fn main() {
     build_frontend();
     tauri_build::build();
-    build_world_static();
-    build_signalsmith_stretch();
-    build_vslib();
+
+    // Allow skipping expensive native builds in CI checks via env var
+    // Set HIFISHIFTER_SKIP_NATIVE_BUILD=1 to skip WORLD/Signalsmith/VSLIB builds
+    let skip_native = std::env::var("HIFISHIFTER_SKIP_NATIVE_BUILD").unwrap_or_default();
+    if skip_native == "1" {
+        println!("cargo:warning=[build.rs] Skipping native library builds (HIFISHIFTER_SKIP_NATIVE_BUILD=1)");
+    } else {
+        build_world_static();
+        build_signalsmith_stretch();
+        build_vslib();
+    }
 }
 
 /// 在编译时自动构建前端静态资源。
@@ -29,6 +37,14 @@ fn build_frontend() {
     println!("cargo:rerun-if-changed=../../frontend/package.json");
     println!("cargo:rerun-if-changed=../../frontend/vite.config.ts");
     println!("cargo:rerun-if-changed=../../frontend/vite.config.js");
+
+    // Allow CI to skip frontend build if artifact is provided.
+    // Set HIFISHIFTER_SKIP_FRONTEND_BUILD=1 to skip building frontend here.
+    let skip_frontend = std::env::var("HIFISHIFTER_SKIP_FRONTEND_BUILD").unwrap_or_default();
+    if skip_frontend == "1" {
+        println!("cargo:warning=[Frontend] HIFISHIFTER_SKIP_FRONTEND_BUILD=1 -> skipping frontend build");
+        return;
+    }
 
     // dist 已存在则跳过，避免每次编译都重新构建前端
     if dist_dir.exists() {
@@ -265,22 +281,33 @@ fn build_vslib() {
 
     println!("cargo:rerun-if-changed=third_party/vslib/vslib_x64.lib");
     println!("cargo:rerun-if-changed=third_party/vslib/vslib_x64.dll");
-    println!("cargo:rustc-link-search=native={}", abs.display());
-    println!("cargo:rustc-link-lib=dylib=vslib_x64");
 
-    // Copy the DLL next to the output binary so `cargo tauri dev` works.
-    // OUT_DIR = .../target/<profile>/build/<pkg>/out  →  4 levels up = target/<profile>/
-    if let Ok(out_dir) = std::env::var("OUT_DIR") {
-        let dll_src = lib_dir.join("vslib_x64.dll");
-        let target_dir = std::path::Path::new(&out_dir)
-            .ancestors()
-            .nth(3)
-            .expect("[vslib] unexpected OUT_DIR depth");
-        let dll_dst = target_dir.join("vslib_x64.dll");
-        if let Err(e) = std::fs::copy(&dll_src, &dll_dst) {
-            println!("cargo:warning=[vslib] could not copy DLL to {}: {}", dll_dst.display(), e);
+    // Only link/copy when building for x86_64 Windows targets. This avoids
+    // trying to link a Windows x64 import lib when compiling for Windows ARM
+    // or non-Windows platforms where the DLL isn't usable.
+    let target = std::env::var("TARGET").unwrap_or_default();
+    let target_lc = target.to_lowercase();
+    if target_lc.contains("windows") && target_lc.contains("x86_64") {
+        println!("cargo:rustc-link-search=native={}", abs.display());
+        println!("cargo:rustc-link-lib=dylib=vslib_x64");
+
+        // OUT_DIR = .../target/<profile>/build/<pkg>/out  →  4 levels up = target/<profile>/
+        if let Ok(out_dir) = std::env::var("OUT_DIR") {
+            let dll_src = lib_dir.join("vslib_x64.dll");
+            let target_dir = std::path::Path::new(&out_dir)
+                .ancestors()
+                .nth(3)
+                .expect("[vslib] unexpected OUT_DIR depth");
+            let dll_dst = target_dir.join("vslib_x64.dll");
+            if let Err(e) = std::fs::copy(&dll_src, &dll_dst) {
+                println!("cargo:warning=[vslib] could not copy DLL to {}: {}", dll_dst.display(), e);
+            } else {
+                println!("cargo:warning=[vslib] copied vslib_x64.dll to {}", dll_dst.display());
+            }
         } else {
-            println!("cargo:warning=[vslib] copied vslib_x64.dll to {}", dll_dst.display());
+            println!("cargo:warning=[vslib] OUT_DIR not set; skipping DLL copy")
         }
+    } else {
+        println!("cargo:warning=[vslib] target '{}' not an x86_64 Windows target; skipping link/copy of vslib_x64", target);
     }
 }

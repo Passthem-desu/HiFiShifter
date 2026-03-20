@@ -26,7 +26,9 @@
     "bundle": {
         "active": true,
         "targets": [
-            "nsis"
+            "nsis",
+            "dmg",
+            "appimage"
         ],
         "windows": {
             "nsis": {
@@ -37,8 +39,7 @@
             "resources/models/nsf_hifigan/pc_nsf_hifigan.onnx": "models/nsf_hifigan/pc_nsf_hifigan.onnx",
             "resources/models/nsf_hifigan/config.json": "models/nsf_hifigan/config.json",
             "resources/models/hnsep/hnsep.onnx": "models/hnsep/hnsep.onnx",
-            "resources/models/hnsep/config.yaml": "models/hnsep/config.yaml",
-            "third_party/vslib/vslib_x64.dll": "vslib_x64.dll"
+            "resources/models/hnsep/config.yaml": "models/hnsep/config.yaml"
         },
         "icon": [
             "icons/32x32.png",
