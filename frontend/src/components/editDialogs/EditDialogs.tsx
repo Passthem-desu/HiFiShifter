@@ -323,6 +323,84 @@ export function SetPitchDialog({
   );
 }
 
+interface AverageProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm?: (strength: number) => void;
+}
+
+export function AverageDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+}: AverageProps) {
+  const { t } = useI18n();
+  const tAny = t as (key: string) => string;
+  const [strength, setStrength] = useState("100");
+  const paramFineAdjustKb = useAppSelector((state) =>
+    selectKeybinding(state, "modifier.paramFineAdjust"),
+  );
+  
+
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content
+        style={{ maxWidth: 400 }}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <Dialog.Title>{tAny("menu_average")}</Dialog.Title>
+        <Flex direction="column" gap="3" mt="3">
+          <Flex align="center" gap="2">
+            <Text size="2" style={{ minWidth: 72 }}>
+              {tAny("dlg_average_strength")}
+            </Text>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={Math.round(Number(strength) || 0)}
+              onWheel={(e) => {
+                e.preventDefault();
+                const fine = isModifierActive(paramFineAdjustKb, e.nativeEvent);
+                const step = fine ? 1 : 5;
+                const dir = e.deltaY < 0 ? 1 : -1;
+                const current = Math.round(Number(strength) || 0);
+                const next = Math.max(0, Math.min(100, current + dir * step));
+                setStrength(String(next));
+              }}
+              onChange={(e) => {
+                setStrength(e.currentTarget.value);
+              }}
+              style={{ flex: 1 }}
+            />
+            <Text size="1" style={{ minWidth: 40, textAlign: "right" }}>
+              {Math.round(Number(strength) || 0)}%
+            </Text>
+          </Flex>
+        </Flex>
+        <Flex justify="end" gap="2" mt="4">
+          <Dialog.Close>
+            <Button variant="soft" color="gray">
+              {tAny("cancel")}
+            </Button>
+          </Dialog.Close>
+          <Button
+            onClick={() => {
+              onConfirm?.(
+                Math.max(0, Math.min(100, Math.round(Number(strength) || 0))),
+              );
+              onOpenChange(false);
+            }}
+          >
+            {tAny("ok")}
+          </Button>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
+  );
+}
+
 interface SmoothProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;

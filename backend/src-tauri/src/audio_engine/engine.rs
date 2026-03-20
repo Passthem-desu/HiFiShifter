@@ -605,8 +605,13 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
             .last_timeline
             .as_ref()
             .map(|old_tl| {
-                let old_params = old_tl.params_by_root_track.get(&clip.track_id);
-                let new_params = tl.params_by_root_track.get(&clip.track_id);
+                // 先解析 root_track_id，否则子轨道中的 clip 无法正确失效缓存
+                let old_root = old_tl.resolve_root_track_id(&clip.track_id);
+                let new_root = tl.resolve_root_track_id(&clip.track_id);
+
+                let old_params = old_root.and_then(|r| old_tl.params_by_root_track.get(&r));
+                let new_params = new_root.and_then(|r| tl.params_by_root_track.get(&r));
+
                 match (old_params, new_params) {
                     (Some(old), Some(new)) => old.pitch_edit != new.pitch_edit,
                     (None, Some(new)) => !new.pitch_edit.is_empty(),
@@ -617,10 +622,10 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
             .unwrap_or(false); // 首次 timeline，不触发重新合成
 
         if pitch_changed {
-            crate::synth_clip_cache::global_synth_clip_cache()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .invalidate(&clip.id);
+            // 修改：不再暴力清除全部缓存，而是仅清除片段缓存和解绑 pending_key。
+            // 这样系统会自然计算出新的 Hash，并在新 Hash 未渲染完成时，
+            // 利用留存下来的 RenderedClipCache 进行无缝垫音播放
+            crate::synth_clip_cache::invalidate_clip_for_pitch_edit(&clip.id);
         }
     }
 
@@ -632,8 +637,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
         .unwrap_or_default();
 
     // ── 3. 收集需要重新推送 pitch data 的 clip ─────────────────────────────
-    // 使用 HashSet 替换 Vec，将后续 `.contains()` 的查找复杂度从 O(N) 降维到 O(1)
-    let moved_clip_ids: std::collections::HashSet<String> = tl
+    let moved_clip_ids: std::collections::HashSet<&str> = tl
         .clips
         .iter()
         .filter(|clip| {
@@ -649,7 +653,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
                 })
                 .unwrap_or(false)
         })
-        .map(|clip| clip.id.clone())
+        .map(|clip| clip.id.as_str()) // 零拷贝
         .collect();
 
     // ── 4. 检测音高相关变化（必须在 last_timeline 更新之前）──────────────────
@@ -660,14 +664,13 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
         }
     });
 
-    // 收集 pitch 参数变化的 clip id（使用 HashSet）
-    let pitch_params_changed_clip_ids: std::collections::HashSet<String> = tl
+    let pitch_params_changed_clip_ids: std::collections::HashSet<&str> = tl
         .clips
         .iter()
         .filter_map(|clip| {
             old_clips_map.get(clip.id.as_str()).and_then(|old| {
                 if clip_pitch_params_changed(*old, clip) {
-                    Some(clip.id.clone())
+                    Some(clip.id.as_str()) // 优化：零拷贝
                 } else {
                     None
                 }
@@ -676,7 +679,6 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
         .collect();
 
     // 检测 track 级别的变化
-    // 检测 track 级别的变化（compose_enabled 或 pitch_analysis_algo）
     let has_last_timeline = s.last_timeline.is_some();
     let track_pitch_settings_changed = s.last_timeline.as_ref().map_or(true, |old_tl| {
         tl.tracks.iter().any(|track| {
@@ -709,17 +711,18 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     // Pre-request decoded PCM for all audible clips (async, non-blocking).
     {
         let track_gain = super::snapshot::compute_track_gains(&tl.tracks);
-        let mut audible_tracks: HashSet<String> = HashSet::new();
-        for (tid, (_gain, muted, solo_ok)) in &track_gain {
+        // 消除高频循环中的 String 堆分配，直接使用 &str
+        let mut audible_tracks: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (&tid, (_gain, muted, solo_ok)) in &track_gain {
             if !*muted && *solo_ok {
-                audible_tracks.insert(tid.clone());
+                audible_tracks.insert(tid);
             }
         }
         for clip in &tl.clips {
             if clip.muted {
                 continue;
             }
-            if !audible_tracks.contains(&clip.track_id) {
+            if !audible_tracks.contains(clip.track_id.as_str()) {
                 continue;
             }
             let Some(source_path) = clip.source_path.as_ref() else {
@@ -755,30 +758,29 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     // 注意：检测逻辑已在 last_timeline 更新之前完成（见上方）
 
     if needs_pitch_schedule {
-        // 对参数变化的 clip（rate/trim 变化），从全量缓存重新截取+resample 推送。
-        // 如果全量缓存已存在（源音频未变，只是 trim/rate 变了），可以立即推送正确的曲线；
-        // 如果缓存未命中（首次分析或源音频变化），schedule_clip_pitch_jobs 会触发异步分析。
         if !pitch_params_changed_clip_ids.is_empty() {
             if let Some(app) = s.app_handle.as_ref() {
                 for clip in tl
                     .clips
                     .iter()
-                    .filter(|c| pitch_params_changed_clip_ids.contains(&c.id))
+                    .filter(|c| pitch_params_changed_clip_ids.contains(c.id.as_str()))
+                // 适配 &str
                 {
                     emit_clip_pitch_data_for_clip(app, &tl, clip);
                 }
             }
         }
-
         schedule_clip_pitch_jobs(&tl, s.tx, s.app_handle.as_ref(), s.sr);
     }
 
-    // 当 clip 的 start_sec 发生变化时（clip 被移动），即使 MIDI 缓存命中，
-    // 也需要重新发送 clip_pitch_data 事件以更新前端的 startFrame。
-    // 这里直接用缓存的 MIDI 曲线重新推送，无需重新分析。
     if !moved_clip_ids.is_empty() {
         if let Some(app) = s.app_handle.as_ref() {
-            for clip in tl.clips.iter().filter(|c| moved_clip_ids.contains(&c.id)) {
+            for clip in tl
+                .clips
+                .iter()
+                .filter(|c| moved_clip_ids.contains(c.id.as_str()))
+            {
+                // 适配 &str
                 emit_clip_pitch_data_for_clip(app, &tl, clip);
             }
         }

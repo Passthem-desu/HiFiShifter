@@ -428,7 +428,7 @@ export const jaJP = {
     menu_transpose_cents: "セント指定で移調...",
     menu_transpose_degrees: "度数指定で移調...",
     menu_set_pitch: "ピッチを設定...",
-    menu_average: "平均化",
+    menu_average: "平均化...",
     menu_smooth: "スムージング...",
     menu_add_vibrato: "ビブラートを追加...",
     menu_quantize: "クオンタイズ...",
@@ -454,6 +454,7 @@ export const jaJP = {
     // スムージングダイアログ
     smooth_title: "スムージング",
     smooth_strength: "スムーズ度",
+    average_strength: "平均度",
 
     // ビブラート追加ダイアログ
     vibrato_title: "ビブラートを追加",
@@ -499,6 +500,7 @@ export const jaJP = {
     dlg_midi_note: "MIDI ノート",
     dlg_strength: "スムーズ度",
     dlg_smoothness: "スムーズ度",
+    dlg_average_strength: "平均度",
     dlg_depth_cents: "振幅（セント）",
     dlg_amplitude_cents: "振幅（セント）",
     dlg_amplitude: "振幅",

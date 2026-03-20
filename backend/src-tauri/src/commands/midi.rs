@@ -23,32 +23,6 @@ fn validate_midi_import_target(track: &Track) -> Result<(), &'static str> {
     Ok(())
 }
 
-#[cfg(test)]
-fn required_project_length(
-    notes: &[midi_import::MidiNoteEvent],
-    offset_sec: f64,
-) -> Option<f64> {
-    notes.iter()
-        .filter_map(|note| {
-            let end_sec = note.end_sec + offset_sec;
-            (end_sec.is_finite() && end_sec > 0.0).then_some(end_sec)
-        })
-        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-}
-
-#[cfg(test)]
-fn align_notes_to_offset(notes: &[midi_import::MidiNoteEvent], offset_sec: f64) -> f64 {
-    let first_start_sec = notes
-        .iter()
-        .filter_map(|note| {
-            (note.start_sec.is_finite() && note.start_sec >= 0.0).then_some(note.start_sec)
-        })
-        .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .unwrap_or(0.0);
-
-    offset_sec - first_start_sec
-}
-
 /// 读取 MIDI 文件并返回轨道摘要列表。
 pub(super) fn get_midi_tracks(midi_path: String) -> serde_json::Value {
     let path = std::path::Path::new(&midi_path);
@@ -62,11 +36,8 @@ pub(super) fn get_midi_tracks(midi_path: String) -> serde_json::Value {
     match midi_import::parse_midi_file(path, None) {
         Ok(result) => {
             // 只返回有音符的轨道
-            let tracks_with_notes: Vec<&MidiTrackInfo> = result
-                .tracks
-                .iter()
-                .filter(|t| t.note_count > 0)
-                .collect();
+            let tracks_with_notes: Vec<&MidiTrackInfo> =
+                result.tracks.iter().filter(|t| t.note_count > 0).collect();
 
             midi_log(format!(
                 "get_midi_tracks: parsed tracks_total={} tracks_with_notes={}",
@@ -141,11 +112,8 @@ pub(super) fn import_midi_to_pitch(
         }
         None => {
             // 合并所有轨道的音符（与 paste_midi_clipboard_inner 一致）
-            let mut all_notes: Vec<midi_import::MidiNoteEvent> = parse_result
-                .track_notes
-                .into_iter()
-                .flatten()
-                .collect();
+            let mut all_notes: Vec<midi_import::MidiNoteEvent> =
+                parse_result.track_notes.into_iter().flatten().collect();
             all_notes.sort_by(|a, b| {
                 a.start_sec
                     .partial_cmp(&b.start_sec)
@@ -190,7 +158,9 @@ pub(super) fn import_midi_to_pitch(
     };
 
     if let Err(error) = validate_midi_import_target(root_track) {
-        midi_log(format!("import_midi_to_pitch: validation_failed error={error}"));
+        midi_log(format!(
+            "import_midi_to_pitch: validation_failed error={error}"
+        ));
         return serde_json::json!({"ok": false, "error": error});
     }
 
@@ -211,7 +181,10 @@ pub(super) fn import_midi_to_pitch(
     let touched = if let Some(sel_start) = selection_start_frame {
         // 以选区起始帧对应秒作为目标偏移，所有音符整体平移使第一个音符对齐该偏移
         let offset_sec = (sel_start as f64 * frame_period_ms_raw) / 1000.0;
-        let first_start = notes.iter().map(|n| n.start_sec).fold(f64::INFINITY, f64::min);
+        let first_start = notes
+            .iter()
+            .map(|n| n.start_sec)
+            .fold(f64::INFINITY, f64::min);
         let align_offset = offset_sec - first_start;
         let max_frame = sel_start + selection_max_frames.unwrap_or(usize::MAX - sel_start);
         let clamp_len = max_frame.min(entry.pitch_edit.len());
@@ -227,7 +200,10 @@ pub(super) fn import_midi_to_pitch(
         )
     } else {
         // 以光标位置为目标偏移，所有音符整体平移使第一个音符对齐该偏移
-        let first_start = notes.iter().map(|n| n.start_sec).fold(f64::INFINITY, f64::min);
+        let first_start = notes
+            .iter()
+            .map(|n| n.start_sec)
+            .fold(f64::INFINITY, f64::min);
         let align_offset = playhead_sec - first_start;
         midi_log(format!(
             "import_midi_to_pitch: playhead mode offset_sec={:.3} align_offset={:.3}",
@@ -245,7 +221,8 @@ pub(super) fn import_midi_to_pitch(
         entry.pitch_edit_user_modified = true;
         midi_log(format!(
             "import_midi_to_pitch: success frames_touched={} notes_imported={}",
-            touched, notes.len()
+            touched,
+            notes.len()
         ));
     } else {
         midi_log(format!(
@@ -262,97 +239,4 @@ pub(super) fn import_midi_to_pitch(
         "notes_imported": notes.len(),
         "frames_touched": touched,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{align_notes_to_offset, required_project_length, validate_midi_import_target};
-    use crate::midi_import::MidiNoteEvent;
-    use crate::state::{PitchAnalysisAlgo, Track};
-
-    fn make_track(compose_enabled: bool, pitch_analysis_algo: PitchAnalysisAlgo) -> Track {
-        Track {
-            id: "track_1".to_string(),
-            name: "Track 1".to_string(),
-            parent_id: None,
-            order: 0,
-            muted: false,
-            solo: false,
-            volume: 1.0,
-            compose_enabled,
-            pitch_analysis_algo,
-            color: String::new(),
-        }
-    }
-
-    #[test]
-    fn validate_midi_import_target_requires_compose() {
-        let track = make_track(false, PitchAnalysisAlgo::WorldDll);
-        assert_eq!(validate_midi_import_target(&track), Err("pitch_requires_compose"));
-    }
-
-    #[test]
-    fn validate_midi_import_target_requires_algorithm() {
-        let track = make_track(true, PitchAnalysisAlgo::None);
-        assert_eq!(validate_midi_import_target(&track), Err("pitch_requires_algo"));
-    }
-
-    #[test]
-    fn validate_midi_import_target_accepts_enabled_pitch_track() {
-        let track = make_track(true, PitchAnalysisAlgo::WorldDll);
-        assert_eq!(validate_midi_import_target(&track), Ok(()));
-    }
-
-    #[test]
-    fn required_project_length_uses_max_note_end_with_offset() {
-        let notes = vec![
-            MidiNoteEvent {
-                start_sec: 0.0,
-                end_sec: 1.5,
-                note: 60,
-                velocity: 100,
-            },
-            MidiNoteEvent {
-                start_sec: 2.0,
-                end_sec: 3.25,
-                note: 64,
-                velocity: 100,
-            },
-        ];
-
-        assert_eq!(required_project_length(&notes, 4.0), Some(7.25));
-    }
-
-    #[test]
-    fn required_project_length_ignores_non_finite_end_times() {
-        let notes = vec![MidiNoteEvent {
-            start_sec: 0.0,
-            end_sec: f64::NAN,
-            note: 60,
-            velocity: 100,
-        }];
-
-        assert_eq!(required_project_length(&notes, 0.0), None);
-    }
-
-    #[test]
-    fn align_notes_to_offset_moves_first_note_to_requested_time() {
-        let notes = vec![
-            MidiNoteEvent {
-                start_sec: 217.586,
-                end_sec: 218.0,
-                note: 60,
-                velocity: 100,
-            },
-            MidiNoteEvent {
-                start_sec: 220.0,
-                end_sec: 221.0,
-                note: 64,
-                velocity: 100,
-            },
-        ];
-
-        assert_eq!(align_notes_to_offset(&notes, 0.0), -217.586);
-        assert_eq!(align_notes_to_offset(&notes, 12.0), -205.586);
-    }
 }

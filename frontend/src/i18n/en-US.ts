@@ -429,7 +429,7 @@ export const enUS = {
     menu_transpose_cents: "Transpose by Cents...",
     menu_transpose_degrees: "Transpose by Degrees...",
     menu_set_pitch: "Set Pitch...",
-    menu_average: "Average",
+    menu_average: "Average...",
     menu_smooth: "Smooth...",
     menu_add_vibrato: "Add Vibrato...",
     menu_quantize: "Quantize...",
@@ -455,6 +455,7 @@ export const enUS = {
     // Smooth dialog
     smooth_title: "Smooth",
     smooth_strength: "Smoothness",
+    average_strength: "Average Amount",
 
     // Add vibrato dialog
     vibrato_title: "Add Vibrato",
@@ -500,6 +501,7 @@ export const enUS = {
     dlg_midi_note: "MIDI Note",
     dlg_strength: "Smoothness",
     dlg_smoothness: "Smoothness",
+    dlg_average_strength: "Average Amount",
     dlg_depth_cents: "Amplitude (cents)",
     dlg_amplitude_cents: "Amplitude (cents)",
     dlg_amplitude: "Amplitude",

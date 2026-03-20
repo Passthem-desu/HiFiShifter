@@ -5,8 +5,7 @@
 use crate::audio_utils::try_read_audio_header_only;
 use crate::models::PitchRange;
 use crate::reaper_parser::{
-    self, ReaperData, ReaperEnvelope, ReaperItem, ReaperTrack,
-    stretch_segments_from_markers,
+    self, stretch_segments_from_markers, ReaperData, ReaperEnvelope, ReaperItem, ReaperTrack,
 };
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
 use std::collections::BTreeMap;
@@ -51,7 +50,11 @@ fn is_audio_supported(path: &str) -> bool {
     Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| SUPPORTED_AUDIO_EXTS.contains(&e.to_lowercase().as_str()))
+        .map(|e| {
+            SUPPORTED_AUDIO_EXTS
+                .iter()
+                .any(|&ext| ext.eq_ignore_ascii_case(e))
+        })
         .unwrap_or(false)
 }
 
@@ -85,7 +88,12 @@ pub fn import_reaper_clipboard(
     ordered_track_ids: &[String],
 ) -> Result<ReaperImportResult, String> {
     let reaper_data = reaper_parser::parse_clipboard_bytes(data)?;
-    convert_reaper_data_clipboard(reaper_data, playhead_sec, selected_track_idx, ordered_track_ids)
+    convert_reaper_data_clipboard(
+        reaper_data,
+        playhead_sec,
+        selected_track_idx,
+        ordered_track_ids,
+    )
 }
 
 /// 剪贴板导入逻辑：
@@ -103,7 +111,10 @@ fn convert_reaper_data_clipboard(
     } else {
         // 纯 Item（可能含 TRACKSKIP）：粘贴到现有轨道，偏移到光标
         convert_reaper_items_to_existing_tracks(
-            data, playhead_sec, selected_track_idx, ordered_track_ids,
+            data,
+            playhead_sec,
+            selected_track_idx,
+            ordered_track_ids,
         )
     }
 }
@@ -125,16 +136,16 @@ fn convert_reaper_items_to_existing_tracks(
     let mut created_track_ids: std::collections::HashMap<usize, String> =
         std::collections::HashMap::new();
     // track_id → pitch offset accumulator
-    let mut pitch_offset_by_track: std::collections::HashMap<
-        String,
-        std::collections::HashMap<usize, PitchFrameAccumulator>,
-    > = std::collections::HashMap::new();
+    let mut pitch_offset_by_track: std::collections::HashMap<String, Vec<PitchFrameAccumulator>> =
+        std::collections::HashMap::new();
 
     // 当前已有轨道的最大 order，用于分配新轨道 order
     let mut next_order = ordered_track_ids.len() as i32;
 
     // 计算所有 item 中最小的 position，用于 offset 到 playhead
-    let min_position = data.tracks.iter()
+    let min_position = data
+        .tracks
+        .iter()
         .flat_map(|t| t.items.iter())
         .map(|item| item.position)
         .fold(f64::MAX, f64::min);
@@ -146,7 +157,11 @@ fn convert_reaper_items_to_existing_tracks(
 
     for (track_idx, reaper_track) in data.tracks.iter().enumerate() {
         // 查找此 Reaper track 对应的 HiFiShifter 轨道
-        let track_offset = data.track_offsets.get(track_idx).copied().unwrap_or(track_idx);
+        let track_offset = data
+            .track_offsets
+            .get(track_idx)
+            .copied()
+            .unwrap_or(track_idx);
         let target_track_idx = selected_track_idx + track_offset;
         let target_track_id = if target_track_idx < ordered_track_ids.len() {
             ordered_track_ids[target_track_idx].clone()
@@ -192,7 +207,8 @@ fn convert_reaper_items_to_existing_tracks(
     }
 
     // 构建待应用的 pitch 偏移数据
-    let project_end = clips.iter()
+    let project_end = clips
+        .iter()
         .map(|c| c.start_sec + c.length_sec)
         .fold(32.0_f64, f64::max);
     let frame_period_ms = FRAME_PERIOD * 1000.0;
@@ -296,10 +312,8 @@ fn convert_reaper_data(
     let mut track_order: i32 = 0;
 
     // track_id → pitch accumulator
-    let mut pitch_data_by_track: std::collections::HashMap<
-        String,
-        std::collections::HashMap<usize, PitchFrameAccumulator>,
-    > = std::collections::HashMap::new();
+    let mut pitch_data_by_track: std::collections::HashMap<String, Vec<PitchFrameAccumulator>> =
+        std::collections::HashMap::new();
 
     // 预分配 UUID、计算深度和父子关系（两道步）
     let track_ids: Vec<String> = (0..data.tracks.len()).map(|_| new_track_id()).collect();
@@ -333,8 +347,7 @@ fn convert_reaper_data(
             color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
         });
 
-        let mut track_pitch_accum: std::collections::HashMap<usize, PitchFrameAccumulator> =
-            std::collections::HashMap::new();
+        let mut track_pitch_accum: Vec<PitchFrameAccumulator> = Vec::new();
 
         for item in &reaper_track.items {
             process_item(
@@ -370,8 +383,7 @@ fn convert_reaper_data(
             if points.is_empty() {
                 continue;
             }
-            let total_frames =
-                ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
+            let total_frames = ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
             let offset_frames = build_pitch_frames(points, total_frames);
 
             // 只在有非零偏移时才记录
@@ -435,7 +447,7 @@ fn process_item(
     time_offset: f64,
     clips: &mut Vec<Clip>,
     skipped_files: &mut Vec<String>,
-    pitch_accum: &mut std::collections::HashMap<usize, PitchFrameAccumulator>,
+    pitch_accum: &mut Vec<PitchFrameAccumulator>,
 ) {
     let take = item.active_take();
 
@@ -552,7 +564,11 @@ fn process_item(
             clips.push(Clip {
                 id: clip_id.clone(),
                 track_id: track_id.to_string(),
-                name: if seg_count > 1 { format!("{} ({})", clip_name, seg_idx + 1) } else { clip_name },
+                name: if seg_count > 1 {
+                    format!("{} ({})", clip_name, seg_idx + 1)
+                } else {
+                    clip_name
+                },
                 start_sec: clip_start,
                 length_sec: clip_length,
                 color: clip_color(),
@@ -561,7 +577,10 @@ fn process_item(
                 duration_frames,
                 source_sample_rate: source_sr,
                 waveform_preview: None,
-                pitch_range: Some(PitchRange { min: -24.0, max: 24.0 }),
+                pitch_range: Some(PitchRange {
+                    min: -24.0,
+                    max: 24.0,
+                }),
                 gain: convert_volume(take_volume * gain_trim),
                 muted: item_muted,
                 source_start_sec: clip_src_start.max(0.0),
@@ -638,7 +657,10 @@ fn process_item(
             duration_frames,
             source_sample_rate: source_sr,
             waveform_preview: None,
-            pitch_range: Some(PitchRange { min: -24.0, max: 24.0 }),
+            pitch_range: Some(PitchRange {
+                min: -24.0,
+                max: 24.0,
+            }),
             gain: convert_volume(take_volume * gain_trim),
             muted: item_muted,
             source_start_sec: source_start.max(0.0),
@@ -707,25 +729,27 @@ fn interpolate_pitch_envelope(points: &[(f64, f64)], time_sec: f64) -> f64 {
     if points.is_empty() {
         return 0.0;
     }
-    if time_sec <= points[0].0 {
+
+    // 二分查找
+    let idx = points.partition_point(|p| p.0 < time_sec);
+
+    if idx == 0 {
         return points[0].1;
     }
-    if time_sec >= points[points.len() - 1].0 {
+    if idx == points.len() {
         return points[points.len() - 1].1;
     }
-    for i in 1..points.len() {
-        if time_sec <= points[i].0 {
-            let (t0, v0) = points[i - 1];
-            let (t1, v1) = points[i];
-            let dt = t1 - t0;
-            if dt.abs() < 1e-12 {
-                return v0;
-            }
-            let t = (time_sec - t0) / dt;
-            return v0 + (v1 - v0) * t;
-        }
+
+    let (t0, v0) = points[idx - 1];
+    let (t1, v1) = points[idx];
+    let dt = t1 - t0;
+
+    if dt.abs() < 1e-12 {
+        return v0;
     }
-    points.last().map(|p| p.1).unwrap_or(0.0)
+
+    let t = (time_sec - t0) / dt;
+    v0 + (v1 - v0) * t
 }
 
 /// 将 pitch 数据写入帧级别的 accumulator。
@@ -737,7 +761,7 @@ fn interpolate_pitch_envelope(points: &[(f64, f64)], time_sec: f64) -> f64 {
 /// 在导入时我们暂时记录偏移量，等 HiFiShifter 进行音高分析后会用 pitch_orig + offset 来计算。
 /// 如果没有偏移（0半音），则不写入 pitch 数据，让 HiFiShifter 的后续音高分析流程来处理。
 fn write_pitch_for_clip(
-    accum: &mut std::collections::HashMap<usize, PitchFrameAccumulator>,
+    accum: &mut Vec<PitchFrameAccumulator>,
     clip_start_sec: f64,
     clip_length_sec: f64,
     _source_start_sec: f64,
@@ -774,7 +798,10 @@ fn write_pitch_for_clip(
             pitch_offset += interpolate_pitch_envelope(env_points, time_in_item);
         }
 
-        let entry = accum.entry(frame_idx).or_default();
+        if frame_idx >= accum.len() {
+            accum.resize(frame_idx + 1, PitchFrameAccumulator::default());
+        }
+        let entry = &mut accum[frame_idx];
         entry.sum += pitch_offset;
         entry.weight += 1.0;
     }
@@ -782,12 +809,9 @@ fn write_pitch_for_clip(
 
 /// 从 accumulator 构建 pitch_edit 帧数组。
 /// 值是半音偏移量（会在后续音高分析后叠加到 pitch_orig 上）。
-fn build_pitch_frames(
-    accum: &std::collections::HashMap<usize, PitchFrameAccumulator>,
-    total_frames: usize,
-) -> Vec<f32> {
+fn build_pitch_frames(accum: &[PitchFrameAccumulator], total_frames: usize) -> Vec<f32> {
     let mut frames = vec![0.0f32; total_frames];
-    for (&idx, acc) in accum {
+    for (idx, acc) in accum.iter().enumerate() {
         if idx < total_frames && acc.weight > 0.0 {
             frames[idx] = (acc.sum / acc.weight) as f32;
         }
@@ -806,12 +830,12 @@ fn clip_name_from_path(path: &str) -> String {
 }
 
 fn resolve_path(raw_path: &str, base_dir: Option<&Path>) -> String {
-    let p = PathBuf::from(raw_path);
+    let p = Path::new(raw_path);
     if p.is_absolute() {
-        return p.to_string_lossy().to_string();
+        return raw_path.to_string();
     }
     if let Some(dir) = base_dir {
-        let resolved = dir.join(&p);
+        let resolved = dir.join(p);
         return resolved.to_string_lossy().to_string();
     }
     raw_path.to_string()

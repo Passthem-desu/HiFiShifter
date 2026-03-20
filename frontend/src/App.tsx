@@ -112,6 +112,11 @@ function AppInner() {
   const drawToolMode = useAppSelector((state) => state.session.drawToolMode);
   const outputPath = useAppSelector((state) => state.session.outputPath);
   const projectDirty = useAppSelector((state) => state.session.project.dirty);
+  // 使用 ref 桥接最新的工程修改状态
+  const projectDirtyRef = useRef(projectDirty);
+  useEffect(() => {
+    projectDirtyRef.current = projectDirty;
+  }, [projectDirty]);
   const projectPath = useAppSelector((state) => state.session.project.path);
   const vocalShifterSkippedFilesDialog = useAppSelector(
     (state) => state.session.vocalShifterSkippedFilesDialog,
@@ -157,37 +162,53 @@ function AppInner() {
       return Math.min(maxV, Math.max(minV, v));
     }
 
-    function setFromClientY(clientY: number) {
+    // 提取纯计算逻辑，不在此处触发 React 状态更新
+    function calculateRatio(clientY: number) {
       const el = containerRef.current;
-      if (!el) return;
+      if (!el) return null;
       const rect = el.getBoundingClientRect();
       const total = rect.height;
       if (
         !Number.isFinite(total) ||
         total <= minTopPx + minBottomPx + handlePx
       ) {
-        return;
+        return null;
       }
       const y = clientY - rect.top;
       const maxTop = total - handlePx - minBottomPx;
       const nextTop = clamp(y, minTopPx, maxTop);
-      const nextRatio = clamp(nextTop / total, 0.15, 0.85);
-      setSplitRatio(nextRatio);
+      return clamp(nextTop / total, 0.15, 0.85);
     }
 
     function onPointerMove(e: PointerEvent) {
       if (!dragRef.current) return;
-      setFromClientY(e.clientY);
+      const nextRatio = calculateRatio(e.clientY);
+      if (nextRatio === null) return;
+
+      // 拖拽时直接修改 DOM 的 flexGrow，绕过 React 重绘
+      const container = containerRef.current;
+      if (container && container.children.length >= 3) {
+        const topPanel = container.children[0] as HTMLElement;
+        const bottomPanel = container.children[2] as HTMLElement;
+        topPanel.style.flexGrow = String(nextRatio);
+        bottomPanel.style.flexGrow = String(1 - nextRatio);
+      }
+
+      splitRatioRef.current = nextRatio;
     }
 
     function endDrag() {
       if (!dragRef.current) return;
       dragRef.current = null;
       setIsDragging(false);
+
+      // 只在松开鼠标的最后一刻，才把最终状态同步给 React 并持久化
+      setSplitRatio(splitRatioRef.current);
       localStorage.setItem(
         "hifishifter.splitRatio",
         String(splitRatioRef.current),
       );
+
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
@@ -198,14 +219,27 @@ function AppInner() {
       dragRef.current = { pointerId: e.pointerId };
       setIsDragging(true);
       (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
-      setFromClientY(e.clientY);
+
+      // 按下的瞬间也走一次 DOM 直通更新
+      const nextRatio = calculateRatio(e.clientY);
+      if (nextRatio !== null) {
+        splitRatioRef.current = nextRatio;
+        const container = containerRef.current;
+        if (container && container.children.length >= 3) {
+          const topPanel = container.children[0] as HTMLElement;
+          const bottomPanel = container.children[2] as HTMLElement;
+          topPanel.style.flexGrow = String(nextRatio);
+          bottomPanel.style.flexGrow = String(1 - nextRatio);
+        }
+      }
+
       window.addEventListener("pointermove", onPointerMove);
       window.addEventListener("pointerup", endDrag);
       window.addEventListener("pointercancel", endDrag);
     }
 
     return { startDrag };
-  }, [splitRatio]);
+  }, []);
 
   const statusText = useMemo(() => {
     // 精确匹配
@@ -220,12 +254,13 @@ function AppInner() {
     return status;
   }, [status, t]);
 
-  // 监听后端 clip_pitch_data 事件，将 per-clip MIDI 曲线存入 store。
+  // 监听后端 clip_pitch_data 事件，将 per-clip MIDI 曲线存入 store
   useClipPitchDataListener();
 
   // 阻止浏览器默认的 Ctrl+F 搜索、右键菜单和 Alt 键
 
-  const [isModifier, setIsModifier] = useState(false);
+  // 改用 useRef，取消重绘
+  const isModifierRef = useRef(false);
 
   useEffect(() => {
     function preventBrowserFind(e: KeyboardEvent) {
@@ -234,30 +269,26 @@ function AppInner() {
       if (mod && e.key.toLowerCase() === "f") {
         e.preventDefault();
       }
-      // 禁用 Ctrl+P 浏览器打印
       if (mod && e.key.toLowerCase() === "p") {
         e.preventDefault();
       }
     }
     function preventContextMenu(e: MouseEvent) {
       const target = e.target as HTMLElement | null;
-      // Allow native context menu on text inputs and textareas
       if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
-      // Allow elements that opt-in to custom context menus
       if (target?.closest?.("[data-hs-context-menu]")) return;
       e.preventDefault();
     }
 
-    // 在 Windows 平台下禁用 Alt 键
     function altKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Alt") setIsModifier(true);
+      if (e.key !== "Alt") isModifierRef.current = true;
     }
 
     function altKeyUp(e: KeyboardEvent) {
-      if (e.key === "Alt" && !isModifier) {
+      if (e.key === "Alt" && !isModifierRef.current) {
         e.preventDefault();
       }
-      setIsModifier(false);
+      isModifierRef.current = false;
     }
 
     window.addEventListener("keydown", altKeyDown, true);
@@ -270,7 +301,7 @@ function AppInner() {
       window.removeEventListener("keyup", altKeyUp, true);
       document.removeEventListener("contextmenu", preventContextMenu, true);
     };
-  }, [isModifier]);
+  }, []);
 
   const errorText = error
     ? `${t("status_error_prefix")}：${errorCodeKey[error] ? t(errorCodeKey[error] as MessageKey) : error}`
@@ -279,23 +310,23 @@ function AppInner() {
   // 构建 pitch 分析进度文本（分析中时显示在状态栏左侧）
   const pitchAnalysisText = pitchAnalysis.pending
     ? (() => {
-        const parts: string[] = [t("status_analyzing_pitch")];
-        if (pitchAnalysis.currentClip) {
-          parts.push(`"${pitchAnalysis.currentClip}"`);
-        }
-        if (pitchAnalysis.totalClips != null && pitchAnalysis.totalClips > 0) {
-          parts.push(
-            `(${pitchAnalysis.completedClips ?? 0}/${pitchAnalysis.totalClips})`,
-          );
-        }
-        if (
-          pitchAnalysis.progress != null &&
-          Number.isFinite(pitchAnalysis.progress)
-        ) {
-          parts.push(`${Math.round(pitchAnalysis.progress * 100)}%`);
-        }
-        return parts.join(" ");
-      })()
+      const parts: string[] = [t("status_analyzing_pitch")];
+      if (pitchAnalysis.currentClip) {
+        parts.push(`"${pitchAnalysis.currentClip}"`);
+      }
+      if (pitchAnalysis.totalClips != null && pitchAnalysis.totalClips > 0) {
+        parts.push(
+          `(${pitchAnalysis.completedClips ?? 0}/${pitchAnalysis.totalClips})`,
+        );
+      }
+      if (
+        pitchAnalysis.progress != null &&
+        Number.isFinite(pitchAnalysis.progress)
+      ) {
+        parts.push(`${Math.round(pitchAnalysis.progress * 100)}%`);
+      }
+      return parts.join(" ");
+    })()
     : null;
 
   const [rendering, setRendering] = useState<{
@@ -454,7 +485,7 @@ function AppInner() {
       disposed = true;
       if (unlisten) unlisten();
     };
-  });
+  }, []);
 
   const runtimeRef = useRef({
     isPlaying: false,
@@ -530,7 +561,7 @@ function AppInner() {
   }, []);
 
   const discardUnsavedAndContinue = useCallback(() => {
-    void executePendingUnsavedAction().catch(() => {});
+    void executePendingUnsavedAction().catch(() => { });
   }, [executePendingUnsavedAction]);
 
   const saveUnsavedAndContinue = useCallback(() => {
@@ -639,7 +670,8 @@ function AppInner() {
               allowWindowCloseRef.current = false;
               return;
             }
-            if (!projectDirty) {
+            // 读取 ref 的值，无需重建整个监听器
+            if (!projectDirtyRef.current) {
               return;
             }
             event.preventDefault();
@@ -649,7 +681,6 @@ function AppInner() {
           },
         );
       } catch {
-        // Safe no-op for non-Tauri builds.
       }
     }
 
@@ -658,7 +689,7 @@ function AppInner() {
       disposed = true;
       if (unlisten) unlisten();
     };
-  }, [closeWindowNow, projectDirty, promptUnsavedAction]);
+  }, [closeWindowNow, promptUnsavedAction]); // 剔除 projectDirty 依赖，只绑定一次
 
   // 统一快捷键处理（通过 keybindings 模块管理，用户可自定义）
   const handleKeybindingAction = useCallback(
@@ -904,9 +935,9 @@ function AppInner() {
               const meanDelta =
                 beforeMean.count > 0 && afterMean.count > 0
                   ? Math.abs(
-                      afterMean.sum / afterMean.count -
-                        beforeMean.sum / beforeMean.count,
-                    )
+                    afterMean.sum / afterMean.count -
+                    beforeMean.sum / beforeMean.count,
+                  )
                   : 0;
 
               let boundaryDelta = 0;
@@ -914,14 +945,14 @@ function AppInner() {
               if (selOffset > 0) {
                 boundaryDelta += Math.abs(
                   Number(beforeDense[selOffset] ?? 0) -
-                    Number(beforeDense[selOffset - 1] ?? 0),
+                  Number(beforeDense[selOffset - 1] ?? 0),
                 );
                 boundaryCount += 1;
               }
               if (selEnd < beforeDense.length - 1) {
                 boundaryDelta += Math.abs(
                   Number(beforeDense[selEnd] ?? 0) -
-                    Number(beforeDense[selEnd + 1] ?? 0),
+                  Number(beforeDense[selEnd + 1] ?? 0),
                 );
                 boundaryCount += 1;
               }

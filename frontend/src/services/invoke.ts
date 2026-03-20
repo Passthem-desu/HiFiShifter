@@ -187,6 +187,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 composeEnabled: args[4],
                 pitchAnalysisAlgo: args[5],
                 color: args[6],
+                name: args[7],
             };
 
         case "select_track":

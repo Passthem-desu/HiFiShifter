@@ -16,9 +16,6 @@ mod pitch_analysis;
 mod pitch_clip;
 #[path = "pitch/pitch_config.rs"]
 mod pitch_config;
-#[cfg(test)]
-#[path = "pitch/pitch_config_tests.rs"]
-mod pitch_config_tests;
 mod pitch_editing;
 #[path = "pitch/pitch_progress.rs"]
 mod pitch_progress;

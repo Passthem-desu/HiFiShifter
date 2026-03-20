@@ -137,7 +137,6 @@ struct ExtraCurveAccumulator {
     formant_weight: f64,
 }
 
-
 // ─── 系统编码检测 ───
 
 /// 将系统本地编码的字节串解码为 UTF-8。
@@ -387,7 +386,10 @@ fn parse_trkp(data: &[u8]) -> VspTrack {
 
 fn parse_itmp(data: &[u8]) -> VspItemBase {
     // 偏移 0: 变长字符串到 null 终止
-    let path_end = data.iter().position(|&b| b == 0).unwrap_or(0x108.min(data.len()));
+    let path_end = data
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(0x108.min(data.len()));
     let audio_path = decode_local_string(&data[0..path_end]);
 
     VspItemBase {
@@ -489,7 +491,11 @@ fn is_audio_supported(path: &str) -> bool {
     Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| SUPPORTED_AUDIO_EXTS.contains(&e.to_lowercase().as_str()))
+        .map(|e| {
+            SUPPORTED_AUDIO_EXTS
+                .iter()
+                .any(|&ext| ext.eq_ignore_ascii_case(e))
+        })
         .unwrap_or(false)
 }
 
@@ -513,7 +519,11 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
     let (project, vsp_tracks, item_bases, item_exts) = parse_vsp_file(data)?;
 
     let sample_rate = project.sample_rate.max(1) as f64;
-    let bpm = if project.bpm > 0.0 { project.bpm } else { 120.0 };
+    let bpm = if project.bpm > 0.0 {
+        project.bpm
+    } else {
+        120.0
+    };
 
     let mut skipped_files: Vec<String> = Vec::new();
 
@@ -529,7 +539,10 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
     let mut track_algos: std::collections::HashMap<i32, std::collections::HashSet<(bool, i32)>> =
         std::collections::HashMap::new();
     for (i, base) in item_bases.iter().enumerate() {
-        let pair = item_exts.get(i).map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+        let pair = item_exts
+            .get(i)
+            .map(|e| algo_type_to_hs(e.algo_type))
+            .unwrap_or((false, 1));
         track_algos
             .entry(base.track_index)
             .or_default()
@@ -540,7 +553,10 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
     let mut earliest_start_by_algo: std::collections::HashMap<(i32, bool, i32), f64> =
         std::collections::HashMap::new();
     for (i, base) in item_bases.iter().enumerate() {
-        let pair = item_exts.get(i).map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+        let pair = item_exts
+            .get(i)
+            .map(|e| algo_type_to_hs(e.algo_type))
+            .unwrap_or((false, 1));
         let start_sec = base.start_sample / sample_rate;
         let key = (base.track_index, pair.0, pair.1);
         let entry = earliest_start_by_algo.entry(key).or_insert(f64::INFINITY);
@@ -558,12 +574,20 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         if has_mixed {
             // 需要拆分：为每个不同的 (is_world, synth_mode) 各建一条轨道
             // 按该算法在原轨道中音频块首次出现的时间排序
-            let mut sorted: Vec<(bool, i32)> = algos.map(|s| s.iter().copied().collect()).unwrap_or_default();
+            let mut sorted: Vec<(bool, i32)> = algos
+                .map(|s| s.iter().copied().collect())
+                .unwrap_or_default();
             sorted.sort_by(|a, b| {
                 let ka = (idx, a.0, a.1);
                 let kb = (idx, b.0, b.1);
-                let ta = earliest_start_by_algo.get(&ka).copied().unwrap_or(f64::INFINITY);
-                let tb = earliest_start_by_algo.get(&kb).copied().unwrap_or(f64::INFINITY);
+                let ta = earliest_start_by_algo
+                    .get(&ka)
+                    .copied()
+                    .unwrap_or(f64::INFINITY);
+                let tb = earliest_start_by_algo
+                    .get(&kb)
+                    .copied()
+                    .unwrap_or(f64::INFINITY);
                 ta.partial_cmp(&tb).unwrap_or(std::cmp::Ordering::Equal)
             });
             for (is_world, synth_mode) in sorted {
@@ -621,8 +645,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
     for base in &item_bases {
         if (base.track_index as usize) >= vsp_tracks.len() {
             let idx = base.track_index;
-            if !track_algo_map.keys().any(|&(i, _, _)| i == idx)
-            {
+            if !track_algo_map.keys().any(|&(i, _, _)| i == idx) {
                 let id = new_track_id();
                 hs_tracks.push(Track {
                     id: id.clone(),
@@ -645,14 +668,11 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
     // ─── 第二步：创建剪辑 ───
     let mut hs_clips: Vec<Clip> = Vec::new();
     // 用于收集每个轨道的 pitch 数据：track_id → frame_idx → 累积加权值
-    let mut pitch_data_by_track: std::collections::HashMap<
-        String,
-        std::collections::HashMap<usize, PitchFrameAccumulator>,
-    > = std::collections::HashMap::new();
-    // 用于收集 vslib 轨道的额外曲线数据
+    let mut pitch_data_by_track: std::collections::HashMap<String, Vec<PitchFrameAccumulator>> =
+        std::collections::HashMap::new();
     let mut extra_curve_data_by_track: std::collections::HashMap<
         String,
-        std::collections::HashMap<usize, ExtraCurveAccumulator>,
+        Vec<ExtraCurveAccumulator>,
     > = std::collections::HashMap::new();
     // 记录每个轨道的 synth_mode（仅 vslib 轨道有效）
     let mut synth_mode_by_track: std::collections::HashMap<String, i32> =
@@ -677,22 +697,20 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         }
 
         // 确定目标轨道
-        let (is_world, synth_mode) = ext.map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+        let (is_world, synth_mode) = ext
+            .map(|e| algo_type_to_hs(e.algo_type))
+            .unwrap_or((false, 1));
         let track_id = track_algo_map
             .get(&(base.track_index, is_world, synth_mode))
             .or_else(|| {
                 // 回退：查找同一原始轨道索引下的任意映射
-                track_algo_map.iter()
+                track_algo_map
+                    .iter()
                     .find(|(&(i, _, _), _)| i == base.track_index)
                     .map(|(_, id)| id)
             })
             .cloned()
-            .unwrap_or_else(|| {
-                hs_tracks
-                    .first()
-                    .map(|t| t.id.clone())
-                    .unwrap_or_default()
-            });
+            .unwrap_or_else(|| hs_tracks.first().map(|t| t.id.clone()).unwrap_or_default());
 
         // 记录 vslib 轨道的 synth_mode
         // 记录该轨道对应的 synth_mode（不再因为 World 而忽略）
@@ -862,8 +880,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
             let (rate, clip_length) = if time_markers.len() == 2 {
                 let m0 = &time_markers[0];
                 let m1 = &time_markers[1];
-                let src_dur =
-                    ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
+                let src_dur = ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
                 let new_dur = ((m1.new_pos - m0.new_pos) / sample_rate).max(0.001);
                 let r = src_dur / new_dur;
                 (r as f32, new_dur)
@@ -896,16 +913,16 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 }),
                 gain: 1.0,
                 muted: false,
-                    source_start_sec: 0.0,
-                    source_end_sec: source_duration_sec,
+                source_start_sec: 0.0,
+                source_end_sec: source_duration_sec,
                 playback_rate: rate.clamp(0.1, 10.0),
-                    fade_in_sec: 0.0,
-                    fade_out_sec: 0.0,
-                    fade_in_curve: String::new(),
-                    fade_out_curve: String::new(),
-                    extra_curves: None,
-                    extra_params: None,
-                });
+                fade_in_sec: 0.0,
+                fade_out_sec: 0.0,
+                fade_in_curve: String::new(),
+                fade_out_curve: String::new(),
+                extra_curves: None,
+                extra_params: None,
+            });
 
             // 写入 pitch 数据
             write_pitch_data_for_segment(
@@ -950,11 +967,10 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
             if points.is_empty() {
                 continue;
             }
-            let total_frames =
-                ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
+            let total_frames = ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
             let mut pitch_edit = vec![0.0f32; total_frames];
 
-            for (&frame_idx, acc) in points {
+            for (frame_idx, acc) in points.iter().enumerate() {
                 if frame_idx < total_frames {
                     if acc.weight > 0.0 {
                         pitch_edit[frame_idx] = (acc.sum / acc.weight) as f32;
@@ -1031,10 +1047,7 @@ fn write_pitch_data_for_segment(
     playback_rate: f64,
     fade_in_sec: f64,
     fade_out_sec: f64,
-    pitch_data: &mut std::collections::HashMap<
-        String,
-        std::collections::HashMap<usize, PitchFrameAccumulator>,
-    >,
+    pitch_data: &mut std::collections::HashMap<String, Vec<PitchFrameAccumulator>>,
 ) {
     if pitch_points.is_empty() {
         return;
@@ -1088,7 +1101,11 @@ fn write_pitch_data_for_segment(
             continue;
         }
 
-        let acc = entry.entry(frame_idx).or_default();
+        if frame_idx >= entry.len() {
+            entry.resize(frame_idx + 1, PitchFrameAccumulator::default());
+        }
+        let acc = &mut entry[frame_idx];
+
         if point.disabled {
             acc.disabled_weight += weight;
             continue;
@@ -1113,10 +1130,7 @@ fn write_extra_curves_for_segment(
     playback_rate: f64,
     fade_in_sec: f64,
     fade_out_sec: f64,
-    curve_data: &mut std::collections::HashMap<
-        String,
-        std::collections::HashMap<usize, ExtraCurveAccumulator>,
-    >,
+    curve_data: &mut std::collections::HashMap<String, Vec<ExtraCurveAccumulator>>,
 ) {
     if pitch_points.is_empty() {
         return;
@@ -1171,7 +1185,11 @@ fn write_extra_curves_for_segment(
         // 共振峰偏移：仅当点未被 disabled 时贡献到 formant 统计；其他参数始终贡献
         let formant_shift = point.formant as f64;
 
-        let acc = entry.entry(frame_idx).or_default();
+        if frame_idx >= entry.len() {
+            entry.resize(frame_idx + 1, ExtraCurveAccumulator::default());
+        }
+        let acc = &mut entry[frame_idx];
+
         // 如果点没有被 disabled，则将其计入 formant 的权重和和
         if !point.disabled {
             acc.formant_shift_sum += formant_shift * weight;
@@ -1189,7 +1207,7 @@ fn write_extra_curves_for_segment(
 
 /// 从 ExtraCurveAccumulator 映射构建 extra_curves HashMap。
 fn build_extra_curves_from_accumulators(
-    acc_map: &std::collections::HashMap<usize, ExtraCurveAccumulator>,
+    acc_map: &[ExtraCurveAccumulator],
     total_frames: usize,
 ) -> std::collections::HashMap<String, Vec<f32>> {
     let mut formant_shift = vec![0.0f32; total_frames];
@@ -1199,7 +1217,7 @@ fn build_extra_curves_from_accumulators(
     let mut pan = vec![0.0f32; total_frames];
     let mut breathiness = vec![0.0f32; total_frames];
 
-    for (&frame_idx, acc) in acc_map {
+    for (frame_idx, acc) in acc_map.iter().enumerate() {
         if frame_idx < total_frames && acc.weight > 0.0 {
             let w = acc.weight;
             // 对于 formant，只使用非 disabled 点的权重进行平均
@@ -1265,7 +1283,11 @@ pub fn import_vsp_clipboard(
     // 若没有选中的 Item，则回退到导入选中的轨道
     if selected_indices.is_empty() {
         return import_vsp_clipboard_selected_tracks(
-            &project, &vsp_tracks, &item_bases, &item_exts, vsp_file_dir,
+            &project,
+            &vsp_tracks,
+            &item_bases,
+            &item_exts,
+            vsp_file_dir,
             ordered_track_ids,
         );
     }
@@ -1301,13 +1323,11 @@ pub fn import_vsp_clipboard(
     let mut new_tracks: Vec<Track> = Vec::new();
     let mut created_track_ids: std::collections::HashMap<usize, String> =
         std::collections::HashMap::new();
-    let mut pitch_data_by_track: std::collections::HashMap<
-        String,
-        std::collections::HashMap<usize, PitchFrameAccumulator>,
-    > = std::collections::HashMap::new();
+    let mut pitch_data_by_track: std::collections::HashMap<String, Vec<PitchFrameAccumulator>> =
+        std::collections::HashMap::new();
     let mut extra_curve_data_by_track: std::collections::HashMap<
         String,
-        std::collections::HashMap<usize, ExtraCurveAccumulator>,
+        Vec<ExtraCurveAccumulator>,
     > = std::collections::HashMap::new();
     let mut synth_mode_by_track: std::collections::HashMap<String, i32> =
         std::collections::HashMap::new();
@@ -1341,8 +1361,7 @@ pub fn import_vsp_clipboard(
             let track_name = vsp_track
                 .map(|t| t.name.clone())
                 .unwrap_or_else(|| format!("Track {}", next_order + 1));
-            let color_idx =
-                (ordered_track_ids.len() + new_tracks.len()) % TRACK_COLORS.len();
+            let color_idx = (ordered_track_ids.len() + new_tracks.len()) % TRACK_COLORS.len();
             new_tracks.push(Track {
                 id: tid.clone(),
                 name: track_name,
@@ -1439,8 +1458,7 @@ pub fn import_vsp_clipboard(
                 let want_post_src = want_post_tl * rate64;
 
                 let seg_src_start = (src_start - want_pre_src).max(0.0);
-                let seg_src_end =
-                    (src_end + want_post_src).min(source_duration_sec.max(src_end));
+                let seg_src_end = (src_end + want_post_src).min(source_duration_sec.max(src_end));
                 let actual_pre_tl = (src_start - seg_src_start) / rate64;
                 let actual_post_tl = (seg_src_end - src_end).max(0.0) / rate64;
 
@@ -1537,8 +1555,7 @@ pub fn import_vsp_clipboard(
             let (rate, clip_length) = if time_markers.len() == 2 {
                 let m0 = &time_markers[0];
                 let m1 = &time_markers[1];
-                let src_dur =
-                    ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
+                let src_dur = ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
                 let new_dur = ((m1.new_pos - m0.new_pos) / sample_rate).max(0.001);
                 let r = src_dur / new_dur;
                 (r as f32, new_dur)
@@ -1618,19 +1635,15 @@ pub fn import_vsp_clipboard(
 
     let mut params_by_root_track: BTreeMap<String, TrackParamsState> = BTreeMap::new();
 
-    for track_id in created_track_ids
-        .values()
-        .chain(ordered_track_ids.iter())
-    {
+    for track_id in created_track_ids.values().chain(ordered_track_ids.iter()) {
         if let Some(points) = pitch_data_by_track.get(track_id) {
             if points.is_empty() {
                 continue;
             }
-            let total_frames =
-                ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
+            let total_frames = ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
             let mut pitch_edit = vec![0.0f32; total_frames];
 
-            for (&frame_idx, acc) in points {
+            for (frame_idx, acc) in points.iter().enumerate() {
                 if frame_idx < total_frames {
                     if acc.weight > 0.0 {
                         pitch_edit[frame_idx] = (acc.sum / acc.weight) as f32;
@@ -1724,13 +1737,11 @@ fn import_vsp_clipboard_selected_tracks(
     let mut skipped_files: Vec<String> = Vec::new();
     let mut hs_tracks: Vec<Track> = Vec::new();
     let mut hs_clips: Vec<Clip> = Vec::new();
-    let mut pitch_data_by_track: std::collections::HashMap<
-        String,
-        std::collections::HashMap<usize, PitchFrameAccumulator>,
-    > = std::collections::HashMap::new();
+    let mut pitch_data_by_track: std::collections::HashMap<String, Vec<PitchFrameAccumulator>> =
+        std::collections::HashMap::new();
     let mut extra_curve_data_by_track: std::collections::HashMap<
         String,
-        std::collections::HashMap<usize, ExtraCurveAccumulator>,
+        Vec<ExtraCurveAccumulator>,
     > = std::collections::HashMap::new();
     let mut synth_mode_by_track: std::collections::HashMap<String, i32> =
         std::collections::HashMap::new();
@@ -1748,7 +1759,10 @@ fn import_vsp_clipboard_selected_tracks(
         if !selected_set.contains(&(base.track_index as usize)) {
             continue;
         }
-        let pair = item_exts.get(i).map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+        let pair = item_exts
+            .get(i)
+            .map(|e| algo_type_to_hs(e.algo_type))
+            .unwrap_or((false, 1));
         let start_sec = base.start_sample / sample_rate;
         let key = (base.track_index, pair.0, pair.1);
         let entry = earliest_start_by_algo.entry(key).or_insert(f64::INFINITY);
@@ -1766,7 +1780,10 @@ fn import_vsp_clipboard_selected_tracks(
             std::collections::HashSet::new();
         for (i, base) in item_bases.iter().enumerate() {
             if base.track_index as usize == vsp_idx {
-                let pair = item_exts.get(i).map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+                let pair = item_exts
+                    .get(i)
+                    .map(|e| algo_type_to_hs(e.algo_type))
+                    .unwrap_or((false, 1));
                 algo_pairs.insert(pair);
             }
         }
@@ -1779,8 +1796,14 @@ fn import_vsp_clipboard_selected_tracks(
             sorted.sort_by(|a, b| {
                 let ka = (vsp_idx as i32, a.0, a.1);
                 let kb = (vsp_idx as i32, b.0, b.1);
-                let ta = earliest_start_by_algo.get(&ka).copied().unwrap_or(f64::INFINITY);
-                let tb = earliest_start_by_algo.get(&kb).copied().unwrap_or(f64::INFINITY);
+                let ta = earliest_start_by_algo
+                    .get(&ka)
+                    .copied()
+                    .unwrap_or(f64::INFINITY);
+                let tb = earliest_start_by_algo
+                    .get(&kb)
+                    .copied()
+                    .unwrap_or(f64::INFINITY);
                 ta.partial_cmp(&tb).unwrap_or(std::cmp::Ordering::Equal)
             });
             for (is_world, synth_mode) in sorted {
@@ -1807,10 +1830,7 @@ fn import_vsp_clipboard_selected_tracks(
                 track_order += 1;
             }
         } else {
-            let (is_world, _synth_mode) = algo_pairs
-                .into_iter()
-                .next()
-                .unwrap_or((false, 1));
+            let (is_world, _synth_mode) = algo_pairs.into_iter().next().unwrap_or((false, 1));
             let algo = if is_world {
                 PitchAnalysisAlgo::WorldDll
             } else {
@@ -1843,12 +1863,15 @@ fn import_vsp_clipboard_selected_tracks(
 
         let ext = item_exts.get(i);
 
-        let (is_world, synth_mode) = ext.map(|e| algo_type_to_hs(e.algo_type)).unwrap_or((false, 1));
+        let (is_world, synth_mode) = ext
+            .map(|e| algo_type_to_hs(e.algo_type))
+            .unwrap_or((false, 1));
         let Some(track_id) = vsp_to_hs_track
             .get(&(base.track_index, is_world, synth_mode))
             .or_else(|| {
                 // 回退：查找同一原始轨道索引下的任意映射
-                vsp_to_hs_track.iter()
+                vsp_to_hs_track
+                    .iter()
                     .find(|(&(i, _, _), _)| i == base.track_index)
                     .map(|(_, id)| id)
             })
@@ -1932,8 +1955,7 @@ fn import_vsp_clipboard_selected_tracks(
                 let want_post_src = want_post_tl * rate64;
 
                 let seg_src_start = (src_start - want_pre_src).max(0.0);
-                let seg_src_end =
-                    (src_end + want_post_src).min(source_duration_sec.max(src_end));
+                let seg_src_end = (src_end + want_post_src).min(source_duration_sec.max(src_end));
                 let actual_pre_tl = (src_start - seg_src_start) / rate64;
                 let actual_post_tl = (seg_src_end - src_end).max(0.0) / rate64;
 
@@ -2028,8 +2050,7 @@ fn import_vsp_clipboard_selected_tracks(
             let (rate, clip_length) = if time_markers.len() == 2 {
                 let m0 = &time_markers[0];
                 let m1 = &time_markers[1];
-                let src_dur =
-                    ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
+                let src_dur = ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
                 let new_dur = ((m1.new_pos - m0.new_pos) / sample_rate).max(0.001);
                 let r = src_dur / new_dur;
                 (r as f32, new_dur)
@@ -2113,12 +2134,11 @@ fn import_vsp_clipboard_selected_tracks(
             if points.is_empty() {
                 continue;
             }
-            let total_frames =
-                ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
+            let total_frames = ((project_end * 1000.0 / frame_period_ms).ceil() as usize).max(1);
             let mut pitch_edit = vec![0.0f32; total_frames];
 
-            for (&frame_idx, acc) in points {
-                if frame_idx < total_frames && acc.weight > 0.0 {
+            for (frame_idx, acc) in points.iter().enumerate() {
+                if frame_idx < total_frames {
                     pitch_edit[frame_idx] = (acc.sum / acc.weight) as f32;
                 }
             }
@@ -2181,12 +2201,12 @@ fn import_vsp_clipboard_selected_tracks(
 
 /// 将相对路径解析为绝对路径。
 fn resolve_audio_path(raw_path: &str, vsp_dir: &Path) -> String {
-    let p = PathBuf::from(raw_path);
+    let p = Path::new(raw_path);
     if p.is_absolute() {
         // 规范化路径分隔符
-        return p.to_string_lossy().to_string();
+        return raw_path.to_string();
     }
     // 相对路径：基于 .vshp/.vsp 所在目录拼接
-    let resolved = vsp_dir.join(&p);
+    let resolved = vsp_dir.join(p);
     resolved.to_string_lossy().to_string()
 }

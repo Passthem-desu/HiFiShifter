@@ -9,6 +9,7 @@ import {
 import { clamp } from "./math";
 import { isModifierActive } from "../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../features/keybindings/types";
+import { getWheelGestureAxis } from "../wheelGesture";
 
 export const TimelineScrollArea: React.FC<
     Omit<React.HTMLAttributes<HTMLDivElement>, "ref"> & {
@@ -130,6 +131,7 @@ export const TimelineScrollArea: React.FC<
 
         const handler: EventListener = (evt) => {
             const e = evt as globalThis.WheelEvent;
+            const wheelAxis = getWheelGestureAxis(e);
 
             // Scroll modifier: convert wheel to horizontal scroll
             if (scrollHorizontalKb && isModifierActive(scrollHorizontalKb, e)) {
@@ -143,6 +145,13 @@ export const TimelineScrollArea: React.FC<
             if (scrollVerticalKb && isModifierActive(scrollVerticalKb, e)) {
                 e.preventDefault();
                 scroller.scrollTop += e.deltaY;
+                return;
+            }
+
+            if (wheelAxis === "horizontal") {
+                e.preventDefault();
+                scroller.scrollLeft += e.deltaX;
+                syncScrollLeft(scroller);
                 return;
             }
 

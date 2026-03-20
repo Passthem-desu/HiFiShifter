@@ -217,13 +217,8 @@ export const ClipItem = React.memo(function ClipItem({
                     e.nativeEvent.getModifierState?.("Alt"),
                 );
 
-                if (e.shiftKey && !alt && !e.ctrlKey && !e.metaKey) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    clearContextMenu();
-                    onShiftRangeSelect(clip.id);
-                    return;
-                }
+                // Shift+点击范围选择在 pointerup 时处理（避免阻止拖动）
+                const doShiftRangeSelect = e.shiftKey && !alt && !e.ctrlKey && !e.metaKey;
 
                 // Seek should happen on click, not on drag.
                 // Track whether the pointer moved beyond a small deadzone.
@@ -244,7 +239,10 @@ export const ClipItem = React.memo(function ClipItem({
                     window.removeEventListener("pointermove", onMove, true);
                     window.removeEventListener("pointerup", onUp, true);
                     window.removeEventListener("pointercancel", onUp, true);
-                    if (!moved && allowSeek) {
+                    // Shift+点击且未移动时执行范围选择
+                    if (doShiftRangeSelect && !moved) {
+                        onShiftRangeSelect(clip.id);
+                    } else if (!moved && allowSeek) {
                         seekFromClientX(ev.clientX, true);
                     }
                 }
@@ -293,11 +291,10 @@ export const ClipItem = React.memo(function ClipItem({
 
             {/* Body block (does not fill the entire track row; leaves header lane above) */}
             <div
-                className={`absolute left-0 right-0 bottom-0 rounded-sm shadow-sm overflow-visible border transition-colors ${
-                    selected
+                className={`absolute left-0 right-0 bottom-0 rounded-sm shadow-sm overflow-visible border transition-colors ${selected
                         ? "border-white/90"
                         : "border-transparent group-hover:border-white/30"
-                }`}
+                    }`}
                 style={{
                     top: CLIP_HEADER_HEIGHT,
                     backgroundColor: trackColor
