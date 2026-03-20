@@ -159,6 +159,7 @@ export function useClipsPeaksForPianoRoll(args: {
     );
     const requestIdRef = useRef(0);
     const mountedRef = useRef(true);
+    const lastLevelByPathRef = useRef<Record<string, 0 | 1 | 2>>({});
 
     useEffect(() => {
         mountedRef.current = true;
@@ -188,7 +189,13 @@ export function useClipsPeaksForPianoRoll(args: {
                     // 估算 clip 在屏幕上的像素宽度
                     const clipWidthPx = pxPerSec ? clip.lengthSec * pxPerSec : undefined;
                     const req = buildClipPeaksRequest(clip, clipWidthPx);
-                    return req ? `${clip.id}:${req.cacheKey}` : null;
+                    if (!req) return null;
+                    const previousLevel = lastLevelByPathRef.current[req.sourcePath];
+                    const level = waveformMipmapStore.selectLevelStable(
+                        req.samplesPerPixel,
+                        previousLevel,
+                    );
+                    return `${clip.id}:${req.sourcePath}|${req.startSec.toFixed(3)}|${req.durSec.toFixed(3)}|lvl${level}`;
                 })
                 .filter(Boolean)
                 .join(","),
@@ -218,6 +225,8 @@ export function useClipsPeaksForPianoRoll(args: {
             clip: ClipInfo;
             req: NonNullable<ReturnType<typeof buildClipPeaksRequest>>;
             columns: number;
+            level: 0 | 1 | 2;
+            cacheKey: string;
         }> = [];
 
         for (const clip of visibleClips) {
@@ -225,30 +234,67 @@ export function useClipsPeaksForPianoRoll(args: {
             const clipWidthPx = pxPerSec ? clip.lengthSec * pxPerSec : undefined;
             const req = buildClipPeaksRequest(clip, clipWidthPx);
             if (!req) continue;
+            const previousLevel = lastLevelByPathRef.current[req.sourcePath];
+            const level = waveformMipmapStore.selectLevelStable(
+                req.samplesPerPixel,
+                previousLevel,
+            );
+            lastLevelByPathRef.current[req.sourcePath] = level;
+            const cacheKey =
+                `${req.sourcePath}|${req.startSec.toFixed(3)}|${req.durSec.toFixed(3)}|lvl${level}`;
 
             // 计算 columns：基于 clip 像素宽度，确保波形清晰
             const columns = clipWidthPx ? Math.max(16, Math.round(clipWidthPx * 2)) : 256;
 
-            const cached = lruGet(clipPeaksCache, req.cacheKey);
+            const cached = lruGet(clipPeaksCache, cacheKey);
             if (cached) {
                 initialMap.set(clip.id, cached);
             } else {
-                toFetch.push({ clip, req, columns });
+                const bestEffort = waveformMipmapStore.getBestSlice(
+                    req.sourcePath,
+                    level,
+                    req.startSec,
+                    req.durSec,
+                );
+                if (bestEffort) {
+                    const entry: CachedEntry = {
+                        min: Array.from(bestEffort.min),
+                        max: Array.from(bestEffort.max),
+                        startSec: req.startSec,
+                        durSec: req.durSec,
+                        t: Date.now(),
+                    };
+                    lruSet(
+                        clipPeaksCache,
+                        cacheKey,
+                        entry,
+                        CLIP_PEAKS_CACHE_LIMIT,
+                    );
+                    initialMap.set(clip.id, entry);
+                } else {
+                    toFetch.push({ clip, req, columns, level, cacheKey });
+                }
             }
         }
 
-        if (initialMap.size > 0) {
-            setPeaksMap(new Map(initialMap));
-        }
+        setPeaksMap((prev) => {
+            const next = new Map<string, CachedEntry>();
+            for (const clip of visibleClips) {
+                const entry = initialMap.get(clip.id) ?? prev.get(clip.id);
+                if (entry) {
+                    next.set(clip.id, entry);
+                }
+            }
+            return next;
+        });
 
         if (toFetch.length === 0) return;
 
         // 异步获取未缓存的 clip peaks (Mipmap优化版)
         void (async () => {
             const results = await Promise.allSettled(
-                toFetch.map(async ({ clip, req }) => {
+                toFetch.map(async ({ clip, req, level, cacheKey }) => {
                     // 使用 waveformMipmapStore（三级整文件缓存）获取峰值数据
-                    const level = waveformMipmapStore.selectLevel(req.samplesPerPixel);
                     const inflightKey = `${req.sourcePath}|${level}`;
                     let p = clipPeaksInflight.get(inflightKey);
                     if (!p) {
@@ -271,7 +317,7 @@ export function useClipsPeaksForPianoRoll(args: {
                             };
                             lruSet(
                                 clipPeaksCache,
-                                req.cacheKey,
+                                cacheKey,
                                 entry,
                                 CLIP_PEAKS_CACHE_LIMIT,
                             );

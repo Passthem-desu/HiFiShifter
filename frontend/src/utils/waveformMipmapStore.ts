@@ -24,6 +24,8 @@ const DIV_FACTORS = [64, 512, 4096] as const;
 
 /** 级别选择的 spp 阈值 */
 const SPP_THRESHOLDS = [256, 2048] as const;
+const SPP_HYSTERESIS_ENTER_SCALE = 1.25;
+const SPP_HYSTERESIS_EXIT_SCALE = 0.75;
 
 /** mipmap 级别数量 */
 const LEVEL_COUNT = 3;
@@ -41,6 +43,8 @@ export interface LevelPeaks {
     /** 采样率 */
     sampleRate: number;
 }
+
+export type WaveformMipmapLevel = 0 | 1 | 2;
 
 /** 文件级缓存条目 */
 interface FileMipmapCache {
@@ -79,6 +83,36 @@ class WaveformMipmapStoreImpl {
     selectLevel(samplesPerPixel: number): 0 | 1 | 2 {
         if (samplesPerPixel <= SPP_THRESHOLDS[0]) return 0;
         if (samplesPerPixel <= SPP_THRESHOLDS[1]) return 1;
+        return 2;
+    }
+
+    selectLevelStable(
+        samplesPerPixel: number,
+        previousLevel?: WaveformMipmapLevel | null,
+    ): WaveformMipmapLevel {
+        if (previousLevel == null) {
+            return this.selectLevel(samplesPerPixel);
+        }
+
+        const enterL1 = SPP_THRESHOLDS[0] * SPP_HYSTERESIS_ENTER_SCALE;
+        const exitL1 = SPP_THRESHOLDS[0] * SPP_HYSTERESIS_EXIT_SCALE;
+        const enterL2 = SPP_THRESHOLDS[1] * SPP_HYSTERESIS_ENTER_SCALE;
+        const exitL2 = SPP_THRESHOLDS[1] * SPP_HYSTERESIS_EXIT_SCALE;
+
+        if (previousLevel === 0) {
+            if (samplesPerPixel > enterL2) return 2;
+            if (samplesPerPixel > enterL1) return 1;
+            return 0;
+        }
+
+        if (previousLevel === 1) {
+            if (samplesPerPixel <= exitL1) return 0;
+            if (samplesPerPixel > enterL2) return 2;
+            return 1;
+        }
+
+        if (samplesPerPixel <= exitL1) return 0;
+        if (samplesPerPixel <= exitL2) return 1;
         return 2;
     }
 
@@ -175,15 +209,16 @@ class WaveformMipmapStoreImpl {
         startSec: number,
         durationSec: number,
         targetWidth: number,
+        preferredLevel?: WaveformMipmapLevel,
     ): {
         interleaved: Float32Array;
         dataStartSec: number;
         dataDurationSec: number;
     } | null {
-        const preferredLevel = this.selectLevel(spp);
-        let peaks = this.getPeaks(sourcePath, preferredLevel);
+        const resolvedLevel = preferredLevel ?? this.selectLevel(spp);
+        let peaks = this.getPeaks(sourcePath, resolvedLevel);
         if (!peaks) {
-            peaks = this.getNearestLoadedLevel(sourcePath, preferredLevel);
+            peaks = this.getNearestLoadedLevel(sourcePath, resolvedLevel);
         }
         if (!peaks) return null;
 
@@ -259,6 +294,20 @@ class WaveformMipmapStoreImpl {
         }
 
         return { interleaved, dataStartSec, dataDurationSec };
+    }
+
+    getBestSlice(
+        sourcePath: string,
+        preferredLevel: WaveformMipmapLevel,
+        startSec: number,
+        durationSec: number,
+    ): { min: Float32Array; max: Float32Array } | null {
+        let peaks = this.getPeaks(sourcePath, preferredLevel);
+        if (!peaks) {
+            peaks = this.getNearestLoadedLevel(sourcePath, preferredLevel);
+        }
+        if (!peaks) return null;
+        return this.getSliceFromPeaks(peaks, startSec, durationSec);
     }
 
     /**

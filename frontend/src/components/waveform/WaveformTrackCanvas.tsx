@@ -77,6 +77,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
 
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
     const backBufferRef = React.useRef<HTMLCanvasElement | null>(null);
+    const lastLevelByPathRef = React.useRef<Record<string, 0 | 1 | 2>>({});
 
     // 强制重绘计数器（mipmap 数据加载完成时 +1 触发重绘）
     const [redrawTick, setRedrawTick] = React.useState(0);
@@ -173,6 +174,12 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
             const sampleRate = clip.sourceSampleRate || 44100;
             const spp = Math.max(1, Math.round(sampleRate / pxPerSec));
+            const previousLevel = lastLevelByPathRef.current[clip.sourcePath];
+            const stableLevel = waveformMipmapStore.selectLevelStable(
+                spp,
+                previousLevel,
+            );
+            lastLevelByPathRef.current[clip.sourcePath] = stableLevel;
 
             // 可见部分在 clip 内的比例
             const ratioStart = (visStartSec - clipStartSec) / Math.max(1e-6, clipLen);
@@ -203,6 +210,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 sourceTimeStart,
                 sourceDuration,
                 visWidthPx,
+                stableLevel,
             );
 
             if (!result || result.interleaved.length < 4) continue;

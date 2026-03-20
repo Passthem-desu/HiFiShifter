@@ -787,6 +787,7 @@ export function drawPianoRoll(args: {
         ctx.clip();
 
         // 使用 drawImage 精确绘制
+        ctx.globalAlpha = 0.5;
         ctx.drawImage(
             offCanvas,
             0,
