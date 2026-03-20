@@ -259,9 +259,10 @@ export function useClipDrag(deps: {
             const b = el.getBoundingClientRect();
             const beatNow = beatFromClientX(ev.clientX, b, el.scrollLeft);
             let nextStart = Math.max(0, beatNow - drag.offsetBeat);
-            // gridSnapEnabled XOR modifier → snap when exactly one is true
-            const modActive = isModifierActive(noSnapKb, ev);
-            if (gridSnapEnabled !== modActive) nextStart = snapBeat(nextStart);
+            const noSnapActive = isModifierActive(noSnapKb, ev);
+            if (gridSnapEnabled && !noSnapActive) {
+                nextStart = snapBeat(nextStart);
+            }
 
             let deltaBeat = nextStart - drag.initialAnchorstartSec;
             deltaBeat = Math.max(deltaBeat, -drag.minstartSec);

@@ -49,6 +49,8 @@ export interface WaveformTrackCanvasProps {
     waveformHeight: number;
     /** 每秒像素数 */
     pxPerSec: number;
+    /** 视口宽度（CSS 像素），用于固定 canvas 宽度避免缩放时抖动 */
+    viewportWidthPx: number;
     /** 视口起始时间（秒） */
     viewportStartSec: number;
     /** 视口结束时间（秒） */
@@ -67,26 +69,28 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         waveformTop,
         waveformHeight,
         pxPerSec,
+        viewportWidthPx,
         viewportStartSec,
-        viewportEndSec,
         strokeColor,
         strokeWidth = 1,
     } = props;
 
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+    const backBufferRef = React.useRef<HTMLCanvasElement | null>(null);
 
     // 强制重绘计数器（mipmap 数据加载完成时 +1 触发重绘）
     const [redrawTick, setRedrawTick] = React.useState(0);
 
-    // 计算视口可见像素宽度（Canvas 物理尺寸固定，不随缩放膨胀）
-    const viewportWidthSec = viewportEndSec - viewportStartSec;
-    const viewportPx = Math.ceil(viewportWidthSec * pxPerSec);
-    const canvasWidthPx = Math.max(1, viewportPx + BUFFER_PX * 2);
-
-    // 缓冲秒数由固定像素缓冲反算
-    const bufferSec = BUFFER_PX / pxPerSec;
-    const bufferedStartSec = Math.max(0, viewportStartSec - bufferSec);
-    const bufferedEndSec = viewportEndSec + bufferSec;
+    // 以像素为基准计算缓冲区，避免高缩放下秒↔像素往返换算造成画布原点漂移
+    const viewportLeftPx = viewportStartSec * pxPerSec;
+    const canvasLeftPx = Math.max(0, Math.floor(viewportLeftPx - BUFFER_PX));
+    const canvasWidthPx = Math.max(
+        1,
+        Math.ceil(Math.max(1, viewportWidthPx)) + BUFFER_PX * 2,
+    );
+    const bufferedStartSec = canvasLeftPx / Math.max(1e-9, pxPerSec);
+    const bufferedEndSec =
+        (canvasLeftPx + canvasWidthPx) / Math.max(1e-9, pxPerSec);
 
     // ========================================
     // 监听 mipmap 缓存加载完成事件，触发重绘
@@ -110,30 +114,35 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
     // ========================================
     // 主渲染逻辑：在单个 Canvas 上绘制所有 clip 的波形
     // ========================================
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
         const dpr = Math.max(1, window.devicePixelRatio || 1);
         const displayW = canvasWidthPx;
         const displayH = waveformHeight;
+        const backBuffer =
+            backBufferRef.current ?? document.createElement("canvas");
+        backBufferRef.current = backBuffer;
 
         // Canvas 内部像素 = CSS 尺寸 × dpr
         const internalW = Math.max(1, Math.floor(displayW * dpr));
         const internalH = Math.max(1, Math.floor(displayH * dpr));
 
-        canvas.width = internalW;
-        canvas.height = internalH;
-        canvas.style.width = `${displayW}px`;
-        canvas.style.height = `${displayH}px`;
+        if (backBuffer.width !== internalW) {
+            backBuffer.width = internalW;
+        }
+        if (backBuffer.height !== internalH) {
+            backBuffer.height = internalH;
+        }
 
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
+        const backCtx = backBuffer.getContext("2d");
+        if (!backCtx) return;
 
         const scaleX = internalW / Math.max(1, displayW);
         const scaleY = internalH / Math.max(1, displayH);
-        ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
-        ctx.clearRect(0, 0, displayW, displayH);
+        backCtx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+        backCtx.clearRect(0, 0, displayW, displayH);
 
         // Canvas 左边缘对应的 timeline 时间
         const canvasStartSec = bufferedStartSec;
@@ -169,9 +178,20 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             const ratioStart = (visStartSec - clipStartSec) / Math.max(1e-6, clipLen);
             const ratioEnd = (visEndSec - clipStartSec) / Math.max(1e-6, clipLen);
 
-            const stretchedDuration = (clip.durationSec - sourceStartSec) / pr;
-            const sourceTimeStart = Math.max(0, sourceStartSec + ratioStart * stretchedDuration * pr);
-            const sourceTimeEnd = Math.min(clip.durationSec, sourceStartSec + ratioEnd * stretchedDuration * pr);
+            const clipSourceEndSec =
+                Number(clip.sourceEndSec ?? clip.durationSec) || clip.durationSec;
+            const clipSourceSpanSec = Math.max(
+                0,
+                Math.min(clip.lengthSec * pr, clipSourceEndSec - sourceStartSec),
+            );
+            const sourceTimeStart = Math.max(
+                0,
+                sourceStartSec + ratioStart * clipSourceSpanSec,
+            );
+            const sourceTimeEnd = Math.min(
+                clip.durationSec,
+                sourceStartSec + ratioEnd * clipSourceSpanSec,
+            );
             const sourceDuration = Math.max(0.1, sourceTimeEnd - sourceTimeStart);
 
             // ========================================
@@ -214,24 +234,55 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             const withGains = applyGainsToPeaks(result.interleaved, params);
 
             // 使用 clip 裁剪区域绘制
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(visLeftPx, 0, visRightPx - visLeftPx, displayH);
-            ctx.clip();
+            backCtx.save();
+            backCtx.beginPath();
+            backCtx.rect(visLeftPx, 0, visRightPx - visLeftPx, displayH);
+            backCtx.clip();
 
             // 平移 ctx 使得 renderWaveform 的坐标从 0 开始
-            ctx.translate(visLeftPx, 0);
+            backCtx.translate(visLeftPx, 0);
 
             // 静音 clip 半透明
             if (clip.muted) {
-                ctx.globalAlpha = 0.4;
+                backCtx.globalAlpha = 0.4;
             } else {
-                ctx.globalAlpha = 1.0;
+                backCtx.globalAlpha = 1.0;
             }
 
-            renderWaveform(ctx, withGains, params, strokeColor, strokeWidth, "line");
+            renderWaveform(
+                backCtx,
+                withGains,
+                params,
+                strokeColor,
+                strokeWidth,
+                "line",
+            );
 
-            ctx.restore();
+            backCtx.restore();
+        }
+
+        if (canvas.width !== internalW) {
+            canvas.width = internalW;
+        }
+        if (canvas.height !== internalH) {
+            canvas.height = internalH;
+        }
+        const nextStyleWidth = `${displayW}px`;
+        const nextStyleHeight = `${displayH}px`;
+        if (canvas.style.width !== nextStyleWidth) {
+            canvas.style.width = nextStyleWidth;
+        }
+        if (canvas.style.height !== nextStyleHeight) {
+            canvas.style.height = nextStyleHeight;
+        }
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+        ctx.clearRect(0, 0, displayW, displayH);
+        ctx.drawImage(backBuffer, 0, 0, internalW, internalH, 0, 0, displayW, displayH);
+        if (ctx.globalAlpha !== 1) {
+            ctx.globalAlpha = 1;
         }
     }, [
         clips,
@@ -244,9 +295,6 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         strokeWidth,
         redrawTick,
     ]);
-
-    // Canvas CSS 定位：相对于 TrackLane 定位
-    const canvasLeftPx = bufferedStartSec * pxPerSec;
 
     return (
         <canvas

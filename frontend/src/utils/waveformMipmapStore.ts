@@ -180,15 +180,20 @@ class WaveformMipmapStoreImpl {
         dataStartSec: number;
         dataDurationSec: number;
     } | null {
-        const level = this.selectLevel(spp);
-        const slice = this.getSlice(sourcePath, level, startSec, durationSec);
+        const preferredLevel = this.selectLevel(spp);
+        let peaks = this.getPeaks(sourcePath, preferredLevel);
+        if (!peaks) {
+            peaks = this.getNearestLoadedLevel(sourcePath, preferredLevel);
+        }
+        if (!peaks) return null;
+
+        const slice = this.getSliceFromPeaks(peaks, startSec, durationSec);
         if (!slice) return null;
 
         const srcLen = slice.min.length;
         const w = Math.max(1, targetWidth);
 
         // 计算实际的数据时间范围（用于 renderWaveform 的 dataStartSec/dataDurationSec）
-        const peaks = this.getPeaks(sourcePath, level);
         let dataStartSec = startSec;
         let dataDurationSec = durationSec;
         if (peaks) {
@@ -400,6 +405,54 @@ class WaveformMipmapStoreImpl {
             divisionFactor: decoded.divisionFactor,
             sampleRate: decoded.sampleRate,
         };
+    }
+
+    private getSliceFromPeaks(
+        peaks: LevelPeaks,
+        startSec: number,
+        durationSec: number,
+    ): { min: Float32Array; max: Float32Array } | null {
+        const { sampleRate, divisionFactor, min, max } = peaks;
+        if (sampleRate <= 0 || divisionFactor <= 0) return null;
+
+        const startIdx = Math.max(
+            0,
+            Math.floor((startSec * sampleRate) / divisionFactor),
+        );
+        const endIdx = Math.min(
+            min.length,
+            Math.ceil(((startSec + durationSec) * sampleRate) / divisionFactor),
+        );
+
+        if (endIdx <= startIdx) {
+            return {
+                min: new Float32Array(0),
+                max: new Float32Array(0),
+            };
+        }
+
+        return {
+            min: min.subarray(startIdx, endIdx),
+            max: max.subarray(startIdx, endIdx),
+        };
+    }
+
+    private getNearestLoadedLevel(
+        sourcePath: string,
+        preferredLevel: 0 | 1 | 2,
+    ): LevelPeaks | null {
+        const entry = this.cache.get(sourcePath);
+        if (!entry) return null;
+
+        const offsets = [0, -1, 1, -2, 2] as const;
+        for (const offset of offsets) {
+            const candidate = preferredLevel + offset;
+            if (candidate < 0 || candidate >= LEVEL_COUNT) continue;
+            const peaks = entry.levels[candidate as 0 | 1 | 2];
+            if (peaks) return peaks;
+        }
+
+        return null;
     }
 
     /**

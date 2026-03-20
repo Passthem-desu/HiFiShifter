@@ -21,6 +21,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
     rowHeight: number;
     pxPerSec: number;
     bpm: number;
+    viewportWidthPx: number;
     viewportStartSec: number;
     viewportEndSec: number;
 
@@ -83,6 +84,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         trackClips,
         rowHeight,
         pxPerSec,
+        viewportWidthPx,
         viewportStartSec,
         viewportEndSec,
         clipWaveforms,
@@ -194,6 +196,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                 waveformTop={CLIP_HEADER_HEIGHT}
                 waveformHeight={waveformHeight}
                 pxPerSec={pxPerSec}
+                viewportWidthPx={viewportWidthPx}
                 viewportStartSec={viewportStartSec}
                 viewportEndSec={viewportEndSec}
                 strokeColor={waveformColors.stroke}

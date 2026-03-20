@@ -95,6 +95,7 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
     } = props;
 
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+    const backBufferRef = React.useRef<HTMLCanvasElement | null>(null);
 
     // 强制重绘计数器（mipmap 数据加载完成时 +1 触发重绘）
     const [redrawTick, setRedrawTick] = React.useState(0);
@@ -136,11 +137,18 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
             };
         }
 
-        const bufferSec = BUFFER_PX / props.pxPerSec;
-        const visStart = Math.max(clipStart, viewportStartSec - bufferSec);
-        const visEnd = Math.min(clipEnd, viewportEndSec + bufferSec);
+        const clipLeftPx = clipStart * props.pxPerSec;
+        const clipRightPx = clipEnd * props.pxPerSec;
+        const visibleLeftPx = Math.max(
+            clipLeftPx,
+            Math.floor(viewportStartSec * props.pxPerSec - BUFFER_PX),
+        );
+        const visibleRightPx = Math.min(
+            clipRightPx,
+            Math.ceil(viewportEndSec * props.pxPerSec + BUFFER_PX),
+        );
 
-        if (visEnd <= visStart) {
+        if (visibleRightPx <= visibleLeftPx) {
             return {
                 visibleWidthPx: 0,
                 offsetPx: 0,
@@ -149,10 +157,13 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
             };
         }
 
-        const startRatio = (visStart - clipStart) / clipLen;
-        const endRatio = (visEnd - clipStart) / clipLen;
-        const offsetPx = Math.floor(startRatio * fullWidthPx);
-        const visibleWidthPx = Math.max(1, Math.ceil(endRatio * fullWidthPx) - offsetPx);
+        const offsetPx = Math.max(0, Math.floor(visibleLeftPx - clipLeftPx));
+        const visibleWidthPx = Math.max(
+            1,
+            Math.ceil(visibleRightPx - visibleLeftPx),
+        );
+        const startRatio = offsetPx / Math.max(1, fullWidthPx);
+        const endRatio = (offsetPx + visibleWidthPx) / Math.max(1, fullWidthPx);
 
         return {
             visibleWidthPx,
@@ -170,8 +181,6 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
 
         const clipLen = clipDurationSec ?? 0;
         const clipStart = clipStartSec ?? 0;
-        const clipEnd = clipStart + clipLen;
-
         if (viewportStartSec === undefined || viewportEndSec === undefined || !props.pxPerSec) {
             const pr = Math.max(1e-6, playbackRate);
             const sourceAvailSec = sourceDurationSec;
@@ -183,9 +192,8 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
             };
         }
 
-        const bufferSec = BUFFER_PX / props.pxPerSec;
-        const visibleStart = Math.max(clipStart, viewportStartSec - bufferSec);
-        const visibleEnd = Math.min(clipEnd, viewportEndSec + bufferSec);
+        const visibleStart = clipStart + visibleInfo.visibleStartRatio * clipLen;
+        const visibleEnd = clipStart + visibleInfo.visibleEndRatio * clipLen;
 
         if (visibleEnd <= visibleStart) {
             return null;
@@ -196,10 +204,18 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
         const ratioEnd = (visibleEnd - clipStart) / Math.max(1e-6, clipLen);
 
         const sourceAvailSec = sourceDurationSec;
-        const stretchedDuration = (sourceAvailSec - sourceStartSec) / pr;
-        
-        const sourceTimeStart = Math.max(0, sourceStartSec + ratioStart * stretchedDuration * pr);
-        const sourceTimeEnd = Math.min(sourceAvailSec, sourceStartSec + ratioEnd * stretchedDuration * pr);
+        const clipSourceSpanSec = Math.max(
+            0,
+            Math.min(clipLen * pr, sourceAvailSec - sourceStartSec),
+        );
+        const sourceTimeStart = Math.max(
+            0,
+            sourceStartSec + ratioStart * clipSourceSpanSec,
+        );
+        const sourceTimeEnd = Math.min(
+            sourceAvailSec,
+            sourceStartSec + ratioEnd * clipSourceSpanSec,
+        );
         const sourceDuration = Math.max(0.1, sourceTimeEnd - sourceTimeStart);
 
         return {
@@ -216,34 +232,41 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
         viewportEndSec,
         clipStartSec,
         props.pxPerSec,
+        visibleInfo.visibleEndRatio,
+        visibleInfo.visibleStartRatio,
     ]);
 
     const displayedW = Math.max(1, Math.floor(visibleInfo.visibleWidthPx));
 
     // 主渲染逻辑
-    React.useEffect(() => {
+    React.useLayoutEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
         const dpr = Math.max(1, window.devicePixelRatio || 1);
         const displayedH = Math.max(1, Math.floor(heightPx));
+        const backBuffer =
+            backBufferRef.current ?? document.createElement("canvas");
+        backBufferRef.current = backBuffer;
 
         const internalW = Math.max(1, Math.floor(displayedW * dpr));
         const internalH = Math.max(1, Math.floor(displayedH * dpr));
 
-        canvas.width = internalW;
-        canvas.height = internalH;
-        canvas.style.width = `${displayedW}px`;
-        canvas.style.height = `${displayedH}px`;
+        if (backBuffer.width !== internalW) {
+            backBuffer.width = internalW;
+        }
+        if (backBuffer.height !== internalH) {
+            backBuffer.height = internalH;
+        }
 
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
+        const backCtx = backBuffer.getContext("2d");
+        if (!backCtx) return;
 
         const scaleX = internalW / Math.max(1, displayedW);
         const scaleY = internalH / Math.max(1, displayedH);
-        ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
-        ctx.clearRect(0, 0, displayedW, displayedH);
-        ctx.globalAlpha = Math.max(0, Math.min(1, Number(opacity) || 0));
+        backCtx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+        backCtx.clearRect(0, 0, displayedW, displayedH);
+        backCtx.globalAlpha = Math.max(0, Math.min(1, Number(opacity) || 0));
 
         // 从 mipmap 缓存获取 resample 后的数据
         if (sourcePath && samplesPerPixel && viewportInfo) {
@@ -276,8 +299,32 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
                 };
 
                 const withGains = applyGainsToPeaks(result.interleaved, params);
-                renderWaveform(ctx, withGains, params, stroke, strokeWidth);
+                renderWaveform(backCtx, withGains, params, stroke, strokeWidth);
             }
+        }
+
+        if (canvas.width !== internalW) {
+            canvas.width = internalW;
+        }
+        if (canvas.height !== internalH) {
+            canvas.height = internalH;
+        }
+        const nextStyleWidth = `${displayedW}px`;
+        const nextStyleHeight = `${displayedH}px`;
+        if (canvas.style.width !== nextStyleWidth) {
+            canvas.style.width = nextStyleWidth;
+        }
+        if (canvas.style.height !== nextStyleHeight) {
+            canvas.style.height = nextStyleHeight;
+        }
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+        ctx.clearRect(0, 0, displayedW, displayedH);
+        ctx.drawImage(backBuffer, 0, 0, internalW, internalH, 0, 0, displayedW, displayedH);
+        if (ctx.globalAlpha !== 1) {
+            ctx.globalAlpha = 1;
         }
     }, [
         targetWidthPx,

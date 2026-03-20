@@ -629,6 +629,21 @@ export function drawPianoRoll(args: {
     const offCanvas =
         drawPianoRollRef._offCanvas || document.createElement("canvas");
     drawPianoRollRef._offCanvas = offCanvas;
+    const offDpr = Math.max(1, window.devicePixelRatio || 1);
+    const displayedOffW = Math.max(1, w);
+    const displayedOffH = Math.max(1, h);
+    const internalOffW = Math.max(1, Math.floor(displayedOffW * offDpr));
+    const internalOffH = Math.max(1, Math.floor(displayedOffH * offDpr));
+    if (offCanvas.width !== internalOffW) {
+        offCanvas.width = internalOffW;
+    }
+    if (offCanvas.height !== internalOffH) {
+        offCanvas.height = internalOffH;
+    }
+    offCanvas.style.width = `${displayedOffW}px`;
+    offCanvas.style.height = `${displayedOffH}px`;
+    const offCtx = offCanvas.getContext("2d");
+    if (!offCtx) return;
 
     // Background waveform: per-clip 叠加绘制
     // peaks 数据覆盖整个 source 文件，渲染时根据 sourceStartSec/playbackRate 计算偏移，
@@ -643,19 +658,36 @@ export function drawPianoRoll(args: {
         const sourceDurSec =
             entry.sourceDurationSec > 0 ? entry.sourceDurationSec : pDurSec;
 
-        // clip 在 canvas 上的可视 x 范围
-        const clipStartX = entry.startSec * pxPerSec - scrollLeft;
+        const clipStartSec = entry.startSec;
+        const clipEndSec = clipStartSec + entry.lengthSec;
         const clipWidthPx = entry.lengthSec * pxPerSec;
         if (clipWidthPx <= 0) continue;
+
+        // 只渲染当前视口内的片段，避免高缩放时创建超大离屏 canvas
+        const visibleClipStartSec = Math.max(clipStartSec, visibleStartSec);
+        const visibleClipEndSec = Math.min(
+            clipEndSec,
+            visibleStartSec + visibleDurSec,
+        );
+        if (visibleClipEndSec <= visibleClipStartSec) continue;
+
+        const visibleClipStartX = visibleClipStartSec * pxPerSec - scrollLeft;
+        const visibleClipWidthPx = Math.max(
+            1,
+            Math.ceil((visibleClipEndSec - visibleClipStartSec) * pxPerSec),
+        );
 
         // peaks 覆盖整个 source 文件（0 ~ sourceDurSec），列数 = peaksCols
         const peaksCols = pMin.length;
 
         // 计算可见区域的 source 范围
-        const visibleSourceStartSec = Math.max(0, sourceStartSec);
+        const visibleSourceStartSec = Math.max(
+            0,
+            sourceStartSec + (visibleClipStartSec - clipStartSec) * pr,
+        );
         const visibleSourceEndSec = Math.min(
             sourceDurSec,
-            sourceStartSec + entry.lengthSec * pr,
+            sourceStartSec + (visibleClipEndSec - clipStartSec) * pr,
         );
         const visibleSourceDurSec = Math.max(
             0.001,
@@ -673,7 +705,7 @@ export function drawPianoRoll(args: {
         const visibleCols = Math.max(2, sourceEndCol - sourceStartCol);
 
         // 计算可见区域的像素宽度
-        const visibleSourceColsPx = (visibleSourceDurSec / pr) * pxPerSec;
+        const visibleSourceColsPx = visibleClipWidthPx;
 
         // 目标采样宽度：每像素 2 个采样点，保证精度同时控制数据量
         const targetRenderWidth = Math.max(
@@ -719,31 +751,14 @@ export function drawPianoRoll(args: {
             }
         }
 
-        // 使用 renderWaveform（jitter 模式）渲染到离屏 canvas
-        const displayedOffW = Math.max(1, Math.ceil(visibleSourceColsPx));
-        const displayedOffH = Math.max(1, h);
-        const offDpr = Math.max(1, window.devicePixelRatio || 1);
-        const internalOffW = Math.max(1, Math.floor(displayedOffW * offDpr));
-        const internalOffH = Math.max(1, Math.floor(displayedOffH * offDpr));
-
-        // 设置离屏 canvas 内部像素尺寸并缩放上下文以考虑 DPR
-        offCanvas.width = internalOffW;
-        offCanvas.height = internalOffH;
-        offCanvas.style.width = `${displayedOffW}px`;
-        offCanvas.style.height = `${displayedOffH}px`;
-        const offCtx = offCanvas.getContext("2d");
-        if (!offCtx) continue;
-
-        // 使用像素缩放，使后续绘制逻辑仍接收 CSS 像素尺寸
+        // 使用固定尺寸的离屏 canvas，避免缩放过程中频繁重设宽度导致闪烁
         offCtx.setTransform(offDpr, 0, 0, offDpr, 0, 0);
-
-        // 清空离屏 canvas（以 CSS 像素为单位）
         offCtx.clearRect(0, 0, displayedOffW, displayedOffH);
 
-        // 构建 renderWaveform 参数：将数据均匀映射到离屏 canvas 的宽度上
+        // 构建 renderWaveform 参数：仅在离屏画布左侧渲染当前可见片段
         // PianoRoll 中波形仅作为背景参考，无需 clip 级别的增益/淡入淡出
         const pianoRollWfParams: WaveformRenderParams = {
-            canvasWidth: displayedOffW,
+            canvasWidth: visibleClipWidthPx,
             canvasHeight: displayedOffH,
             centerY: displayedOffH / 2,
             sourceStartSec: visibleSourceStartSec,
@@ -763,12 +778,12 @@ export function drawPianoRoll(args: {
         renderWaveform(offCtx, interleavedPeaks, pianoRollWfParams, waveformColors.stroke, 0.5, "jitter");
 
         // 计算渲染目标位置：clip 在主 canvas 上的起始位置
-        const destX = clipStartX;
+        const destX = visibleClipStartX;
 
         // 裁剪到 clip 的可视 x 范围，避免溢出到相邻 clip
         ctx.save();
         ctx.beginPath();
-        ctx.rect(clipStartX, 0, clipWidthPx, h);
+        ctx.rect(visibleClipStartX, 0, visibleClipWidthPx, h);
         ctx.clip();
 
         // 使用 drawImage 精确绘制
@@ -776,11 +791,11 @@ export function drawPianoRoll(args: {
             offCanvas,
             0,
             0,
-            internalOffW,
+            Math.max(1, Math.floor(visibleClipWidthPx * offDpr)),
             internalOffH,
             destX,
             0,
-            visibleSourceColsPx,
+            visibleClipWidthPx,
             h,
         );
 
