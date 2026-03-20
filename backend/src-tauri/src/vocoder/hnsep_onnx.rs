@@ -14,7 +14,17 @@ static PROBE: OnceLock<Result<(), String>> = OnceLock::new();
 static LOGGED_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 
 const HNSEP_MODEL_SR: u32 = 44_100;
-const HNSEP_CACHE_CAPACITY: usize = 32;
+/// HNSEP 分离缓存默认容量（可通过环境变量 HIFISHIFTER_HNSEP_CACHE_CAPACITY 覆盖）。
+const HNSEP_CACHE_CAPACITY_DEFAULT: usize = 128;
+
+/// 读取环境变量或使用默认值获取 HNSEP 缓存初始容量。
+fn hnsep_cache_initial_capacity() -> usize {
+    std::env::var("HIFISHIFTER_HNSEP_CACHE_CAPACITY")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(HNSEP_CACHE_CAPACITY_DEFAULT)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OrtExecutionProviderChoice {
@@ -189,10 +199,30 @@ static HNSEP_CACHE: OnceLock<Mutex<LruCache<u64, HnsepCacheEntry>>> = OnceLock::
 
 fn global_cache() -> &'static Mutex<LruCache<u64, HnsepCacheEntry>> {
     HNSEP_CACHE.get_or_init(|| {
+        let cap = hnsep_cache_initial_capacity();
+        eprintln!("[hnsep] LRU cache initialized with capacity={cap}");
         Mutex::new(LruCache::new(
-            NonZeroUsize::new(HNSEP_CACHE_CAPACITY).expect("HNSEP cache capacity must be non-zero"),
+            NonZeroUsize::new(cap).expect("HNSEP cache capacity must be non-zero"),
         ))
     })
+}
+
+/// 确保 HNSEP 分离缓存容量不小于给定值（仅增不减）。
+///
+/// 渲染线程可在开始批量渲染前调用此函数，根据轨道上的 clip 数量动态扩容，
+/// 避免在大量切片场景下因 LRU 容量不足导致缓存驱逐和重复推理。
+pub fn ensure_cache_capacity(min_capacity: usize) {
+    let next = min_capacity.max(1);
+    let mut cache = global_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let current_cap = cache.cap().get();
+    if next > current_cap {
+        cache.resize(NonZeroUsize::new(next).unwrap());
+        eprintln!(
+            "[hnsep] LRU cache resized: {current_cap} -> {next}"
+        );
+    }
 }
 
 fn separation_cache_key(clip_id: &str, sample_rate: u32, audio_mono: &[f32]) -> u64 {

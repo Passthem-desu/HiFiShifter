@@ -146,6 +146,24 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     let required = clips_to_render.len().max(1);
                     tension_cache.ensure_capacity(required);
                 }
+                // 动态扩容 HNSEP 分离缓存：确保容量 >= 本轮 clip 数 + 余量，
+                // 避免大量切片场景下 LRU 驱逐导致重复执行 HNSEP 推理。
+                {
+                    let breath_clips = clips_to_render.len();
+                    // 预留 25% 余量，至少 128
+                    let required = (breath_clips + breath_clips / 4).max(128);
+                    crate::hnsep_onnx::ensure_cache_capacity(required);
+                }
+                // 动态扩容 Breath Noise 独立缓存：确保容量 >= 本轮 clip 数，
+                // 使 formant 编辑时可复用已缓存的 noise stem，避免重复 HNSEP 推理。
+                {
+                    let mut breath_noise_cache =
+                        crate::synth_clip_cache::global_breath_noise_cache()
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                    let required = clips_to_render.len().max(1);
+                    breath_noise_cache.ensure_capacity(required);
+                }
 
                 let total = clips_to_render.len().max(1);
                 let mut rendered_count = 0u32;
@@ -734,6 +752,84 @@ fn render_single_clip(
         merged_extra_curves.extend(extra_curves.clone());
     }
 
+    // ── 构造 BreathNoiseCache key（与 RenderedClipCacheKey 相同，不含 formant_shift_cents）──
+    // 因为 formant_shift_cents 已从 compute_rendered_clip_hash 的排除列表中排除，
+    // 所以这里的 param_hash 天然不含 formant，可以直接用作 BreathNoiseCache 的 key。
+    let breath_noise_cache_key = {
+        let clip_root = timeline.resolve_root_track_id(&clip.track_id);
+        let entry = clip_root.as_ref().and_then(|root| timeline.params_by_root_track.get(root));
+        let track = clip_root.as_ref().and_then(|root| timeline.tracks.iter().find(|t| &t.id == root));
+        match (entry, track) {
+            (Some(entry), Some(track)) => {
+                let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+                let renderer_id = crate::renderer::get_renderer(kind).id();
+                let start_frame = (clip.start_sec.max(0.0) * out_rate as f64).round() as u64;
+                let end_frame = start_frame + (clip.length_sec.max(0.0) * out_rate as f64).round().max(1.0) as u64;
+                let source_path = clip.source_path.as_deref().unwrap_or("");
+                let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
+                    &clip.id,
+                    source_path,
+                    start_frame,
+                    end_frame,
+                    out_rate,
+                    renderer_id,
+                    &entry.pitch_edit,
+                    entry.frame_period_ms.max(0.1),
+                    playback_rate,
+                    &entry.extra_curves,
+                    &entry.extra_params,
+                );
+                Some(crate::synth_clip_cache::BreathNoiseCacheKey {
+                    clip_id: clip.id.clone(),
+                    param_hash,
+                })
+            }
+            _ => None,
+        }
+    };
+
+    // ── 尝试从 BreathNoiseCache 中命中已有的 noise stem ──────────────────
+    let cached_noise = breath_noise_cache_key.as_ref().and_then(|key| {
+        let mut cache = crate::synth_clip_cache::global_breath_noise_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        cache.get(key).map(|entry| entry.noise_stereo.clone())
+    });
+
+    if let Some(cached_noise_arc) = cached_noise {
+        // BreathNoiseCache 命中：仅需渲染 harmonic_only（1 次 HNSEP + 1 次 HiFiGAN），
+        // noise stem 直接复用缓存。
+        if debug {
+            eprintln!(
+                "render_single_clip: breath_noise_cache HIT for clip_id={}, skipping second render_variant",
+                clip.id
+            );
+        }
+
+        let mut harmonic_only_clip = clip.clone();
+        merged_extra_curves.insert("breath_gain".to_string(), vec![0.0; curve_len]);
+        harmonic_only_clip.extra_params = Some(merged_extra_params);
+        harmonic_only_clip.extra_curves = Some(merged_extra_curves);
+        let mut harmonic_only = render_variant(&harmonic_only_clip);
+
+        let out_len = harmonic_only.len().min(cached_noise_arc.len());
+        harmonic_only.truncate(out_len);
+        let breath_noise_stereo = cached_noise_arc[..out_len].to_vec();
+
+        return Ok(RenderedClipOutput {
+            rendered_stereo: harmonic_only,
+            breath_noise_stereo: Some(breath_noise_stereo),
+        });
+    }
+
+    // ── BreathNoiseCache 未命中：完整的两次 render_variant ──────────────────
+    if debug {
+        eprintln!(
+            "render_single_clip: breath_noise_cache MISS for clip_id={}, doing full 2-pass render",
+            clip.id
+        );
+    }
+
     let mut harmonic_only_clip = clip.clone();
     merged_extra_curves.insert("breath_gain".to_string(), vec![0.0; curve_len]);
     harmonic_only_clip.extra_params = Some(merged_extra_params.clone());
@@ -753,6 +849,19 @@ fn render_single_clip(
         .zip(&harmonic_only[..out_len])
         .map(|(u, h)| u - h)
         .collect();
+
+    // 将 noise stem 存入 BreathNoiseCache，后续 formant 编辑时可直接复用
+    if let Some(key) = breath_noise_cache_key {
+        let entry = crate::synth_clip_cache::BreathNoiseCacheEntry {
+            noise_stereo: std::sync::Arc::new(breath_noise_stereo.clone()),
+            frames: (breath_noise_stereo.len() / 2) as u64,
+            sample_rate: out_rate,
+        };
+        let mut cache = crate::synth_clip_cache::global_breath_noise_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        cache.insert(key, entry);
+    }
 
     Ok(RenderedClipOutput {
         rendered_stereo: harmonic_only,
