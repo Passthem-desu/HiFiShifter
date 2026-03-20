@@ -111,6 +111,7 @@ export function useClipDrag(deps: {
         autoCrossfadeEnabled,
         onCtrlClick,
     } = deps;
+    void gridSnapEnabled;
 
     const clipDragRef = useRef<ClipDragState | null>(null);
     const [ghostDrag, setGhostDrag] = useState<GhostDragInfo | null>(null);
@@ -260,7 +261,7 @@ export function useClipDrag(deps: {
             const beatNow = beatFromClientX(ev.clientX, b, el.scrollLeft);
             let nextStart = Math.max(0, beatNow - drag.offsetBeat);
             const noSnapActive = isModifierActive(noSnapKb, ev);
-            if (gridSnapEnabled && !noSnapActive) {
+            if (!noSnapActive) {
                 nextStart = snapBeat(nextStart);
             }
 

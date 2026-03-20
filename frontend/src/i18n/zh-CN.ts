@@ -74,7 +74,7 @@ export const zhCN = {
     output_path: "导出路径",
     hints: "提示",
     hint_drag_clip:
-        "拖拽时间轴中的块可移动起始位置（吸附取决于网格吸附设置；按住修饰键可切换）",
+        "拖拽时间轴中的块可移动起始位置（默认吸附到网格；按住 Shift 可自由移动）",
     hint_add_point: "参数区双击可新增控制点",
     hint_drag_point: "拖动控制点可编辑曲线",
     hint_drop_audio: "把音频文件拖到界面中可直接导入并分析",
@@ -293,7 +293,7 @@ export const zhCN = {
     kb_mode_vibrato_tool: "切换到直线/颤音工具",
     kb_modifier_slip_edit: "Slip 编辑（拖动音频块时按住）",
     kb_modifier_stretch: "拉伸（拖动边缘时按住）",
-    kb_modifier_no_snap: "切换吸附（拖动时按住）",
+    kb_modifier_no_snap: "自由移动（拖动音频块时按住）",
     kb_modifier_copy_drag: "复制拖动（拖动音频块时按住）",
     kb_modifier_pr_vzoom: "垂直缩放（按住+滚轮）",
     kb_modifier_param_morph: "参数形变（参数编辑器选区内按住）",
@@ -403,9 +403,9 @@ export const zhCN = {
     scale_highlight_off: "关闭",
 
     // Modifier key rename
-    kb_modifier_toggle_snap: "切换吸附（拖动时按住）",
+    kb_modifier_toggle_snap: "自由移动（拖动音频块时按住）",
     hint_toggle_snap:
-        "按住修饰键可切换吸附行为（根据网格吸附设置决定吸附/自由）",
+        "拖动音频块时按住 Shift 可自由移动；否则默认吸附到网格",
 
     // File browser enhancements
     fb_regex: "正则",
