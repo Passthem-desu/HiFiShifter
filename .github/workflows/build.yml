@@ -43,6 +43,8 @@ jobs:
     # Prevent CI environment from converting warnings into errors
     env:
       RUSTFLAGS: '-Awarnings'
+      # Set to '1' to skip the cargo check steps (useful for faster CI runs)
+      HIFISHIFTER_SKIP_CARGO_CHECK: '1'
     strategy:
       fail-fast: false
       matrix:
@@ -137,7 +139,7 @@ jobs:
         shell: bash
 
       - name: Build (cargo check) on Unix
-        if: runner.os != 'Windows'
+        if: ${{ runner.os != 'Windows' && env.HIFISHIFTER_SKIP_CARGO_CHECK != '1' }}
         working-directory: backend/src-tauri
         env:
           HIFISHIFTER_SKIP_NATIVE_BUILD: '1'
@@ -158,7 +160,7 @@ jobs:
         shell: bash
 
       - name: Build (cargo check) on Windows
-        if: runner.os == 'Windows'
+        if: ${{ runner.os == 'Windows' && env.HIFISHIFTER_SKIP_CARGO_CHECK != '1' }}
         working-directory: backend/src-tauri
         env:
           HIFISHIFTER_SKIP_NATIVE_BUILD: '1'
