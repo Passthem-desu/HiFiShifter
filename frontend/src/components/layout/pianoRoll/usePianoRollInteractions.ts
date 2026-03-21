@@ -135,6 +135,8 @@ export function usePianoRollInteractions(args: {
     pianoRollPasteKb: Keybinding;
     /** modifier.pianoRollVerticalZoom 绑定 */
     prVerticalZoomKb: Keybinding;
+    /** modifier.horizontalZoom 绑定 */
+    horizontalZoomKb: Keybinding;
     /** modifier.scrollHorizontal 绑定 */
     scrollHorizontalKb: Keybinding;
     /** modifier.scrollVertical 绑定 */
@@ -155,6 +157,16 @@ export function usePianoRollInteractions(args: {
     playheadSec?: number;
     /** 是否以播放头为中心缩放 */
     playheadZoomEnabled?: boolean;
+    /** 参数编辑器左键按下时是否同步调整播放头 */
+    paramEditorSeekPlayheadEnabled?: boolean;
+    /** 参数值浮窗是否启用 */
+    paramValuePopupEnabled?: boolean;
+    /** 参数值浮窗预览回调 */
+    onParamValuePreviewChange?: (next: {
+        clientX: number;
+        clientY: number;
+        value: number;
+    } | null) => void;
     /** 是否启用绘制时音高吸附 */
     pitchSnapEnabled?: boolean;
     /** 音高吸附方式 */
@@ -224,6 +236,7 @@ export function usePianoRollInteractions(args: {
         pianoRollCopyKb,
         pianoRollPasteKb,
         prVerticalZoomKb,
+        horizontalZoomKb,
         scrollHorizontalKb,
         scrollVerticalKb,
         paramMorphKb,
@@ -233,6 +246,9 @@ export function usePianoRollInteractions(args: {
         vibratoFrequencyAdjustKb,
         playheadSec,
         playheadZoomEnabled,
+        paramEditorSeekPlayheadEnabled,
+        paramValuePopupEnabled,
+        onParamValuePreviewChange,
     } = args;
 
     const {
@@ -1140,19 +1156,22 @@ export function usePianoRollInteractions(args: {
                 return;
             }
 
-            const horizontalScrollModifierActive = isModifierActive(
+            const noModifierPressed =
+                !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+            const isWheelBindingRequested = (kb: Keybinding) => {
+                if (isNoneBinding(kb)) return noModifierPressed;
+                return isModifierActive(kb, e);
+            };
+            const horizontalScrollModifierActive = isWheelBindingRequested(
                 scrollHorizontalKb,
-                e,
-            );
-            const verticalPanModifierActive = isModifierActive(
-                scrollVerticalKb,
-                e,
             );
             const wheelAction = getParamEditorWheelAction({
                 deltaX: e.deltaX,
                 deltaY: e.deltaY,
-                horizontalScrollModifier: horizontalScrollModifierActive,
-                verticalPanModifier: verticalPanModifierActive,
+                horizontalScrollRequested: horizontalScrollModifierActive,
+                verticalPanRequested: isWheelBindingRequested(scrollVerticalKb),
+                verticalZoomRequested: isWheelBindingRequested(prVerticalZoomKb),
+                horizontalZoomRequested: isWheelBindingRequested(horizontalZoomKb),
             });
 
             // Scroll modifier: convert wheel to horizontal scroll
@@ -1209,8 +1228,7 @@ export function usePianoRollInteractions(args: {
             // We rely on preventDefault to stop native scrolling while zooming.
             e.preventDefault();
 
-            // Ctrl + wheel: vertical zoom (value axis)
-            if (isModifierActive(prVerticalZoomKb, e)) {
+            if (wheelAction === "vertical-zoom") {
                 const h = Math.max(1, bounds.height);
                 const y = clamp(pointerYRaw, 0, h);
                 const t = yToViewportT(y, h);
@@ -1242,6 +1260,9 @@ export function usePianoRollInteractions(args: {
             }
 
             // Wheel: horizontal zoom (time axis)
+            if (wheelAction !== "horizontal-zoom") {
+                return;
+            }
             const dir = e.deltaY < 0 ? 1 : -1;
             const factor = dir > 0 ? 1.1 : 0.9;
             const curPxPerBeat = pxPerBeatRef.current;
@@ -1300,8 +1321,10 @@ export function usePianoRollInteractions(args: {
             pxPerBeatRef,
             setPxPerBeat,
             syncScrollLeft,
+            prVerticalZoomKb,
             scrollHorizontalKb,
             scrollVerticalKb,
+            horizontalZoomKb,
             vibratoAmplitudeAdjustKb,
             vibratoFrequencyAdjustKb,
             paramFineAdjustKb,
@@ -1327,19 +1350,13 @@ export function usePianoRollInteractions(args: {
         return toolMode === "select" ? "default" : "crosshair";
     }, [toolMode]);
 
-    const isPointerNearDraggableSelection = useCallback(
-        (clientX: number, clientY: number): boolean => {
-            if (toolMode !== "select") return false;
-            const sel = selectionRef.current;
+    const getCurveValueNearPointer = useCallback(
+        (clientX: number, clientY: number): number | null => {
             const pv = paramViewRef.current;
             const canvas = canvasRef.current;
-            if (!sel || !pv || pv.edit.length === 0 || !canvas) return false;
+            if (!pv || pv.edit.length === 0 || !canvas) return null;
 
             const beat = pointerBeat(clientX);
-            const aBeat = Math.min(sel.aBeat, sel.bBeat);
-            const bBeat = Math.max(sel.aBeat, sel.bBeat);
-            if (beat < aBeat || beat > bBeat) return false;
-
             const fp = pv.framePeriodMs;
             const sec = beat * secPerBeat;
             const frame = Math.max(0, Math.floor((sec * 1000) / fp));
@@ -1347,8 +1364,8 @@ export function usePianoRollInteractions(args: {
                 (frame - pv.startFrame) / Math.max(1, pv.stride),
             );
             const curveVal =
-                idx >= 0 && idx < pv.edit.length ? pv.edit[idx] : null;
-            if (curveVal == null) return false;
+                idx >= 0 && idx < pv.edit.length ? Number(pv.edit[idx]) : null;
+            if (curveVal == null || !Number.isFinite(curveVal)) return null;
 
             const rect = canvas.getBoundingClientRect();
             const rectH = rect.height || viewSizeRef.current.h || 1;
@@ -1356,11 +1373,9 @@ export function usePianoRollInteractions(args: {
             const mappedCurveVal =
                 editParam === "pitch" ? curveVal + 0.5 : curveVal;
             const curveY = valueToY(editParam, mappedCurveVal, rectH);
-            return Math.abs(mouseY - curveY) < 10;
+            return Math.abs(mouseY - curveY) < 10 ? curveVal : null;
         },
         [
-            toolMode,
-            selectionRef,
             paramViewRef,
             canvasRef,
             pointerBeat,
@@ -1368,6 +1383,27 @@ export function usePianoRollInteractions(args: {
             viewSizeRef,
             editParam,
             valueToY,
+        ],
+    );
+
+    const isPointerNearDraggableSelection = useCallback(
+        (clientX: number, clientY: number): boolean => {
+            if (toolMode !== "select") return false;
+            const sel = selectionRef.current;
+            if (!sel) return false;
+
+            const beat = pointerBeat(clientX);
+            const aBeat = Math.min(sel.aBeat, sel.bBeat);
+            const bBeat = Math.max(sel.aBeat, sel.bBeat);
+            if (beat < aBeat || beat > bBeat) return false;
+
+            return getCurveValueNearPointer(clientX, clientY) != null;
+        },
+        [
+            toolMode,
+            selectionRef,
+            pointerBeat,
+            getCurveValueNearPointer,
         ],
     );
 
@@ -1402,6 +1438,32 @@ export function usePianoRollInteractions(args: {
 
     const onCanvasPointerMove = useCallback(
         (e: ReactPointerEvent<HTMLCanvasElement>) => {
+            if (paramValuePopupEnabled) {
+                const draggingLeft =
+                    Boolean(strokeRef.current) && (e.buttons & 1) === 1;
+                if (draggingLeft) {
+                    onParamValuePreviewChange?.({
+                        clientX: e.clientX,
+                        clientY: e.clientY,
+                        value: pointerValue(e.clientY),
+                    });
+                } else {
+                    const nearCurveValue = getCurveValueNearPointer(
+                        e.clientX,
+                        e.clientY,
+                    );
+                    if (nearCurveValue == null) {
+                        onParamValuePreviewChange?.(null);
+                    } else {
+                        onParamValuePreviewChange?.({
+                            clientX: e.clientX,
+                            clientY: e.clientY,
+                            value: nearCurveValue,
+                        });
+                    }
+                }
+            }
+
             if (panRef.current || strokeRef.current) return;
             if (isPointerNearStretchSelectionEdge(e)) {
                 setCanvasCursor("ew-resize");
@@ -1414,6 +1476,10 @@ export function usePianoRollInteractions(args: {
             setCanvasCursor(getDefaultCanvasCursor());
         },
         [
+            paramValuePopupEnabled,
+            onParamValuePreviewChange,
+            pointerValue,
+            getCurveValueNearPointer,
             panRef,
             strokeRef,
             isPointerNearStretchSelectionEdge,
@@ -1425,11 +1491,37 @@ export function usePianoRollInteractions(args: {
 
     const onCanvasPointerLeave = useCallback(() => {
         if (panRef.current || strokeRef.current) return;
+        onParamValuePreviewChange?.(null);
         setCanvasCursor(getDefaultCanvasCursor());
-    }, [panRef, strokeRef, setCanvasCursor, getDefaultCanvasCursor]);
+    }, [
+        panRef,
+        strokeRef,
+        onParamValuePreviewChange,
+        setCanvasCursor,
+        getDefaultCanvasCursor,
+    ]);
 
     const onCanvasPointerDown = useCallback(
         (e: ReactPointerEvent<HTMLCanvasElement>) => {
+            if (e.button === 0 && paramEditorSeekPlayheadEnabled !== false) {
+                const beat = pointerBeat(e.clientX);
+                const sec = Math.max(0, beat * secPerBeat);
+                dispatch(setplayheadSec(sec));
+                void dispatch(seekPlayhead(sec));
+            }
+
+            if (
+                e.button === 0 &&
+                paramValuePopupEnabled &&
+                (toolMode === "select" || toolMode === "draw" || toolMode === "line")
+            ) {
+                onParamValuePreviewChange?.({
+                    clientX: e.clientX,
+                    clientY: e.clientY,
+                    value: pointerValue(e.clientY),
+                });
+            }
+
             if (!rootTrackId) return;
 
             // Middle mouse: pan (time axis)
@@ -2681,15 +2773,16 @@ export function usePianoRollInteractions(args: {
                                     ev.stopImmediatePropagation();
                                 };
                                 const onMouseDownDuringDrag = (ev: globalThis.MouseEvent) => {
-                                    if (ev.button === 2) {
-                                        ev.preventDefault();
-                                        ev.stopPropagation();
-                                        const order: Array<"free" | "x-only" | "y-only"> = ["free", "x-only", "y-only"];
-                                        const idx = order.indexOf(currentDragDir);
-                                        currentDragDir = order[(idx + 1) % order.length];
-                                        // Also cycle the global setting
-                                        if (onCycleDragDirection) onCycleDragDirection("select");
-                                    }
+                                    if (ev.button !== 2) return;
+                                    // 仅在左键拖拽进行中时，右键才切换拖拽方向。
+                                    if ((ev.buttons & 1) !== 1) return;
+                                    ev.preventDefault();
+                                    ev.stopPropagation();
+                                    const order: Array<"free" | "x-only" | "y-only"> = ["free", "x-only", "y-only"];
+                                    const idx = order.indexOf(currentDragDir);
+                                    currentDragDir = order[(idx + 1) % order.length];
+                                    // Also cycle the global setting
+                                    if (onCycleDragDirection) onCycleDragDirection("select");
                                 };
 
                                 window.addEventListener("pointermove", onMove);
@@ -2790,6 +2883,7 @@ export function usePianoRollInteractions(args: {
                 const startValue = value;
                 let currentDragDir: "free" | "x-only" =
                     dragDirection === "x-only" ? "x-only" : "free";
+                const canCycleDragDirection = e.button === 0;
 
                 if (isVibratoTool) {
                     vibratoStateRef.current = {
@@ -2916,6 +3010,9 @@ export function usePianoRollInteractions(args: {
                 };
                 const onMouseDownDuringDraw = (ev: globalThis.MouseEvent) => {
                     if (ev.button !== 2) return;
+                    if (!canCycleDragDirection) return;
+                    // 仅在左键拖拽进行中时，右键才切换拖拽方向。
+                    if ((ev.buttons & 1) !== 1) return;
                     ev.preventDefault();
                     ev.stopPropagation();
                     currentDragDir = currentDragDir === "free" ? "x-only" : "free";
@@ -2933,6 +3030,7 @@ export function usePianoRollInteractions(args: {
                 // Draw tool: freehand drawing with interpolation between points
                 let currentDragDir: "free" | "x-only" =
                     dragDirection === "x-only" ? "x-only" : "free";
+                const canCycleDragDirection = e.button === 0;
                 const onMove = (ev: globalThis.PointerEvent) => {
                     const st = strokeRef.current;
                     if (!st || st.pointerId !== e.pointerId) return;
@@ -3023,6 +3121,9 @@ export function usePianoRollInteractions(args: {
                 };
                 const onMouseDownDuringDraw = (ev: globalThis.MouseEvent) => {
                     if (ev.button !== 2) return;
+                    if (!canCycleDragDirection) return;
+                    // 仅在左键拖拽进行中时，右键才切换拖拽方向。
+                    if ((ev.buttons & 1) !== 1) return;
                     ev.preventDefault();
                     ev.stopPropagation();
                     currentDragDir = currentDragDir === "free" ? "x-only" : "free";
@@ -3084,8 +3185,25 @@ export function usePianoRollInteractions(args: {
             scrollLeftRef,
             valueToY,
             buildVibratoDense,
+            paramEditorSeekPlayheadEnabled,
+            paramValuePopupEnabled,
+            onParamValuePreviewChange,
         ],
     );
+
+    useEffect(() => {
+        if (!paramValuePopupEnabled) {
+            onParamValuePreviewChange?.(null);
+            return;
+        }
+        const clearPreview = () => onParamValuePreviewChange?.(null);
+        window.addEventListener("pointerup", clearPreview);
+        window.addEventListener("pointercancel", clearPreview);
+        return () => {
+            window.removeEventListener("pointerup", clearPreview);
+            window.removeEventListener("pointercancel", clearPreview);
+        };
+    }, [paramValuePopupEnabled, onParamValuePreviewChange]);
 
     return {
         onRulerMouseDown,

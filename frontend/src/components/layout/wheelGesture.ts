@@ -3,7 +3,8 @@ const WHEEL_AXIS_EPSILON = 0.5;
 export type ParamEditorWheelAction =
     | "horizontal-scroll"
     | "vertical-pan"
-    | "vertical-zoom";
+    | "vertical-zoom"
+    | "horizontal-zoom";
 
 export function getWheelGestureAxis(input: {
     deltaX: number;
@@ -22,18 +23,28 @@ export function getWheelGestureAxis(input: {
 export function getParamEditorWheelAction(input: {
     deltaX: number;
     deltaY: number;
-    horizontalScrollModifier: boolean;
-    verticalPanModifier: boolean;
+    horizontalScrollRequested: boolean;
+    verticalPanRequested: boolean;
+    verticalZoomRequested: boolean;
+    horizontalZoomRequested: boolean;
 }): ParamEditorWheelAction {
-    if (input.horizontalScrollModifier) {
+    if (input.horizontalScrollRequested) {
         return "horizontal-scroll";
     }
 
-    if (input.verticalPanModifier) {
+    if (input.verticalPanRequested) {
         return "vertical-pan";
+    }
+
+    if (input.verticalZoomRequested) {
+        return "vertical-zoom";
+    }
+
+    if (input.horizontalZoomRequested) {
+        return "horizontal-zoom";
     }
 
     return getWheelGestureAxis(input) === "horizontal"
         ? "horizontal-scroll"
-        : "vertical-zoom";
+        : "horizontal-zoom";
 }

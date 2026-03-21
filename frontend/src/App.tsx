@@ -703,8 +703,6 @@ function AppInner() {
           }
           break;
         case "playback.stop":
-          // Play/Stop: if playing → stop and return cursor to start position;
-          // if not playing → start playback
           if (runtimeRef.current.isPlaying) {
             void dispatch(stopAudioPlayback({ restoreAnchor: true }));
           } else {
@@ -1066,6 +1064,9 @@ function AppInner() {
     // 用 in-flight guard 防止轮询请求堆积；并适度降频以降低 Redux/React 压力。
     const intervalMs = 80;
     const id = window.setInterval(() => {
+      // 预渲染阶段后端还未真正进入 playing，
+      // 若此时同步会把前端“准备播放”状态误判为停止，导致 stop 锚点丢失。
+      if (rendering.active) return;
       if (playbackSyncInFlightRef.current) return;
       playbackSyncInFlightRef.current = true;
       const p = dispatch(syncPlaybackState()) as unknown as Promise<unknown>;
@@ -1074,7 +1075,7 @@ function AppInner() {
       });
     }, intervalMs);
     return () => window.clearInterval(id);
-  }, [dispatch, runtimeIsPlaying]);
+  }, [dispatch, runtimeIsPlaying, rendering.active]);
 
   useEffect(() => {
     splitRatioRef.current = splitRatio;

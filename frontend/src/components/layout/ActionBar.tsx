@@ -9,6 +9,7 @@ import {
     Text,
 } from "@radix-ui/themes";
 import {
+    PauseIcon,
     PlayIcon,
     StopIcon,
 } from "@radix-ui/react-icons";
@@ -28,6 +29,7 @@ import {
     toggleGridSnap,
     togglePlayheadZoom,
     toggleAutoScroll,
+    toggleParamEditorSeekPlayhead,
     persistUiSettings,
     setProjectBaseScaleRemote,
     setProjectCustomScaleRemote,
@@ -257,7 +259,9 @@ export function ActionBar() {
                     variant="soft"
                     color="gray"
                     size="1"
-                    onClick={() => dispatch(stopAudioPlayback())}
+                    onClick={() => {
+                        dispatch(stopAudioPlayback({ restoreAnchor: true }));
+                    }}
                     title={t("action_stop")}
                 >
                     <StopIcon />
@@ -265,10 +269,16 @@ export function ActionBar() {
                 <IconButton
                     variant="solid"
                     size="1"
-onClick={() => dispatch(playOriginal())}
-                    title={t("action_play_out")}
+                    onClick={() => {
+                        if (s.runtime.isPlaying) {
+                            dispatch(stopAudioPlayback());
+                            return;
+                        }
+                        dispatch(playOriginal());
+                    }}
+                    title={s.runtime.isPlaying ? tAny("action_pause") : t("action_play_out")}
                 >
-                    <PlayIcon />
+                    {s.runtime.isPlaying ? <PauseIcon /> : <PlayIcon />}
                 </IconButton>
             </Flex>
 
@@ -352,6 +362,24 @@ onClick={() => dispatch(playOriginal())}
                 {/* Auto Scroll */}
                 <IconButton
                     size="1"
+                    variant={s.paramEditorSeekPlayheadEnabled ? "solid" : "ghost"}
+                    color="gray"
+                    title={tAny("param_editor_seek_playhead")}
+                    tabIndex={-1}
+                    onClick={() => { dispatch(toggleParamEditorSeekPlayhead()); void dispatch(persistUiSettings()); }}
+                >
+                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 2.5H13" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
+                        <path d="M2 12.5H13" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
+                        <path d="M7.5 3.5V11.5" stroke="currentColor" strokeWidth="1.2"/>
+                        <path d="M6 4.5L7.5 3L9 4.5" stroke="currentColor" strokeWidth="1"/>
+                        <path d="M7.8 8.2C8.9 8.2 9.8 9.1 9.8 10.2C9.8 11.3 8.9 12.2 7.8 12.2C6.9 12.2 6.2 11.6 6 10.8H7.8V8.2Z" fill="currentColor"/>
+                    </svg>
+                </IconButton>
+
+                {/* Auto Scroll (horizontal arrows) */}
+                <IconButton
+                    size="1"
                     variant={s.autoScrollEnabled ? "solid" : "ghost"}
                     color="gray"
                     title={tAny("auto_scroll")}
@@ -359,10 +387,10 @@ onClick={() => dispatch(playOriginal())}
                     onClick={() => { dispatch(toggleAutoScroll()); void dispatch(persistUiSettings()); }}
                 >
                     <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M7.5 2V11" stroke="currentColor" strokeWidth="1.2"/>
-                        <path d="M6 3L7.5 1.5L9 3" stroke="currentColor" strokeWidth="1"/>
-                        <path d="M5 9L7.5 12L10 9" stroke="currentColor" strokeWidth="1"/>
-                        <path d="M2 13H13" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
+                        <path d="M7.5 2V13" stroke="currentColor" strokeWidth="1.2"/>
+                        <path d="M3 6L1.5 7.5L3 9" stroke="currentColor" strokeWidth="1"/>
+                        <path d="M12 6L13.5 7.5L12 9" stroke="currentColor" strokeWidth="1"/>
+                        <path d="M2 7.5H13" stroke="currentColor" strokeWidth="0.8" opacity="0.5"/>
                     </svg>
                 </IconButton>
 
