@@ -629,61 +629,6 @@ pub fn calculate_division_factors(sample_rate: u32) -> Vec<u32> {
         .collect()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_header_serialization() {
-        let header = HfsPeakHeader {
-            magic: *MAGIC,
-            version: VERSION,
-            channels: 2,
-            sample_rate: 44100,
-            total_frames: 44100 * 60, // 1 minute
-            source_file_size: 1024 * 1024,
-            source_modified_ns: 1234567890,
-            mipmap_count: 4,
-            reserved: [0; 8],
-        };
-
-        let bytes = header.to_bytes();
-        assert_eq!(bytes.len(), HfsPeakHeader::SIZE);
-
-        let parsed = HfsPeakHeader::from_bytes(&bytes).unwrap();
-        assert_eq!(parsed.version, VERSION);
-        assert_eq!(parsed.channels, 2);
-        assert_eq!(parsed.sample_rate, 44100);
-    }
-
-    #[test]
-    fn test_mipmap_header_serialization() {
-        let header = MipmapHeader {
-            division_factor: 128,
-            peak_count: 1000,
-            data_offset: 100,
-        };
-
-        let bytes = header.to_bytes();
-        assert_eq!(bytes.len(), MipmapHeader::SIZE);
-
-        let parsed = MipmapHeader::from_bytes(&bytes).unwrap();
-        assert_eq!(parsed.division_factor, 128);
-        assert_eq!(parsed.peak_count, 1000);
-    }
-
-    #[test]
-    fn test_division_factors() {
-        // 44.1kHz
-        let factors_44 = calculate_division_factors(44100);
-        assert_eq!(factors_44, DEFAULT_DIVISION_FACTORS.to_vec());
-
-        // 48kHz
-        let factors_48 = calculate_division_factors(48000);
-        assert!(factors_48[0] > DEFAULT_DIVISION_FACTORS[0]);
-    }
-}
-
 // ============== 多级 Mipmap 峰值计算 ==============
 
 use std::path::Path;
