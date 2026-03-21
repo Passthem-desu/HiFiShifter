@@ -9,7 +9,7 @@ use crate::reaper_parser::{
 };
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// HiFiShifter 支持的音频格式扩展名
 const SUPPORTED_AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3", "ogg", "m4a"];

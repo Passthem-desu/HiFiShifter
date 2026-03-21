@@ -80,8 +80,7 @@ pub fn nsf_hifigan_onnx_probe() -> Result<String, String> {
     // Probe ONNX model availability.
     #[cfg(feature = "onnx")]
     {
-        nsf_hifigan_onnx::probe_load();
-        Ok("ok".to_string())
+        nsf_hifigan_onnx::probe_load().map(|_| "ok".to_string())
     }
     #[cfg(not(feature = "onnx"))]
     {

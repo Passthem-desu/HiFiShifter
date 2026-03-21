@@ -978,7 +978,7 @@ pub fn invalidate_clip_for_pitch_edit(clip_id: &str) {
 
 /// 获取指定 clip 最近一次成功的整 clip 渲染结果（用作平滑过渡的垫音）
 pub fn get_latest_rendered_pcm(clip_id: &str) -> Option<(Arc<Vec<f32>>, Option<Arc<Vec<f32>>>)> {
-    let mut cache = global_rendered_clip_cache()
+    let cache = global_rendered_clip_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let found_key = cache.order.iter().find(|k| k.clip_id == clip_id).cloned()?;
@@ -988,7 +988,7 @@ pub fn get_latest_rendered_pcm(clip_id: &str) -> Option<(Arc<Vec<f32>>, Option<A
 
 /// 获取指定 clip 最近一次成功的 Tension 渲染结果（用作平滑过渡的垫音）
 pub fn get_latest_tension_rendered_pcm(clip_id: &str) -> Option<Arc<Vec<f32>>> {
-    let mut cache = global_tension_rendered_clip_cache()
+    let cache = global_tension_rendered_clip_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let found_key = cache.order.iter().find(|k| k.clip_id == clip_id).cloned()?;

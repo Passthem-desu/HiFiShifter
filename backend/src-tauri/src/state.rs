@@ -1591,10 +1591,10 @@ impl TimelineState {
             length_sec: ls,
             color: default_clip_color(),
             source_path,
-            duration_sec: inherited.as_ref().and_then(|v| v.0),
-            duration_frames: inherited.as_ref().and_then(|v| v.1),
-            source_sample_rate: inherited.as_ref().and_then(|v| v.2),
-            waveform_preview: inherited.as_ref().and_then(|v| v.3.clone()),
+            duration_sec: computed_duration_sec,
+            duration_frames: computed_duration_frames,
+            source_sample_rate: computed_source_sr,
+            waveform_preview: computed_waveform,
             pitch_range: inherited
                 .as_ref()
                 .and_then(|v| v.4.clone())
@@ -1605,7 +1605,7 @@ impl TimelineState {
             gain: 1.0,
             muted: false,
             source_start_sec: 0.0,
-            source_end_sec: inherited.as_ref().and_then(|v| v.0).unwrap_or(ls),
+            source_end_sec: computed_duration_sec.unwrap_or(ls),
             playback_rate: 1.0,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,

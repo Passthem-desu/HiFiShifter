@@ -7,7 +7,7 @@
 use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Version number for cache format. Increment this when the cache key format

@@ -44,8 +44,8 @@ impl ProgressTracker {
         bpm: f64,
         cache: &Arc<Mutex<crate::clip_pitch_cache::ClipPitchCache>>,
     ) -> Self {
-        let bs = 60.0 / bpm.max(1e-6);
-
+        let _bs = 60.0 / bpm.max(1e-6);
+        
         // Estimate cache hit rate (use current stats if available)
         let cache_miss_factor = {
             if let Ok(guard) = cache.lock() {

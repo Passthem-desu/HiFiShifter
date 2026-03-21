@@ -381,7 +381,7 @@ pub fn schedule_clip_pitch_jobs(
     tl: &TimelineState,
     engine_tx: &mpsc::Sender<crate::audio_engine::types::EngineCommand>,
     app_handle: Option<&tauri::AppHandle>,
-    out_rate: u32,
+    _out_rate: u32,
 ) {
     eprintln!(
         "[pitch_clip] schedule_clip_pitch_jobs called, clips={}, app_handle={}",
