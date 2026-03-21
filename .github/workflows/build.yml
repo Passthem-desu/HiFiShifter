@@ -42,9 +42,6 @@ jobs:
     name: Build Backend
     needs: frontend-build
     runs-on: ${{ matrix.os }}
-    # Prevent CI environment from converting warnings into errors
-    env:
-      RUSTFLAGS: ''
     strategy:
       fail-fast: false
       matrix:
@@ -243,19 +240,25 @@ jobs:
           if (Test-Path $conf) {
             try {
               $j = Get-Content $conf -Raw | ConvertFrom-Json -ErrorAction Stop
+              if (-not $prod) { $prod = $j.productName }
+              if (-not $ver) { $ver = $j.version }
               if ($j.package) {
-                $prod = $j.package.productName
+                if (-not $prod) { $prod = $j.package.productName }
                 if (-not $prod) { $prod = $j.package.name }
-                $ver = $j.package.version
+                if (-not $ver) { $ver = $j.package.version }
               }
             } catch { }
           }
           if (-not $prod -and (Test-Path 'backend/src-tauri/Cargo.toml')) {
-            $toml = Get-Content 'backend/src-tauri/Cargo.toml' -Raw
-            if ($toml -match '^[ \t]*name[ \t]*=[ \t]*"(.*?)"') { $prod = $Matches[1] }
-            if ($toml -match '^[ \t]*version[ \t]*=[ \t]*"(.*?)"') { $ver = $Matches[1] }
+            $inPackage = $false
+            foreach ($line in Get-Content 'backend/src-tauri/Cargo.toml') {
+              if ($line -match '^\s*\[package\]\s*$') { $inPackage = $true; continue }
+              if ($inPackage -and $line -match '^\s*\[.+\]\s*$') { break }
+              if ($inPackage -and -not $prod -and $line -match '^\s*name\s*=\s*"([^"]+)"') { $prod = $Matches[1]; continue }
+              if ($inPackage -and -not $ver -and $line -match '^\s*version\s*=\s*"([^"]+)"') { $ver = $Matches[1]; continue }
+            }
           }
-          if (-not $prod -and (Test-Path 'frontend/package.json')) {
+          if ((-not $prod -or -not $ver) -and (Test-Path 'frontend/package.json')) {
             try { $pj = Get-Content 'frontend/package.json' -Raw | ConvertFrom-Json -ErrorAction Stop; if (-not $prod) { $prod = $pj.productName; if (-not $prod) { $prod = $pj.name } } if (-not $ver) { $ver = $pj.version } } catch { }
           }
           if (-not $prod) { $prod = 'HiFiShifter' }
@@ -545,12 +548,32 @@ jobs:
           PROD=""
           VER=""
           if [ -f backend/src-tauri/tauri.conf.json ]; then
-            PROD=$(node -e "try{const p=require('./backend/src-tauri/tauri.conf.json'); console.log((p.package&&p.package.productName)||(p.package&&p.package.name)||'')}catch(e){console.log('')}" ) || true
-            VER=$(node -e "try{const p=require('./backend/src-tauri/tauri.conf.json'); console.log((p.package&&p.package.version)||'')}catch(e){console.log('')}" ) || true
+            PROD=$(node -e "try{const p=require('./backend/src-tauri/tauri.conf.json'); console.log(p.productName||((p.package&&p.package.productName)||(p.package&&p.package.name))||'')}catch(e){console.log('')}" ) || true
+            VER=$(node -e "try{const p=require('./backend/src-tauri/tauri.conf.json'); console.log(p.version||((p.package&&p.package.version)||'')||'')}catch(e){console.log('')}" ) || true
           fi
           if [ -z "$PROD" ] && [ -f backend/src-tauri/Cargo.toml ]; then
-            PROD=$(grep -E '^name\s*=' backend/src-tauri/Cargo.toml | sed -E 's/.*=\s*"(.*)"/\1/' | head -n1)
-            VER=$(grep -E '^version\s*=' backend/src-tauri/Cargo.toml | sed -E 's/.*=\s*"(.*)"/\1/' | head -n1)
+            PROD=$(awk '
+              BEGIN { in_pkg=0 }
+              /^\[package\]$/ { in_pkg=1; next }
+              /^\[.*\]$/ { if (in_pkg) exit }
+              in_pkg && $0 ~ /^[[:space:]]*name[[:space:]]*=/ {
+                gsub(/^[[:space:]]*name[[:space:]]*=[[:space:]]*"/, "", $0)
+                gsub(/".*/, "", $0)
+                print $0
+                exit
+              }
+            ' backend/src-tauri/Cargo.toml)
+            VER=$(awk '
+              BEGIN { in_pkg=0 }
+              /^\[package\]$/ { in_pkg=1; next }
+              /^\[.*\]$/ { if (in_pkg) exit }
+              in_pkg && $0 ~ /^[[:space:]]*version[[:space:]]*=/ {
+                gsub(/^[[:space:]]*version[[:space:]]*=[[:space:]]*"/, "", $0)
+                gsub(/".*/, "", $0)
+                print $0
+                exit
+              }
+            ' backend/src-tauri/Cargo.toml)
           fi
           if [ -z "$PROD" ] && [ -f frontend/package.json ]; then
             PROD=$(node -e "try{const p=require('./frontend/package.json'); console.log(p.productName||p.name||'')}catch(e){console.log('')}" ) || true
