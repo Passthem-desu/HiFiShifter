@@ -7,7 +7,10 @@ import {
     MIN_ROW_HEIGHT,
 } from "./constants";
 import { clamp } from "./math";
-import { isModifierActive } from "../../../features/keybindings/keybindingsSlice";
+import {
+    isNoneBinding,
+    isModifierActive,
+} from "../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../features/keybindings/types";
 import { getWheelGestureAxis } from "../wheelGesture";
 
@@ -23,6 +26,7 @@ export const TimelineScrollArea: React.FC<
         setScrollLeft: React.Dispatch<React.SetStateAction<number>>;
         scrollHorizontalKb?: Keybinding;
         scrollVerticalKb?: Keybinding;
+        horizontalZoomKb?: Keybinding;
         playheadSec?: number;
         playheadZoomEnabled?: boolean;
     }
@@ -39,6 +43,7 @@ export const TimelineScrollArea: React.FC<
     onWheel,
     scrollHorizontalKb,
     scrollVerticalKb,
+    horizontalZoomKb,
     playheadSec,
     playheadZoomEnabled,
     ...divProps
@@ -132,9 +137,17 @@ export const TimelineScrollArea: React.FC<
         const handler: EventListener = (evt) => {
             const e = evt as globalThis.WheelEvent;
             const wheelAxis = getWheelGestureAxis(e);
+            const noModifierPressed =
+                !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+            const isWheelBindingRequested = (kb?: Keybinding) => {
+                if (!kb) return false;
+                if (isNoneBinding(kb)) return noModifierPressed;
+                return isModifierActive(kb, e);
+            };
+            const horizontalZoomRequested = isWheelBindingRequested(horizontalZoomKb);
 
             // Scroll modifier: convert wheel to horizontal scroll
-            if (scrollHorizontalKb && isModifierActive(scrollHorizontalKb, e)) {
+            if (isWheelBindingRequested(scrollHorizontalKb)) {
                 e.preventDefault();
                 scroller.scrollLeft += e.deltaY;
                 syncScrollLeft(scroller);
@@ -142,13 +155,13 @@ export const TimelineScrollArea: React.FC<
             }
 
             // Scroll modifier: convert wheel to vertical scroll
-            if (scrollVerticalKb && isModifierActive(scrollVerticalKb, e)) {
+            if (isWheelBindingRequested(scrollVerticalKb)) {
                 e.preventDefault();
                 scroller.scrollTop += e.deltaY;
                 return;
             }
 
-            if (wheelAxis === "horizontal") {
+            if (!horizontalZoomRequested && wheelAxis === "horizontal") {
                 e.preventDefault();
                 scroller.scrollLeft += e.deltaX;
                 syncScrollLeft(scroller);
@@ -169,6 +182,9 @@ export const TimelineScrollArea: React.FC<
             }
 
             // Wheel: horizontal zoom (time scale)
+            if (!horizontalZoomRequested) {
+                return;
+            }
             e.preventDefault();
             const dir = e.deltaY < 0 ? 1 : -1;
             const factor = dir > 0 ? 1.1 : 0.9;
@@ -233,6 +249,7 @@ export const TimelineScrollArea: React.FC<
         setRowHeight,
         scrollHorizontalKb,
         scrollVerticalKb,
+        horizontalZoomKb,
         playheadSec,
         playheadZoomEnabled,
     ]);

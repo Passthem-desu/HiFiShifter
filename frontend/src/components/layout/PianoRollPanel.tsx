@@ -28,6 +28,7 @@ import {
     togglePitchSnap,
     setScaleHighlightMode,
     toggleClipboardPreview,
+    toggleParamValuePopup,
     toggleLockParamLines,
     cycleDragDirection,
     setToolMode,
@@ -47,7 +48,10 @@ import {
     transposePitchByScaleSteps,
 } from "../../utils/musicalScales";
 import { computeAnchoredHorizontalZoom } from "../../utils/horizontalZoom";
-import { isModifierActive } from "../../features/keybindings/keybindingsSlice";
+import {
+    isModifierActive,
+    isNoneBinding,
+} from "../../features/keybindings/keybindingsSlice";
 import type { ScaleLike } from "../../utils/musicalScales";
 import {
     pasteReaperClipboard,
@@ -77,6 +81,7 @@ import { usePianoRollInteractions } from "./pianoRoll/usePianoRollInteractions";
 import { useLiveParamEditing } from "./pianoRoll/useLiveParamEditing";
 import { getParamShiftStep } from "./pianoRoll/paramShiftStep";
 import { getParamEditorWheelAction } from "./pianoRoll/wheelGesture";
+import type { Keybinding } from "../../features/keybindings/types";
 import { pianoKeySound } from "../../utils/PianoKeySound";
 import {
     getVisibleSecondaryParamIds,
@@ -102,6 +107,21 @@ import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 import { coreApi } from "../../services/api/core";
 import { EditContextMenu } from "../editDialogs/EditContextMenu";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
+
+const NOTE_NAMES_SHARP = [
+    "C",
+    "C#",
+    "D",
+    "D#",
+    "E",
+    "F",
+    "F#",
+    "G",
+    "G#",
+    "A",
+    "A#",
+    "B",
+];
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -135,11 +155,20 @@ export const PianoRollPanel: React.FC = () => {
     const prVerticalZoomKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.pianoRollVerticalZoom"),
     );
+    const horizontalZoomKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.horizontalZoom"),
+    );
     const scrollHorizontalKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.scrollHorizontal"),
     );
     const scrollVerticalKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.scrollVertical"),
+    );
+    const pianoKeysVerticalScrollKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.pianoKeysVerticalScroll"),
+    );
+    const pianoKeysVerticalZoomKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.pianoKeysVerticalZoom"),
     );
     const paramMorphKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.paramMorph"),
@@ -210,6 +239,30 @@ export const PianoRollPanel: React.FC = () => {
     );
     const [drawToolMenuOpen, setDrawToolMenuOpen] = useState(false);
     const drawToolMenuRef = useRef<HTMLDivElement | null>(null);
+    const [paramValuePreview, setParamValuePreview] = useState<{
+        clientX: number;
+        clientY: number;
+        value: number;
+    } | null>(null);
+
+    const formatParamValuePreview = useCallback(
+        (value: number): string => {
+            if (!Number.isFinite(value)) return "";
+            if (editParam === "pitch") {
+                const rounded = Math.round(value);
+                const pitchClass = ((rounded % 12) + 12) % 12;
+                const octave = Math.floor(rounded / 12) - 1;
+                const noteName = `${NOTE_NAMES_SHARP[pitchClass]}${octave}`;
+                const cents = Math.round((value - rounded) * 100);
+                const signedCents = cents >= 0 ? `+${cents}` : `${cents}`;
+                return `${noteName}${signedCents}`;
+            }
+            if (Math.abs(value) >= 100) return value.toFixed(1);
+            if (Math.abs(value) >= 10) return value.toFixed(2);
+            return value.toFixed(3);
+        },
+        [editParam],
+    );
 
     const currentDrawTool =
         s.drawToolMode === "line" ? "vibrato" : s.drawToolMode;
@@ -1172,6 +1225,7 @@ export const PianoRollPanel: React.FC = () => {
         pianoRollCopyKb,
         pianoRollPasteKb,
         prVerticalZoomKb,
+        horizontalZoomKb,
         scrollHorizontalKb,
         scrollVerticalKb,
         paramMorphKb,
@@ -1184,6 +1238,7 @@ export const PianoRollPanel: React.FC = () => {
         }, []),
         playheadSec: s.playheadSec,
         playheadZoomEnabled: s.playheadZoomEnabled,
+        paramEditorSeekPlayheadEnabled: s.paramEditorSeekPlayheadEnabled,
         pitchSnapEnabled: s.pitchSnapEnabled,
         pitchSnapUnit: s.pitchSnapUnit,
         projectScale: effectiveProjectScale,
@@ -1204,6 +1259,19 @@ export const PianoRollPanel: React.FC = () => {
         onPitchSnapGestureActiveChange: useCallback((active: boolean) => {
             setSnapGestureActive(active);
         }, []),
+        paramValuePopupEnabled: s.showParamValuePopup,
+        onParamValuePreviewChange: useCallback(
+            (
+                next: {
+                    clientX: number;
+                    clientY: number;
+                    value: number;
+                } | null,
+            ) => {
+                setParamValuePreview(next);
+            },
+            [],
+        ),
     });
 
     const onScrollerWheelNative = interactions.onScrollerWheelNative;
@@ -1229,13 +1297,45 @@ export const PianoRollPanel: React.FC = () => {
         };
     }, []); // 空依赖
 
+    // Auto-scroll: keep playhead visible in parameter editor during playback
+    useEffect(() => {
+        if (!s.autoScrollEnabled || !s.runtime.isPlaying) return;
+        const scroller = scrollerRef.current;
+        if (!scroller) return;
+        const playheadX = s.playheadSec * pxPerSec;
+        const viewLeft = scroller.scrollLeft;
+        const viewRight = viewLeft + scroller.clientWidth;
+        if (playheadX < viewLeft || playheadX > viewRight) {
+            const next = Math.max(0, playheadX - scroller.clientWidth / 2);
+            scroller.scrollLeft = next;
+            syncScrollLeft(scroller);
+        }
+    }, [s.autoScrollEnabled, s.runtime.isPlaying, s.playheadSec, pxPerSec]);
+
     // Piano keys (axis) area: keep touchpad wheel behavior aligned with the main editor.
     useEffect(() => {
         const el = axisWrapRef.current;
         if (!el) return;
 
         const handler = (e: WheelEvent) => {
-            e.preventDefault();
+            const noModifierPressed =
+                !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+            const isWheelBindingRequested = (kb: Keybinding) => {
+                if (isNoneBinding(kb)) return noModifierPressed;
+                return isModifierActive(kb, e as any);
+            };
+            const horizontalScrollRequested = isWheelBindingRequested(
+                scrollHorizontalKb,
+            );
+            const pianoVerticalScrollRequested = isWheelBindingRequested(
+                pianoKeysVerticalScrollKb,
+            );
+            const pianoVerticalZoomRequested = isWheelBindingRequested(
+                pianoKeysVerticalZoomKb,
+            );
+            const horizontalZoomRequested = isWheelBindingRequested(
+                horizontalZoomKb,
+            );
 
             const bounds = el.getBoundingClientRect();
             const h = Math.max(1, bounds.height);
@@ -1243,32 +1343,26 @@ export const PianoRollPanel: React.FC = () => {
             // t: 0=top, 1=bottom — same semantics as usePianoRollInteractions
             const t = pointerY / h;
 
-            const horizontalScrollModifierActive = isModifierActive(
-                scrollHorizontalKb,
-                e as any,
-            );
-            const verticalPanModifierActive = isModifierActive(
-                scrollVerticalKb,
-                e as any,
-            );
             const wheelAction = getParamEditorWheelAction({
                 deltaX: e.deltaX,
                 deltaY: e.deltaY,
-                horizontalScrollModifier: horizontalScrollModifierActive,
-                verticalPanModifier: verticalPanModifierActive,
+                horizontalScrollRequested,
+                verticalPanRequested: pianoVerticalScrollRequested,
+                verticalZoomRequested: pianoVerticalZoomRequested,
+                horizontalZoomRequested,
             });
 
             if (wheelAction === "horizontal-scroll") {
+                e.preventDefault();
                 const scroller = scrollerRef.current;
                 if (!scroller) return;
-                scroller.scrollLeft += horizontalScrollModifierActive
-                    ? e.deltaY
-                    : e.deltaX;
+                scroller.scrollLeft += horizontalScrollRequested ? e.deltaY : e.deltaX;
                 syncScrollLeft(scroller);
                 return;
             }
 
             if (wheelAction === "vertical-pan") {
+                e.preventDefault();
                 const delta = (-e.deltaY / h) * 0.5;
                 if (editParam === "pitch") {
                     const cur = pitchViewRef.current;
@@ -1291,6 +1385,12 @@ export const PianoRollPanel: React.FC = () => {
                 invalidate();
                 return;
             }
+
+            if (wheelAction !== "vertical-zoom") {
+                return;
+            }
+
+            e.preventDefault();
 
             const valueAtPointer =
                 editParam === "pitch"
@@ -1373,7 +1473,9 @@ export const PianoRollPanel: React.FC = () => {
         setParamViewport,
         invalidate,
         scrollHorizontalKb,
-        scrollVerticalKb,
+        pianoKeysVerticalScrollKb,
+        pianoKeysVerticalZoomKb,
+        horizontalZoomKb,
     ]);
 
     // Piano keys (axis) hover: play sine wave sound when pointer moves over keys
@@ -2732,6 +2834,44 @@ export const PianoRollPanel: React.FC = () => {
                         </IconButton>
                         <IconButton
                             size="1"
+                            variant={s.showParamValuePopup ? "solid" : "ghost"}
+                            color="gray"
+                            title={t("param_value_popup")}
+                            tabIndex={-1}
+                            onClick={() => {
+                                dispatch(toggleParamValuePopup());
+                                void dispatch(persistUiSettings());
+                            }}
+                        >
+                            <svg
+                                width="15"
+                                height="15"
+                                viewBox="0 0 15 15"
+                                fill="none"
+                                xmlns="http://www.w3.org/2000/svg"
+                            >
+                                <path
+                                    d="M2.5 3.5H12.5V10.5H6.2L3.2 13.5V10.5H2.5V3.5Z"
+                                    stroke="currentColor"
+                                    strokeWidth="1"
+                                    fill="none"
+                                />
+                                <path
+                                    d="M5 6H10"
+                                    stroke="currentColor"
+                                    strokeWidth="1"
+                                    strokeLinecap="round"
+                                />
+                                <path
+                                    d="M5 8H8.8"
+                                    stroke="currentColor"
+                                    strokeWidth="1"
+                                    strokeLinecap="round"
+                                />
+                            </svg>
+                        </IconButton>
+                        <IconButton
+                            size="1"
                             variant={
                                 s.lockParamLinesEnabled ? "solid" : "ghost"
                             }
@@ -3181,6 +3321,32 @@ export const PianoRollPanel: React.FC = () => {
                                         interactions.onCanvasPointerDown
                                     }
                                 />
+                                {s.showParamValuePopup && paramValuePreview && (
+                                    (() => {
+                                        const rect =
+                                            canvasRef.current?.getBoundingClientRect();
+                                        if (!rect) return null;
+                                        return (
+                                            <div
+                                                className="absolute z-20 pointer-events-none bg-qt-panel border border-qt-border rounded px-2 py-1 text-[11px] leading-none text-qt-text"
+                                                style={{
+                                                    left:
+                                                        paramValuePreview.clientX -
+                                                        rect.left,
+                                                    top:
+                                                        paramValuePreview.clientY -
+                                                        rect.top,
+                                                    transform: "translate(0, -100%)",
+                                                    whiteSpace: "nowrap",
+                                                }}
+                                            >
+                                                {formatParamValuePreview(
+                                                    paramValuePreview.value,
+                                                )}
+                                            </div>
+                                        );
+                                    })()
+                                )}
                             </div>
                         </div>
                     </div>

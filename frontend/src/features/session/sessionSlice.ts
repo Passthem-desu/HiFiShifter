@@ -146,8 +146,12 @@ export interface SessionState {
     playheadZoomEnabled: boolean;
     /** 自动滚动（播放时跟随播放头） */
     autoScrollEnabled: boolean;
+    /** 允许参数编辑器点击时调整播放头 */
+    paramEditorSeekPlayheadEnabled: boolean;
     /** 剪贴板预览（在参数编辑器选区内显示剪贴板曲线预览） */
     showClipboardPreview: boolean;
+    /** 参数线附近显示参数值浮窗 */
+    showParamValuePopup: boolean;
     /** 参数编辑器（选择工具）拖动方向限制 */
     selectDragDirection: DragDirection;
     /** 参数编辑器（绘制工具）拖动方向限制 */
@@ -658,7 +662,9 @@ const initialState: SessionState = {
     scaleHighlightMode: "always",
     playheadZoomEnabled: false,
     autoScrollEnabled: false,
-    showClipboardPreview: false,
+    paramEditorSeekPlayheadEnabled: true,
+    showClipboardPreview: true,
+    showParamValuePopup: true,
     selectDragDirection: "y-only" as DragDirection,
     drawDragDirection: "free" as DrawDragDirection,
     lineVibratoDragDirection: "free" as DrawDragDirection,
@@ -897,8 +903,15 @@ const sessionSlice = createSlice({
         toggleAutoScroll(state) {
             state.autoScrollEnabled = !state.autoScrollEnabled;
         },
+        toggleParamEditorSeekPlayhead(state) {
+            state.paramEditorSeekPlayheadEnabled =
+                !state.paramEditorSeekPlayheadEnabled;
+        },
         toggleClipboardPreview(state) {
             state.showClipboardPreview = !state.showClipboardPreview;
+        },
+        toggleParamValuePopup(state) {
+            state.showParamValuePopup = !state.showParamValuePopup;
         },
         cycleDragDirection(
             state,
@@ -1408,8 +1421,16 @@ const sessionSlice = createSlice({
                 state.playheadZoomEnabled = s.playheadZoom;
                 if (s.autoScroll != null)
                     state.autoScrollEnabled = s.autoScroll;
+                if ((s as any).paramEditorSeekPlayhead != null)
+                    state.paramEditorSeekPlayheadEnabled = Boolean(
+                        (s as any).paramEditorSeekPlayhead,
+                    );
                 if (s.showClipboardPreview != null)
                     state.showClipboardPreview = s.showClipboardPreview;
+                if ((s as any).showParamValuePopup != null)
+                    state.showParamValuePopup = Boolean(
+                        (s as any).showParamValuePopup,
+                    );
                 if (s.scaleHighlightMode != null)
                     state.scaleHighlightMode = s.scaleHighlightMode === "always" ? "always" : "off";
                 if ((s as any).lockParamLines != null)
@@ -1805,7 +1826,7 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     ok?: boolean;
                     clipId?: string | null;
-                    anchorBeat?: number;
+                    anchorSec?: number;
                 };
                 const ok = Boolean(payload.ok);
                 state.runtime.isPlaying = ok;
@@ -1813,7 +1834,7 @@ const sessionSlice = createSlice({
                 state.playbackClipId = ok ? (payload.clipId ?? null) : null;
                 // Store the playhead position at which playback started,
                 // so Play/Stop can restore it.
-                state.playbackAnchorSec = ok ? (payload.anchorBeat ?? 0) : 0;
+                state.playbackAnchorSec = ok ? (payload.anchorSec ?? 0) : 0;
                 state.status = ok ? "Playing original" : "Play original failed";
             })
             .addCase(playOriginal.rejected, setRejected)
@@ -1827,14 +1848,17 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     ok?: boolean;
                     restoreAnchor?: boolean;
+                    wasPlaying?: boolean;
+                    anchorSec?: number | null;
                 };
                 // If restoreAnchor is set (Play/Stop action), restore playhead to anchor position
                 if (
                     payload.restoreAnchor &&
-                    state.playbackAnchorSec !== undefined &&
-                    state.playbackAnchorSec !== null
+                    payload.wasPlaying &&
+                    typeof payload.anchorSec === "number" &&
+                    Number.isFinite(payload.anchorSec)
                 ) {
-                    state.playheadSec = state.playbackAnchorSec;
+                    state.playheadSec = Math.max(0, payload.anchorSec);
                 }
                 state.runtime.isPlaying = false;
                 state.runtime.playbackTarget = null;
@@ -1889,13 +1913,7 @@ const sessionSlice = createSlice({
                             EPS_SEC);
 
                 if (!shouldUpdatePlaybackFields) {
-                    // 即使播放已停止，也避免重复写入相同值（Immer 会把赋值视�?mutation）�?
-                    if (!nextIsPlaying) {
-                        if (state.playbackClipId !== null)
-                            state.playbackClipId = null;
-                        if (state.playbackAnchorSec !== 0)
-                            state.playbackAnchorSec = 0;
-                    }
+                    // No state change needed.
                     return;
                 }
 
@@ -1908,7 +1926,6 @@ const sessionSlice = createSlice({
                     state.playheadSec = nextplayheadSec;
                 } else {
                     state.playbackClipId = null;
-                    state.playbackAnchorSec = 0;
                 }
             })
 
@@ -2403,7 +2420,7 @@ const sessionSlice = createSlice({
                     Number(payload.playhead_sec ?? state.playheadSec),
                 );
                 if (state.runtime.isPlaying) {
-                    state.playbackAnchorSec = 0;
+                    state.playbackAnchorSec = state.playheadSec;
                 }
                 if (payload.tracks && payload.clips) {
                     applyTimelineState(state, payload as TimelineState);
@@ -2491,7 +2508,9 @@ export const {
     setPitchSnapScale,
     togglePlayheadZoom,
     toggleAutoScroll,
+    toggleParamEditorSeekPlayhead,
     toggleClipboardPreview,
+    toggleParamValuePopup,
     cycleDragDirection,
     setDragDirection,
     setEdgeSmoothnessPercent,
