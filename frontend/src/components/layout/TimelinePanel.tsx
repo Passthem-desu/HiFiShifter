@@ -234,6 +234,9 @@ export const TimelinePanel: React.FC = () => {
     const scrollVerticalKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.scrollVertical"),
     );
+    const horizontalZoomKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.horizontalZoom"),
+    );
     const stretchKbRef = useRef<Keybinding>(stretchKb);
     useEffect(() => {
         stretchKbRef.current = stretchKb;
@@ -1856,6 +1859,7 @@ export const TimelinePanel: React.FC = () => {
                     setScrollLeft={setScrollLeftAction}
                     scrollHorizontalKb={scrollHorizontalKb}
                     scrollVerticalKb={scrollVerticalKb}
+                    horizontalZoomKb={horizontalZoomKb}
                     playheadSec={s.playheadSec}
                     playheadZoomEnabled={s.playheadZoomEnabled}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"

@@ -60,9 +60,12 @@ export type ActionId =
     | "modifier.clipStretch" // clip 边缘拖动时从 trim 变为 stretch
     | "modifier.clipNoSnap" // clip 移动/trim/stretch 时切换吸附
     | "modifier.clipCopyDrag" // 拖动 clip 时进入复制模式
+    | "modifier.horizontalZoom" // 按住+滚轮水平缩放
     | "modifier.pianoRollVerticalZoom" // PianoRoll Ctrl+滚轮垂直缩放
     | "modifier.scrollHorizontal" // 按住+滚轮水平滚动
     | "modifier.scrollVertical" // 按住+滚轮竖直滚动
+    | "modifier.pianoKeysVerticalScroll" // 钢琴键垂直滚动（按住+滚轮）
+    | "modifier.pianoKeysVerticalZoom" // 钢琴键垂直缩放（按住+滚轮）
     | "modifier.paramMorph" // 参数编辑器形变模式（按住）
     | "modifier.paramFineAdjust" // 参数微调（按住）
     | "modifier.vibratoAmplitudeAdjust" // 颤音绘制时滚轮调振幅

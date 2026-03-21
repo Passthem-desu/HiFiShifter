@@ -11,7 +11,9 @@ export interface UiSettings {
     scaleHighlightMode?: string;
     playheadZoom: boolean;
     autoScroll: boolean;
+    paramEditorSeekPlayhead?: boolean;
     showClipboardPreview: boolean;
+    showParamValuePopup?: boolean;
     lockParamLines?: boolean;
     dragDirection?: string;
     selectDragDirection?: string;

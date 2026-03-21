@@ -14,7 +14,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
 
     // 播放控制
     "playback.toggle": { key: "space" },
-    "playback.stop": { key: "enter" }, // Play/Stop: 播放/停止（停止时回到起始位置）
+    "playback.stop": { key: "enter" }, // 停止并回到本次播放起点
     "playback.focusCursor": { key: "\\" }, // 聚焦播放光标
     "playback.seekLeft": { key: "arrowleft" },
     "playback.seekRight": { key: "arrowright" },
@@ -69,6 +69,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "modifier.clipStretch": { key: "alt", modifierOnly: true, alt: true },
     "modifier.clipNoSnap": { key: "shift", modifierOnly: true, shift: true },
     "modifier.clipCopyDrag": { key: "control", modifierOnly: true, ctrl: true },
+    "modifier.horizontalZoom": { key: "__none__", modifierOnly: true },
     "modifier.pianoRollVerticalZoom": {
         key: "control",
         modifierOnly: true,
@@ -80,6 +81,12 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
         shift: true,
     },
     "modifier.scrollVertical": { key: "alt", modifierOnly: true, alt: true },
+    "modifier.pianoKeysVerticalScroll": {
+        key: "alt",
+        modifierOnly: true,
+        alt: true,
+    },
+    "modifier.pianoKeysVerticalZoom": { key: "__none__", modifierOnly: true },
     "modifier.paramMorph": { key: "alt", modifierOnly: true, alt: true },
     // 目前微调操作有逻辑问题，没法完全实现，暂时禁用快捷键
     // "modifier.paramFineAdjust": { key: "control", modifierOnly: true, ctrl: true },
@@ -239,6 +246,11 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
         group: "modifier",
         modifierOperationType: "drag",
     },
+    "modifier.horizontalZoom": {
+        labelKey: "kb_modifier_horizontal_zoom",
+        group: "modifier",
+        modifierOperationType: "wheel",
+    },
     "modifier.pianoRollVerticalZoom": {
         labelKey: "kb_modifier_pr_vzoom",
         group: "modifier",
@@ -253,6 +265,18 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
         labelKey: "kb_modifier_scroll_v",
         group: "modifier",
         modifierOperationType: "wheel",
+    },
+    "modifier.pianoKeysVerticalScroll": {
+        labelKey: "kb_modifier_piano_keys_scroll_v",
+        group: "modifier",
+        modifierOperationType: "wheel",
+        scopedContext: "pianoKeysWheel",
+    },
+    "modifier.pianoKeysVerticalZoom": {
+        labelKey: "kb_modifier_piano_keys_zoom_v",
+        group: "modifier",
+        modifierOperationType: "wheel",
+        scopedContext: "pianoKeysWheel",
     },
     "modifier.paramMorph": {
         labelKey: "kb_modifier_param_morph",
