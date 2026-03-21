@@ -637,8 +637,7 @@ export function usePianoRollData(args: {
                                     ) || secondaryReq.secondaryStartFrame,
                                 stride,
                                 referenceKind:
-                                    secPayload.reference_kind ??
-                                    "source_curve",
+                                    secPayload.reference_kind ?? "source_curve",
                                 orig: (secPayload.orig ?? []).map(
                                     (v) => Number(v) || 0,
                                 ),
@@ -863,5 +862,3 @@ export function usePianoRollData(args: {
         pitchEditBackendAvailable,
     };
 }
-
-
