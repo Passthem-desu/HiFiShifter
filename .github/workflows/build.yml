@@ -1,8 +1,6 @@
 name: HiFiShifter Cross-Platform Build (Windows, macOS, Linux)
 
 on:
-  push:
-    branches: [ main ]
   pull_request:
     branches: [ main ]
 
