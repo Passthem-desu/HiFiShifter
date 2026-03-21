@@ -577,6 +577,36 @@ pub fn compute_rendered_clip_hash(
     h
 }
 
+pub fn compute_breath_noise_hash(
+    clip_id: &str,
+    source_path: &str,
+    start_frame: u64,
+    end_frame: u64,
+    sr: u32,
+    renderer_id: &str,
+    pitch_edit: &[f32],
+    frame_period_ms: f64,
+    playback_rate: f64,
+    extra_curves: &std::collections::HashMap<String, Vec<f32>>,
+    extra_params: &std::collections::HashMap<String, f64>,
+) -> u64 {
+    let mut filtered_curves = extra_curves.clone();
+    filtered_curves.remove("formant_shift_cents");
+    compute_rendered_clip_hash(
+        clip_id,
+        source_path,
+        start_frame,
+        end_frame,
+        sr,
+        renderer_id,
+        pitch_edit,
+        frame_period_ms,
+        playback_rate,
+        &filtered_curves,
+        extra_params,
+    )
+}
+
 fn curve_slice_bounds(
     start_frame: u64,
     end_frame: u64,
@@ -739,7 +769,107 @@ pub fn global_tension_rendered_clip_cache() -> &'static Mutex<TensionRenderedCli
         .get_or_init(|| Mutex::new(TensionRenderedClipCache::new(rendered_clip_capacity())))
 }
 
-/// 使指定 clip 的所有渲染缓存失效（SynthClipCache + RenderedClipCache + TensionRenderedClipCache）。
+// ─── Breath Noise 独立缓存（formant 变化时可复用，避免重复 HNSEP 分离）─────────
+
+/// Breath Noise 缓存的 key：使用不含 formant_shift_cents 的 base hash。
+///
+/// formant 变化时 RenderedClipCache 的 hash 不变（因为 formant 已排除），
+/// 但如果其他参数（pitch_edit、playback_rate 等）变化，此 key 也会变化。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BreathNoiseCacheKey {
+    pub clip_id: String,
+    /// 与 RenderedClipCacheKey.param_hash 相同（不含 formant_shift_cents）。
+    pub param_hash: u64,
+}
+
+/// Breath Noise 缓存的 entry：HNSEP 分离后的 noise stem（stereo interleaved）。
+#[derive(Debug, Clone)]
+pub struct BreathNoiseCacheEntry {
+    pub noise_stereo: Arc<Vec<f32>>,
+    pub frames: u64,
+    pub sample_rate: u32,
+}
+
+/// Breath Noise 独立 LRU 缓存。
+///
+/// 在 Breath 路径中，`breath_noise_stereo`（= unity_mix - harmonic_only）不受 formant 影响。
+/// 当仅 formant 变化时，可直接复用此缓存中的 noise stem，跳过第二次 render_variant 调用，
+/// 从而避免每个 clip 的两次 HNSEP 推理变为一次。
+pub struct BreathNoiseCache {
+    inner: HashMap<BreathNoiseCacheKey, BreathNoiseCacheEntry>,
+    order: VecDeque<BreathNoiseCacheKey>,
+    capacity: usize,
+}
+
+impl BreathNoiseCache {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            inner: HashMap::with_capacity(capacity),
+            order: VecDeque::with_capacity(capacity),
+            capacity: capacity.max(1),
+        }
+    }
+
+    pub fn get(&mut self, key: &BreathNoiseCacheKey) -> Option<&BreathNoiseCacheEntry> {
+        if !self.inner.contains_key(key) {
+            return None;
+        }
+        if let Some(pos) = self.order.iter().position(|k| k == key) {
+            let hit = self.order.remove(pos).unwrap();
+            self.order.push_front(hit);
+        }
+        self.inner.get(key)
+    }
+
+    pub fn insert(&mut self, key: BreathNoiseCacheKey, entry: BreathNoiseCacheEntry) {
+        if self.inner.contains_key(&key) {
+            self.inner.insert(key.clone(), entry);
+            if let Some(pos) = self.order.iter().position(|k| k == &key) {
+                let hit = self.order.remove(pos).unwrap();
+                self.order.push_front(hit);
+            }
+            return;
+        }
+
+        while self.inner.len() >= self.capacity {
+            if let Some(evict_key) = self.order.pop_back() {
+                self.inner.remove(&evict_key);
+            } else {
+                break;
+            }
+        }
+
+        self.order.push_front(key.clone());
+        self.inner.insert(key, entry);
+    }
+
+    pub fn invalidate(&mut self, clip_id: &str) {
+        self.inner.retain(|k, _| k.clip_id != clip_id);
+        self.order.retain(|k| k.clip_id != clip_id);
+    }
+
+    /// 确保缓存容量不小于给定值（仅增不减）。
+    pub fn ensure_capacity(&mut self, min_capacity: usize) {
+        let next = min_capacity.max(1);
+        if next > self.capacity {
+            self.capacity = next;
+            self.inner
+                .reserve(self.capacity.saturating_sub(self.inner.len()));
+            self.order
+                .reserve(self.capacity.saturating_sub(self.order.len()));
+        }
+    }
+}
+
+static GLOBAL_BREATH_NOISE_CACHE: OnceLock<Mutex<BreathNoiseCache>> = OnceLock::new();
+
+/// 获取进程级全局 Breath Noise 缓存。
+pub fn global_breath_noise_cache() -> &'static Mutex<BreathNoiseCache> {
+    GLOBAL_BREATH_NOISE_CACHE
+        .get_or_init(|| Mutex::new(BreathNoiseCache::new(rendered_clip_capacity())))
+}
+
+/// 使指定 clip 的所有渲染缓存失效（SynthClipCache + RenderedClipCache + TensionRenderedClipCache + BreathNoiseCache）。
 ///
 /// 此函数应在 pitch_edit 或其他影响合成的参数发生变化时调用，
 /// 确保旧的预渲染结果不会被错误复用。
@@ -793,7 +923,22 @@ pub fn invalidate_clip_all_caches(clip_id: &str) {
         }
     }
 
-    // 4. pending_rendered_keys 清除（渲染线程正在处理的 clip）
+    // 4. BreathNoiseCache 失效（Breath Noise 独立缓存）
+    {
+        let mut cache = global_breath_noise_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let had_entry = cache.inner.keys().any(|k| k.clip_id == clip_id);
+        cache.invalidate(clip_id);
+        if had_entry {
+            eprintln!(
+                "[cache:invalidate] clip_id={} BreathNoiseCache invalidated",
+                clip_id
+            );
+        }
+    }
+
+    // 5. pending_rendered_keys 清除（渲染线程正在处理的 clip）
     {
         let mut map = global_pending_rendered_keys()
             .lock()

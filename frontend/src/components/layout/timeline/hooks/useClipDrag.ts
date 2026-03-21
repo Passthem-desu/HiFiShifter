@@ -25,7 +25,7 @@ import {
 } from "./autoCrossfade";
 import { webApi } from "../../../../services/webviewApi";
 
-const NEW_TRACK_SENTINEL = "__hs_new_track__";
+export const NEW_TRACK_SENTINEL = "__hs_new_track__";
 
 /** copyMode 拖动时的 ghost 预览信息 */
 export type GhostDragInfo = {
@@ -111,6 +111,7 @@ export function useClipDrag(deps: {
         autoCrossfadeEnabled,
         onCtrlClick,
     } = deps;
+    void gridSnapEnabled;
 
     const clipDragRef = useRef<ClipDragState | null>(null);
     const [ghostDrag, setGhostDrag] = useState<GhostDragInfo | null>(null);
@@ -259,9 +260,10 @@ export function useClipDrag(deps: {
             const b = el.getBoundingClientRect();
             const beatNow = beatFromClientX(ev.clientX, b, el.scrollLeft);
             let nextStart = Math.max(0, beatNow - drag.offsetBeat);
-            // gridSnapEnabled XOR modifier → snap when exactly one is true
-            const modActive = isModifierActive(noSnapKb, ev);
-            if (gridSnapEnabled !== modActive) nextStart = snapBeat(nextStart);
+            const noSnapActive = isModifierActive(noSnapKb, ev);
+            if (!noSnapActive) {
+                nextStart = snapBeat(nextStart);
+            }
 
             let deltaBeat = nextStart - drag.initialAnchorstartSec;
             deltaBeat = Math.max(deltaBeat, -drag.minstartSec);

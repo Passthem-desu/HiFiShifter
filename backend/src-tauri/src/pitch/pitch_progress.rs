@@ -61,7 +61,7 @@ impl ProgressTracker {
                 1.0 // Fallback: assume worst case
             }
         };
-        
+
         let mut total = 0.0f64;
         for clip in clips {
             let duration_sec = clip.length_sec.max(0.0);
@@ -69,7 +69,7 @@ impl ProgressTracker {
                 total += duration_sec * cache_miss_factor;
             }
         }
-        
+
         Self {
             total_workload: total.max(1e-6), // Avoid division by zero
             completed_workload: AtomicU64::new(0),
@@ -79,7 +79,7 @@ impl ProgressTracker {
             current_clip_name: Mutex::new(None),
         }
     }
-    
+
     /// Report completion of a clip
     ///
     /// # Parameters
@@ -94,11 +94,12 @@ impl ProgressTracker {
         } else {
             clip_duration_sec
         };
-        
+
         let workload_u64 = (workload * 1000.0).round().max(0.0) as u64;
-        self.completed_workload.fetch_add(workload_u64, Ordering::Relaxed);
+        self.completed_workload
+            .fetch_add(workload_u64, Ordering::Relaxed);
         self.completed_clips.fetch_add(1, Ordering::Relaxed);
-        
+
         self.get_current_progress()
     }
 
@@ -118,14 +119,14 @@ impl ProgressTracker {
     pub fn get_completed_clips(&self) -> u32 {
         self.completed_clips.load(Ordering::Relaxed)
     }
-    
+
     /// Get current progress percentage
     pub fn get_current_progress(&self) -> f32 {
         let completed = self.completed_workload.load(Ordering::Relaxed) as f64 / 1000.0;
         let progress = (completed / self.total_workload).clamp(0.0, 1.0);
         progress as f32
     }
-    
+
     /// Estimate remaining time in seconds
     ///
     /// # Returns
@@ -136,19 +137,19 @@ impl ProgressTracker {
         if elapsed_sec < 0.1 {
             return None; // Too early to estimate
         }
-        
+
         let completed = self.completed_workload.load(Ordering::Relaxed) as f64 / 1000.0;
         if completed < 1e-6 {
             return None; // No progress yet
         }
-        
+
         let remaining = (self.total_workload - completed).max(0.0);
         let speed = completed / elapsed_sec; // workload per second
-        
+
         if speed < 1e-9 {
             return None; // Insufficient speed data
         }
-        
+
         Some(remaining / speed)
     }
 }

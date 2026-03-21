@@ -34,7 +34,10 @@ import {
 import type { ClipTemplate } from "../../features/session/sessionTypes";
 import { dbToGain } from "./timeline/math";
 import { computeAnchoredHorizontalZoom } from "../../utils/horizontalZoom";
-import { useClipDrag } from "./timeline/hooks/useClipDrag";
+import {
+    NEW_TRACK_SENTINEL,
+    useClipDrag,
+} from "./timeline/hooks/useClipDrag";
 import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
 import { useKeyboardShortcuts } from "./timeline/hooks/useKeyboardShortcuts";
@@ -43,6 +46,8 @@ import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../features/keybindings/types";
 import { webApi } from "../../services/webviewApi";
+import { getDynamicProjectSec } from "../../features/session/projectBoundary";
+import { waveformMipmapStore } from "../../utils/waveformMipmapStore";
 
 import {
     BackgroundGrid,
@@ -84,6 +89,7 @@ export const TimelinePanel: React.FC = () => {
     const lastClickedClipIdRef = useRef<string | null>(null);
     const playheadRef = useRef<HTMLDivElement | null>(null);
     const dropPreviewRef = useRef<HTMLDivElement | null>(null);
+    const pendingDropDurationPathRef = useRef<string | null>(null);
     const [scrollLeft, setScrollLeft] = useState(0);
     const [pxPerSec, setPxPerSec] = useState(() => {
         const stored = Number(localStorage.getItem("hifishifter.pxPerSec"));
@@ -395,6 +401,7 @@ export const TimelinePanel: React.FC = () => {
                         if (type === "enter" || type === "over") {
                             if (primaryPath) {
                                 tauriDraggedPathRef.current = primaryPath;
+                                ensureDropPreviewDuration(primaryPath);
                             }
                             // On some platforms, `paths` may only be populated on `drop`.
                             // Still update the ghost position on every `over`.
@@ -407,6 +414,7 @@ export const TimelinePanel: React.FC = () => {
                                 if (prev && dropPreviewRef.current) {
                                     dropPreviewRef.current.style.left = `${Math.max(0, beat * pxPerSecRef.current)}px`;
                                     dropPreviewRef.current.style.top = `${rowTopForTrackId(trackId) + 8}px`;
+                                    dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(prev.durationSec)}px`;
                                 }
 
                                 if (!prev || prev.trackId !== trackId || prev.path !== path) {
@@ -433,6 +441,9 @@ export const TimelinePanel: React.FC = () => {
                             if (primaryPath) {
                                 tauriDraggedPathRef.current = primaryPath;
                                 tauriLastDropPathRef.current = primaryPath;
+                            }
+                            if (primaryPath) {
+                                ensureDropPreviewDuration(primaryPath);
                             }
                             setDropPreview(null);
 
@@ -540,6 +551,11 @@ export const TimelinePanel: React.FC = () => {
             if (detail.type === "duration") {
                 setDropPreview((prev) => {
                     if (prev && prev.path === detail.filePath) {
+                        if (dropPreviewRef.current) {
+                            const nextDuration =
+                                Number((detail as any).durationSec) || 0;
+                            dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(nextDuration)}px`;
+                        }
                         return {
                             ...prev,
                             durationSec: (detail as any).durationSec,
@@ -567,9 +583,11 @@ export const TimelinePanel: React.FC = () => {
                         if (prev && dropPreviewRef.current) {
                             dropPreviewRef.current.style.left = `${Math.max(0, beat * pxPerSecRef.current)}px`;
                             dropPreviewRef.current.style.top = `${rowTopForTrackId(trackId) + 8}px`;
+                            dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(prev.durationSec)}px`;
                         }
                         // 如果切换了轨道或文件，才触发真正的 React 重绘
                         if (!prev || prev.trackId !== trackId || prev.path !== path) {
+                            ensureDropPreviewDuration(path);
                             return {
                                 path,
                                 fileName,
@@ -738,9 +756,15 @@ export const TimelinePanel: React.FC = () => {
             onSingleSelect: handleSelectionRectSingleSelect,
         });
 
-    const contentWidth = useMemo(() => {
-        return Math.max(8 * (60 / Math.max(1, s.bpm)), s.projectSec) * pxPerSec;
-    }, [s.projectSec, pxPerSec, s.bpm]);
+    const dynamicProjectSec = useMemo(
+        () => getDynamicProjectSec(s.clips),
+        [s.clips],
+    );
+
+    const contentWidth = useMemo(
+        () => Math.max(1, Math.ceil(dynamicProjectSec * pxPerSec)),
+        [dynamicProjectSec, pxPerSec],
+    );
 
     const dropExtraRows =
         (dropPreview && !dropPreview.trackId ? 1 : 0) +
@@ -749,17 +773,51 @@ export const TimelinePanel: React.FC = () => {
 
     const bars = useMemo(() => {
         const beatsPerBar = Math.max(1, Math.round(s.beats || 4));
-        const secPerBeat = 60 / Math.max(1, s.bpm);
+        const secPerBeatLocal = 60 / Math.max(1, s.bpm);
         // totalBeats 必须用秒/每拍换算，确保覆盖整个 projectSec 范围
-        const totalBeats = Math.max(1, Math.ceil(s.projectSec / secPerBeat));
+        const totalBeats = Math.max(
+            1,
+            Math.ceil(dynamicProjectSec / secPerBeatLocal),
+        );
+        const totalBars = Math.max(1, Math.ceil(totalBeats / beatsPerBar));
+
+        let startBarIndex = 0;
+        let endBarIndex = totalBars;
+
+        if (Number.isFinite(viewportWidth) && viewportWidth > 0) {
+            const beatPx = Math.max(1e-9, secPerBeatLocal * pxPerSec);
+            const bufferPx = Math.max(240, viewportWidth * 0.5);
+            const leftPx = Math.max(0, scrollLeft - bufferPx);
+            const rightPx = scrollLeft + viewportWidth + bufferPx;
+
+            const leftBeat = leftPx / beatPx;
+            const rightBeat = rightPx / beatPx;
+
+            startBarIndex = Math.max(
+                0,
+                Math.floor(leftBeat / beatsPerBar) - 1,
+            );
+            endBarIndex = Math.min(
+                totalBars,
+                Math.ceil(rightBeat / beatsPerBar) + 1,
+            );
+        }
+
         const result: Array<{ beat: number; label: string }> = [];
-        let barIndex = 1;
-        for (let beat = 0; beat <= totalBeats; beat += beatsPerBar) {
-            result.push({ beat, label: `${barIndex}.1` });
-            barIndex += 1;
+        for (let barIndex = startBarIndex; barIndex <= endBarIndex; barIndex += 1) {
+            const beat = barIndex * beatsPerBar;
+            if (beat > totalBeats) break;
+            result.push({ beat, label: `${barIndex + 1}.1` });
         }
         return result;
-    }, [s.beats, s.projectSec, s.bpm]);
+    }, [
+        s.beats,
+        dynamicProjectSec,
+        s.bpm,
+        viewportWidth,
+        pxPerSec,
+        scrollLeft,
+    ]);
 
     const clipsByTrackId = useMemo(() => {
         const map = new Map<string, typeof s.clips>();
@@ -781,6 +839,20 @@ export const TimelinePanel: React.FC = () => {
         }
 
         return map;
+    }, [s.clips]);
+
+    // ========================================
+    // Mipmap 预加载：clip 列表变化时，对新 sourcePath 自动预加载三级波形数据
+    // ========================================
+    const preloadedPathsRef = useRef(new Set<string>());
+    useEffect(() => {
+        for (const clip of s.clips) {
+            const sp = clip.sourcePath;
+            if (sp && !preloadedPathsRef.current.has(sp)) {
+                preloadedPathsRef.current.add(sp);
+                void waveformMipmapStore.preload(sp);
+            }
+        }
     }, [s.clips]);
 
     /** 将客户端 X 坐标转换为秒（seconds-based，不受 BPM 影响） */
@@ -816,6 +888,37 @@ export const TimelinePanel: React.FC = () => {
             return s.tracks.length * rowHeight;
         }
         return idx * rowHeight;
+    }
+
+    function ensureDropPreviewDuration(path: string) {
+        if (!path || pendingDropDurationPathRef.current === path) return;
+        pendingDropDurationPathRef.current = path;
+        void import("../../services/api/fileBrowser")
+            .then(({ fileBrowserApi }) => fileBrowserApi.getAudioFileInfo(path))
+            .then((info) => {
+                setDropPreview((prev) => {
+                    if (!prev || prev.path !== path) return prev;
+                    return {
+                        ...prev,
+                        durationSec: Math.max(
+                            0,
+                            Number(info?.durationSec ?? prev.durationSec) || 0,
+                        ),
+                    };
+                });
+            })
+            .catch(() => undefined)
+            .finally(() => {
+                if (pendingDropDurationPathRef.current === path) {
+                    pendingDropDurationPathRef.current = null;
+                }
+            });
+    }
+
+    function getDropPreviewWidthPx(durationSec: number) {
+        return durationSec > 0
+            ? Math.max(1, pxPerSecRef.current * durationSec)
+            : 80;
     }
 
     const setPlayheadFromClientX = React.useCallback(
@@ -1154,6 +1257,32 @@ export const TimelinePanel: React.FC = () => {
             void dispatch(selectClipRemote(clipId));
         },
     });
+
+    const newTrackGhostClips = useMemo(() => {
+        if (clipDropNewTrack) {
+            const moved = s.clips.filter(
+                (clip) => clip.trackId === NEW_TRACK_SENTINEL,
+            );
+            if (moved.length > 0) return moved;
+        }
+        if (!ghostDrag || ghostDrag.targetTrackId != null) {
+            return [];
+        }
+        return ghostDrag.clipIds
+            .map((clipId) => {
+                const initial = ghostDrag.initialById[clipId];
+                const clip = s.clips.find((item) => item.id === clipId);
+                if (!initial || !clip) return null;
+                return {
+                    ...clip,
+                    startSec: Math.max(
+                        0,
+                        initial.startSec + ghostDrag.deltaSec,
+                    ),
+                };
+            })
+            .filter((clip): clip is typeof s.clips[number] => clip != null);
+    }, [clipDropNewTrack, ghostDrag, s.clips]);
 
     const startClipDrag = React.useCallback(
         (
@@ -1718,7 +1847,7 @@ export const TimelinePanel: React.FC = () => {
                 {/* Tracks Area */}
                 <TimelineScrollArea
                     scrollRef={scrollRef}
-                    projectSec={s.projectSec}
+                    projectSec={dynamicProjectSec}
                     bpm={s.bpm}
                     pxPerSec={pxPerSec}
                     setPxPerSec={setPxPerSec}
@@ -1848,6 +1977,9 @@ export const TimelinePanel: React.FC = () => {
                                 : hasDomFile
                                     ? String(dt?.files?.[0]?.name ?? "Audio")
                                     : "Audio");
+                        if (path) {
+                            ensureDropPreviewDuration(path);
+                        }
                         setDropPreview({
                             path,
                             fileName,
@@ -2064,6 +2196,36 @@ export const TimelinePanel: React.FC = () => {
                                             "color-mix(in oklab, var(--qt-highlight) 10%, transparent)",
                                     }}
                                 />
+                                {newTrackGhostClips.map((clip) => (
+                                    <div
+                                        key={`new-track-ghost-${clip.id}`}
+                                        className="absolute opacity-60"
+                                        style={{
+                                            left: Math.max(0, clip.startSec * pxPerSec),
+                                            width: Math.max(1, clip.lengthSec * pxPerSec),
+                                            top: 0,
+                                            height: rowHeight - 8,
+                                            paddingTop: 8,
+                                        }}
+                                    >
+                                        <div
+                                            className="absolute left-0 right-0 top-0 rounded-t-sm"
+                                            style={{
+                                                height: 18,
+                                                backgroundColor:
+                                                    "color-mix(in oklab, var(--qt-highlight) 55%, transparent)",
+                                            }}
+                                        />
+                                        <div
+                                            className="absolute left-0 right-0 bottom-0 rounded-sm border border-dashed border-white/70"
+                                            style={{
+                                                top: 18,
+                                                backgroundColor:
+                                                    "color-mix(in oklab, var(--qt-highlight) 20%, transparent)",
+                                            }}
+                                        />
+                                    </div>
+                                ))}
                             </div>
                         ) : null}
 
@@ -2081,6 +2243,7 @@ export const TimelinePanel: React.FC = () => {
                                     rowHeight={rowHeight}
                                     pxPerSec={pxPerSec}
                                     bpm={s.bpm}
+                                    viewportWidthPx={viewportWidth}
                                     viewportStartSec={viewportStartSec}
                                     viewportEndSec={viewportEndSec}
                                     clipWaveforms={s.clipWaveforms}
@@ -2124,10 +2287,14 @@ export const TimelinePanel: React.FC = () => {
                                     top:
                                         rowTopForTrackId(dropPreview.trackId) +
                                         8,
-                                    width: Math.max(
-                                        80,
-                                        pxPerSec * dropPreview.durationSec,
-                                    ),
+                                    width:
+                                        dropPreview.durationSec > 0
+                                            ? Math.max(
+                                                1,
+                                                pxPerSec *
+                                                    dropPreview.durationSec,
+                                            )
+                                            : 80,
                                     height: rowHeight - 16,
                                 }}
                             >

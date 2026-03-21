@@ -7,6 +7,9 @@ import type {
 import type { GhostDragInfo } from "./hooks/useClipDrag";
 import { ClipItem } from "./ClipItem";
 import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
+import { WaveformTrackCanvas } from "../../waveform/WaveformTrackCanvas";
+import { useAppTheme } from "../../../theme/AppThemeProvider";
+import { getWaveformColors } from "../../../theme/waveformColors";
 
 type WaveformPreview = number[] | { l: number[]; r: number[] };
 
@@ -18,6 +21,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
     rowHeight: number;
     pxPerSec: number;
     bpm: number;
+    viewportWidthPx: number;
     viewportStartSec: number;
     viewportEndSec: number;
 
@@ -80,6 +84,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         trackClips,
         rowHeight,
         pxPerSec,
+        viewportWidthPx,
         viewportStartSec,
         viewportEndSec,
         clipWaveforms,
@@ -106,6 +111,16 @@ export const TrackLane = React.memo(function TrackLane(props: {
         allClips,
     } = props;
 
+    // 获取波形颜色配置
+    const { mode: themeMode } = useAppTheme();
+    const waveformColors = React.useMemo(
+        () => getWaveformColors(themeMode),
+        [themeMode],
+    );
+
+    // 波形区域高度计算（与 ClipItem 一致）
+    const waveformHeight = Math.max(1, rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT);
+
     // 计算当前轨道上需要渲染的 ghost clip 列表
     const ghostClips = React.useMemo(() => {
         if (!ghostDrag) return [];
@@ -121,7 +136,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
             let ghostTrackId = initial.trackId;
             if (ghostDrag.allowTrackMove) {
                 if (ghostDrag.targetTrackId == null) {
-                    ghostTrackId = initial.trackId;
+                    continue;
                 } else {
                     const sourceIndex = trackIndexById[initial.trackId];
                     const targetIndex =
@@ -174,6 +189,19 @@ export const TrackLane = React.memo(function TrackLane(props: {
             className="border-b border-qt-border relative"
             style={{ height: rowHeight }}
         >
+            {/* 轨道级波形 Canvas：一个 Canvas 绘制该轨道所有可见 clip 的波形 */}
+            <WaveformTrackCanvas
+                clips={visibleTrackClips}
+                trackHeight={rowHeight}
+                waveformTop={CLIP_HEADER_HEIGHT}
+                waveformHeight={waveformHeight}
+                pxPerSec={pxPerSec}
+                viewportWidthPx={viewportWidthPx}
+                viewportStartSec={viewportStartSec}
+                viewportEndSec={viewportEndSec}
+                strokeColor={waveformColors.stroke}
+                strokeWidth={1}
+            />
             {visibleTrackClips.map((clip) => {
                 const selected =
                     multiSelectedClipIds.length > 0
@@ -193,6 +221,8 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         isInMultiSelectedSet={multiSelectedSet.has(clip.id)}
                         multiSelectedCount={multiSelectedClipIds.length}
                         trackColor={trackColor}
+                        viewportStartSec={viewportStartSec}
+                        viewportEndSec={viewportEndSec}
                         ensureSelected={ensureSelected}
                         selectClipRemote={selectClipRemote}
                         openContextMenu={openContextMenu}

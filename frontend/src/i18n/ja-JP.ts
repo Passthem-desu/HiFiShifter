@@ -74,7 +74,7 @@ export const jaJP = {
     output_path: "出力パス",
     hints: "ヒント",
     hint_drag_clip:
-        "タイムライン上のクリップをドラッグして開始位置を移動（スナップはグリッドスナップ設定に依存；修飾キーで切替）",
+        "タイムライン上のクリップをドラッグして開始位置を移動（通常はグリッドにスナップ；Shift を押しながらでフリー移動）",
     hint_add_point: "パラメータパネルをダブルクリックしてポイントを追加",
     hint_drag_point: "ポイントをドラッグしてカーブを編集",
     hint_drop_audio: "オーディオファイルをドロップしてインポート・分析",
@@ -294,7 +294,7 @@ export const jaJP = {
     kb_pianoroll_shift_param_down_selection: "パラメーターライン下移動（選択範囲）",
     kb_modifier_slip_edit: "Slip 編集（クリップドラッグ中に押す）",
     kb_modifier_stretch: "タイムストレッチ（エッジドラッグ中に押す）",
-    kb_modifier_no_snap: "スナップ切替（ドラッグ中に押す）",
+    kb_modifier_no_snap: "フリー移動（クリップドラッグ中に押す）",
     kb_modifier_copy_drag: "コピードラッグ（クリップドラッグ中に押す）",
     kb_modifier_pr_vzoom: "垂直ズーム（押しながらスクロール）",
     kb_modifier_param_morph: "パラメータ形状変形（選択範囲内で押す）",
@@ -410,9 +410,9 @@ export const jaJP = {
         scale_highlight_always: "常に",
         scale_highlight_only_when_snapping: "スナップ時のみ",
         scale_highlight_off: "オフ",
-    kb_modifier_toggle_snap: "スナップ切替（ドラッグ中に押す）",
+    kb_modifier_toggle_snap: "フリー移動（クリップドラッグ中に押す）",
     hint_toggle_snap:
-        "修飾キーを押してスナップ動作を切替（グリッドスナップ設定に基づきスナップ/フリー）",
+        "クリップをドラッグ中に Shift を押すとフリー移動になります。通常はグリッドにスナップします",
 
     // ファイルブラウザ拡張
     fb_regex: "正規表現",

@@ -591,7 +591,12 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let seg_end_sec = seg_start_sec + (expected_out_frames as f64) / (sample_rate.max(1) as f64);
     let has_pitch_user_edit =
         any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec);
-    if !has_pitch_user_edit && !extra_processing && !tension_processing && !formant_processing && !needs_processor_stretch {
+    if !has_pitch_user_edit
+        && !extra_processing
+        && !tension_processing
+        && !formant_processing
+        && !needs_processor_stretch
+    {
         return Ok(false);
     }
 
@@ -661,7 +666,10 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
                 seg_end_sec,
             );
             if !has_effective_pitch_change
-                && !(extra_processing || tension_processing || formant_processing || needs_processor_stretch)
+                && !(extra_processing
+                    || tension_processing
+                    || formant_processing
+                    || needs_processor_stretch)
             {
                 return Ok(false);
             }

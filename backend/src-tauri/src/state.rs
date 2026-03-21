@@ -142,9 +142,9 @@ pub struct Clip {
     pub color: String,
 
     pub source_path: Option<String>,
-    pub duration_sec: Option<f64>,           // 兼容性保留
-    pub duration_frames: Option<u64>,        // 精确的frame总数
-    pub source_sample_rate: Option<u32>,     // 源文件采样率
+    pub duration_sec: Option<f64>,       // 兼容性保留
+    pub duration_frames: Option<u64>,    // 精确的frame总数
+    pub source_sample_rate: Option<u32>, // 源文件采样率
     pub waveform_preview: Option<Vec<f32>>,
     pub pitch_range: Option<PitchRange>,
 
@@ -284,7 +284,12 @@ impl Default for TimelineState {
 }
 
 impl TimelineState {
-    fn clip_frame_bounds(&self, start_sec: f64, length_sec: f64, frame_period_ms: f64) -> (usize, usize) {
+    fn clip_frame_bounds(
+        &self,
+        start_sec: f64,
+        length_sec: f64,
+        frame_period_ms: f64,
+    ) -> (usize, usize) {
         let fp = frame_period_ms.max(0.1);
         let start_frame = ((start_sec.max(0.0) * 1000.0) / fp).floor() as usize;
         let frame_len = ((length_sec.max(0.0) * 1000.0) / fp).ceil().max(1.0) as usize;
@@ -300,14 +305,23 @@ impl TimelineState {
     }
 
     fn linked_param_frame_len(linked_params: &LinkedParamCurvesPayload) -> usize {
-        let mut frame_len = linked_params.pitch_edit.len().max(linked_params.tension_edit.len());
+        let mut frame_len = linked_params
+            .pitch_edit
+            .len()
+            .max(linked_params.tension_edit.len());
         for curve in linked_params.extra_curves.values() {
             frame_len = frame_len.max(curve.len());
         }
         frame_len.max(1)
     }
 
-    fn clear_curve_range(curve: &mut Vec<f32>, required_len: usize, start_frame: usize, end_frame: usize, default_value: f32) {
+    fn clear_curve_range(
+        curve: &mut Vec<f32>,
+        required_len: usize,
+        start_frame: usize,
+        end_frame: usize,
+        default_value: f32,
+    ) {
         if curve.len() < required_len {
             curve.resize(required_len, default_value);
         }
@@ -321,7 +335,13 @@ impl TimelineState {
         }
     }
 
-    fn write_curve_range(curve: &mut Vec<f32>, required_len: usize, start_frame: usize, values: &[f32], default_value: f32) {
+    fn write_curve_range(
+        curve: &mut Vec<f32>,
+        required_len: usize,
+        start_frame: usize,
+        values: &[f32],
+        default_value: f32,
+    ) {
         if curve.len() < required_len {
             curve.resize(required_len, default_value);
         }
@@ -342,7 +362,8 @@ impl TimelineState {
     ) -> Option<LinkedParamCurvesPayload> {
         self.ensure_params_for_root(root_track_id);
         let frame_period_ms = self.frame_period_ms().max(0.1);
-        let (start_frame, end_frame) = self.clip_frame_bounds(start_sec, length_sec, frame_period_ms);
+        let (start_frame, end_frame) =
+            self.clip_frame_bounds(start_sec, length_sec, frame_period_ms);
         let entry = self.params_by_root_track.get(root_track_id)?;
 
         let pitch_edit = if entry.pitch_edit_user_modified {
@@ -388,7 +409,8 @@ impl TimelineState {
     ) {
         self.ensure_params_for_root(root_track_id);
         let frame_period_ms = self.frame_period_ms().max(0.1);
-        let (start_frame, end_frame) = self.clip_frame_bounds(start_sec, length_sec, frame_period_ms);
+        let (start_frame, end_frame) =
+            self.clip_frame_bounds(start_sec, length_sec, frame_period_ms);
         let kind = self.root_track_kind(root_track_id);
         let Some(entry) = self.params_by_root_track.get_mut(root_track_id) else {
             return;
@@ -396,15 +418,28 @@ impl TimelineState {
 
         let required_len = entry.pitch_edit.len().max(end_frame);
         if clear_pitch {
-            Self::clear_curve_range(&mut entry.pitch_edit, required_len, start_frame, end_frame, 0.0);
+            Self::clear_curve_range(
+                &mut entry.pitch_edit,
+                required_len,
+                start_frame,
+                end_frame,
+                0.0,
+            );
         }
-        Self::clear_curve_range(&mut entry.tension_edit, required_len, start_frame, end_frame, 0.0);
+        Self::clear_curve_range(
+            &mut entry.tension_edit,
+            required_len,
+            start_frame,
+            end_frame,
+            0.0,
+        );
 
         let keys = extra_curve_keys
             .map(|keys| keys.to_vec())
             .unwrap_or_else(|| entry.extra_curves.keys().cloned().collect());
         for key in keys {
-            let default_value = crate::renderer::automation_curve_default_value(kind, &key).unwrap_or(0.0);
+            let default_value =
+                crate::renderer::automation_curve_default_value(kind, &key).unwrap_or(0.0);
             let curve = entry
                 .extra_curves
                 .entry(key)
@@ -443,9 +478,21 @@ impl TimelineState {
 
         let required_len = entry.pitch_edit.len().max(end_frame);
         if has_pitch {
-            Self::clear_curve_range(&mut entry.pitch_edit, required_len, start_frame, end_frame, 0.0);
+            Self::clear_curve_range(
+                &mut entry.pitch_edit,
+                required_len,
+                start_frame,
+                end_frame,
+                0.0,
+            );
         }
-        Self::clear_curve_range(&mut entry.tension_edit, required_len, start_frame, end_frame, 0.0);
+        Self::clear_curve_range(
+            &mut entry.tension_edit,
+            required_len,
+            start_frame,
+            end_frame,
+            0.0,
+        );
         if has_pitch {
             Self::write_curve_range(
                 &mut entry.pitch_edit,
@@ -470,7 +517,8 @@ impl TimelineState {
             }
         }
         for key in &all_keys {
-            let default_value = crate::renderer::automation_curve_default_value(kind, key).unwrap_or(0.0);
+            let default_value =
+                crate::renderer::automation_curve_default_value(kind, key).unwrap_or(0.0);
             let curve = entry
                 .extra_curves
                 .entry(key.clone())
@@ -478,7 +526,8 @@ impl TimelineState {
             Self::clear_curve_range(curve, required_len, start_frame, end_frame, default_value);
         }
         for (key, values) in &linked_params.extra_curves {
-            let default_value = crate::renderer::automation_curve_default_value(kind, key).unwrap_or(0.0);
+            let default_value =
+                crate::renderer::automation_curve_default_value(kind, key).unwrap_or(0.0);
             let curve = entry
                 .extra_curves
                 .entry(key.clone())
@@ -491,13 +540,20 @@ impl TimelineState {
         }
     }
 
-    pub fn extract_clip_linked_params(&mut self, clip_id: &str) -> Option<LinkedParamCurvesPayload> {
+    pub fn extract_clip_linked_params(
+        &mut self,
+        clip_id: &str,
+    ) -> Option<LinkedParamCurvesPayload> {
         let clip = self.clips.iter().find(|clip| clip.id == clip_id)?;
         let root_track_id = self.resolve_root_track_id(&clip.track_id)?;
         self.extract_linked_params_from_root_range(&root_track_id, clip.start_sec, clip.length_sec)
     }
 
-    pub fn apply_linked_params_to_clip(&mut self, clip_id: &str, linked_params: &LinkedParamCurvesPayload) -> bool {
+    pub fn apply_linked_params_to_clip(
+        &mut self,
+        clip_id: &str,
+        linked_params: &LinkedParamCurvesPayload,
+    ) -> bool {
         let Some(clip) = self.clips.iter().find(|clip| clip.id == clip_id) else {
             return false;
         };
@@ -554,10 +610,10 @@ impl TimelineState {
     pub fn ensure_params_for_root(&mut self, root_track_id: &str) {
         let fp = self.frame_period_ms();
         let target = self.target_param_frames(fp);
-        
+
         // Calculate expected cache key to detect when timeline changed
         let expected_key = crate::pitch_analysis::build_root_pitch_key(self, root_track_id);
-        
+
         let entry = self
             .params_by_root_track
             .entry(root_track_id.to_string())
@@ -567,11 +623,11 @@ impl TimelineState {
             });
 
         entry.frame_period_ms = fp;
-        
+
         // CRITICAL FIX: Detect stale pitch curves and clear them when clip/timeline changes.
         // This prevents old pitch data from being displayed after clip replacement or timeline edits.
         let key_changed = entry.pitch_orig_key.as_deref() != Some(&expected_key);
-        
+
         if key_changed && entry.pitch_orig_key.is_some() {
             // Timeline/clip configuration changed - clear orig curves to force re-analysis
             entry.pitch_orig.clear();
@@ -580,7 +636,7 @@ impl TimelineState {
             if !entry.pitch_edit_user_modified {
                 entry.pitch_edit.clear();
             }
-            
+
             if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                 eprintln!(
                     "state: [INVALIDATE] Cleared stale pitch curves for root_track={} (key changed, user_modified={})",
@@ -662,18 +718,24 @@ pub struct AppState {
         std::collections::HashMap<String, std::sync::Arc<crate::waveform::CachedPeaks>>,
     >,
 
+    /// V2 多级 mipmap 波形缓存 (key = source_path)
+    pub waveform_cache_v2: std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile>>,
+    >,
+
     // Set in Tauri setup. Used for async notifications.
     pub app_handle: OnceLock<tauri::AppHandle>,
 
     // De-dup background pitch analysis jobs (keyed by rootTrackId + analysis key).
     pub pitch_inflight: std::sync::Mutex<std::collections::HashSet<String>>,
-    
+
     // Current pitch analysis progress (for polling from frontend)
-    pub pitch_analysis_progress: std::sync::RwLock<Option<crate::pitch_analysis::PitchOrigAnalysisProgressEvent>>,
+    pub pitch_analysis_progress:
+        std::sync::RwLock<Option<crate::pitch_analysis::PitchOrigAnalysisProgressEvent>>,
 
     // Clip-level pitch analysis cache for performance optimization
     pub clip_pitch_cache: Arc<Mutex<ClipPitchCache>>,
-    
+
     // Timeline snapshot for incremental pitch refresh (keyed by root_track_id)
     pub pitch_timeline_snapshot: Mutex<HashMap<String, TimelineSnapshot>>,
 
@@ -703,6 +765,7 @@ impl Default for AppState {
                 crate::waveform_disk_cache::default_cache_dir(),
             ),
             waveform_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+            waveform_cache_v2: std::sync::Mutex::new(std::collections::HashMap::new()),
 
             app_handle: OnceLock::new(),
             pitch_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -781,13 +844,154 @@ impl AppState {
             cache.clear();
         }
 
+        // 也清理 v2 缓存
+        {
+            let mut cache_v2 = self
+                .waveform_cache_v2
+                .lock()
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+            cache_v2.clear();
+        }
+
+        let cache_dir = {
+            self.waveform_cache_dir
+                .lock()
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner())
+                .clone()
+        };
+        crate::waveform_disk_cache::clear_dir(&cache_dir)
+    }
+
+    /// 获取或计算 v2 多级 mipmap 峰值数据
+    ///
+    /// 优先从内存缓存读取，其次从磁盘缓存读取，最后计算
+    /// 首次计算时会通过 Tauri 事件推送进度（waveform_analysis_progress）
+    pub fn get_or_compute_waveform_peaks_v2(
+        &self,
+        source_path: &str,
+    ) -> Result<std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile>, String> {
+        if source_path.trim().is_empty() {
+            return Err("empty source_path".to_string());
+        }
+
+        // 检查内存缓存
+        {
+            let cache = self
+                .waveform_cache_v2
+                .lock()
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+            if let Some(found) = cache.get(source_path) {
+                // 缓存命中：发送 cached 状态事件
+                if let Some(handle) = self.app_handle.get() {
+                    use tauri::Emitter;
+                    let _ = handle.emit(
+                        "waveform_analysis_progress",
+                        serde_json::json!({
+                            "sourcePath": source_path,
+                            "progress": 1.0,
+                            "status": "cached",
+                        }),
+                    );
+                }
+                return Ok(found.clone() as std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile>);
+            }
+        }
+
+        // 磁盘缓存
         let cache_dir = {
             self.waveform_cache_dir
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone()
         };
-        crate::waveform_disk_cache::clear_dir(&cache_dir)
+
+        let hfs_cache = crate::hfspeaks_v2::HfsPeaksCache::new(cache_dir);
+        let path = std::path::Path::new(source_path);
+
+        // 尝试从磁盘加载
+        if let Some(cached) = hfs_cache.try_load(path) {
+            let cached: std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile> =
+                std::sync::Arc::new(cached);
+            let mut cache = self
+                .waveform_cache_v2
+                .lock()
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+            cache.insert(source_path.to_string(), cached.clone());
+            // 磁盘缓存命中：发送 cached 状态事件
+            if let Some(handle) = self.app_handle.get() {
+                use tauri::Emitter;
+                let _ = handle.emit(
+                    "waveform_analysis_progress",
+                    serde_json::json!({
+                        "sourcePath": source_path,
+                        "progress": 1.0,
+                        "status": "cached",
+                    }),
+                );
+            }
+            return Ok(cached);
+        }
+
+        // 发送 computing 状态事件（进度 0）
+        let source_path_owned = source_path.to_string();
+        if let Some(handle) = self.app_handle.get() {
+            use tauri::Emitter;
+            let _ = handle.emit(
+                "waveform_analysis_progress",
+                serde_json::json!({
+                    "sourcePath": &source_path_owned,
+                    "progress": 0.0,
+                    "status": "computing",
+                }),
+            );
+        }
+
+        // 构建进度回调：通过 app_handle emit 事件
+        let app_handle_for_cb = self.app_handle.get().cloned();
+        let source_path_for_cb = source_path_owned.clone();
+        let progress_cb = move |progress: f32| {
+            if let Some(ref handle) = app_handle_for_cb {
+                use tauri::Emitter;
+                let _ = handle.emit(
+                    "waveform_analysis_progress",
+                    serde_json::json!({
+                        "sourcePath": &source_path_for_cb,
+                        "progress": progress.clamp(0.0, 1.0),
+                        "status": "computing",
+                    }),
+                );
+            }
+        };
+
+        // 计算新的峰值数据（带进度回调）
+        let peaks =
+            crate::hfspeaks_v2::compute_mipmap_peaks_with_progress(path, Some(progress_cb))?;
+
+        // 保存到磁盘缓存
+        if let Err(e) = hfs_cache.save(path, &peaks) {
+            eprintln!("Warning: failed to save v2 peaks cache: {}", e);
+        }
+
+        // 发送 done 状态事件
+        if let Some(handle) = self.app_handle.get() {
+            use tauri::Emitter;
+            let _ = handle.emit(
+                "waveform_analysis_progress",
+                serde_json::json!({
+                    "sourcePath": &source_path_owned,
+                    "progress": 1.0,
+                    "status": "done",
+                }),
+            );
+        }
+
+        let peaks = std::sync::Arc::new(peaks);
+        let mut cache = self
+            .waveform_cache_v2
+            .lock()
+            .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+        cache.insert(source_path.to_string(), peaks.clone());
+        Ok(peaks)
     }
 
     pub fn project_meta_payload(&self) -> ProjectMetaPayload {
@@ -813,7 +1017,10 @@ impl AppState {
         // When suppress_checkpoints is active (inside an undo group),
         // skip pushing to the undo stack so multiple operations become
         // a single undo entry.
-        if self.suppress_checkpoints.load(std::sync::atomic::Ordering::Acquire) {
+        if self
+            .suppress_checkpoints
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
             // Still mark project dirty
             let (name, was_clean) = {
                 let mut p = self.project.lock().unwrap_or_else(|e| e.into_inner());
@@ -875,9 +1082,11 @@ impl AppState {
     pub fn begin_undo_group(&self) -> TimelineStatePayload {
         let tl = self.timeline.lock().unwrap_or_else(|e| e.into_inner());
         // Force a checkpoint even if suppress was already active (defensive)
-        self.suppress_checkpoints.store(false, std::sync::atomic::Ordering::Release);
+        self.suppress_checkpoints
+            .store(false, std::sync::atomic::Ordering::Release);
         self.checkpoint_timeline(&tl);
-        self.suppress_checkpoints.store(true, std::sync::atomic::Ordering::Release);
+        self.suppress_checkpoints
+            .store(true, std::sync::atomic::Ordering::Release);
         let mut payload = tl.to_payload();
         payload.project = Some(self.project_meta_payload());
         payload
@@ -885,7 +1094,8 @@ impl AppState {
 
     /// End the undo group: re-enable checkpoints.
     pub fn end_undo_group(&self) -> serde_json::Value {
-        self.suppress_checkpoints.store(false, std::sync::atomic::Ordering::Release);
+        self.suppress_checkpoints
+            .store(false, std::sync::atomic::Ordering::Release);
         serde_json::json!({ "ok": true })
     }
 
@@ -1077,7 +1287,9 @@ impl TimelineState {
                     all_ids.push(child);
                 }
                 idx += 1;
-                if idx > 4096 { break; }
+                if idx > 4096 {
+                    break;
+                }
             }
 
             // old_id → new_id 映射
@@ -1135,7 +1347,8 @@ impl TimelineState {
             // 克隆 params_by_root_track
             let new_root_id = id_map[track_id].clone();
             if let Some(params) = self.params_by_root_track.get(track_id).cloned() {
-                self.params_by_root_track.insert(new_root_id.clone(), params);
+                self.params_by_root_track
+                    .insert(new_root_id.clone(), params);
             }
 
             self.selected_track_id = Some(new_root_id);
@@ -1663,7 +1876,11 @@ impl TimelineState {
         // 计算左 clip 的 playback_rate，用于更新 source_end_sec
         let left_rate = {
             let r = self.clips[idx].playback_rate as f64;
-            if r.is_finite() && r > 0.0 { r } else { 1.0 }
+            if r.is_finite() && r > 0.0 {
+                r
+            } else {
+                1.0
+            }
         };
 
         self.clips[idx].length_sec = left_len;
@@ -1740,10 +1957,7 @@ impl TimelineState {
 
         // Render selected clips into one baked audio file so glue includes all selected data,
         // not only the first clip's source payload.
-        let selected_id_set: HashSet<String> = selected
-            .iter()
-            .map(|c| c.id.clone())
-            .collect();
+        let selected_id_set: HashSet<String> = selected.iter().map(|c| c.id.clone()).collect();
 
         let temp_glue_path = crate::temp_manager::hifishifter_temp_dir()
             .map(|dir| dir.join(format!("glue_{}.wav", Uuid::new_v4().simple())));
@@ -1803,7 +2017,10 @@ impl TimelineState {
                 glued.fade_out_curve = default_fade_curve();
                 glued.extra_curves = None;
                 glued.extra_params = None;
-                glued.pitch_range = Some(PitchRange { min: -24.0, max: 24.0 });
+                glued.pitch_range = Some(PitchRange {
+                    min: -24.0,
+                    max: 24.0,
+                });
             }
         }
 
@@ -1882,11 +2099,12 @@ impl TimelineState {
         }
 
         // 使用精确的frame计算length_sec（直接用秒，不依赖BPM）
-        let computed_length_sec = if let (Some(frames), Some(sr)) = (duration_frames, source_sample_rate) {
-            frames as f64 / sr as f64
-        } else {
-            duration_sec.unwrap_or(4.0)
-        };
+        let computed_length_sec =
+            if let (Some(frames), Some(sr)) = (duration_frames, source_sample_rate) {
+                frames as f64 / sr as f64
+            } else {
+                duration_sec.unwrap_or(4.0)
+            };
 
         let clip_id = self.add_clip(
             track_id,

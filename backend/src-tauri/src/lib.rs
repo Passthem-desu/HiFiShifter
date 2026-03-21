@@ -41,6 +41,8 @@ mod hnsep_onnx_stub;
 use hnsep_onnx_stub as hnsep_onnx;
 
 mod config;
+#[path = "audio/hfspeaks_v2.rs"]
+mod hfspeaks_v2;
 #[path = "import/midi_import.rs"]
 mod midi_import;
 mod project;
@@ -176,10 +178,11 @@ pub fn run() {
             commands::pick_output_path,
             commands::pick_directory,
             commands::open_midi_dialog,
-            commands::get_waveform_peaks_segment,
             commands::get_root_mix_waveform_peaks_segment,
             commands::get_track_mix_waveform_peaks_segment,
             commands::clear_waveform_cache,
+            commands::get_waveform_mipmap_binary,
+            commands::preload_waveform_mipmap,
             commands::import_audio_item,
             commands::import_audio_bytes,
             commands::add_track,

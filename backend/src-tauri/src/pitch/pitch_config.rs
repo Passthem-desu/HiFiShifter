@@ -104,13 +104,13 @@ pub fn merge_adjacent_voiced_ranges(
     if ranges.is_empty() {
         return vec![];
     }
-    
+
     let mut merged: Vec<Range<usize>> = Vec::new();
     let mut current = ranges[0].clone();
-    
+
     for range in ranges.into_iter().skip(1) {
         let gap = range.start.saturating_sub(current.end);
-        
+
         if gap <= merge_threshold_samples {
             // Merge: extend current range
             current.end = range.end;
@@ -120,7 +120,7 @@ pub fn merge_adjacent_voiced_ranges(
             current = range;
         }
     }
-    
+
     // Don't forget the last range
     merged.push(current);
     merged
@@ -164,9 +164,7 @@ pub fn apply_crossfade(current: &[f64], next: &[f64], ctx_frames: usize) -> Vec<
         return vec![];
     }
 
-    let fade = ctx_frames
-        .min(current.len())
-        .min(next.len());
+    let fade = ctx_frames.min(current.len()).min(next.len());
     if fade == 0 {
         return vec![];
     }

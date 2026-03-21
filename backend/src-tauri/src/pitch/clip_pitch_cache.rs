@@ -49,7 +49,8 @@ pub struct ClipPitchCache {
 impl ClipPitchCache {
     /// Create a new cache with specified capacity
     pub fn new(capacity: usize) -> Self {
-        let cap = NonZeroUsize::new(capacity).unwrap_or(NonZeroUsize::new(DEFAULT_CACHE_CAPACITY).unwrap());
+        let cap = NonZeroUsize::new(capacity)
+            .unwrap_or(NonZeroUsize::new(DEFAULT_CACHE_CAPACITY).unwrap());
         Self {
             cache: LruCache::new(cap),
             hits: 0,
@@ -88,7 +89,7 @@ impl ClipPitchCache {
         } else {
             0.0
         };
-        
+
         CacheStats {
             entries: self.cache.len(),
             capacity: self.cache.cap().get(),
@@ -147,23 +148,23 @@ pub fn get_file_signature(path: &Path) -> (u64, u64) {
 /// Generate a cache key string from clip parameters
 pub fn generate_clip_cache_key(key_data: &ClipCacheKey) -> String {
     let mut hasher = blake3::Hasher::new();
-    
+
     // Add version
     hasher.update(b"clip_pitch_v");
     hasher.update(&key_data.version.to_le_bytes());
-    
+
     // Add file identity
     hasher.update(key_data.source_path.as_bytes());
     hasher.update(&key_data.file_size.to_le_bytes());
     hasher.update(&key_data.file_mtime.to_le_bytes());
-    
+
     // 全量分析策略：不含 source_start/end/playback_rate
     // trim/rate 变化不影响缓存 key，在组装阶段处理
-    
+
     // Add analysis algorithm and parameters
     hasher.update(key_data.algo.as_bytes());
     hasher.update(&key_data.f0_floor.to_le_bytes());
     hasher.update(&key_data.f0_ceil.to_le_bytes());
-    
+
     hasher.finalize().to_hex().to_string()
 }

@@ -60,13 +60,14 @@ export function usePianoRollInteractions(args: {
     scrollLeftRef: MutableRefObject<number>;
     pxPerBeatRef: MutableRefObject<number>;
     setPxPerBeat: (next: number) => void;
-    /** 当前 BPM，用于动态计�?pxPerBeat 的合法范�?*/
+    /** 当前 BPM，用于动态计算 pxPerBeat 的合法范围 */
     bpm: number;
+    /** 项目时长（秒），用于计算缩放时的 maxScroll */
+    dynamicProjectSec: number;
     setPitchView: (next: ValueViewport) => void;
     setParamViewport: (param: string, next: ValueViewport) => void;
     pitchViewRef: MutableRefObject<ValueViewport>;
     paramViewsRef: MutableRefObject<Record<string, ValueViewport>>;
-
     scrollerRef: MutableRefObject<HTMLDivElement | null>;
     canvasRef: MutableRefObject<HTMLCanvasElement | null>;
     viewSizeRef: MutableRefObject<{ w: number; h: number }>;
@@ -190,6 +191,7 @@ export function usePianoRollInteractions(args: {
         pxPerBeatRef,
         setPxPerBeat,
         bpm,
+        dynamicProjectSec,
         setPitchView,
         setParamViewport,
         pitchViewRef,
@@ -1277,7 +1279,10 @@ export function usePianoRollInteractions(args: {
 
             setPxPerBeat(next);
             const nextScrollLeft = anchorBeat * next - anchorX;
-            el.scrollLeft = Math.max(0, nextScrollLeft);
+            // 使用 dynamicProjectSec 计算正确的 maxScroll，避免缩放时波形偏移
+            const totalBeats = dynamicProjectSec / secPerBeatLocal;
+            const maxScroll = Math.max(0, totalBeats * next - el.clientWidth);
+            el.scrollLeft = clamp(nextScrollLeft, 0, maxScroll);
             syncScrollLeft(el);
         },
         [
@@ -1301,6 +1306,7 @@ export function usePianoRollInteractions(args: {
             vibratoFrequencyAdjustKb,
             paramFineAdjustKb,
             bpm,
+            dynamicProjectSec,
             playheadSec,
             playheadZoomEnabled,
             strokeRef,
