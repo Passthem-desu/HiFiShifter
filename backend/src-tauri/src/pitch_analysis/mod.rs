@@ -2,17 +2,14 @@
 // 工具函数、类型定义、公开 API。
 // 核心分析流水线见 analysis.rs，调度逻辑见 schedule.rs。
 
-use crate::state::{AppState, Clip, PitchAnalysisAlgo, TimelineState};
+use crate::state::{Clip, PitchAnalysisAlgo, TimelineState};
 use serde::Serialize;
-use std::collections::HashSet;
 use std::path::Path;
-use tauri::Emitter;
 
 pub(crate) mod analysis;
 pub(crate) mod schedule;
 
 // 公开 API — 供 crate 内其他模块使用
-pub(crate) use analysis::{build_pitch_job, compute_pitch_curve};
 pub use schedule::maybe_schedule_pitch_orig;
 
 pub(crate) fn hz_to_midi(hz: f64) -> f32 {

@@ -6,7 +6,7 @@ use crate::state::AppState;
 use tauri::Emitter;
 
 use super::analysis::build_pitch_job;
-use super::{build_root_pitch_key, resample_curve_linear, PitchOrigUpdatedEvent};
+use super::{build_root_pitch_key, PitchOrigUpdatedEvent};
 
 fn assemble_pitch_orig_from_cache(
     tl: &crate::state::TimelineState,
@@ -19,7 +19,7 @@ fn assemble_pitch_orig_from_cache(
     } else {
         120.0
     };
-    let bs = 60.0 / bpm;
+    let _bs = 60.0 / bpm;
 
     // 收集属于?root track 的所?clip（保?tl.clips 原始顺序 = z-order?
     let clips: Vec<&crate::state::Clip> = tl

@@ -9,7 +9,7 @@ use crate::audio_utils::try_read_wav_info;
 use crate::models::PitchRange;
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // ─── 块标识 (8 bytes each) ───
 
@@ -762,7 +762,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 let src_dur = (src_end - src_start).max(0.001);
 
                 let new_start = m_start.new_pos / sample_rate;
-                let new_end = m_end.new_pos / sample_rate;
+                let _new_end = m_end.new_pos / sample_rate;
                 let new_dur = seg_timeline_durations[seg_idx];
 
                 let rate = (src_dur / new_dur) as f32;
@@ -1438,7 +1438,7 @@ pub fn import_vsp_clipboard(
                 let src_dur = (src_end - src_start).max(0.001);
 
                 let new_start = m_start.new_pos / sample_rate;
-                let new_end = m_end.new_pos / sample_rate;
+                let _new_end = m_end.new_pos / sample_rate;
                 let new_dur = seg_timeline_durations[seg_idx];
 
                 let rate = (src_dur / new_dur) as f32;
@@ -1935,7 +1935,7 @@ fn import_vsp_clipboard_selected_tracks(
                 let src_dur = (src_end - src_start).max(0.001);
 
                 let new_start = m_start.new_pos / sample_rate;
-                let new_end = m_end.new_pos / sample_rate;
+                let _new_end = m_end.new_pos / sample_rate;
                 let new_dur = seg_timeline_durations[seg_idx];
 
                 let rate = (src_dur / new_dur) as f32;

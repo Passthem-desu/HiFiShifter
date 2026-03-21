@@ -161,7 +161,7 @@ pub(crate) fn schedule_stretch_jobs(
         }
 
         // 利用 HashSet 本身的机制，取代之前的 9 行锁判断
-        let should_enqueue = inflight
+        let _should_enqueue = inflight
             .lock()
             .map(|mut s| {
                 if s.contains(&key) {
@@ -454,7 +454,7 @@ pub(crate) fn build_snapshot(
 
                     if let Some((
                         pitch_orig,
-                        pitch_edit,
+                        _pitch_edit,
                         frame_period_ms,
                         renderer_id,
                         entry,

@@ -2,7 +2,7 @@
 //
 // 将 Reaper RPP 文本格式解析为中间数据结构。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 // ─── 数据结构 ───
 
@@ -283,7 +283,7 @@ impl Block {
 
 /// 从原始文本行构建嵌套块结构（对应 C# ReaperBlock 构造函数）。
 fn parse_blocks(lines: &[String]) -> Block {
-    let mut root = Block {
+    let root = Block {
         lines: Vec::new(),
         children: Vec::new(),
     };
@@ -319,7 +319,7 @@ fn parse_blocks(lines: &[String]) -> Block {
 
         if first_char == '<' {
             // 开始新块
-            let mut new_block = Block {
+            let new_block = Block {
                 lines: vec![line],
                 children: Vec::new(),
             };

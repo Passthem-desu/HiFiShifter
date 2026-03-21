@@ -4,11 +4,9 @@
 use crate::state::{AppState, Clip, PitchAnalysisAlgo, TimelineState};
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::Arc;
 
 use super::{
     build_root_pitch_key, hz_to_midi, resample_curve_linear, PitchJob,
-    PitchOrigAnalysisProgressEvent, PitchOrigAnalysisStartedEvent,
 };
 
 fn build_root_mix_timeline(tl: &TimelineState, root_track_id: &str) -> TimelineState {
@@ -219,7 +217,7 @@ fn determine_clips_to_analyze<'a>(
     let comparison = compare_snapshots(old_snapshot, new_snapshot);
 
     // Clips needing analysis: added + modified
-    let mut need_analysis_ids: std::collections::HashSet<String> = comparison
+    let need_analysis_ids: std::collections::HashSet<String> = comparison
         .added_clip_ids
         .into_iter()
         .chain(comparison.modified_clip_ids.into_iter())
@@ -286,7 +284,7 @@ pub(crate) fn build_pitch_job(tl: &TimelineState, root_track_id: &str) -> Option
 #[allow(clippy::too_many_arguments)]
 fn analyze_clip_with_cache(
     clip: &Clip,
-    bpm: f64,
+    _bpm: f64,
     frame_period_ms: f64,
     f0_floor: f64,
     f0_ceil: f64,
@@ -1005,7 +1003,7 @@ fn clip_weight_at_frame(
     local_in_clip_frames: usize,
     track_gain_value: f32,
 ) -> f32 {
-    let bs = beat_sec(bpm);
+    let _bs = beat_sec(bpm);
     let gain = (clip.gain.max(0.0) * track_gain_value).clamp(0.0, 4.0);
     if gain <= 0.0 {
         return 0.0;
