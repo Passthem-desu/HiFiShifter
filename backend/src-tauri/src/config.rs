@@ -24,9 +24,9 @@ pub struct UiSettings {
     pub auto_scroll: bool,
     #[serde(default = "default_true")]
     pub param_editor_seek_playhead: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub show_clipboard_preview: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub show_param_value_popup: bool,
     #[serde(default = "default_true")]
     pub lock_param_lines: bool,
@@ -79,7 +79,7 @@ impl Default for UiSettings {
             auto_scroll: false,
             param_editor_seek_playhead: true,
             show_clipboard_preview: true,
-            show_param_value_popup: false,
+            show_param_value_popup: true,
             lock_param_lines: true,
             drag_direction: default_drag_direction(),
             select_drag_direction: default_drag_direction(),

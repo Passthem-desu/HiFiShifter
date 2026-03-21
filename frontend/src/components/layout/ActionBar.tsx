@@ -260,9 +260,7 @@ export function ActionBar() {
                     color="gray"
                     size="1"
                     onClick={() => {
-                        if (s.runtime.isPlaying) {
-                            dispatch(stopAudioPlayback({ restoreAnchor: true }));
-                        }
+                        dispatch(stopAudioPlayback({ restoreAnchor: true }));
                     }}
                     title={t("action_stop")}
                 >
