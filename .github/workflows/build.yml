@@ -13,10 +13,10 @@ jobs:
     outputs:
       artifact-name: frontend-dist
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
@@ -33,7 +33,7 @@ jobs:
           if [ -d dist ]; then zip -r ../frontend-dist.zip dist; else echo "No dist produced"; exit 1; fi
 
       - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
           path: frontend-dist.zip
@@ -44,17 +44,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Prevent CI environment from converting warnings into errors
     env:
-      RUSTFLAGS: ''
+      RUSTFLAGS: '-Awarnings'
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, windows-11-arm, macos-latest, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm]
         #os: [windows-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Download frontend artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: frontend-dist
           path: frontend-dist
@@ -77,7 +77,7 @@ jobs:
 
       - name: Cache cargo registry (Unix)
         if: runner.os != 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -86,7 +86,7 @@ jobs:
 
       - name: Cache cargo registry (Windows)
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             %USERPROFILE%\.cargo\registry
@@ -110,7 +110,7 @@ jobs:
           toolchain: stable
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '24'
           cache: npm
@@ -280,7 +280,7 @@ jobs:
 
       - name: Upload portable ZIP (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.determine-windows-arch.outputs.artifact-name }}-portable
           path: |
@@ -289,7 +289,7 @@ jobs:
 
       - name: Upload NSIS installer (Windows)
         if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.determine-windows-arch.outputs.artifact-name }}-installer
           path: |
@@ -622,7 +622,7 @@ jobs:
 
       - name: Upload Unix bundles
         if: runner.os != 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.determine-platform-arch.outputs.artifact-name }}
           path: |
