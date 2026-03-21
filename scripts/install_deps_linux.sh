@@ -63,8 +63,8 @@ fi
 
 echo "[install_deps_linux] Ensure Node is available (install if missing)"
 if ! command -v node >/dev/null 2>&1; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-  sudo apt-get install -y nodejs || true
+  echo "[install_deps_linux] Installing nodejs/npm from apt repositories"
+  sudo apt-get install -y nodejs npm
 fi
 
 if [ "${SKIP_FRONTEND:-0}" != "1" ]; then

@@ -265,6 +265,15 @@ fn build_vslib() {
         return;
     }
 
+    // Only link/copy for x86_64 Windows targets. Non-target platforms should
+    // not require third_party/vslib assets to exist.
+    let target = std::env::var("TARGET").unwrap_or_default();
+    let target_lc = target.to_lowercase();
+    if !(target_lc.contains("windows") && target_lc.contains("x86_64")) {
+        println!("cargo:warning=[vslib] target '{}' not an x86_64 Windows target; skipping link/copy of vslib_x64", target);
+        return;
+    }
+
     let lib_dir = std::path::Path::new("third_party/vslib");
 
     if !lib_dir.exists() {
@@ -282,32 +291,23 @@ fn build_vslib() {
     println!("cargo:rerun-if-changed=third_party/vslib/vslib_x64.lib");
     println!("cargo:rerun-if-changed=third_party/vslib/vslib_x64.dll");
 
-    // Only link/copy when building for x86_64 Windows targets. This avoids
-    // trying to link a Windows x64 import lib when compiling for Windows ARM
-    // or non-Windows platforms where the DLL isn't usable.
-    let target = std::env::var("TARGET").unwrap_or_default();
-    let target_lc = target.to_lowercase();
-    if target_lc.contains("windows") && target_lc.contains("x86_64") {
-        println!("cargo:rustc-link-search=native={}", abs.display());
-        println!("cargo:rustc-link-lib=dylib=vslib_x64");
+    println!("cargo:rustc-link-search=native={}", abs.display());
+    println!("cargo:rustc-link-lib=dylib=vslib_x64");
 
-        // OUT_DIR = .../target/<profile>/build/<pkg>/out  →  4 levels up = target/<profile>/
-        if let Ok(out_dir) = std::env::var("OUT_DIR") {
-            let dll_src = lib_dir.join("vslib_x64.dll");
-            let target_dir = std::path::Path::new(&out_dir)
-                .ancestors()
-                .nth(3)
-                .expect("[vslib] unexpected OUT_DIR depth");
-            let dll_dst = target_dir.join("vslib_x64.dll");
-            if let Err(e) = std::fs::copy(&dll_src, &dll_dst) {
-                println!("cargo:warning=[vslib] could not copy DLL to {}: {}", dll_dst.display(), e);
-            } else {
-                println!("cargo:warning=[vslib] copied vslib_x64.dll to {}", dll_dst.display());
-            }
+    // OUT_DIR = .../target/<profile>/build/<pkg>/out  →  4 levels up = target/<profile>/
+    if let Ok(out_dir) = std::env::var("OUT_DIR") {
+        let dll_src = lib_dir.join("vslib_x64.dll");
+        let target_dir = std::path::Path::new(&out_dir)
+            .ancestors()
+            .nth(3)
+            .expect("[vslib] unexpected OUT_DIR depth");
+        let dll_dst = target_dir.join("vslib_x64.dll");
+        if let Err(e) = std::fs::copy(&dll_src, &dll_dst) {
+            println!("cargo:warning=[vslib] could not copy DLL to {}: {}", dll_dst.display(), e);
         } else {
-            println!("cargo:warning=[vslib] OUT_DIR not set; skipping DLL copy")
+            println!("cargo:warning=[vslib] copied vslib_x64.dll to {}", dll_dst.display());
         }
     } else {
-        println!("cargo:warning=[vslib] target '{}' not an x86_64 Windows target; skipping link/copy of vslib_x64", target);
+        println!("cargo:warning=[vslib] OUT_DIR not set; skipping DLL copy")
     }
 }
