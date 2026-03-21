@@ -683,7 +683,7 @@ fn try_read_audio_info_symphonia(path: &Path, preview_points: usize) -> Option<W
         Some((format, decoder, sr, ch))
     }
 
-    let (mut format1, mut decoder1, sample_rate, channels) = open(path)?;
+    let (mut format1, _decoder1, sample_rate, channels) = open(path)?;
 
     // Pass 1: count total frames
     let mut total_frames: u64 = 0;

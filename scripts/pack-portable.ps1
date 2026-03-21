@@ -35,7 +35,25 @@ $ErrorActionPreference = "Stop"
 # ===== 路径定义 =====
 $ProjectRoot = Resolve-Path "$PSScriptRoot\.."
 $TauriDir = Join-Path $ProjectRoot "backend\src-tauri"
-$TargetRelease = Join-Path $ProjectRoot "backend\src-tauri\target\x86_64-pc-windows-msvc\release"
+$TauriTargetRoot = Join-Path $TauriDir "target"
+
+# Detect target triple: prefer x86_64 but fall back to aarch64 if present.
+$DetectedTriple = $null
+$PossibleTriples = @("x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc")
+foreach ($t in $PossibleTriples) {
+    $p = Join-Path $TauriTargetRoot (Join-Path $t "release")
+    if (Test-Path $p) {
+        $DetectedTriple = $t
+        $TargetRelease = $p
+        break
+    }
+}
+
+# If no triple-specific release directory exists yet, default to x86_64 path (build may create it later).
+if (-not $DetectedTriple) {
+    $DetectedTriple = "x86_64-pc-windows-msvc"
+    $TargetRelease = Join-Path $TauriTargetRoot "x86_64-pc-windows-msvc\release"
+}
 
 # 从 tauri.conf.json 读取版本号和产品名
 $TauriConf = Get-Content (Join-Path $TauriDir "tauri.conf.json") -Raw | ConvertFrom-Json
@@ -49,7 +67,16 @@ if (-not $OutputDir) {
 
 $PortableDirName = "$ProductName"
 $TempDir = Join-Path $OutputDir $PortableDirName
-$ZipName = "$ProductName-v$Version-portable-win-x64.zip"
+
+# Determine arch short name for filenames
+if ($DetectedTriple -like "*aarch64*") {
+    $ArchShort = "arm64"
+}
+else {
+    $ArchShort = "x64"
+}
+
+$ZipName = "$ProductName-v$Version-portable-win-$ArchShort.zip"
 $ZipPath = Join-Path $OutputDir $ZipName
 
 Write-Host "============================================" -ForegroundColor Cyan
@@ -116,9 +143,13 @@ $Resources = @(
     @{ Src = Join-Path $TauriDir "resources\models\nsf_hifigan\pc_nsf_hifigan.onnx"; Dst = "models\nsf_hifigan\pc_nsf_hifigan.onnx" },
     @{ Src = Join-Path $TauriDir "resources\models\nsf_hifigan\config.json";          Dst = "models\nsf_hifigan\config.json" },
     @{ Src = Join-Path $TauriDir "resources\models\hnsep\hnsep.onnx";                 Dst = "models\hnsep\hnsep.onnx" },
-    @{ Src = Join-Path $TauriDir "resources\models\hnsep\config.yaml";                Dst = "models\hnsep\config.yaml" },
-    @{ Src = Join-Path $TauriDir "third_party\vslib\vslib_x64.dll";                   Dst = "vslib_x64.dll" }
+    @{ Src = Join-Path $TauriDir "resources\models\hnsep\config.yaml";                Dst = "models\hnsep\config.yaml" }
 )
+
+# Only include vslib_x64.dll for x86_64 builds
+if ($ArchShort -eq "x64") {
+    $Resources += @{ Src = Join-Path $TauriDir "third_party\vslib\vslib_x64.dll"; Dst = "vslib_x64.dll" }
+}
 
 # 检查所有资源文件是否存在
 $Missing = @()
@@ -203,8 +234,14 @@ Write-Host "[4/5] 压缩完成 ✓" -ForegroundColor Green
 # ===== 步骤 5: 复制 NSIS 安装包 =====
 Write-Host "[5/5] 复制 NSIS 安装包到 dist..." -ForegroundColor Yellow
 
-$NsisDir = Join-Path $ProjectRoot "backend\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis"
-$NsisPattern = "${ProductName}_${Version}_x64-setup.exe"
+# NSIS installer path: look under the detected triple's bundle dir
+$NsisDir = Join-Path $ProjectRoot (Join-Path "backend\src-tauri\target" (Join-Path $DetectedTriple "release\bundle\nsis"))
+if ($ArchShort -eq "x64") {
+    $NsisPattern = "${ProductName}_${Version}_x64-setup.exe"
+}
+else {
+    $NsisPattern = "${ProductName}_${Version}_arm64-setup.exe"
+}
 $NsisExePath = Join-Path $NsisDir $NsisPattern
 
 if (Test-Path $NsisExePath) {

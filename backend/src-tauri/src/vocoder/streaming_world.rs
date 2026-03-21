@@ -455,8 +455,6 @@ impl StreamingWorldSynthesizer {
             return vec![];
         }
 
-        let mut synthesis_count = 0usize;
-
         loop {
             // IsLocked 返回 1 表示环形缓冲区既满又无法合成，需要 refresh
             if unsafe { IsLocked(self.inner.as_mut()) } != 0 {
@@ -467,7 +465,6 @@ impl StreamingWorldSynthesizer {
             if ok == 0 {
                 break;
             }
-            synthesis_count += 1;
 
             let buffer_ptr = unsafe { get_synth_buffer(self.inner.as_mut()) };
 

@@ -57,7 +57,7 @@ use crate::state::AppState;
 use tauri::{State, Window};
 
 // This is used by the window close handler (crate-internal), not a tauri command.
-pub(crate) use project::save_project_to_path_inner;
+// pub(crate) use project::save_project_to_path_inner;
 
 // ===================== core =====================
 

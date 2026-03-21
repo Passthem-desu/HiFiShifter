@@ -1,7 +1,7 @@
 use crate::state::{Clip, TimelineState};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 use std::time::Instant;
 
@@ -363,7 +363,7 @@ pub fn schedule_clip_pitch_jobs(
     tl: &TimelineState,
     engine_tx: &mpsc::Sender<crate::audio_engine::types::EngineCommand>,
     app_handle: Option<&tauri::AppHandle>,
-    out_rate: u32,
+    _out_rate: u32,
 ) {
     eprintln!("[pitch_clip] schedule_clip_pitch_jobs called, clips={}, app_handle={}",
         tl.clips.len(), app_handle.is_some());

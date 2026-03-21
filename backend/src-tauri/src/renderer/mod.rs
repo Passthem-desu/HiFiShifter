@@ -17,11 +17,10 @@ pub(crate) mod chain;
 pub(crate) mod vslib_processor;
 
 pub use traits::{
-    Renderer, RenderContext, RendererCapabilities,
-    ClipProcessor, ClipProcessContext, ProcessorCapabilities, ParamDescriptor, ParamKind,
+    Renderer,
+    ClipProcessor, ClipProcessContext, ParamDescriptor, ParamKind,
 };
-pub use utils::{edit_midi_at_time_or_none, clip_midi_at_time};
-pub use chain::{ProcessingStage, StageContext, ProcessorChain};
+pub use chain::ProcessingStage;
 
 use crate::state::SynthPipelineKind;
 

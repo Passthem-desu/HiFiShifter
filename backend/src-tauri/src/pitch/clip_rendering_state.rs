@@ -3,7 +3,7 @@
 //! 支持 clip 级别的渲染状态跟踪，用于实现增量渲染和动态暂停/恢复机制。
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, atomic::{AtomicU32, Ordering}};
+use std::sync::{Mutex, atomic::{AtomicU32, Ordering}};
 
 /// Clip 渲染状态枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
