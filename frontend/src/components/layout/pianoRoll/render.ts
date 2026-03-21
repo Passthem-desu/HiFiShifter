@@ -305,8 +305,8 @@ export function drawPianoRoll(args: {
     valueToY: (param: ParamName, v: number, h: number) => number;
     clipPeaks: ClipPeaksEntry[];
     paramView: ParamViewSegment | null;
-    secondaryParamView: ParamViewSegment | null;
-    secondaryParamId?: ParamName | null;
+    secondaryParamViews: Partial<Record<ParamName, ParamViewSegment>>;
+    secondaryParamIds: ParamName[];
     showSecondaryParam: boolean;
     overlayText?: string | null;
     liveEditOverride: { key: string; edit: number[] } | null;
@@ -345,8 +345,8 @@ export function drawPianoRoll(args: {
         valueToY,
         clipPeaks,
         paramView,
-        secondaryParamView,
-        secondaryParamId,
+        secondaryParamViews,
+        secondaryParamIds,
         showSecondaryParam,
         overlayText,
         liveEditOverride,
@@ -887,39 +887,52 @@ export function drawPianoRoll(args: {
     // 副参数曲线（半透明、细线，绘制在主参数曲线下方�?
     if (
         showSecondaryParam &&
-        secondaryParamId &&
-        secondaryParamView &&
-        Math.max(
-            secondaryParamView.orig.length,
-            secondaryParamView.edit.length,
-        ) >= 2
+        secondaryParamIds.length > 0
     ) {
-        const secondaryValues = resolveSecondaryOverlayValues({
-            orig: secondaryParamView.orig,
-            edit: secondaryParamView.edit,
+        const secondaryPalette = [
+            "rgba(100, 200, 255, 0.45)",
+            "rgba(255, 180, 60, 0.45)",
+            "rgba(160, 120, 255, 0.45)",
+            "rgba(90, 220, 160, 0.45)",
+        ];
+        secondaryParamIds.forEach((paramId, index) => {
+            const secondaryParamView = secondaryParamViews[paramId];
+            if (
+                !secondaryParamView ||
+                Math.max(
+                    secondaryParamView.orig.length,
+                    secondaryParamView.edit.length,
+                ) < 2
+            ) {
+                return;
+            }
+            const secondaryValues = resolveSecondaryOverlayValues({
+                orig: secondaryParamView.orig,
+                edit: secondaryParamView.edit,
+            });
+            const secondaryColor =
+                paramId === "pitch"
+                    ? "rgba(100, 200, 255, 0.45)"
+                    : secondaryPalette[index % secondaryPalette.length];
+            ctx.save();
+            ctx.strokeStyle = secondaryColor;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([]);
+            drawCurveTimed({
+                ctx,
+                values: secondaryValues,
+                param: paramId,
+                w,
+                h,
+                startFrame: secondaryParamView.startFrame,
+                stride: secondaryParamView.stride,
+                framePeriodMs: secondaryParamView.framePeriodMs,
+                visibleStartSec,
+                visibleDurSec,
+                valueToY,
+            });
+            ctx.restore();
         });
-        const secondaryColor =
-            secondaryParamId === "pitch"
-                ? "rgba(100, 200, 255, 0.45)"
-                : "rgba(255, 180, 60, 0.45)";
-        ctx.save();
-        ctx.strokeStyle = secondaryColor;
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([]);
-        drawCurveTimed({
-            ctx,
-            values: secondaryValues,
-            param: secondaryParamId,
-            w,
-            h,
-            startFrame: secondaryParamView.startFrame,
-            stride: secondaryParamView.stride,
-            framePeriodMs: secondaryParamView.framePeriodMs,
-            visibleStartSec,
-            visibleDurSec,
-            valueToY,
-        });
-        ctx.restore();
     }
 
     if (paramView && paramView.orig.length >= 2 && paramView.edit.length >= 2) {

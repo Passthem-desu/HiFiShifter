@@ -79,7 +79,7 @@ import { getParamShiftStep } from "./pianoRoll/paramShiftStep";
 import { getParamEditorWheelAction } from "./pianoRoll/wheelGesture";
 import { pianoKeySound } from "../../utils/PianoKeySound";
 import {
-    getActiveSecondaryParamId,
+    getVisibleSecondaryParamIds,
     toggleSecondaryParamVisibility,
 } from "./pianoRoll/secondaryOverlaySelection";
 import type {
@@ -612,13 +612,12 @@ export const PianoRollPanel: React.FC = () => {
     const pitchEnabled =
         editParam !== "pitch" || pitchHardDisableReason == null;
 
-    const activeSecondaryParamId = useMemo(() => {
-        const next = getActiveSecondaryParamId({
+    const visibleSecondaryParamIds = useMemo(() => {
+        return getVisibleSecondaryParamIds({
             editParam,
             processorParamIds: processorParamsRef.current.map((p) => p.id as ParamName),
             secondaryParamVisible,
         });
-        return next;
     }, [editParam, processorParams, secondaryParamVisible]);
 
     const dynamicProjectSec = useMemo(
@@ -869,7 +868,7 @@ export const PianoRollPanel: React.FC = () => {
     const {
         paramView,
         setParamView,
-        secondaryParamView,
+        secondaryParamViews,
         bumpRefreshToken,
         refreshNow,
         refreshSecondaryNow,
@@ -877,7 +876,7 @@ export const PianoRollPanel: React.FC = () => {
         isLoading,
     } = usePianoRollData({
         editParam,
-        secondaryParamId: activeSecondaryParamId,
+        secondaryParamIds: visibleSecondaryParamIds,
         pitchEnabled,
         paramsEpoch:
             (s as unknown as { paramsEpoch?: number }).paramsEpoch ?? 0,
@@ -894,15 +893,6 @@ export const PianoRollPanel: React.FC = () => {
         liveEditActiveRef,
     });
 
-    const visibleSecondaryParamView = useMemo(() => {
-        if (!activeSecondaryParamId || !secondaryParamView) {
-            return null;
-        }
-        return secondaryParamView.key.includes(`|${activeSecondaryParamId}|`)
-            ? secondaryParamView
-            : null;
-    }, [activeSecondaryParamId, secondaryParamView]);
-
     const refreshSecondaryNowRef = useRef(refreshSecondaryNow);
     useEffect(() => {
         refreshSecondaryNowRef.current = refreshSecondaryNow;
@@ -913,12 +903,12 @@ export const PianoRollPanel: React.FC = () => {
             invalidate();
             return;
         }
-        if (activeSecondaryParamId) {
+        if (visibleSecondaryParamIds.length > 0) {
             void refreshSecondaryNowRef.current();
             return;
         }
         invalidate();
-    }, [activeSecondaryParamId, invalidate, rootTrackId]);
+    }, [visibleSecondaryParamIds, invalidate, rootTrackId]);
 
     const handleMidiImported = useCallback(
         (_result: { notes_imported: number; frames_touched: number }) => {
@@ -973,7 +963,7 @@ export const PianoRollPanel: React.FC = () => {
     }, [
         clipPeaks,
         paramView,
-        visibleSecondaryParamView,
+        secondaryParamViews,
         pxPerBeat,
         viewSize.w,
         viewSize.h,
@@ -982,7 +972,7 @@ export const PianoRollPanel: React.FC = () => {
 
     useEffect(() => {
         invalidate();
-    }, [editParam, activeSecondaryParamId, themeMode, invalidate]);
+    }, [editParam, visibleSecondaryParamIds, themeMode, invalidate]);
 
     // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后�?
     // useEffect 已移�?detectedPitchCurves useMemo 定义之后，见下方�?
@@ -1065,9 +1055,9 @@ export const PianoRollPanel: React.FC = () => {
             valueToY,
             clipPeaks,
             paramView,
-            secondaryParamView: visibleSecondaryParamView,
-            secondaryParamId: activeSecondaryParamId,
-            showSecondaryParam: activeSecondaryParamId != null,
+            secondaryParamViews,
+            secondaryParamIds: visibleSecondaryParamIds,
+            showSecondaryParam: visibleSecondaryParamIds.length > 0,
             overlayText:
                 editParam === "pitch" && !pitchEnabled
                     ? pitchHardDisableReason
