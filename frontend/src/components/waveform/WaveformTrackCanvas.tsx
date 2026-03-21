@@ -7,8 +7,8 @@
  * 渲染流程：
  *   1. Canvas 宽度 = 视口可见宽度，通过 CSS left 偏移跟随水平滚动
  *   2. 遍历所有可见 clip，对每个 clip：
- *      a. waveformMipmapStore.getResampledSlice() 获取该 clip 对应源文件的峰值数据
- *         （整文件级三级 mipmap 缓存 + 零拷贝切片 + 内置 resample）
+ *      a. waveformMipmapStore.getInterleavedSlice() 获取该 clip 对应源文件的稳定峰值切片
+ *         （整文件级三级 mipmap 缓存 + 零拷贝切片）
  *      b. applyGainsToPeaks 应用增益/淡入淡出
  *      c. ctx.save() / ctx.clip() 限制绘制区域到 clip 的像素边界
  *      d. renderWaveform() 绘制波形
@@ -22,7 +22,7 @@
  *   - Float32Array 零拷贝切片：无需每帧分配新 buffer
  *
  * 数据流（v2 mipmap 架构）：
- *   waveformMipmapStore.getResampledSlice() → interleaved Float32Array → applyGainsToPeaks → renderWaveform
+ *   waveformMipmapStore.getInterleavedSlice() → interleaved Float32Array → applyGainsToPeaks → renderWaveform
  */
 
 import React from "react";
@@ -164,14 +164,17 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             // 可见区域在 canvas 上的像素位置
             const visLeftPx = Math.max(0, (visStartSec - canvasStartSec) * pxPerSec);
             const visRightPx = Math.min(displayW, (visEndSec - canvasStartSec) * pxPerSec);
-            const visWidthPx = Math.max(1, Math.ceil(visRightPx - visLeftPx));
-
-            // ========================================
-            // 计算源文件时间范围（可见部分）
-            // ========================================
             const pr = Math.max(1e-6, clip.playbackRate);
             const clipLen = clip.lengthSec;
             const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
+            const sampleStartSec = visStartSec;
+            const sampleEndSec = visEndSec;
+            if (sampleEndSec <= sampleStartSec) continue;
+            const visibleWidthPx = Math.max(1, Math.ceil(visRightPx - visLeftPx));
+
+            // ========================================
+            // 计算源文件时间范围（与实际绘制窗口对齐）
+            // ========================================
             const sampleRate = clip.sourceSampleRate || 44100;
             const spp = Math.max(1, Math.round(sampleRate / pxPerSec));
             const previousLevel = lastLevelByPathRef.current[clip.sourcePath];
@@ -182,8 +185,8 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             lastLevelByPathRef.current[clip.sourcePath] = stableLevel;
 
             // 可见部分在 clip 内的比例
-            const ratioStart = (visStartSec - clipStartSec) / Math.max(1e-6, clipLen);
-            const ratioEnd = (visEndSec - clipStartSec) / Math.max(1e-6, clipLen);
+            const ratioStart = (sampleStartSec - clipStartSec) / Math.max(1e-6, clipLen);
+            const ratioEnd = (sampleEndSec - clipStartSec) / Math.max(1e-6, clipLen);
 
             const clipSourceEndSec =
                 Number(clip.sourceEndSec ?? clip.durationSec) || clip.durationSec;
@@ -204,23 +207,21 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             // ========================================
             // 从 mipmap 缓存获取 resample 后的数据
             // ========================================
-            const result = waveformMipmapStore.getResampledSlice(
+            const result = waveformMipmapStore.getInterleavedSlice(
                 clip.sourcePath,
-                spp,
+                stableLevel,
                 sourceTimeStart,
                 sourceDuration,
-                visWidthPx,
-                stableLevel,
             );
 
             if (!result || result.interleaved.length < 4) continue;
 
             // 计算 clip 内的偏移
-            const clipPixelOffset = Math.floor((visStartSec - clipStartSec) * pxPerSec);
+            const clipPixelOffset = (visStartSec - clipStartSec) * pxPerSec;
 
             // 构建渲染参数
             const params: WaveformRenderParams = {
-                canvasWidth: visWidthPx,
+                canvasWidth: visibleWidthPx,
                 canvasHeight: displayH,
                 centerY: displayH / 2,
                 sourceStartSec,
@@ -235,7 +236,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 dataStartSec: result.dataStartSec,
                 dataDurationSec: result.dataDurationSec,
                 clipPixelOffset,
-                clipTotalWidthPx: Math.max(1, Math.floor(clipWidthPx)),
+                clipTotalWidthPx: Math.max(1, clipWidthPx),
             };
 
             // 应用增益（音量 + 淡入淡出）

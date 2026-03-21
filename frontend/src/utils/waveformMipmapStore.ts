@@ -310,6 +310,54 @@ class WaveformMipmapStoreImpl {
         return this.getSliceFromPeaks(peaks, startSec, durationSec);
     }
 
+    getInterleavedSlice(
+        sourcePath: string,
+        preferredLevel: WaveformMipmapLevel,
+        startSec: number,
+        durationSec: number,
+    ): {
+        interleaved: Float32Array;
+        dataStartSec: number;
+        dataDurationSec: number;
+    } | null {
+        let peaks = this.getPeaks(sourcePath, preferredLevel);
+        if (!peaks) {
+            peaks = this.getNearestLoadedLevel(sourcePath, preferredLevel);
+        }
+        if (!peaks) return null;
+
+        const slice = this.getSliceFromPeaks(peaks, startSec, durationSec);
+        if (!slice) return null;
+
+        const { sampleRate, divisionFactor } = peaks;
+        const startIdx = Math.max(
+            0,
+            Math.floor((startSec * sampleRate) / divisionFactor),
+        );
+        const endIdx = Math.min(
+            peaks.min.length,
+            Math.ceil(((startSec + durationSec) * sampleRate) / divisionFactor),
+        );
+        const dataStartSec = (startIdx * divisionFactor) / sampleRate;
+        const dataDurationSec = Math.max(
+            0,
+            ((endIdx - startIdx) * divisionFactor) / sampleRate,
+        );
+
+        const len = slice.min.length;
+        const interleaved = new Float32Array(len * 2);
+        for (let i = 0; i < len; i++) {
+            interleaved[i * 2] = slice.min[i] ?? 0;
+            interleaved[i * 2 + 1] = slice.max[i] ?? 0;
+        }
+
+        return {
+            interleaved,
+            dataStartSec,
+            dataDurationSec,
+        };
+    }
+
     /**
      * 预加载文件的所有三级 mipmap 数据
      *

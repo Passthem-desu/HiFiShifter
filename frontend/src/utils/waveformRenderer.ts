@@ -345,12 +345,15 @@ export function renderWaveform(
     const timelineOverlapEnd = (overlapEndSec - sourceStartSec) / playbackRate;
 
     // 重叠范围映射到 clip 全局像素
-    const globalPxStart = Math.floor((timelineOverlapStart / clipDuration) * clipTotalW);
-    const globalPxEnd = Math.ceil((timelineOverlapEnd / clipDuration) * clipTotalW);
+    const globalPxStart = (timelineOverlapStart / clipDuration) * clipTotalW;
+    const globalPxEnd = (timelineOverlapEnd / clipDuration) * clipTotalW;
 
     // 裁剪到当前 canvas 范围 [0, canvasWidth)
-    const localPxStart = Math.max(0, globalPxStart - clipPixelOffset);
-    const localPxEnd = Math.min(canvasWidth - 1, globalPxEnd - clipPixelOffset);
+    const localPxStart = Math.max(0, Math.floor(globalPxStart - clipPixelOffset));
+    const localPxEnd = Math.min(
+        canvasWidth - 1,
+        Math.ceil(globalPxEnd - clipPixelOffset) - 1,
+    );
 
     if (localPxEnd <= localPxStart) return;
 
