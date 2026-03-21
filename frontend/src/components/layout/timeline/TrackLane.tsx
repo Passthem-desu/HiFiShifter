@@ -136,7 +136,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
             let ghostTrackId = initial.trackId;
             if (ghostDrag.allowTrackMove) {
                 if (ghostDrag.targetTrackId == null) {
-                    ghostTrackId = initial.trackId;
+                    continue;
                 } else {
                     const sourceIndex = trackIndexById[initial.trackId];
                     const targetIndex =

@@ -34,7 +34,10 @@ import {
 import type { ClipTemplate } from "../../features/session/sessionTypes";
 import { dbToGain } from "./timeline/math";
 import { computeAnchoredHorizontalZoom } from "../../utils/horizontalZoom";
-import { useClipDrag } from "./timeline/hooks/useClipDrag";
+import {
+    NEW_TRACK_SENTINEL,
+    useClipDrag,
+} from "./timeline/hooks/useClipDrag";
 import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
 import { useKeyboardShortcuts } from "./timeline/hooks/useKeyboardShortcuts";
@@ -86,6 +89,7 @@ export const TimelinePanel: React.FC = () => {
     const lastClickedClipIdRef = useRef<string | null>(null);
     const playheadRef = useRef<HTMLDivElement | null>(null);
     const dropPreviewRef = useRef<HTMLDivElement | null>(null);
+    const pendingDropDurationPathRef = useRef<string | null>(null);
     const [scrollLeft, setScrollLeft] = useState(0);
     const [pxPerSec, setPxPerSec] = useState(() => {
         const stored = Number(localStorage.getItem("hifishifter.pxPerSec"));
@@ -397,6 +401,7 @@ export const TimelinePanel: React.FC = () => {
                         if (type === "enter" || type === "over") {
                             if (primaryPath) {
                                 tauriDraggedPathRef.current = primaryPath;
+                                ensureDropPreviewDuration(primaryPath);
                             }
                             // On some platforms, `paths` may only be populated on `drop`.
                             // Still update the ghost position on every `over`.
@@ -409,6 +414,7 @@ export const TimelinePanel: React.FC = () => {
                                 if (prev && dropPreviewRef.current) {
                                     dropPreviewRef.current.style.left = `${Math.max(0, beat * pxPerSecRef.current)}px`;
                                     dropPreviewRef.current.style.top = `${rowTopForTrackId(trackId) + 8}px`;
+                                    dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(prev.durationSec)}px`;
                                 }
 
                                 if (!prev || prev.trackId !== trackId || prev.path !== path) {
@@ -435,6 +441,9 @@ export const TimelinePanel: React.FC = () => {
                             if (primaryPath) {
                                 tauriDraggedPathRef.current = primaryPath;
                                 tauriLastDropPathRef.current = primaryPath;
+                            }
+                            if (primaryPath) {
+                                ensureDropPreviewDuration(primaryPath);
                             }
                             setDropPreview(null);
 
@@ -542,6 +551,11 @@ export const TimelinePanel: React.FC = () => {
             if (detail.type === "duration") {
                 setDropPreview((prev) => {
                     if (prev && prev.path === detail.filePath) {
+                        if (dropPreviewRef.current) {
+                            const nextDuration =
+                                Number((detail as any).durationSec) || 0;
+                            dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(nextDuration)}px`;
+                        }
                         return {
                             ...prev,
                             durationSec: (detail as any).durationSec,
@@ -569,9 +583,11 @@ export const TimelinePanel: React.FC = () => {
                         if (prev && dropPreviewRef.current) {
                             dropPreviewRef.current.style.left = `${Math.max(0, beat * pxPerSecRef.current)}px`;
                             dropPreviewRef.current.style.top = `${rowTopForTrackId(trackId) + 8}px`;
+                            dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(prev.durationSec)}px`;
                         }
                         // 如果切换了轨道或文件，才触发真正的 React 重绘
                         if (!prev || prev.trackId !== trackId || prev.path !== path) {
+                            ensureDropPreviewDuration(path);
                             return {
                                 path,
                                 fileName,
@@ -872,6 +888,37 @@ export const TimelinePanel: React.FC = () => {
             return s.tracks.length * rowHeight;
         }
         return idx * rowHeight;
+    }
+
+    function ensureDropPreviewDuration(path: string) {
+        if (!path || pendingDropDurationPathRef.current === path) return;
+        pendingDropDurationPathRef.current = path;
+        void import("../../services/api/fileBrowser")
+            .then(({ fileBrowserApi }) => fileBrowserApi.getAudioFileInfo(path))
+            .then((info) => {
+                setDropPreview((prev) => {
+                    if (!prev || prev.path !== path) return prev;
+                    return {
+                        ...prev,
+                        durationSec: Math.max(
+                            0,
+                            Number(info?.durationSec ?? prev.durationSec) || 0,
+                        ),
+                    };
+                });
+            })
+            .catch(() => undefined)
+            .finally(() => {
+                if (pendingDropDurationPathRef.current === path) {
+                    pendingDropDurationPathRef.current = null;
+                }
+            });
+    }
+
+    function getDropPreviewWidthPx(durationSec: number) {
+        return durationSec > 0
+            ? Math.max(1, pxPerSecRef.current * durationSec)
+            : 80;
     }
 
     const setPlayheadFromClientX = React.useCallback(
@@ -1210,6 +1257,32 @@ export const TimelinePanel: React.FC = () => {
             void dispatch(selectClipRemote(clipId));
         },
     });
+
+    const newTrackGhostClips = useMemo(() => {
+        if (clipDropNewTrack) {
+            const moved = s.clips.filter(
+                (clip) => clip.trackId === NEW_TRACK_SENTINEL,
+            );
+            if (moved.length > 0) return moved;
+        }
+        if (!ghostDrag || ghostDrag.targetTrackId != null) {
+            return [];
+        }
+        return ghostDrag.clipIds
+            .map((clipId) => {
+                const initial = ghostDrag.initialById[clipId];
+                const clip = s.clips.find((item) => item.id === clipId);
+                if (!initial || !clip) return null;
+                return {
+                    ...clip,
+                    startSec: Math.max(
+                        0,
+                        initial.startSec + ghostDrag.deltaSec,
+                    ),
+                };
+            })
+            .filter((clip): clip is typeof s.clips[number] => clip != null);
+    }, [clipDropNewTrack, ghostDrag, s.clips]);
 
     const startClipDrag = React.useCallback(
         (
@@ -1904,6 +1977,9 @@ export const TimelinePanel: React.FC = () => {
                                 : hasDomFile
                                     ? String(dt?.files?.[0]?.name ?? "Audio")
                                     : "Audio");
+                        if (path) {
+                            ensureDropPreviewDuration(path);
+                        }
                         setDropPreview({
                             path,
                             fileName,
@@ -2120,6 +2196,36 @@ export const TimelinePanel: React.FC = () => {
                                             "color-mix(in oklab, var(--qt-highlight) 10%, transparent)",
                                     }}
                                 />
+                                {newTrackGhostClips.map((clip) => (
+                                    <div
+                                        key={`new-track-ghost-${clip.id}`}
+                                        className="absolute opacity-60"
+                                        style={{
+                                            left: Math.max(0, clip.startSec * pxPerSec),
+                                            width: Math.max(1, clip.lengthSec * pxPerSec),
+                                            top: 0,
+                                            height: rowHeight - 8,
+                                            paddingTop: 8,
+                                        }}
+                                    >
+                                        <div
+                                            className="absolute left-0 right-0 top-0 rounded-t-sm"
+                                            style={{
+                                                height: 18,
+                                                backgroundColor:
+                                                    "color-mix(in oklab, var(--qt-highlight) 55%, transparent)",
+                                            }}
+                                        />
+                                        <div
+                                            className="absolute left-0 right-0 bottom-0 rounded-sm border border-dashed border-white/70"
+                                            style={{
+                                                top: 18,
+                                                backgroundColor:
+                                                    "color-mix(in oklab, var(--qt-highlight) 20%, transparent)",
+                                            }}
+                                        />
+                                    </div>
+                                ))}
                             </div>
                         ) : null}
 
@@ -2181,10 +2287,14 @@ export const TimelinePanel: React.FC = () => {
                                     top:
                                         rowTopForTrackId(dropPreview.trackId) +
                                         8,
-                                    width: Math.max(
-                                        80,
-                                        pxPerSec * dropPreview.durationSec,
-                                    ),
+                                    width:
+                                        dropPreview.durationSec > 0
+                                            ? Math.max(
+                                                1,
+                                                pxPerSec *
+                                                    dropPreview.durationSec,
+                                            )
+                                            : 80,
                                     height: rowHeight - 16,
                                 }}
                             >

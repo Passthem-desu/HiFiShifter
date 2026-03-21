@@ -25,7 +25,7 @@ import {
 } from "./autoCrossfade";
 import { webApi } from "../../../../services/webviewApi";
 
-const NEW_TRACK_SENTINEL = "__hs_new_track__";
+export const NEW_TRACK_SENTINEL = "__hs_new_track__";
 
 /** copyMode 拖动时的 ghost 预览信息 */
 export type GhostDragInfo = {
