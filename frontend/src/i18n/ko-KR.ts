@@ -295,7 +295,7 @@ export const koKR = {
         kb_pianoroll_shift_param_down_selection: "파라미터 라인 아래로 이동 (선택 범위)",
     kb_modifier_slip_edit: "Slip 편집 (클립 드래그 중 누르기)",
     kb_modifier_stretch: "타임 스트레치 (엣지 드래그 중 누르기)",
-    kb_modifier_no_snap: "자유 이동 (클립 드래그 중 누르기)",
+    kb_modifier_no_snap: "드래그 중 그리드 스냅을 전환합니다 (누르면 현재 그리드 스냅을 반전)",
     kb_modifier_copy_drag: "복사 드래그 (클립 드래그 중 누르기)",
     kb_modifier_horizontal_zoom: "수평 줌 (누른 채 스크롤)",
     kb_modifier_pr_vzoom: "수직 줌 (누른 채 스크롤)",

@@ -294,7 +294,7 @@ export const zhCN = {
     kb_mode_vibrato_tool: "切换到直线/颤音工具",
     kb_modifier_slip_edit: "Slip 编辑（拖动音频块时按住）",
     kb_modifier_stretch: "拉伸（拖动边缘时按住）",
-    kb_modifier_no_snap: "自由移动（拖动音频块时按住）",
+    kb_modifier_no_snap: "拖动时切换网格吸附（按住可反转当前网格吸附）",
     kb_modifier_copy_drag: "复制拖动（拖动音频块时按住）",
     kb_modifier_horizontal_zoom: "水平缩放（按住+滚轮）",
     kb_modifier_pr_vzoom: "垂直缩放（按住+滚轮）",

@@ -221,11 +221,9 @@ export function useEditDrag(deps: {
                 drag.type === "trim_right" ||
                 drag.type === "stretch_left" ||
                 drag.type === "stretch_right";
-            if (
-                shouldSnap &&
-                gridSnapEnabled &&
-                !isModifierActive(noSnapKb, ev)
-            ) {
+            const noSnapActive = isModifierActive(noSnapKb, ev);
+            const effectiveSnap = gridSnapEnabled ? !noSnapActive : noSnapActive;
+            if (shouldSnap && effectiveSnap) {
                 beat = snapBeat(beat);
             }
 

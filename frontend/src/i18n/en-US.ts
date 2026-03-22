@@ -295,7 +295,7 @@ export const enUS = {
     kb_pianoroll_shift_param_down_selection: "Shift Param Down (selection range)",
     kb_modifier_slip_edit: "Slip Edit (hold while dragging clip)",
     kb_modifier_stretch: "Time Stretch (hold while dragging edge)",
-    kb_modifier_no_snap: "Free Movement (hold while dragging clip)",
+    kb_modifier_no_snap: "Toggle grid snap while dragging (hold to invert current grid snap)",
     kb_modifier_copy_drag: "Copy Drag (hold while dragging clip)",
     kb_modifier_horizontal_zoom: "Horizontal Zoom (hold + scroll)",
     kb_modifier_pr_vzoom: "Vertical Zoom (hold + scroll)",

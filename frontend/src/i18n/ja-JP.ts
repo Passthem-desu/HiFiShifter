@@ -295,7 +295,7 @@ export const jaJP = {
     kb_pianoroll_shift_param_down_selection: "パラメーターライン下移動（選択範囲）",
     kb_modifier_slip_edit: "Slip 編集（クリップドラッグ中に押す）",
     kb_modifier_stretch: "タイムストレッチ（エッジドラッグ中に押す）",
-    kb_modifier_no_snap: "フリー移動（クリップドラッグ中に押す）",
+    kb_modifier_no_snap: "ドラッグ中にグリッド吸着を切り替えます（押すと現在のグリッド吸着を反転）",
     kb_modifier_copy_drag: "コピードラッグ（クリップドラッグ中に押す）",
     kb_modifier_horizontal_zoom: "水平ズーム（押しながらスクロール）",
     kb_modifier_pr_vzoom: "垂直ズーム（押しながらスクロール）",
