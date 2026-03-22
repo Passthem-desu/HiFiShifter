@@ -26,7 +26,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "edit.redo": { key: "y", ctrl: true },
     "edit.selectAll": { key: "a", ctrl: true },
     "edit.deselect": { key: "r", ctrl: true },
-    "edit.initialize": { key: "delete" },
+    "edit.initialize": { key: "backspace" },
     "edit.transposeCents": { key: "f", ctrl: true },
     "edit.transposeDegrees": { key: "i", ctrl: true },
     "edit.setPitch": { key: "t", ctrl: true },
