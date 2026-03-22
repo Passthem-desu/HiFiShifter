@@ -96,8 +96,7 @@ export const enUS = {
         "Select a non-None pitch algorithm to enable pitch editing",
     pitch_backend_unavailable:
         "Pitch backend unavailable (check WORLD DLL / ONNX model)",
-    pitch_edit_not_modified_hint:
-        "No edit yet: curve matches original pitch",
+    pitch_edit_not_modified_hint: "No edit yet: curve matches original pitch",
     pitch_status_label: "Pitch",
     pitch_status_off: "Off",
     pitch_status_pending: "Analyzing…",
@@ -292,18 +291,23 @@ export const enUS = {
     kb_pianoroll_shift_param_up: "Shift Param Up (clip range)",
     kb_pianoroll_shift_param_down: "Shift Param Down (clip range)",
     kb_pianoroll_shift_param_up_selection: "Shift Param Up (selection range)",
-    kb_pianoroll_shift_param_down_selection: "Shift Param Down (selection range)",
+    kb_pianoroll_shift_param_down_selection:
+        "Shift Param Down (selection range)",
     kb_modifier_slip_edit: "Slip Edit (hold while dragging clip)",
     kb_modifier_stretch: "Time Stretch (hold while dragging edge)",
-    kb_modifier_no_snap: "Toggle grid snap while dragging (hold to invert current grid snap)",
+    kb_modifier_no_snap:
+        "Toggle grid snap while dragging (hold to invert current grid snap)",
     kb_modifier_copy_drag: "Copy Drag (hold while dragging clip)",
     kb_modifier_horizontal_zoom: "Horizontal Zoom (hold + scroll)",
     kb_modifier_pr_vzoom: "Vertical Zoom (hold + scroll)",
     kb_modifier_param_morph: "Param Morph (hold inside param selection)",
     kb_modifier_param_fine_adjust: "Param Fine Adjust (hold)",
-    kb_modifier_vibrato_amplitude_adjust: "Vibrato Amplitude Adjust (hold + wheel)",
-    kb_modifier_vibrato_frequency_adjust: "Vibrato Frequency Adjust (hold + wheel)",
-    kb_modifier_piano_keys_scroll_v: "Piano Keys Vertical Scroll (hold + wheel)",
+    kb_modifier_vibrato_amplitude_adjust:
+        "Vibrato Amplitude Adjust (hold + wheel)",
+    kb_modifier_vibrato_frequency_adjust:
+        "Vibrato Frequency Adjust (hold + wheel)",
+    kb_modifier_piano_keys_scroll_v:
+        "Piano Keys Vertical Scroll (hold + wheel)",
     kb_modifier_piano_keys_zoom_v: "Piano Keys Vertical Zoom (hold + wheel)",
     kb_group_mode: "Mode",
     kb_mode_toggle: "Mode Toggle",
@@ -319,8 +323,7 @@ export const enUS = {
     kb_quick_search_preview: "Preview / Audition",
     kb_quick_search_confirm: "Place Audio",
     kb_quick_search_close: "Close",
-    vs_paste_clipboard_not_found:
-        "VocalShifter clipboard data was not found.",
+    vs_paste_clipboard_not_found: "VocalShifter clipboard data was not found.",
     vs_paste_clipboard_invalid_format:
         "Clipboard file format is invalid (size is not a multiple of 0x80, or record is corrupted).",
     vs_paste_clipboard_io_error:

@@ -22,7 +22,8 @@ export const jaJP = {
     menu_import_reaper: "Reaper プロジェクトをインポート...",
     menu_import_vocalshifter: "VocalShifter プロジェクトをインポート...",
     menu_paste_reaper_clipboard: "Reaper クリップボードデータをペースト",
-    menu_paste_vocalshifter_clipboard: "VocalShifter クリップボードデータをペースト",
+    menu_paste_vocalshifter_clipboard:
+        "VocalShifter クリップボードデータをペースト",
     reaper_import_skipped_header:
         "Reaper インポート時に以下のオーディオファイルがスキップされました（非対応形式またはファイルが見つかりません）：",
     menu_pick_output: "出力先を選択",
@@ -291,19 +292,25 @@ export const jaJP = {
     kb_pianoroll_paste: "パラメータフレームをペースト",
     kb_pianoroll_shift_param_up: "パラメータを上へ移動（クリップ範囲）",
     kb_pianoroll_shift_param_down: "パラメータを下へ移動（クリップ範囲）",
-    kb_pianoroll_shift_param_up_selection: "パラメーターライン上移動（選択範囲）",
-    kb_pianoroll_shift_param_down_selection: "パラメーターライン下移動（選択範囲）",
+    kb_pianoroll_shift_param_up_selection:
+        "パラメーターライン上移動（選択範囲）",
+    kb_pianoroll_shift_param_down_selection:
+        "パラメーターライン下移動（選択範囲）",
     kb_modifier_slip_edit: "Slip 編集（クリップドラッグ中に押す）",
     kb_modifier_stretch: "タイムストレッチ（エッジドラッグ中に押す）",
-    kb_modifier_no_snap: "ドラッグ中にグリッド吸着を切り替えます（押すと現在のグリッド吸着を反転）",
+    kb_modifier_no_snap:
+        "ドラッグ中にグリッド吸着を切り替えます（押すと現在のグリッド吸着を反転）",
     kb_modifier_copy_drag: "コピードラッグ（クリップドラッグ中に押す）",
     kb_modifier_horizontal_zoom: "水平ズーム（押しながらスクロール）",
     kb_modifier_pr_vzoom: "垂直ズーム（押しながらスクロール）",
     kb_modifier_param_morph: "パラメータ形状変形（選択範囲内で押す）",
     kb_modifier_param_fine_adjust: "パラメータ微調整（押している間）",
-    kb_modifier_vibrato_amplitude_adjust: "ビブラート振幅調整（押しながらスクロール）",
-    kb_modifier_vibrato_frequency_adjust: "ビブラート周波数調整（押しながらスクロール）",
-    kb_modifier_piano_keys_scroll_v: "鍵盤垂直スクロール（押しながらスクロール）",
+    kb_modifier_vibrato_amplitude_adjust:
+        "ビブラート振幅調整（押しながらスクロール）",
+    kb_modifier_vibrato_frequency_adjust:
+        "ビブラート周波数調整（押しながらスクロール）",
+    kb_modifier_piano_keys_scroll_v:
+        "鍵盤垂直スクロール（押しながらスクロール）",
     kb_modifier_piano_keys_zoom_v: "鍵盤垂直ズーム（押しながらスクロール）",
     kb_group_mode: "モード",
     kb_mode_toggle: "モード切替",
@@ -327,7 +334,8 @@ export const jaJP = {
         "VocalShifter クリップボードファイルの読み取り中に I/O エラーが発生しました。",
     vs_paste_no_pitch_line:
         "ピッチラインが選択されていません。先にピッチラインを選択してください。",
-    vs_import_read_failed: "VocalShifter プロジェクトファイルの読み取りに失敗しました。",
+    vs_import_read_failed:
+        "VocalShifter プロジェクトファイルの読み取りに失敗しました。",
     vs_import_parse_failed: "VocalShifter プロジェクトの解析に失敗しました。",
     vs_import_skipped_header:
         "以下のオーディオファイルはスキップされました（非対応形式またはファイルが見つかりません）：",
@@ -342,7 +350,8 @@ export const jaJP = {
     midi_track_range: "範囲：{min} – {max}",
     midi_no_tracks: "MIDI ファイルにノートを含むトラックが見つかりません",
     midi_importing: "インポート中...",
-    midi_import_success: "MIDI をインポートしました：{notes} ノート、{frames} フレーム",
+    midi_import_success:
+        "MIDI をインポートしました：{notes} ノート、{frames} フレーム",
     midi_import_failed: "MIDI のインポートに失敗しました",
     midi_file_not_found: "MIDI ファイルが見つかりません",
     midi_no_notes: "選択したトラックにノートがありません",
@@ -411,11 +420,11 @@ export const jaJP = {
     project_scale_generic: "プロジェクトスケール",
 
     // 修飾キーリネーム
-        // Scale highlight setting
-        scale_highlight: "スケール強調表示",
-        scale_highlight_always: "常に",
-        scale_highlight_only_when_snapping: "スナップ時のみ",
-        scale_highlight_off: "オフ",
+    // Scale highlight setting
+    scale_highlight: "スケール強調表示",
+    scale_highlight_always: "常に",
+    scale_highlight_only_when_snapping: "スナップ時のみ",
+    scale_highlight_off: "オフ",
     kb_modifier_toggle_snap: "フリー移動（クリップドラッグ中に押す）",
     hint_toggle_snap:
         "クリップをドラッグ中に Shift を押すとフリー移動になります。通常はグリッドにスナップします",

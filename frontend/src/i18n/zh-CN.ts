@@ -92,8 +92,7 @@ export const zhCN = {
     param_editor: "参数编辑器",
     pitch_requires_compose: "请在根轨开启 Compose（C）以生成音高曲线",
     pitch_requires_algo: "请选择算法以启用编辑",
-    pitch_backend_unavailable:
-        "音高后端不可用（请检查 WORLD DLL / ONNX 模型）",
+    pitch_backend_unavailable: "音高后端不可用（请检查 WORLD DLL / ONNX 模型）",
     pitch_edit_not_modified_hint: "尚未修改曲线：当前等同原始音高",
     pitch_status_label: "音高",
     pitch_status_off: "关闭",
@@ -148,8 +147,7 @@ export const zhCN = {
     unsaved_changes_title: "未保存更改",
     unsaved_changes_switch_desc:
         "当前工程有未保存的更改。切换工程前是否先保存？",
-    unsaved_changes_exit_desc:
-        "当前工程有未保存的更改。关闭应用前是否先保存？",
+    unsaved_changes_exit_desc: "当前工程有未保存的更改。关闭应用前是否先保存？",
     unsaved_changes_discard: "不保存",
 
     menu_export_separated: "导出分轨音频",
@@ -316,13 +314,11 @@ export const zhCN = {
     vs_paste_clipboard_not_found: "未找到 VocalShifter 剪贴板数据。",
     vs_paste_clipboard_invalid_format:
         "剪贴板文件格式不正确（文件大小不是 0x80 的整数倍，或记录损坏）。",
-    vs_paste_clipboard_io_error:
-        "读取 VocalShifter 剪贴板文件时发生 IO 错误。",
+    vs_paste_clipboard_io_error: "读取 VocalShifter 剪贴板文件时发生 IO 错误。",
     vs_paste_no_pitch_line: "当前没有选中的音高线，请先选择一条音高线。",
     vs_import_read_failed: "读取 VocalShifter 工程文件失败。",
     vs_import_parse_failed: "解析 VocalShifter 工程失败。",
-    vs_import_skipped_header:
-        "以下音频文件因格式不支持或文件不存在而被跳过：",
+    vs_import_skipped_header: "以下音频文件因格式不支持或文件不存在而被跳过：",
 
     // MIDI 导入
     midi_import: "导入 MIDI",
@@ -410,8 +406,7 @@ export const zhCN = {
 
     // Modifier key rename
     kb_modifier_toggle_snap: "自由移动（拖动音频块时按住）",
-    hint_toggle_snap:
-        "拖动音频块时按住 Shift 可自由移动；否则默认吸附到网格",
+    hint_toggle_snap: "拖动音频块时按住 Shift 可自由移动；否则默认吸附到网格",
 
     // File browser enhancements
     fb_regex: "正则",

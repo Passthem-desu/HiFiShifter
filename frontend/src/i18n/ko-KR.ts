@@ -258,8 +258,7 @@ export const koKR = {
     kb_conflict_msg: "이 단축키가 다음 작업과 충돌합니다:",
     kb_conflict_override: "덮어쓰기",
     kb_conflict_cancel: "취소",
-    kb_dialog_hint_click:
-        "좌클릭으로 '없음'으로 설정. 우클릭으로 기본값 복원.",
+    kb_dialog_hint_click: "좌클릭으로 '없음'으로 설정. 우클릭으로 기본값 복원.",
     kb_group_playback: "재생",
     kb_group_edit: "편집",
     kb_group_project: "프로젝트",
@@ -291,18 +290,22 @@ export const koKR = {
     kb_pianoroll_paste: "파라미터 프레임 붙여넣기",
     kb_pianoroll_shift_param_up: "파라미터 위로 이동 (클립 범위)",
     kb_pianoroll_shift_param_down: "파라미터 아래로 이동 (클립 범위)",
-        kb_pianoroll_shift_param_up_selection: "파라미터 라인 위로 이동 (선택 범위)",
-        kb_pianoroll_shift_param_down_selection: "파라미터 라인 아래로 이동 (선택 범위)",
+    kb_pianoroll_shift_param_up_selection:
+        "파라미터 라인 위로 이동 (선택 범위)",
+    kb_pianoroll_shift_param_down_selection:
+        "파라미터 라인 아래로 이동 (선택 범위)",
     kb_modifier_slip_edit: "Slip 편집 (클립 드래그 중 누르기)",
     kb_modifier_stretch: "타임 스트레치 (엣지 드래그 중 누르기)",
-    kb_modifier_no_snap: "드래그 중 그리드 스냅을 전환합니다 (누르면 현재 그리드 스냅을 반전)",
+    kb_modifier_no_snap:
+        "드래그 중 그리드 스냅을 전환합니다 (누르면 현재 그리드 스냅을 반전)",
     kb_modifier_copy_drag: "복사 드래그 (클립 드래그 중 누르기)",
     kb_modifier_horizontal_zoom: "수평 줌 (누른 채 스크롤)",
     kb_modifier_pr_vzoom: "수직 줌 (누른 채 스크롤)",
     kb_modifier_param_morph: "파라미터 형태 변형 (선택 영역에서 누르기)",
     kb_modifier_param_fine_adjust: "파라미터 미세 조정 (누르고 있는 동안)",
     kb_modifier_vibrato_amplitude_adjust: "비브라토 진폭 조절 (누른 채 스크롤)",
-    kb_modifier_vibrato_frequency_adjust: "비브라토 주파수 조절 (누른 채 스크롤)",
+    kb_modifier_vibrato_frequency_adjust:
+        "비브라토 주파수 조절 (누른 채 스크롤)",
     kb_modifier_piano_keys_scroll_v: "피아노 키 수직 스크롤 (누른 채 스크롤)",
     kb_modifier_piano_keys_zoom_v: "피아노 키 수직 줌 (누른 채 스크롤)",
     kb_group_mode: "모드",
@@ -530,8 +533,7 @@ export const koKR = {
     pitch_snap_settings: "피치 스냅 설정",
 
     // 키바인딩 힌트
-    kb_hint_recording:
-        "좌클릭으로 '없음' 설정. 우클릭으로 기본값 복원.",
+    kb_hint_recording: "좌클릭으로 '없음' 설정. 우클릭으로 기본값 복원.",
 
     // 키바인딩 None
     kb_none: "없음",
