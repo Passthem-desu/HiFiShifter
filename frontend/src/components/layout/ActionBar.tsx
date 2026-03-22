@@ -127,11 +127,15 @@ export function ActionBar() {
                                 : "4"
                         }
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                            const v = Number(e.target.value);
-                            if (!Number.isFinite(v)) return;
+                            const raw = e.target.value.trim();
+                            const parsed = Number(raw);
+                            if (!Number.isFinite(parsed)) return;
+                            // Clamp locally to avoid sending huge values to backend
+                            const clamped = Math.min(32, Math.max(1, Math.round(parsed)));
+                            if (clamped === Math.round(s.beats || 0)) return;
                             void dispatch(
                                 setProjectTimelineSettingsRemote({
-                                    beatsPerBar: v,
+                                    beatsPerBar: clamped,
                                     gridSize: s.grid,
                                 }),
                             );
