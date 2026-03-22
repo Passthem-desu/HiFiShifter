@@ -157,7 +157,7 @@ This mechanism is abstracted: when adding new parameters, only need to implement
 | Save As | Ctrl + Shift + S |
 | Export audio | Ctrl + E |
 | Mode Toggle (Select/Draw) | Tab |
-| Delete selected clips | Delete / Backspace |
+| Delete selected clips | Delete |
 | Copy selected clips (internal clipboard) | Ctrl + C |
 | Paste at playhead position | Ctrl + V |
 | Parameter panel copy selection curves | Ctrl + C (Select mode) |
