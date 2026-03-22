@@ -191,6 +191,8 @@ export function useEditDrag(deps: {
     } = deps;
 
     const editDragRef = useRef<EditDragState | null>(null);
+    // 用于节流向后端发送 clip 状态更新，避免拖动时频繁覆盖与后端同步引起闪烁
+    const lastRemoteSentRef = useRef<Record<string, number>>({});
 
     function startEditDrag(
         e: React.PointerEvent,
@@ -255,6 +257,20 @@ export function useEditDrag(deps: {
                 dispatch(
                     setClipFades({ clipId: drag.clipId, fadeInSec: next }),
                 );
+                // Throttle remote updates to at most ~200ms
+                try {
+                    const now = Date.now();
+                    const last = lastRemoteSentRef.current[drag.clipId] || 0;
+                    if (now - last > 200) {
+                        lastRemoteSentRef.current[drag.clipId] = now;
+                        void dispatch(
+                            setClipStateRemote({
+                                clipId: drag.clipId,
+                                fadeInSec: next,
+                            }),
+                        );
+                    }
+                } catch {}
                 return;
             }
             if (drag.type === "fade_out") {
@@ -263,6 +279,19 @@ export function useEditDrag(deps: {
                 dispatch(
                     setClipFades({ clipId: drag.clipId, fadeOutSec: next }),
                 );
+                try {
+                    const now = Date.now();
+                    const last = lastRemoteSentRef.current[drag.clipId] || 0;
+                    if (now - last > 200) {
+                        lastRemoteSentRef.current[drag.clipId] = now;
+                        void dispatch(
+                            setClipStateRemote({
+                                clipId: drag.clipId,
+                                fadeOutSec: next,
+                            }),
+                        );
+                    }
+                } catch {}
                 return;
             }
             if (drag.type === "gain") {
@@ -275,6 +304,19 @@ export function useEditDrag(deps: {
                     dbToGain(12),
                 );
                 dispatch(setClipGain({ clipId: drag.clipId, gain: nextGain }));
+                try {
+                    const now = Date.now();
+                    const last = lastRemoteSentRef.current[drag.clipId] || 0;
+                    if (now - last > 200) {
+                        lastRemoteSentRef.current[drag.clipId] = now;
+                        void dispatch(
+                            setClipStateRemote({
+                                clipId: drag.clipId,
+                                gain: nextGain,
+                            }),
+                        );
+                    }
+                } catch {}
                 return;
             }
 
@@ -496,6 +538,7 @@ export function useEditDrag(deps: {
                     }),
                 ).unwrap();
             } else if (drag.type === "fade_in") {
+                // 确保结束时把最终值持久化到后端
                 void dispatch(
                     setClipStateRemote({
                         clipId: drag.clipId,

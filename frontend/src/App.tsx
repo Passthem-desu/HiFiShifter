@@ -1062,7 +1062,8 @@ function AppInner() {
     if (!runtimeIsPlaying) return;
     // Keep playhead following backend audio clock.
     // 用 in-flight guard 防止轮询请求堆积；并适度降频以降低 Redux/React 压力。
-    const intervalMs = 80;
+    // Increase playhead sync frequency to ~30Hz for smoother playhead updates
+    const intervalMs = 33;
     const id = window.setInterval(() => {
       // 预渲染阶段后端还未真正进入 playing，
       // 若此时同步会把前端“准备播放”状态误判为停止，导致 stop 锚点丢失。
