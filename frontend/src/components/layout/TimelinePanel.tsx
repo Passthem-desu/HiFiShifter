@@ -59,6 +59,7 @@ import {
     MAX_ROW_HEIGHT,
     MIN_PX_PER_SEC,
     MIN_ROW_HEIGHT,
+    TRACK_ADD_ROW_HEIGHT,
     TrackAreaContextMenu,
     TimelineScrollArea,
     TimeRuler,
@@ -773,7 +774,8 @@ export const TimelinePanel: React.FC = () => {
     const dropExtraRows =
         (dropPreview && !dropPreview.trackId ? 1 : 0) +
         (clipDropNewTrack ? 1 : 0);
-    const contentHeight = (s.tracks.length + dropExtraRows) * rowHeight;
+    const contentHeight =
+        (s.tracks.length + dropExtraRows) * rowHeight + TRACK_ADD_ROW_HEIGHT;
 
     const bars = useMemo(() => {
         const beatsPerBar = Math.max(1, Math.round(s.beats || 4));
@@ -1816,6 +1818,12 @@ export const TimelinePanel: React.FC = () => {
                 onDuplicateTrack={(trackId) => {
                     dispatch(duplicateTrackRemote(trackId));
                 }}
+                onScrollTopChange={(scrollTop) => {
+                    const timelineScroller = scrollRef.current;
+                    if (!timelineScroller) return;
+                    if (Math.abs(timelineScroller.scrollTop - scrollTop) < 0.5) return;
+                    timelineScroller.scrollTop = scrollTop;
+                }}
             />
 
             {/* Timeline View (Right) */}
@@ -1870,7 +1878,13 @@ export const TimelinePanel: React.FC = () => {
                     onScroll={(e) => {
                         const el = e.currentTarget as HTMLDivElement;
                         if (trackListScrollRef.current) {
-                            trackListScrollRef.current.scrollTop = el.scrollTop;
+                            if (
+                                Math.abs(
+                                    trackListScrollRef.current.scrollTop - el.scrollTop,
+                                ) >= 0.5
+                            ) {
+                                trackListScrollRef.current.scrollTop = el.scrollTop;
+                            }
                         }
                     }}
                     onMouseDownCapture={(e) => {
@@ -2280,6 +2294,15 @@ export const TimelinePanel: React.FC = () => {
                                 />
                             );
                         })}
+
+                        <div
+                            className="absolute left-0 right-0 pointer-events-none z-10"
+                            style={{
+                                top: contentHeight - TRACK_ADD_ROW_HEIGHT,
+                                height: TRACK_ADD_ROW_HEIGHT,
+                                backgroundColor: "var(--qt-graph-bg)",
+                            }}
+                        />
 
                         {/* Drop preview (ghost item) */}
                         {dropPreview ? (

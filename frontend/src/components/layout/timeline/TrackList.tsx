@@ -9,6 +9,7 @@ import { Flex, Box, Text, IconButton, Slider, Select } from "@radix-ui/themes";
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
 import type { TrackInfo } from "../../../features/session/sessionTypes";
 import type { MessageKey } from "../../../i18n/messages";
+import { TRACK_ADD_ROW_HEIGHT } from "./constants";
 
 /** 轨道颜色调色板（与后端 add_track 预设一致） */
 const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
@@ -45,6 +46,7 @@ export const TrackList: React.FC<{
   onAlgoChange?: (trackId: string, algo: string) => void;
   onTrackNameChange?: (trackId: string, name: string) => void;
   onDuplicateTrack?: (trackId: string) => void;
+  onScrollTopChange?: (scrollTop: number) => void;
   /** 外部持有该滚动容器的 ref，用于同步右侧轨道区的竖向滚动 */
   listScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
 }> = ({
@@ -66,6 +68,7 @@ export const TrackList: React.FC<{
   onAlgoChange,
   onTrackNameChange,
   onDuplicateTrack,
+  onScrollTopChange,
   listScrollRef,
 }) => {
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -167,6 +170,41 @@ export const TrackList: React.FC<{
       setDragUi(null);
     };
   }, []);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+
+    const handler: EventListener = (evt) => {
+      const e = evt as WheelEvent;
+      // Keep ctrl/meta wheel available for global zoom/system gestures.
+      if (e.ctrlKey || e.metaKey) return;
+
+      const useY = Math.abs(e.deltaY) >= Math.abs(e.deltaX);
+      const delta = useY ? e.deltaY : e.deltaX;
+      if (!Number.isFinite(delta) || Math.abs(delta) < 0.01) return;
+
+      const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (maxScrollTop <= 0) return;
+
+      const nextScrollTop = Math.max(
+        0,
+        Math.min(maxScrollTop, el.scrollTop + delta),
+      );
+      if (Math.abs(nextScrollTop - el.scrollTop) < 0.5) return;
+
+      e.preventDefault();
+      el.scrollTop = nextScrollTop;
+      onScrollTopChange?.(nextScrollTop);
+    };
+
+    el.addEventListener("wheel", handler, {
+      passive: false,
+    } as AddEventListenerOptions);
+    return () => {
+      el.removeEventListener("wheel", handler);
+    };
+  }, [onScrollTopChange]);
 
   function wouldCreateCycle(trackId: string, parentTrackId: string | null) {
     let cur = parentTrackId;
@@ -312,8 +350,10 @@ export const TrackList: React.FC<{
             el;
           if (listScrollRef) listScrollRef.current = el;
         }}
-        className="flex-1 relative"
-        style={{ overflowY: "hidden" }}
+        className="flex-1 relative overflow-y-auto custom-scrollbar hide-v-scrollbar"
+        onScroll={(e) => {
+          onScrollTopChange?.((e.currentTarget as HTMLDivElement).scrollTop);
+        }}
       >
         {dragUi?.mode === "reorder" && typeof dragUi.indicatorY === "number" ? (
           <div
@@ -785,6 +825,7 @@ export const TrackList: React.FC<{
           align="center"
           justify="center"
           className="h-8 border-b border-qt-border border-dashed text-qt-text-muted hover:text-qt-text hover:bg-qt-button-hover cursor-pointer transition-colors"
+          style={{ height: TRACK_ADD_ROW_HEIGHT }}
           onClick={onAddTrack}
         >
           <PlusIcon className="mr-1" /> <Text size="1">{t("track_add")}</Text>
