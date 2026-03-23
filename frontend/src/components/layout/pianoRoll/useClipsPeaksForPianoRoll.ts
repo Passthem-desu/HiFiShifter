@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { ClipInfo } from "../../../features/session/sessionTypes";
+import type { ClipInfo, FadeCurveType } from "../../../features/session/sessionTypes";
 import { lruGet, lruSet } from "./peaksCache";
 import { waveformMipmapStore } from "../../../utils/waveformMipmapStore";
 
@@ -26,6 +26,16 @@ export interface ClipPeaksEntry {
     sourceDurationSec: number;
     /** 播放速率 */
     playbackRate: number;
+    /** clip 增益（线性值，0~4） */
+    gain: number;
+    /** 淡入时长（秒） */
+    fadeInSec: number;
+    /** 淡出时长（秒） */
+    fadeOutSec: number;
+    /** 淡入曲线类型 */
+    fadeInCurve: FadeCurveType;
+    /** 淡出曲线类型 */
+    fadeOutCurve: FadeCurveType;
     peaks: {
         min: number[];
         max: number[];
@@ -398,6 +408,11 @@ export function useClipsPeaksForPianoRoll(args: {
                 sourceDurationSec:
                     sourceDurationSec > 0 ? sourceDurationSec : 0,
                 playbackRate: pr,
+                gain: clip.gain ?? 1,
+                fadeInSec: clip.fadeInSec ?? 0,
+                fadeOutSec: clip.fadeOutSec ?? 0,
+                fadeInCurve: clip.fadeInCurve ?? "linear",
+                fadeOutCurve: clip.fadeOutCurve ?? "linear",
                 peaks: entry
                     ? {
                           min: entry.min,
