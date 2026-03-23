@@ -16,6 +16,14 @@ fn default_frame_period_ms() -> f64 {
     5.0
 }
 
+fn default_child_pitch_offset_degrees() -> i32 {
+    3
+}
+
+fn default_project_scale_notes() -> Vec<u8> {
+    vec![0, 2, 4, 5, 7, 9, 11]
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PitchAnalysisAlgo {
@@ -27,6 +35,14 @@ pub enum PitchAnalysisAlgo {
     None,
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ChildPitchOffsetMode {
+    #[default]
+    Cents,
+    Degrees,
 }
 
 /// 合成链路类型，独立于 PitchAnalysisAlgo，面向声码器选择。
@@ -127,6 +143,15 @@ pub struct Track {
     #[serde(default)]
     pub pitch_analysis_algo: PitchAnalysisAlgo,
 
+    #[serde(default)]
+    pub child_pitch_offset_mode: ChildPitchOffsetMode,
+
+    #[serde(default)]
+    pub child_pitch_offset_cents: f32,
+
+    #[serde(default = "default_child_pitch_offset_degrees")]
+    pub child_pitch_offset_degrees: i32,
+
     /// 轨道主题色，hex 字符串，如 "#4f8ef7"
     #[serde(default)]
     pub color: String,
@@ -213,6 +238,9 @@ pub struct TimelineState {
     #[serde(default)]
     pub params_by_root_track: BTreeMap<String, TrackParamsState>,
 
+    #[serde(default = "default_project_scale_notes")]
+    pub project_scale_notes: Vec<u8>,
+
     pub next_track_order: i32,
 }
 
@@ -268,6 +296,9 @@ impl Default for TimelineState {
 
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
+                child_pitch_offset_mode: ChildPitchOffsetMode::default(),
+                child_pitch_offset_cents: 0.0,
+                child_pitch_offset_degrees: default_child_pitch_offset_degrees(),
                 color: String::new(),
             }],
             clips: vec![],
@@ -278,6 +309,7 @@ impl Default for TimelineState {
             project_sec: 32.0, // 64 beats @ 120 BPM = 32 sec
 
             params_by_root_track: BTreeMap::new(),
+            project_scale_notes: default_project_scale_notes(),
             next_track_order: 1,
         }
     }
@@ -1264,6 +1296,9 @@ impl TimelineState {
 
             compose_enabled: false,
             pitch_analysis_algo: PitchAnalysisAlgo::default(),
+            child_pitch_offset_mode: ChildPitchOffsetMode::default(),
+            child_pitch_offset_cents: 0.0,
+            child_pitch_offset_degrees: default_child_pitch_offset_degrees(),
             color,
         };
         self.tracks.push(track);
@@ -1484,6 +1519,9 @@ impl TimelineState {
         volume: Option<f32>,
         compose_enabled: Option<bool>,
         pitch_analysis_algo: Option<PitchAnalysisAlgo>,
+        child_pitch_offset_mode: Option<ChildPitchOffsetMode>,
+        child_pitch_offset_cents: Option<f32>,
+        child_pitch_offset_degrees: Option<i32>,
         color: Option<String>,
         name: Option<String>,
     ) {
@@ -1503,6 +1541,15 @@ impl TimelineState {
             }
             if let Some(v) = pitch_analysis_algo {
                 t.pitch_analysis_algo = v;
+            }
+            if let Some(v) = child_pitch_offset_mode {
+                t.child_pitch_offset_mode = v;
+            }
+            if let Some(v) = child_pitch_offset_cents {
+                t.child_pitch_offset_cents = v;
+            }
+            if let Some(v) = child_pitch_offset_degrees {
+                t.child_pitch_offset_degrees = v;
             }
             if let Some(v) = color {
                 t.color = v;
@@ -1554,6 +1601,9 @@ impl TimelineState {
 
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
+                child_pitch_offset_mode: ChildPitchOffsetMode::default(),
+                child_pitch_offset_cents: 0.0,
+                child_pitch_offset_degrees: default_child_pitch_offset_degrees(),
                 color: String::new(),
             });
             self.next_track_order += 1;
@@ -2253,6 +2303,12 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
             volume: t.volume,
             compose_enabled: t.compose_enabled,
             pitch_analysis_algo: algo_name(&t.pitch_analysis_algo),
+            child_pitch_offset_mode: match t.child_pitch_offset_mode {
+                ChildPitchOffsetMode::Cents => "cents".to_string(),
+                ChildPitchOffsetMode::Degrees => "degrees".to_string(),
+            },
+            child_pitch_offset_cents: t.child_pitch_offset_cents,
+            child_pitch_offset_degrees: t.child_pitch_offset_degrees,
             color: t.color.clone(),
         });
 
@@ -2290,6 +2346,12 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
                         PitchAnalysisAlgo::None => "none".to_string(),
                         PitchAnalysisAlgo::Unknown => "unknown".to_string(),
                     },
+                    child_pitch_offset_mode: match t.child_pitch_offset_mode {
+                        ChildPitchOffsetMode::Cents => "cents".to_string(),
+                        ChildPitchOffsetMode::Degrees => "degrees".to_string(),
+                    },
+                    child_pitch_offset_cents: t.child_pitch_offset_cents,
+                    child_pitch_offset_degrees: t.child_pitch_offset_degrees,
                     color: t.color.clone(),
                 });
             }

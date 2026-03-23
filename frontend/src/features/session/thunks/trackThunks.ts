@@ -11,6 +11,9 @@ export const setTrackStateRemote = createAsyncThunk(
         volume?: number;
         composeEnabled?: boolean;
         pitchAnalysisAlgo?: string;
+        childPitchOffsetMode?: "cents" | "degrees";
+        childPitchOffsetCents?: number;
+        childPitchOffsetDegrees?: number;
         color?: string;
         name?: string;
     }) => {

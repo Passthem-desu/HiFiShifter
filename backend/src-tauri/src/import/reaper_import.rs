@@ -182,6 +182,9 @@ fn convert_reaper_items_to_existing_tracks(
                 volume: 0.9,
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
+                child_pitch_offset_mode: crate::state::ChildPitchOffsetMode::Cents,
+                child_pitch_offset_cents: 0.0,
+                child_pitch_offset_degrees: 3,
                 color: TRACK_COLORS[color_idx].to_string(),
             });
             created_track_ids.insert(target_track_idx, tid.clone());
@@ -249,6 +252,7 @@ fn convert_reaper_items_to_existing_tracks(
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
+        project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: next_order,
     };
 
@@ -344,6 +348,9 @@ fn convert_reaper_data(
             volume,
             compose_enabled: false,
             pitch_analysis_algo: PitchAnalysisAlgo::default(),
+            child_pitch_offset_mode: crate::state::ChildPitchOffsetMode::Cents,
+            child_pitch_offset_cents: 0.0,
+            child_pitch_offset_degrees: 3,
             color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
         });
 
@@ -419,6 +426,7 @@ fn convert_reaper_data(
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
+        project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: track_order,
     };
 

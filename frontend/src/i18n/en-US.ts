@@ -246,6 +246,12 @@ export const enUS = {
     progress_cancel: "Cancel",
     pitch_analyzing_clips: "Analyzing{clipName}{clipCount} {percentage}%",
     algo_label: "Algo",
+    child_pitch_mode_cents: "Cents",
+    child_pitch_mode_degrees: "Degrees",
+    child_pitch_offset_cents_label: "Child Track Cents Offset",
+    child_pitch_offset_degrees_label: "Child Track Degree Offset",
+    child_pitch_offset_cents_short: "cents",
+    child_pitch_offset_degrees_short: "degrees",
     aria_loading: "Loading",
 
     // 快捷键管理

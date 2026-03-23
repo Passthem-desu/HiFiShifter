@@ -240,6 +240,12 @@ export const zhCN = {
     progress_cancel: "取消",
     pitch_analyzing_clips: "正在分析{clipName}{clipCount} {percentage}%",
     algo_label: "算法",
+    child_pitch_mode_cents: "音分差",
+    child_pitch_mode_degrees: "度数差",
+    child_pitch_offset_cents_label: "子轨音分差",
+    child_pitch_offset_degrees_label: "子轨度数差",
+    child_pitch_offset_cents_short: "音分",
+    child_pitch_offset_degrees_short: "度数",
     aria_loading: "加载中",
 
     // 快捷键管理

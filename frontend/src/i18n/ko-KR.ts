@@ -247,6 +247,12 @@ export const koKR = {
     progress_cancel: "취소",
     pitch_analyzing_clips: "분석 중{clipName}{clipCount} {percentage}%",
     algo_label: "알고리즘",
+    child_pitch_mode_cents: "센트 차",
+    child_pitch_mode_degrees: "도수 차",
+    child_pitch_offset_cents_label: "자식 트랙 센트 차",
+    child_pitch_offset_degrees_label: "자식 트랙 도수 차",
+    child_pitch_offset_cents_short: "센트",
+    child_pitch_offset_degrees_short: "도수",
     aria_loading: "로딩 중",
 
     // 단축키 관리

@@ -22,6 +22,40 @@ fn normalize_custom_scale(input: Option<CustomScale>) -> Option<CustomScale> {
     input.map(|s| s.normalized())
 }
 
+fn base_scale_notes(scale: &str) -> Vec<u8> {
+    match normalize_scale_key(scale).as_str() {
+        "C" => vec![0, 2, 4, 5, 7, 9, 11],
+        "Db" => vec![1, 3, 5, 6, 8, 10, 0],
+        "D" => vec![2, 4, 6, 7, 9, 11, 1],
+        "Eb" => vec![3, 5, 7, 8, 10, 0, 2],
+        "E" => vec![4, 6, 8, 9, 11, 1, 3],
+        "F" => vec![5, 7, 9, 10, 0, 2, 4],
+        "Gb" => vec![6, 8, 10, 11, 1, 3, 5],
+        "G" => vec![7, 9, 11, 0, 2, 4, 6],
+        "Ab" => vec![8, 10, 0, 1, 3, 5, 7],
+        "A" => vec![9, 11, 1, 2, 4, 6, 8],
+        "Bb" => vec![10, 0, 2, 3, 5, 7, 9],
+        "B" => vec![11, 1, 3, 4, 6, 8, 10],
+        _ => vec![0, 2, 4, 5, 7, 9, 11],
+    }
+}
+
+fn effective_scale_notes(
+    base_scale: &str,
+    use_custom_scale: bool,
+    custom_scale: Option<&CustomScale>,
+) -> Vec<u8> {
+    if use_custom_scale {
+        if let Some(custom) = custom_scale {
+            let normalized = custom.normalized();
+            if !normalized.notes.is_empty() {
+                return normalized.notes;
+            }
+        }
+    }
+    base_scale_notes(base_scale)
+}
+
 fn normalize_beats_per_bar(raw: u32) -> u32 {
     raw.clamp(1, 32)
 }
@@ -133,6 +167,11 @@ pub(super) fn new_project(
         p.beats_per_bar = 4;
         p.grid_size = "1/4".to_string();
     }
+    {
+        let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        tl.project_scale_notes = base_scale_notes("C");
+        state.audio_engine.update_timeline(tl.clone());
+    }
     update_window_title(&window, "Untitled", false);
     get_timeline_state(state)
 }
@@ -193,6 +232,15 @@ pub(super) fn open_project(
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         *tl = pf.timeline.clone();
+        let normalized_base_scale = normalize_scale_key(&pf.base_scale);
+        let normalized_custom_scale = normalize_custom_scale(pf.custom_scale.clone());
+        let normalized_use_custom_scale =
+            pf.use_custom_scale && normalized_custom_scale.is_some();
+        tl.project_scale_notes = effective_scale_notes(
+            &normalized_base_scale,
+            normalized_use_custom_scale,
+            normalized_custom_scale.as_ref(),
+        );
         state.audio_engine.update_timeline(tl.clone());
     }
     state.clear_history();
@@ -306,6 +354,12 @@ pub(super) fn set_project_base_scale(
         }
     }
 
+    {
+        let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        tl.project_scale_notes = base_scale_notes(&normalized);
+        state.audio_engine.update_timeline(tl.clone());
+    }
+
     let payload = state.project_meta_payload();
     serde_json::json!({ "ok": true, "project": payload })
 }
@@ -324,7 +378,7 @@ pub(super) fn set_project_custom_scale(
             return serde_json::json!({ "ok": true, "project": state.project_meta_payload() });
         }
         let was_clean = !p.dirty;
-        p.custom_scale = Some(normalized);
+        p.custom_scale = Some(normalized.clone());
         p.use_custom_scale = true;
         p.dirty = true;
         (p.name.clone(), true, was_clean)
@@ -338,6 +392,12 @@ pub(super) fn set_project_custom_scale(
                 let _ = win.set_title(&title);
             }
         }
+    }
+
+    {
+        let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        tl.project_scale_notes = normalized.notes.clone();
+        state.audio_engine.update_timeline(tl.clone());
     }
 
     serde_json::json!({ "ok": true, "project": state.project_meta_payload() })

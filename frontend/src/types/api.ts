@@ -28,6 +28,9 @@ export interface TimelineTrack {
 
     compose_enabled: boolean;
     pitch_analysis_algo: string;
+    child_pitch_offset_mode: "cents" | "degrees";
+    child_pitch_offset_cents: number;
+    child_pitch_offset_degrees: number;
     color: string;
 }
 

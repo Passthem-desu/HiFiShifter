@@ -248,6 +248,12 @@ export const jaJP = {
     progress_cancel: "キャンセル",
     pitch_analyzing_clips: "分析中{clipName}{clipCount} {percentage}%",
     algo_label: "アルゴリズム",
+    child_pitch_mode_cents: "セント差",
+    child_pitch_mode_degrees: "度数差",
+    child_pitch_offset_cents_label: "子トラックのセント差",
+    child_pitch_offset_degrees_label: "子トラックの度数差",
+    child_pitch_offset_cents_short: "セント",
+    child_pitch_offset_degrees_short: "度数",
     aria_loading: "読み込み中",
 
     // ショートカットキー管理

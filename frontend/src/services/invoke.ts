@@ -186,8 +186,11 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 volume: args[3],
                 composeEnabled: args[4],
                 pitchAnalysisAlgo: args[5],
-                color: args[6],
-                name: args[7],
+                childPitchOffsetMode: args[6],
+                childPitchOffsetCents: args[7],
+                childPitchOffsetDegrees: args[8],
+                color: args[9],
+                name: args[10],
             };
 
         case "select_track":

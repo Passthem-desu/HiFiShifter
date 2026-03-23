@@ -523,7 +523,7 @@ fn collect_clips_needing_render(
         let pitch_edit = entry.pitch_edit.as_slice();
         let frame_period_ms = entry.frame_period_ms.max(0.1);
 
-        let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
+        let mut param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
             &clip.id,
             source_path,
             start_frame,
@@ -536,6 +536,13 @@ fn collect_clips_needing_render(
             &entry.extra_curves,
             &entry.extra_params,
         );
+        let child_hash_salt = crate::pitch_editing::child_pitch_offset_hash_salt(timeline, clip);
+        if child_hash_salt != 0 {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(&param_hash, &mut hasher);
+            std::hash::Hash::hash(&child_hash_salt, &mut hasher);
+            param_hash = std::hash::Hasher::finish(&hasher);
+        }
         let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
             clip_id: clip.id.clone(),
             param_hash,

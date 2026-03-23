@@ -155,6 +155,9 @@ pub(super) fn set_track_state(
     volume: Option<f32>,
     compose_enabled: Option<bool>,
     pitch_analysis_algo: Option<String>,
+    child_pitch_offset_mode: Option<String>,
+    child_pitch_offset_cents: Option<f32>,
+    child_pitch_offset_degrees: Option<i32>,
     color: Option<String>,
     name: Option<String>,
 ) -> crate::models::TimelineStatePayload {
@@ -169,6 +172,10 @@ pub(super) fn set_track_state(
         "none" => crate::state::PitchAnalysisAlgo::None,
         _ => crate::state::PitchAnalysisAlgo::Unknown,
     });
+    let child_mode = child_pitch_offset_mode.as_deref().map(|s| match s {
+        "degrees" => crate::state::ChildPitchOffsetMode::Degrees,
+        _ => crate::state::ChildPitchOffsetMode::Cents,
+    });
     tl.set_track_state(
         &track_id,
         muted,
@@ -176,6 +183,9 @@ pub(super) fn set_track_state(
         volume,
         compose_enabled,
         algo,
+        child_mode,
+        child_pitch_offset_cents,
+        child_pitch_offset_degrees,
         color,
         name,
     );

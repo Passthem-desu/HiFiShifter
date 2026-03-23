@@ -1854,6 +1854,30 @@ export const TimelinePanel: React.FC = () => {
                         }),
                     );
                 }}
+                onChildPitchOffsetModeChange={(trackId, mode) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            childPitchOffsetMode: mode,
+                        }),
+                    );
+                }}
+                onChildPitchOffsetCentsChange={(trackId, cents) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            childPitchOffsetCents: cents,
+                        }),
+                    );
+                }}
+                onChildPitchOffsetDegreesChange={(trackId, degrees) => {
+                    dispatch(
+                        setTrackStateRemote({
+                            trackId,
+                            childPitchOffsetDegrees: degrees,
+                        }),
+                    );
+                }}
                 onTrackNameChange={(trackId, name) => {
                     // 乐观更新：立即反映到 UI
                     dispatch(setTrackName({ trackId, name }));

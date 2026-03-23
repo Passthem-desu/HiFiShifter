@@ -241,6 +241,12 @@ export const zhTW = {
     progress_cancel: "取消",
     pitch_analyzing_clips: "正在分析{clipName}{clipCount} {percentage}%",
     algo_label: "演算法",
+    child_pitch_mode_cents: "音分差",
+    child_pitch_mode_degrees: "度數差",
+    child_pitch_offset_cents_label: "子軌音分差",
+    child_pitch_offset_degrees_label: "子軌度數差",
+    child_pitch_offset_cents_short: "音分",
+    child_pitch_offset_degrees_short: "度數",
     aria_loading: "載入中",
 
     // 快速鍵管理

@@ -607,6 +607,9 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     volume: convert_volume(vsp_track.volume),
                     compose_enabled: false,
                     pitch_analysis_algo: algo,
+                    child_pitch_offset_mode: crate::state::ChildPitchOffsetMode::Cents,
+                    child_pitch_offset_cents: 0.0,
+                    child_pitch_offset_degrees: 3,
                     color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
                 });
                 track_algo_map.insert((idx, is_world, synth_mode), id);
@@ -633,6 +636,9 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 volume: convert_volume(vsp_track.volume),
                 compose_enabled: false,
                 pitch_analysis_algo: algo,
+                child_pitch_offset_mode: crate::state::ChildPitchOffsetMode::Cents,
+                child_pitch_offset_cents: 0.0,
+                child_pitch_offset_degrees: 3,
                 color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
             });
             // 单一算法，映射精确的 (is_world, synth_mode) 对
@@ -657,6 +663,9 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     volume: 0.9,
                     compose_enabled: false,
                     pitch_analysis_algo: PitchAnalysisAlgo::default(),
+                    child_pitch_offset_mode: crate::state::ChildPitchOffsetMode::Cents,
+                    child_pitch_offset_cents: 0.0,
+                    child_pitch_offset_degrees: 3,
                     color: TRACK_COLORS[hs_tracks.len() % TRACK_COLORS.len()].to_string(),
                 });
                 track_algo_map.insert((idx, false, 1), id);
@@ -1027,6 +1036,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
+        project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: track_order,
     };
 
@@ -1372,6 +1382,9 @@ pub fn import_vsp_clipboard(
                 volume: 0.9,
                 compose_enabled: false,
                 pitch_analysis_algo: algo,
+                child_pitch_offset_mode: crate::state::ChildPitchOffsetMode::Cents,
+                child_pitch_offset_cents: 0.0,
+                child_pitch_offset_degrees: 3,
                 color: TRACK_COLORS[color_idx].to_string(),
             });
             created_track_ids.insert(target_track_idx, tid.clone());
@@ -1697,6 +1710,7 @@ pub fn import_vsp_clipboard(
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
+        project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: next_order,
     };
 
@@ -1824,6 +1838,9 @@ fn import_vsp_clipboard_selected_tracks(
                     volume: convert_volume(vsp_track.volume),
                     compose_enabled: false,
                     pitch_analysis_algo: algo,
+                    child_pitch_offset_mode: crate::state::ChildPitchOffsetMode::Cents,
+                    child_pitch_offset_cents: 0.0,
+                    child_pitch_offset_degrees: 3,
                     color: TRACK_COLORS[color_idx].to_string(),
                 });
                 vsp_to_hs_track.insert((vsp_idx as i32, is_world, synth_mode), id);
@@ -1848,6 +1865,9 @@ fn import_vsp_clipboard_selected_tracks(
                 volume: convert_volume(vsp_track.volume),
                 compose_enabled: false,
                 pitch_analysis_algo: algo,
+                child_pitch_offset_mode: crate::state::ChildPitchOffsetMode::Cents,
+                child_pitch_offset_cents: 0.0,
+                child_pitch_offset_degrees: 3,
                 color: TRACK_COLORS[color_idx].to_string(),
             });
             vsp_to_hs_track.insert((vsp_idx as i32, is_world, _synth_mode), id);
@@ -2189,6 +2209,7 @@ fn import_vsp_clipboard_selected_tracks(
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
+        project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: track_order,
     };
 

@@ -450,6 +450,11 @@ function applyTimelineState(
         pitchAnalysisAlgo: String(
             track.pitch_analysis_algo ?? "nsf_hifigan_onnx",
         ),
+        childPitchOffsetMode:
+            track.child_pitch_offset_mode === "degrees" ? "degrees" : "cents",
+        childPitchOffsetCents: Number(track.child_pitch_offset_cents ?? 0) || 0,
+        childPitchOffsetDegrees:
+            Math.trunc(Number(track.child_pitch_offset_degrees ?? 3)) || 3,
         color: track.color || undefined,
     }));
 
@@ -627,6 +632,9 @@ function upsertImportedClip(
 
             composeEnabled: false,
             pitchAnalysisAlgo: "nsf_hifigan_onnx",
+            childPitchOffsetMode: "cents",
+            childPitchOffsetCents: 0,
+            childPitchOffsetDegrees: 3,
         });
     }
 
@@ -713,6 +721,9 @@ const initialState: SessionState = {
 
             composeEnabled: false,
             pitchAnalysisAlgo: "nsf_hifigan_onnx",
+            childPitchOffsetMode: "cents",
+            childPitchOffsetCents: 0,
+            childPitchOffsetDegrees: 3,
         },
     ],
     clips: [],

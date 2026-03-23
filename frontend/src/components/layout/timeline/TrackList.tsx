@@ -5,7 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Flex, Box, Text, IconButton, Slider, Select } from "@radix-ui/themes";
+import { Flex, Box, Text, IconButton, Slider, Select, TextField } from "@radix-ui/themes";
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
 import type { TrackInfo } from "../../../features/session/sessionTypes";
 import type { MessageKey } from "../../../i18n/messages";
@@ -44,6 +44,12 @@ export const TrackList: React.FC<{
   onAddTrack: () => void;
   onTrackColorChange?: (trackId: string, color: string) => void;
   onAlgoChange?: (trackId: string, algo: string) => void;
+  onChildPitchOffsetModeChange?: (
+    trackId: string,
+    mode: "cents" | "degrees",
+  ) => void;
+  onChildPitchOffsetCentsChange?: (trackId: string, cents: number) => void;
+  onChildPitchOffsetDegreesChange?: (trackId: string, degrees: number) => void;
   onTrackNameChange?: (trackId: string, name: string) => void;
   onDuplicateTrack?: (trackId: string) => void;
   onScrollTopChange?: (scrollTop: number) => void;
@@ -66,6 +72,9 @@ export const TrackList: React.FC<{
   onAddTrack,
   onTrackColorChange,
   onAlgoChange,
+  onChildPitchOffsetModeChange,
+  onChildPitchOffsetCentsChange,
+  onChildPitchOffsetDegreesChange,
   onTrackNameChange,
   onDuplicateTrack,
   onScrollTopChange,
@@ -872,6 +881,82 @@ export const TrackList: React.FC<{
                           </Select.Content>
                         </Select.Root>
                       </div>
+                    ) : !isRoot ? (
+                      <Flex
+                        gap="1"
+                        align="center"
+                        onPointerDown={(e) => e.stopPropagation()}
+                      >
+                        <Select.Root
+                          size="1"
+                          value={
+                            track.childPitchOffsetMode === "degrees"
+                              ? "degrees"
+                              : "cents"
+                          }
+                          onValueChange={(v) => {
+                            if (
+                              v === "cents" ||
+                              v === "degrees"
+                            ) {
+                              onChildPitchOffsetModeChange?.(track.id, v);
+                            }
+                          }}
+                        >
+                          <Select.Trigger style={{ minWidth: 72 }} />
+                          <Select.Content>
+                            <Select.Item value="cents">
+                              {t("child_pitch_mode_cents")}
+                            </Select.Item>
+                            <Select.Item value="degrees">
+                              {t("child_pitch_mode_degrees")}
+                            </Select.Item>
+                          </Select.Content>
+                        </Select.Root>
+                        {track.childPitchOffsetMode === "degrees" ? (
+                          <TextField.Root
+                            key={`deg-${track.id}-${track.childPitchOffsetDegrees}`}
+                            size="1"
+                            type="number"
+                            defaultValue={String(track.childPitchOffsetDegrees ?? 3)}
+                            style={{ width: 72 }}
+                            onBlur={(e) => {
+                              const raw = Number(e.currentTarget.value);
+                              const next = Number.isFinite(raw)
+                                ? Math.trunc(raw)
+                                : 3;
+                              onChildPitchOffsetDegreesChange?.(track.id, next);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                (e.currentTarget as HTMLInputElement).blur();
+                              }
+                            }}
+                            aria-label={t("child_pitch_offset_degrees_label")}
+                            placeholder={t("child_pitch_offset_degrees_short")}
+                          />
+                        ) : (
+                          <TextField.Root
+                            key={`cent-${track.id}-${track.childPitchOffsetCents}`}
+                            size="1"
+                            type="number"
+                            defaultValue={String(track.childPitchOffsetCents ?? 0)}
+                            style={{ width: 72 }}
+                            onBlur={(e) => {
+                              const raw = Number(e.currentTarget.value);
+                              const next = Number.isFinite(raw) ? raw : 0;
+                              onChildPitchOffsetCentsChange?.(track.id, next);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                (e.currentTarget as HTMLInputElement).blur();
+                              }
+                            }}
+                            aria-label={t("child_pitch_offset_cents_label")}
+                            placeholder={t("child_pitch_offset_cents_short")}
+                          />
+                        )}
+                      </Flex>
                     ) : null}
                     <Box flexGrow="1" />
                     <Text size="1" color="gray">

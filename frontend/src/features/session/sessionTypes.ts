@@ -31,6 +31,9 @@ export interface TrackInfo {
 
     composeEnabled: boolean;
     pitchAnalysisAlgo: string;
+    childPitchOffsetMode: "cents" | "degrees";
+    childPitchOffsetCents: number;
+    childPitchOffsetDegrees: number;
     /** 轨道主题色，hex 字符串，如 "#4f8ef7" */
     color?: string;
 }

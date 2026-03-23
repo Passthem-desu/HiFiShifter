@@ -327,6 +327,9 @@ pub fn set_track_state(
     volume: Option<f32>,
     compose_enabled: Option<bool>,
     pitch_analysis_algo: Option<String>,
+    child_pitch_offset_mode: Option<String>,
+    child_pitch_offset_cents: Option<f32>,
+    child_pitch_offset_degrees: Option<i32>,
     color: Option<String>,
     name: Option<String>,
 ) -> crate::models::TimelineStatePayload {
@@ -338,6 +341,9 @@ pub fn set_track_state(
         volume,
         compose_enabled,
         pitch_analysis_algo,
+        child_pitch_offset_mode,
+        child_pitch_offset_cents,
+        child_pitch_offset_degrees,
         color,
         name,
     )
