@@ -10,6 +10,8 @@ import {
     setClipPlaybackRate,
     setClipStateRemote,
     setClipSourceRange,
+    beginInteraction,
+    endInteraction,
 } from "../../../../features/session/sessionSlice";
 import { applyAutoCrossfade } from "./autoCrossfade";
 import { clamp, gainToDb, dbToGain } from "../math";
@@ -207,6 +209,7 @@ export function useEditDrag(deps: {
         const rightEdgeBeat = clip.startSec + clip.lengthSec;
 
         dispatch(checkpointHistory());
+        dispatch(beginInteraction());
 
         editDragRef.current = {
             type,
@@ -500,7 +503,14 @@ export function useEditDrag(deps: {
             const clipNow = sessionRef.current.clips.find(
                 (c) => c.id === drag.clipId,
             );
-            if (!clipNow) return;
+            if (!clipNow) {
+                dispatch(endInteraction());
+                return;
+            }
+
+            // 先释放交互锁，再发最终持久化请求，
+            // 这样最终请求的 fulfilled handler 能正常 applyTimelineState。
+            dispatch(endInteraction());
 
             let persistPromise: Promise<unknown> | null = null;
             if (drag.type === "trim_left") {
