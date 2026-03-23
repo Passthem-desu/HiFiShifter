@@ -72,6 +72,11 @@ export const TrackList: React.FC<{
   listScrollRef,
 }) => {
   const listRef = useRef<HTMLDivElement | null>(null);
+  const panRef = useRef<{
+    pointerId: number | null;
+    startY: number;
+    scrollTop: number;
+  } | null>(null);
   const dragRef = useRef<{
     pointerId: number;
     trackId: string;
@@ -170,6 +175,69 @@ export const TrackList: React.FC<{
       setDragUi(null);
     };
   }, []);
+
+  function isEditableTarget(target: EventTarget | null) {
+    const el = target as HTMLElement | null;
+    if (!el) return false;
+    const tag = (el.tagName ?? "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (el.isContentEditable) return true;
+    if (el.closest?.('input,textarea,select,[contenteditable="true"]')) return true;
+    return false;
+  }
+
+  function startPanPointerLocal(e: React.PointerEvent) {
+    // Intercept middle-button mouse to prevent browser native autoscroll
+    if (e.pointerType === "mouse" && e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (e.pointerType !== "mouse") return;
+    if (e.button !== 1) return;
+    if (isEditableTarget(e.target)) return;
+    const el = listRef.current;
+    if (!el) return;
+
+    panRef.current = {
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      scrollTop: el.scrollTop,
+    };
+
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+
+    function onMove(ev: PointerEvent) {
+      const pan = panRef.current;
+      const cur = listRef.current;
+      if (!pan || !cur) return;
+      if (pan.pointerId != null && ev.pointerId !== pan.pointerId) return;
+      cur.scrollTop = pan.scrollTop - (ev.clientY - pan.startY);
+      onScrollTopChange?.(cur.scrollTop);
+    }
+
+    function end(ev: PointerEvent) {
+      const pan = panRef.current;
+      if (!pan) return;
+      if (pan.pointerId != null && ev.pointerId !== pan.pointerId) return;
+      panRef.current = null;
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  }
 
   useEffect(() => {
     const el = listRef.current;
@@ -349,6 +417,18 @@ export const TrackList: React.FC<{
           (listRef as React.MutableRefObject<HTMLDivElement | null>).current =
             el;
           if (listScrollRef) listScrollRef.current = el;
+        }}
+        onPointerDown={(e) => startPanPointerLocal?.(e)}
+        onAuxClick={(e) => {
+          // Prevent native autoscroll overlay on middle click
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onMouseDown={(e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
         }}
         className="flex-1 relative overflow-y-auto custom-scrollbar hide-v-scrollbar"
         onScroll={(e) => {
