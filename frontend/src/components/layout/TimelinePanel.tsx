@@ -48,6 +48,7 @@ import { selectKeybinding } from "../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../features/keybindings/types";
 import { webApi } from "../../services/webviewApi";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
+import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
 import { waveformMipmapStore } from "../../utils/waveformMipmapStore";
 
 import {
@@ -65,6 +66,8 @@ import {
     TimeRuler,
     TrackLane,
     TrackList,
+    detectExternalPathAction,
+    findFirstExternalPathAction,
     useTimelineSelectionRect,
     extractLocalFilePath,
     gridStepBeats,
@@ -406,13 +409,18 @@ export const TimelinePanel: React.FC = () => {
                         if (type === "enter" || type === "over") {
                             if (primaryPath) {
                                 tauriDraggedPathRef.current = primaryPath;
-                                ensureDropPreviewDuration(primaryPath);
+                                if (detectExternalPathAction(primaryPath) === "importAudio") {
+                                    ensureDropPreviewDuration(primaryPath);
+                                }
                             }
                             // On some platforms, `paths` may only be populated on `drop`.
                             // Still update the ghost position on every `over`.
                             setDropPreview((prev) => {
                                 const path = primaryPath ?? tauriDraggedPathRef.current ?? prev?.path ?? null;
                                 if (!path) return prev;
+                                if (detectExternalPathAction(path) !== "importAudio") {
+                                    return null;
+                                }
                                 const nextFileName = fileNameFromPath(path);
 
                                 // 直接修改 DOM
@@ -447,10 +455,28 @@ export const TimelinePanel: React.FC = () => {
                                 tauriDraggedPathRef.current = primaryPath;
                                 tauriLastDropPathRef.current = primaryPath;
                             }
-                            if (primaryPath) {
+                            if (
+                                primaryPath &&
+                                detectExternalPathAction(primaryPath) === "importAudio"
+                            ) {
                                 ensureDropPreviewDuration(primaryPath);
                             }
                             setDropPreview(null);
+
+                            const externalAction = findFirstExternalPathAction(paths);
+                            if (
+                                externalAction &&
+                                externalAction.kind !== "importAudio"
+                            ) {
+                                tauriDropHandledAtRef.current = Date.now();
+                                tauriDraggedPathRef.current = null;
+                                tauriLastDropPathRef.current = null;
+                                emitExternalFileAction(
+                                    externalAction.kind,
+                                    externalAction.path,
+                                );
+                                return;
+                            }
 
                             // Multi-file drop
                             if (paths.length > 1) {
@@ -499,6 +525,11 @@ export const TimelinePanel: React.FC = () => {
                                 tauriDropHandledAtRef.current = Date.now();
                                 tauriDraggedPathRef.current = null;
                                 tauriLastDropPathRef.current = null;
+                                const actionKind = detectExternalPathAction(resolvedPath);
+                                if (actionKind && actionKind !== "importAudio") {
+                                    emitExternalFileAction(actionKind, resolvedPath);
+                                    return;
+                                }
                                 void dispatch(
                                     importAudioAtPosition({
                                         audioPath: resolvedPath,
@@ -583,6 +614,11 @@ export const TimelinePanel: React.FC = () => {
                     const path = detail.filePath;
                     const fileName = detail.fileName;
 
+                    if (detectExternalPathAction(path) !== "importAudio") {
+                        setDropPreview(null);
+                        return;
+                    }
+
                     setDropPreview((prev) => {
                         // 如果幽灵框存在，直接通过 DOM 修改其位置坐标
                         if (prev && dropPreviewRef.current) {
@@ -652,6 +688,14 @@ export const TimelinePanel: React.FC = () => {
                             startSec: beat,
                         });
                     } else if (isMulti) {
+                        const externalAction = findFirstExternalPathAction(filePaths);
+                        if (externalAction && externalAction.kind !== "importAudio") {
+                            emitExternalFileAction(
+                                externalAction.kind,
+                                externalAction.path,
+                            );
+                            return;
+                        }
                         // 左键多文件拖拽 → 直接跨时间导入
                         void dispatch(
                             importMultipleAudioAtPosition({
@@ -662,6 +706,11 @@ export const TimelinePanel: React.FC = () => {
                             }),
                         );
                     } else {
+                        const actionKind = detectExternalPathAction(detail.filePath);
+                        if (actionKind && actionKind !== "importAudio") {
+                            emitExternalFileAction(actionKind, detail.filePath);
+                            return;
+                        }
                         // 左键单文件拖拽 → 直接导入
                         void dispatch(
                             importAudioAtPosition({
@@ -1998,6 +2047,10 @@ export const TimelinePanel: React.FC = () => {
                                 : hasDomFile
                                     ? String(dt?.files?.[0]?.name ?? "Audio")
                                     : "Audio");
+                        if (path && detectExternalPathAction(path) !== "importAudio") {
+                            setDropPreview(null);
+                            return;
+                        }
                         if (path) {
                             ensureDropPreviewDuration(path);
                         }
@@ -2064,6 +2117,11 @@ export const TimelinePanel: React.FC = () => {
                         if (resolvedPath) {
                             tauriDraggedPathRef.current = null;
                             tauriLastDropPathRef.current = null;
+                            const actionKind = detectExternalPathAction(resolvedPath);
+                            if (actionKind && actionKind !== "importAudio") {
+                                emitExternalFileAction(actionKind, resolvedPath);
+                                return;
+                            }
                             void dispatch(
                                 importAudioAtPosition({
                                     audioPath: resolvedPath,
@@ -2082,6 +2140,11 @@ export const TimelinePanel: React.FC = () => {
                                 if (!p) return;
                                 tauriDraggedPathRef.current = null;
                                 tauriLastDropPathRef.current = null;
+                                const actionKind = detectExternalPathAction(p);
+                                if (actionKind && actionKind !== "importAudio") {
+                                    emitExternalFileAction(actionKind, p);
+                                    return;
+                                }
                                 void dispatch(
                                     importAudioAtPosition({
                                         audioPath: p,

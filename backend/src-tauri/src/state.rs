@@ -743,6 +743,9 @@ pub struct AppState {
 
     /// App config directory for persisting recent projects etc.
     pub config_dir: OnceLock<std::path::PathBuf>,
+
+    /// 启动参数传入的待打开工程路径（一次性消费）。
+    pub pending_startup_project_path: Mutex<Option<String>>,
 }
 
 impl Default for AppState {
@@ -775,11 +778,28 @@ impl Default for AppState {
 
             audio_engine: AudioEngine::new(),
             config_dir: OnceLock::new(),
+            pending_startup_project_path: Mutex::new(None),
         }
     }
 }
 
 impl AppState {
+    pub fn set_pending_startup_project_path(&self, path: Option<String>) {
+        let mut guard = self
+            .pending_startup_project_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *guard = path;
+    }
+
+    pub fn take_pending_startup_project_path(&self) -> Option<String> {
+        let mut guard = self
+            .pending_startup_project_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.take()
+    }
+
     pub fn get_or_compute_waveform_peaks(
         &self,
         source_path: &str,

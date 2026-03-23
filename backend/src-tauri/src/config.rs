@@ -3,6 +3,9 @@ use std::fs;
 use std::path::Path;
 
 /// UI 设置（持久化到 app_config.json）
+///
+/// 该文件负责管理应用的可序列化配置项，包括 UI 相关的偏好
+/// 以及窗口状态。窗口状态用于在程序重启后恢复上次的窗口尺寸、位置和最大化/全屏状态。
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct UiSettings {
@@ -92,12 +95,34 @@ impl Default for UiSettings {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Default)]
+/// 持久化配置根结构。
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone, Debug)]
 struct AppConfig {
     #[serde(default)]
     recent: Vec<String>,
     #[serde(default)]
     ui: UiSettings,
+    /// 持久化的窗口状态（可选）。
+    #[serde(default)]
+    window: WindowState,
+}
+
+/// 窗口状态（持久化）
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowState {
+    /// 窗口左上角 x（屏幕坐标，逻辑像素）
+    pub x: Option<i32>,
+    /// 窗口左上角 y（屏幕坐标，逻辑像素）
+    pub y: Option<i32>,
+    /// 窗口宽度（逻辑像素）
+    pub width: Option<f64>,
+    /// 窗口高度（逻辑像素）
+    pub height: Option<f64>,
+    /// 是否最大化
+    pub maximized: Option<bool>,
+    /// 是否全屏
+    pub fullscreen: Option<bool>,
 }
 
 fn load_config(config_dir: &Path) -> AppConfig {
@@ -113,6 +138,18 @@ fn save_config(config_dir: &Path, cfg: &AppConfig) {
     if let Ok(data) = serde_json::to_string_pretty(cfg) {
         let _ = fs::write(&path, data);
     }
+}
+
+/// 读取持久化的窗口状态，如果不存在则返回默认值
+pub fn load_window_state(config_dir: &Path) -> WindowState {
+    load_config(config_dir).window
+}
+
+/// 将窗口状态写回配置文件（保留其他字段）
+pub fn save_window_state(config_dir: &Path, ws: &WindowState) {
+    let mut cfg = load_config(config_dir);
+    cfg.window = ws.clone();
+    save_config(config_dir, &cfg);
 }
 
 /// 从 config dir 读取最近工程列表；读取失败时返回空列表。

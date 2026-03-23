@@ -19,6 +19,9 @@ import {
     newProjectRemote,
     openProjectFromDialog,
     openProjectFromPath,
+    openVocalShifterFromPath,
+    openReaperFromPath,
+    importAudioFromPath,
     saveProjectRemote,
     saveProjectAsRemote,
     exportAudio,
@@ -47,8 +50,14 @@ import { getParamShiftStep } from "./components/layout/pianoRoll/paramShiftStep"
 import { runConfirmedExitClose } from "./confirmedExitClose";
 import { paramsApi } from "./services/api";
 import { coreApi } from "./services/api/core";
+import { projectApi } from "./services/api/project";
 import type { ParamFramesPayload, ProcessorParamDescriptor } from "./types/api";
 import { MISSING_FILE_CONFIRM_EVENT } from "./features/session/thunks/missingFilePrompt";
+import {
+    OPEN_PROJECT_PATH_EVENT,
+    type ExternalFileActionDetail,
+    type ExternalFileActionKind,
+} from "./features/session/projectOpenEvents";
 import type { MessageKey } from "./i18n/messages";
 import type { CloseRequestedEvent } from "@tauri-apps/api/window";
 
@@ -89,6 +98,20 @@ const errorCodeKey: Record<string, string> = {
     import_read_failed: "vs_import_read_failed",
     import_parse_failed: "vs_import_parse_failed",
 };
+
+function detectExternalActionKindFromPath(
+    path: string,
+): ExternalFileActionKind | null {
+    const normalized = String(path ?? "").trim();
+    if (!normalized) return null;
+    if (/\.(hshp|hsp)$/i.test(normalized)) return "openProject";
+    if (/\.rpp$/i.test(normalized)) return "importReaper";
+    if (/\.(vshp|vsp)$/i.test(normalized)) return "importVocalShifter";
+    if (/\.(wav|flac|mp3|ogg|m4a|aac|aif|aiff|wma|opus)$/i.test(normalized)) {
+        return "importAudio";
+    }
+    return null;
+}
 
 function AppInner() {
     const dispatch = useAppDispatch();
@@ -640,6 +663,31 @@ function AppInner() {
         [dispatch, runOrPromptUnsavedAction],
     );
 
+    const handleExternalFileAction = useCallback(
+        (kind: ExternalFileActionKind, path: string) => {
+            const normalized = String(path ?? "").trim();
+            if (!normalized) return;
+            if (kind === "openProject") {
+                runOrPromptUnsavedAction("switch", async () => {
+                    await dispatch(openProjectFromPath(normalized)).unwrap();
+                });
+                return;
+            }
+            if (kind === "importVocalShifter") {
+                void dispatch(openVocalShifterFromPath(normalized));
+                return;
+            }
+            if (kind === "importReaper") {
+                void dispatch(openReaperFromPath(normalized));
+                return;
+            }
+            if (kind === "importAudio") {
+                void dispatch(importAudioFromPath(normalized));
+            }
+        },
+        [dispatch, runOrPromptUnsavedAction],
+    );
+
     const handleExitApp = useCallback(() => {
         runOrPromptUnsavedAction("exit", closeWindowNow);
     }, [closeWindowNow, runOrPromptUnsavedAction]);
@@ -649,6 +697,46 @@ function AppInner() {
         void dispatch(refreshRuntime());
         void dispatch(loadUiSettings());
     }, [dispatch]);
+
+    useEffect(() => {
+        let canceled = false;
+
+        async function consumeStartupProjectPath() {
+            try {
+                const result = await projectApi.consumeStartupProjectPath();
+                const startupPath = String(result?.path ?? "").trim();
+                const kind = detectExternalActionKindFromPath(startupPath);
+                if (!canceled && startupPath && kind) {
+                    handleExternalFileAction(kind, startupPath);
+                }
+            } catch {
+                // no-op
+            }
+        }
+
+        void consumeStartupProjectPath();
+        return () => {
+            canceled = true;
+        };
+    }, [handleExternalFileAction]);
+
+    useEffect(() => {
+        function onOpenProjectPath(event: Event) {
+            const detail = (event as CustomEvent<ExternalFileActionDetail>).detail;
+            const path = String(detail?.path ?? "").trim();
+            const kind = detail?.kind ?? detectExternalActionKindFromPath(path);
+            if (!path || !kind) return;
+            handleExternalFileAction(kind, path);
+        }
+
+        window.addEventListener(OPEN_PROJECT_PATH_EVENT, onOpenProjectPath as EventListener);
+        return () => {
+            window.removeEventListener(
+                OPEN_PROJECT_PATH_EVENT,
+                onOpenProjectPath as EventListener,
+            );
+        };
+    }, [handleExternalFileAction]);
 
     useEffect(() => {
         runtimeRef.current = {

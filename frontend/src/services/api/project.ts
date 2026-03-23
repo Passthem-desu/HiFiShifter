@@ -3,6 +3,11 @@ import type { TimelineResult } from "../../types/api";
 import { invoke } from "../invoke";
 
 export const projectApi = {
+    consumeStartupProjectPath: () =>
+        invoke<{ ok: boolean; path?: string | null }>(
+            "consume_startup_project_path",
+        ),
+
     // Project meta
     getProjectMeta: () =>
         invoke<{

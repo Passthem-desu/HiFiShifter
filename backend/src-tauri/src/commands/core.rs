@@ -9,6 +9,11 @@ pub(super) fn get_runtime_info(state: State<'_, AppState>) -> crate::models::Run
     state.runtime_info()
 }
 
+pub(super) fn consume_startup_project_path(state: State<'_, AppState>) -> serde_json::Value {
+    let path = state.take_pending_startup_project_path();
+    serde_json::json!({ "ok": true, "path": path })
+}
+
 pub(super) fn set_ui_locale(state: State<'_, AppState>, locale: String) -> serde_json::Value {
     let locale = locale.trim();
     let lower = locale.to_lowercase();

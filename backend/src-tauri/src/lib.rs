@@ -8,6 +8,7 @@ mod clip_rendering_state;
 mod commands;
 #[path = "audio/hifigan_tension.rs"]
 mod hifigan_tension;
+mod launch_args;
 #[path = "audio/mixdown.rs"]
 mod mixdown;
 mod models;
@@ -75,6 +76,11 @@ mod world;
 mod world_vocoder;
 
 use tauri::Manager;
+use tauri::WindowEvent;
+use tauri::Size as TauriSize;
+use tauri::LogicalSize as TauriLogicalSize;
+use tauri::Position as TauriPosition;
+use tauri::LogicalPosition as TauriLogicalPosition;
 
 pub fn nsf_hifigan_onnx_probe() -> Result<String, String> {
     // Probe ONNX model availability.
@@ -115,6 +121,11 @@ pub fn run() {
 
             let state = app.state::<state::AppState>();
 
+            // 从进程启动参数中解析工程路径（双击文件关联场景）。
+            let startup_project_path =
+                launch_args::extract_project_path_from_args(std::env::args_os());
+            state.set_pending_startup_project_path(startup_project_path);
+
             // Expose app handle for background workers.
             let _ = state.app_handle.set(app.handle().clone());
 
@@ -148,14 +159,72 @@ pub fn run() {
                 let _ = state.config_dir.set(cfg_dir);
             }
 
+            // 尝试恢复上次运行时保存的窗口状态（非强制性）
+            if let Some(cfg_dir) = state.config_dir.get() {
+                if let Some(win) = app.get_webview_window("main") {
+                    let ws = crate::config::load_window_state(cfg_dir);
+                    // 应用尺寸与位置（非最大化/全屏状态先应用尺寸/位置，再切换最大化）
+                    if let (Some(w), Some(h)) = (ws.width, ws.height) {
+                        let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width: w, height: h }));
+                    }
+                    if let (Some(x), Some(y)) = (ws.x, ws.y) {
+                        let _ = win.set_position(tauri::Position::Logical(tauri::LogicalPosition { x: x as f64, y: y as f64 }));
+                    }
+                    if ws.fullscreen.unwrap_or(false) {
+                        let _ = win.set_fullscreen(true);
+                    } else if ws.maximized.unwrap_or(false) {
+                        let _ = win.maximize();
+                    } else {
+                        let _ = win.set_fullscreen(false);
+                    }
+                }
+            }
+
             // 启动时清理上次遗留的临时文件（后台线程，不阻塞启动）
             temp_manager::cleanup_stale_temp_files();
 
             Ok(())
         })
+        // 在窗口事件中监听 CloseRequested，保存窗口状态到配置目录
+        .on_window_event(|win, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                // 仅针对主窗口保存状态
+                if win.label() != "main" {
+                    return;
+                }
+
+                let maximized = win.is_maximized().unwrap_or(false);
+                let fullscreen = win.is_fullscreen().unwrap_or(false);
+                let mut x_opt = None;
+                let mut y_opt = None;
+                let mut w_opt = None;
+                let mut h_opt = None;
+                if let Ok(pos) = win.outer_position() {
+                    x_opt = Some(pos.x);
+                    y_opt = Some(pos.y);
+                }
+                if let Ok(size) = win.inner_size() {
+                    w_opt = Some(size.width as f64);
+                    h_opt = Some(size.height as f64);
+                }
+
+                if let Some(cfg_dir) = win.app_handle().state::<state::AppState>().config_dir.get() {
+                    let ws = crate::config::WindowState {
+                        x: x_opt,
+                        y: y_opt,
+                        width: w_opt,
+                        height: h_opt,
+                        maximized: Some(maximized),
+                        fullscreen: Some(fullscreen),
+                    };
+                    crate::config::save_window_state(cfg_dir, &ws);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::get_runtime_info,
+            commands::consume_startup_project_path,
             commands::set_ui_locale,
             commands::get_timeline_state,
             commands::set_transport,

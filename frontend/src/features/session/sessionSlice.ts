@@ -24,6 +24,7 @@ import {
     addClipOnTrack,
     addTrackRemote,
     createClipsRemote,
+    duplicateTrackRemote,
     fetchSelectedTrackSummary,
     glueClipsRemote,
     moveClipRemote,
@@ -44,7 +45,9 @@ import {
     openProjectFromDialog,
     openProjectFromPath,
     openVocalShifterFromDialog,
+    openVocalShifterFromPath,
     openReaperFromDialog,
+    openReaperFromPath,
     redoRemote,
     saveProjectAsRemote,
     saveProjectRemote,
@@ -776,7 +779,9 @@ export {
     openProjectFromDialog,
     openProjectFromPath,
     openVocalShifterFromDialog,
+    openVocalShifterFromPath,
     openReaperFromDialog,
+    openReaperFromPath,
     saveProjectRemote,
     saveProjectAsRemote,
     setProjectBaseScaleRemote,
@@ -2095,6 +2100,40 @@ const sessionSlice = createSlice({
                 state.status = "Import failed";
             })
 
+            .addCase(openVocalShifterFromPath.pending, (state) =>
+                setPending(state, "Importing VocalShifter project..."),
+            )
+            .addCase(openVocalShifterFromPath.fulfilled, (state, action) => {
+                state.busy = false;
+                const payload = action.payload as
+                    | { ok: true; canceled: true }
+                    | {
+                          ok: true;
+                          canceled: false;
+                          timeline: TimelineState;
+                          skippedFiles?: string[];
+                      };
+                if (!payload || (payload as any).canceled) {
+                    state.status = "Import canceled";
+                    return;
+                }
+                applyTimelineState(state, (payload as any).timeline, { force: true });
+                const skippedFiles = (payload as any).skippedFiles;
+                state.vocalShifterSkippedFilesDialog =
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0
+                        ? skippedFiles
+                        : null;
+                state.status = "VocalShifter project imported";
+            })
+            .addCase(openVocalShifterFromPath.rejected, (state, action) => {
+                state.busy = false;
+                state.error =
+                    (action.payload as string) ??
+                    action.error?.message ??
+                    "Import VocalShifter failed";
+                state.status = "Import failed";
+            })
+
             .addCase(openReaperFromDialog.pending, (state) =>
                 setPending(state, "Importing Reaper project..."),
             )
@@ -2121,6 +2160,40 @@ const sessionSlice = createSlice({
                 state.status = "Reaper project imported";
             })
             .addCase(openReaperFromDialog.rejected, (state, action) => {
+                state.busy = false;
+                state.error =
+                    (action.payload as string) ??
+                    action.error?.message ??
+                    "Import Reaper failed";
+                state.status = "Import failed";
+            })
+
+            .addCase(openReaperFromPath.pending, (state) =>
+                setPending(state, "Importing Reaper project..."),
+            )
+            .addCase(openReaperFromPath.fulfilled, (state, action) => {
+                state.busy = false;
+                const payload = action.payload as
+                    | { ok: true; canceled: true }
+                    | {
+                          ok: true;
+                          canceled: false;
+                          timeline: TimelineState;
+                          skippedFiles?: string[];
+                      };
+                if (!payload || (payload as any).canceled) {
+                    state.status = "Import canceled";
+                    return;
+                }
+                applyTimelineState(state, (payload as any).timeline, { force: true });
+                const skippedFiles = (payload as any).skippedFiles;
+                state.reaperSkippedFilesDialog =
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0
+                        ? skippedFiles
+                        : null;
+                state.status = "Reaper project imported";
+            })
+            .addCase(openReaperFromPath.rejected, (state, action) => {
                 state.busy = false;
                 state.error =
                     (action.payload as string) ??
@@ -2324,6 +2397,17 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(duplicateTrackRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                // 克隆轨道属于离散操作，必须立即同步后端快照，避免 UI 延迟刷新。
                 applyTimelineState(state, payload, { force: true });
             })
 
