@@ -173,11 +173,14 @@ fn compute_track_gains(tracks: &[Track]) -> HashMap<String, (f32, bool, bool)> {
             }
         }
 
-        // If any solo exists, only soloed lineages are audible.
+        // Solo overrides mute: when a track (or its ancestor) is soloed,
+        // its own mute flag is ignored so that solo always wins.
+        let effective_muted = if any_solo && soloed { false } else { muted };
+
         if any_solo {
-            out.insert(t.id.clone(), (gain, muted, soloed));
+            out.insert(t.id.clone(), (gain, effective_muted, soloed));
         } else {
-            out.insert(t.id.clone(), (gain, muted, true));
+            out.insert(t.id.clone(), (gain, effective_muted, true));
         }
     }
 
