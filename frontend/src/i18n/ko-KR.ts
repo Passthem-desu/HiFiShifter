@@ -431,6 +431,7 @@ export const koKR = {
     fb_sort_size: "크기",
     fb_sort_label: "정렬",
     fb_regex_error: "잘못된 정규 표현식",
+    fb_audio_only: "오디오 파일만 표시",
 
     // 편집 메뉴 새 항목
     menu_deselect: "선택 해제",

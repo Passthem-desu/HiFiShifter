@@ -415,6 +415,7 @@ export const zhCN = {
     fb_sort_size: "大小",
     fb_sort_label: "排序",
     fb_regex_error: "无效的正则表达式",
+    fb_audio_only: "仅显示音频文件",
 
     // Edit menu new items
     menu_deselect: "取消选择",

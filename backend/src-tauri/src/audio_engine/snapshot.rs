@@ -38,9 +38,13 @@ pub(crate) fn compute_track_gains<'a>(tracks: &'a [Track]) -> HashMap<&'a str, (
             }
         }
 
+        // Solo overrides mute: when a track (or its ancestor) is soloed,
+        // its own mute flag is ignored so that solo always wins.
+        let effective_muted = if any_solo && soloed { false } else { muted };
+
         out.insert(
             t.id.as_str(),
-            (gain, muted, if any_solo { soloed } else { true }),
+            (gain, effective_muted, if any_solo { soloed } else { true }),
         );
     }
 
