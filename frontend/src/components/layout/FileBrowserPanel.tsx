@@ -36,6 +36,7 @@ import {
     searchFilesRecursive,
     toggleRegex,
     setSortMode,
+    toggleAudioOnly,
     type SortMode,
 } from "../../features/fileBrowser/fileBrowserSlice";
 import { audioPreview } from "../../features/fileBrowser/audioPreview";
@@ -166,9 +167,17 @@ export const FileBrowserPanel: React.FC = () => {
         }
     }, [rawEntries, fb.regexEnabled, trimmedSearchQuery, isSearchMode]);
 
+    // 音频过滤
+    const audioFilteredEntries = useMemo(() => {
+        if (!fb.audioOnly) return regexFilteredEntries;
+        return regexFilteredEntries.filter(
+            (e) => e.isDir || isAudioFile(e),
+        );
+    }, [regexFilteredEntries, fb.audioOnly]);
+
     // 排序
     const displayEntries = useMemo(() => {
-        const sorted = [...regexFilteredEntries];
+        const sorted = [...audioFilteredEntries];
         switch (fb.sortMode) {
             case "name":
                 sorted.sort((a, b) => a.name.localeCompare(b.name));
@@ -185,7 +194,7 @@ export const FileBrowserPanel: React.FC = () => {
         // 目录始终排在前面
         sorted.sort((a, b) => (a.isDir === b.isDir ? 0 : a.isDir ? -1 : 1));
         return sorted;
-    }, [regexFilteredEntries, fb.sortMode]);
+    }, [audioFilteredEntries, fb.sortMode]);
 
     // 计算展示相对路径（搜索模式下显示文件所在目录）
     function getRelativeDirHint(fullPath: string): string {
@@ -602,6 +611,19 @@ export const FileBrowserPanel: React.FC = () => {
                         }}
                     >
                         .*
+                    </IconButton>
+                    <IconButton
+                        size="1"
+                        variant={fb.audioOnly ? "solid" : "ghost"}
+                        color="gray"
+                        title={tAny("fb_audio_only")}
+                        onClick={() => dispatch(toggleAudioOnly())}
+                        style={{
+                            width: 22,
+                            height: 22,
+                        }}
+                    >
+                        <AudioIcon />
                     </IconButton>
                     <Select.Root
                         value={fb.sortMode}

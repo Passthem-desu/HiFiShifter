@@ -436,6 +436,7 @@ export const jaJP = {
     fb_sort_size: "サイズ",
     fb_sort_label: "並び替え",
     fb_regex_error: "無効な正規表現",
+    fb_audio_only: "オーディオファイルのみ表示",
 
     // 編集メニュー新規項目
     menu_deselect: "選択解除",

@@ -20,9 +20,11 @@ interface FileBrowserState {
     searchLoading: boolean;
     regexEnabled: boolean;
     sortMode: SortMode;
+    audioOnly: boolean; // 仅显示音频文件
 }
 
 const STORAGE_KEY = "hifishifter.fileBrowser.lastPath";
+const AUDIO_ONLY_KEY = "hifishifter.fileBrowser.audioOnly";
 
 function getInitialPath(): string {
     return localStorage.getItem(STORAGE_KEY) || "";
@@ -41,6 +43,7 @@ const initialState: FileBrowserState = {
     searchLoading: false,
     regexEnabled: false,
     sortMode: "name" as SortMode,
+    audioOnly: localStorage.getItem(AUDIO_ONLY_KEY) === "true",
 };
 
 export const loadDirectory = createAsyncThunk(
@@ -106,6 +109,10 @@ const fileBrowserSlice = createSlice({
         setSortMode(state, action: PayloadAction<SortMode>) {
             state.sortMode = action.payload;
         },
+        toggleAudioOnly(state) {
+            state.audioOnly = !state.audioOnly;
+            localStorage.setItem(AUDIO_ONLY_KEY, String(state.audioOnly));
+        },
     },
     extraReducers: (builder) => {
         builder
@@ -145,6 +152,7 @@ export const {
     setSearchQuery,
     toggleRegex,
     setSortMode,
+    toggleAudioOnly,
 } = fileBrowserSlice.actions;
 
 export default fileBrowserSlice.reducer;

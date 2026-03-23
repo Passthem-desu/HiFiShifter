@@ -431,6 +431,7 @@ export const enUS = {
     fb_sort_size: "Size",
     fb_sort_label: "Sort",
     fb_regex_error: "Invalid regex",
+    fb_audio_only: "Show audio files only",
 
     // Edit menu new items
     menu_deselect: "Deselect",
