@@ -38,6 +38,16 @@ import {
 /** 可视区缓冲（像素），防止滚动时出现空白；固定像素数，不随缩放膨胀 */
 const BUFFER_PX = 500;
 
+/**
+ * 将 canvas 内部像素尺寸向上对齐到 ALIGN 的整数倍。
+ * 这样缩放时只有当宽度变化超过 ALIGN 像素才会重设 canvas.width，
+ * 大幅减少因 canvas.width 赋值导致的清屏次数。
+ */
+const SIZE_ALIGN = 128;
+function alignUp(v: number): number {
+    return Math.ceil(v / SIZE_ALIGN) * SIZE_ALIGN;
+}
+
 export interface WaveformTrackCanvasProps {
     /** 当前轨道上所有 clip（已由 TrackLane 做过可视区过滤） */
     clips: ClipInfo[];
@@ -126,24 +136,25 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             backBufferRef.current ?? document.createElement("canvas");
         backBufferRef.current = backBuffer;
 
-        // Canvas 内部像素 = CSS 尺寸 × dpr
-        const internalW = Math.max(1, Math.floor(displayW * dpr));
-        const internalH = Math.max(1, Math.floor(displayH * dpr));
+        // Canvas 内部像素 = CSS 尺寸 × dpr，向上对齐到 SIZE_ALIGN 减少重设次数
+        const rawW = Math.max(1, Math.floor(displayW * dpr));
+        const rawH = Math.max(1, Math.floor(displayH * dpr));
+        const internalW = alignUp(rawW);
+        const internalH = alignUp(rawH);
 
-        if (backBuffer.width !== internalW) {
+        // 只在对齐后的尺寸变化时才重设（大幅减少清屏次数）
+        if (backBuffer.width !== internalW || backBuffer.height !== internalH) {
             backBuffer.width = internalW;
-        }
-        if (backBuffer.height !== internalH) {
             backBuffer.height = internalH;
         }
 
         const backCtx = backBuffer.getContext("2d");
         if (!backCtx) return;
 
-        const scaleX = internalW / Math.max(1, displayW);
-        const scaleY = internalH / Math.max(1, displayH);
+        const scaleX = rawW / Math.max(1, displayW);
+        const scaleY = rawH / Math.max(1, displayH);
         backCtx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
-        backCtx.clearRect(0, 0, displayW, displayH);
+        backCtx.clearRect(0, 0, displayW + SIZE_ALIGN, displayH + SIZE_ALIGN);
 
         // Canvas 左边缘对应的 timeline 时间
         const canvasStartSec = bufferedStartSec;
@@ -270,10 +281,9 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             backCtx.restore();
         }
 
-        if (canvas.width !== internalW) {
+        // 只在对齐后的尺寸变化时才重设前台 canvas（减少清屏）
+        if (canvas.width !== internalW || canvas.height !== internalH) {
             canvas.width = internalW;
-        }
-        if (canvas.height !== internalH) {
             canvas.height = internalH;
         }
         const nextStyleWidth = `${displayW}px`;
@@ -288,8 +298,8 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
         ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
-        ctx.clearRect(0, 0, displayW, displayH);
-        ctx.drawImage(backBuffer, 0, 0, internalW, internalH, 0, 0, displayW, displayH);
+        ctx.clearRect(0, 0, displayW + SIZE_ALIGN, displayH + SIZE_ALIGN);
+        ctx.drawImage(backBuffer, 0, 0, rawW, rawH, 0, 0, displayW, displayH);
         if (ctx.globalAlpha !== 1) {
             ctx.globalAlpha = 1;
         }
