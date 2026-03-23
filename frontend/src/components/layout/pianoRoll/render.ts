@@ -22,6 +22,7 @@ import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./constants";
 import { framesToTime, timeToPixel } from "./utils";
 import { resolveSecondaryOverlayValues } from "./secondaryOverlaySelection";
 import {
+    applyGainsToPeaks,
     renderWaveform,
     type WaveformRenderParams,
 } from "../../../utils/waveformRenderer";
@@ -756,26 +757,29 @@ export function drawPianoRoll(args: {
         offCtx.clearRect(0, 0, displayedOffW, displayedOffH);
 
         // 构建 renderWaveform 参数：仅在离屏画布左侧渲染当前可见片段
-        // PianoRoll 中波形仅作为背景参考，无需 clip 级别的增益/淡入淡出
+        // PianoRoll 中波形受 clip 级别的增益/淡入淡出影响，与 timeline 保持一致
         const pianoRollWfParams: WaveformRenderParams = {
             canvasWidth: visibleClipWidthPx,
             canvasHeight: displayedOffH,
             centerY: displayedOffH / 2,
             sourceStartSec: visibleSourceStartSec,
-            clipDuration: visibleSourceDurSec / pr,
+            clipDuration: entry.lengthSec,
             playbackRate: pr,
             sourceDurationSec: sourceDurSec,
-            volumeGain: 1,
-            fadeInSec: 0,
-            fadeOutSec: 0,
-            fadeInCurve: "linear",
-            fadeOutCurve: "linear",
+            volumeGain: entry.gain ?? 1,
+            fadeInSec: entry.fadeInSec ?? 0,
+            fadeOutSec: entry.fadeOutSec ?? 0,
+            fadeInCurve: entry.fadeInCurve ?? "linear",
+            fadeOutCurve: entry.fadeOutCurve ?? "linear",
             dataStartSec: visibleSourceStartSec,
             dataDurationSec: visibleSourceDurSec,
         };
 
+        // 应用增益（音量 + 淡入淡出）到波形数据
+        const withGains = applyGainsToPeaks(interleavedPeaks, pianoRollWfParams);
+
         // 渲染波形（jitter 抖动线模式）
-        renderWaveform(offCtx, interleavedPeaks, pianoRollWfParams, waveformColors.stroke, 0.5, "jitter");
+        renderWaveform(offCtx, withGains, pianoRollWfParams, waveformColors.stroke, 0.5, "jitter");
 
         // 计算渲染目标位置：clip 在主 canvas 上的起始位置
         const destX = visibleClipStartX;
