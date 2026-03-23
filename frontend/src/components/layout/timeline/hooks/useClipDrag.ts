@@ -15,6 +15,8 @@ import {
     selectTrackRemote,
     seekPlayhead,
     setplayheadSec,
+    beginInteraction,
+    endInteraction,
 } from "../../../../features/session/sessionSlice";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
@@ -275,6 +277,7 @@ export function useClipDrag(deps: {
                 drag.hasMoved = true;
                 if (!drag.copyMode) {
                     dispatch(checkpointHistory());
+                    dispatch(beginInteraction());
                     // Begin backend undo group so that move_clip + auto-crossfade
                     // share a single backend undo entry.
                     void webApi.beginUndoGroup();
@@ -479,6 +482,7 @@ export function useClipDrag(deps: {
 
             if (drag.copyMode) {
                 // copyMode 下原 clip 未被移动，直接根据 ghost 偏移量计算副本位置
+                // copyMode 不使用交互锁（原 clip 未被拖动改变位置）
                 void (async () => {
                     const templateInputs = drag.clipIds
                         .map((id) => {
@@ -657,6 +661,9 @@ export function useClipDrag(deps: {
                     })().catch(() => undefined);
                 })().catch(() => undefined);
             } else {
+                // 非 copyMode：先释放交互锁，再发最终持久化请求
+                dispatch(endInteraction());
+
                 if (dropToNewTrack) {
                     void (async () => {
                         try {

@@ -29,6 +29,7 @@ import {
     setMultiSelectedClipIds as setMultiSelectedClipIdsAction,
     setSelectedClip,
     setSelectedClipPreservingTrack,
+    setTrackName,
 } from "../../features/session/sessionSlice";
 
 import type { ClipTemplate } from "../../features/session/sessionTypes";
@@ -1803,13 +1804,15 @@ export const TimelinePanel: React.FC = () => {
                     );
                 }}
                 onTrackNameChange={(trackId, name) => {
+                    // 乐观更新：立即反映到 UI
+                    dispatch(setTrackName({ trackId, name }));
                     dispatch(
                         setTrackStateRemote({
                             trackId,
                             name,
                         }),
                     );
-                }}
+                }}}
                 onDuplicateTrack={(trackId) => {
                     dispatch(duplicateTrackRemote(trackId));
                 }}
