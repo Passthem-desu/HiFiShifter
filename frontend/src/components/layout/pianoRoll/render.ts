@@ -634,11 +634,14 @@ export function drawPianoRoll(args: {
     const displayedOffH = Math.max(1, h);
     const internalOffW = Math.max(1, Math.floor(displayedOffW * offDpr));
     const internalOffH = Math.max(1, Math.floor(displayedOffH * offDpr));
-    if (offCanvas.width !== internalOffW) {
-        offCanvas.width = internalOffW;
-    }
-    if (offCanvas.height !== internalOffH) {
-        offCanvas.height = internalOffH;
+    // 将离屏 canvas 尺寸向上对齐到 128 的整数倍，
+    // 缩放时减少 canvas.width 重设导致的清屏次数，消除闪烁
+    const OFF_SIZE_ALIGN = 128;
+    const alignedOffW = Math.ceil(internalOffW / OFF_SIZE_ALIGN) * OFF_SIZE_ALIGN;
+    const alignedOffH = Math.ceil(internalOffH / OFF_SIZE_ALIGN) * OFF_SIZE_ALIGN;
+    if (offCanvas.width !== alignedOffW || offCanvas.height !== alignedOffH) {
+        offCanvas.width = alignedOffW;
+        offCanvas.height = alignedOffH;
     }
     offCanvas.style.width = `${displayedOffW}px`;
     offCanvas.style.height = `${displayedOffH}px`;

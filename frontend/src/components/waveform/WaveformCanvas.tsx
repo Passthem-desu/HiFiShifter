@@ -31,6 +31,16 @@ import type { FadeCurveType } from "../layout/timeline/paths";
 /** 可视区缓冲（像素），防止滚动时出现空白；固定像素数，不随缩放膨胀 */
 const BUFFER_PX = 500;
 
+/**
+ * 将 canvas 内部像素尺寸向上对齐到 ALIGN 的整数倍。
+ * 缩放时只有当宽度变化超过 ALIGN 像素才会重设 canvas.width，
+ * 大幅减少因 canvas.width 赋值导致的清屏次数，消除闪烁。
+ */
+const SIZE_ALIGN = 128;
+function alignUp(v: number): number {
+    return Math.ceil(v / SIZE_ALIGN) * SIZE_ALIGN;
+}
+
 export type WaveformCanvasProps = {
     targetWidthPx: number;
     heightPx: number;
@@ -249,23 +259,24 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
             backBufferRef.current ?? document.createElement("canvas");
         backBufferRef.current = backBuffer;
 
-        const internalW = Math.max(1, Math.floor(displayedW * dpr));
-        const internalH = Math.max(1, Math.floor(displayedH * dpr));
+        const rawW = Math.max(1, Math.floor(displayedW * dpr));
+        const rawH = Math.max(1, Math.floor(displayedH * dpr));
+        const internalW = alignUp(rawW);
+        const internalH = alignUp(rawH);
 
-        if (backBuffer.width !== internalW) {
+        // 只在对齐后的尺寸变化时才重设（大幅减少清屏次数）
+        if (backBuffer.width !== internalW || backBuffer.height !== internalH) {
             backBuffer.width = internalW;
-        }
-        if (backBuffer.height !== internalH) {
             backBuffer.height = internalH;
         }
 
         const backCtx = backBuffer.getContext("2d");
         if (!backCtx) return;
 
-        const scaleX = internalW / Math.max(1, displayedW);
-        const scaleY = internalH / Math.max(1, displayedH);
+        const scaleX = rawW / Math.max(1, displayedW);
+        const scaleY = rawH / Math.max(1, displayedH);
         backCtx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
-        backCtx.clearRect(0, 0, displayedW, displayedH);
+        backCtx.clearRect(0, 0, displayedW + SIZE_ALIGN, displayedH + SIZE_ALIGN);
         backCtx.globalAlpha = Math.max(0, Math.min(1, Number(opacity) || 0));
 
         // 从 mipmap 缓存获取 resample 后的数据
@@ -303,10 +314,9 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
             }
         }
 
-        if (canvas.width !== internalW) {
+        // 只在对齐后的尺寸变化时才重设前台 canvas（减少清屏）
+        if (canvas.width !== internalW || canvas.height !== internalH) {
             canvas.width = internalW;
-        }
-        if (canvas.height !== internalH) {
             canvas.height = internalH;
         }
         const nextStyleWidth = `${displayedW}px`;
@@ -321,8 +331,8 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
         ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
-        ctx.clearRect(0, 0, displayedW, displayedH);
-        ctx.drawImage(backBuffer, 0, 0, internalW, internalH, 0, 0, displayedW, displayedH);
+        ctx.clearRect(0, 0, displayedW + SIZE_ALIGN, displayedH + SIZE_ALIGN);
+        ctx.drawImage(backBuffer, 0, 0, rawW, rawH, 0, 0, displayedW, displayedH);
         if (ctx.globalAlpha !== 1) {
             ctx.globalAlpha = 1;
         }
