@@ -29,7 +29,8 @@ export const jaJP = {
     menu_pick_output: "出力先を選択",
     language: "言語",
     lang_en: "English",
-    lang_zh: "中文",
+    lang_zh: "简体中文",
+    lang_zh_tw: "繁體中文",
     lang_ja: "日本語",
     lang_ko: "한국어",
 

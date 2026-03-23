@@ -28,7 +28,8 @@ export const zhCN = {
     menu_pick_output: "选择导出路径",
     language: "语言",
     lang_en: "English",
-    lang_zh: "中文",
+    lang_zh: "简体中文",
+    lang_zh_tw: "繁體中文",
     lang_ja: "日本語",
     lang_ko: "한국어",
 
