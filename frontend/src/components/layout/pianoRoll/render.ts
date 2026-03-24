@@ -757,15 +757,32 @@ export function drawPianoRoll(args: {
         offCtx.clearRect(0, 0, displayedOffW, displayedOffH);
 
         // 构建 renderWaveform 参数：仅在离屏画布左侧渲染当前可见片段
-        // PianoRoll 中波形受 clip 级别的增益/淡入淡出影响，与 timeline 保持一致
+        // clipDuration 必须与 canvasWidth 对应，表示可见片段的 timeline 时长，
+        // 否则时间→像素映射会被挤压导致窗口边缘波形横向压缩。
+        const visibleClipDuration = visibleSourceDurSec / pr;
         const pianoRollWfParams: WaveformRenderParams = {
             canvasWidth: visibleClipWidthPx,
             canvasHeight: displayedOffH,
             centerY: displayedOffH / 2,
             sourceStartSec: visibleSourceStartSec,
-            clipDuration: entry.lengthSec,
+            clipDuration: visibleClipDuration,
             playbackRate: pr,
             sourceDurationSec: sourceDurSec,
+            volumeGain: 1,
+            fadeInSec: 0,
+            fadeOutSec: 0,
+            fadeInCurve: "linear",
+            fadeOutCurve: "linear",
+            dataStartSec: visibleSourceStartSec,
+            dataDurationSec: visibleSourceDurSec,
+        };
+
+        // 增益（音量 + 淡入淡出）需要基于完整 clip 坐标系来计算，
+        // 因为淡入淡出的时间基准是相对于整个 clip 起止位置的。
+        const gainParams: WaveformRenderParams = {
+            ...pianoRollWfParams,
+            sourceStartSec: sourceStartSec,
+            clipDuration: entry.lengthSec,
             volumeGain: entry.gain ?? 1,
             fadeInSec: entry.fadeInSec ?? 0,
             fadeOutSec: entry.fadeOutSec ?? 0,
@@ -776,7 +793,7 @@ export function drawPianoRoll(args: {
         };
 
         // 应用增益（音量 + 淡入淡出）到波形数据
-        const withGains = applyGainsToPeaks(interleavedPeaks, pianoRollWfParams);
+        const withGains = applyGainsToPeaks(interleavedPeaks, gainParams);
 
         // 渲染波形（jitter 抖动线模式）
         renderWaveform(offCtx, withGains, pianoRollWfParams, waveformColors.stroke, 0.5, "jitter");
