@@ -13,7 +13,7 @@
 
 import { waveformApi } from "../services/api/waveform";
 import {
-    decodeWaveformFromNumberArray,
+    decodeWaveformFromBase64,
     type WaveformMipmapBinary,
 } from "./waveformBinaryCodec";
 
@@ -380,6 +380,73 @@ class WaveformMipmapStoreImpl {
     }
 
     /**
+     * 批量预加载多个文件的所有三级 mipmap 数据
+     *
+     * 将 N 个文件 × (1 preload + 3 loadLevel) = 4N 次 IPC 合并为 1 次。
+     * 项目打开/重新打开时调用，大幅减少 IPC 往返开销。
+     *
+     * @param sourcePaths 需要预加载的音频文件路径数组
+     */
+    async batchPreload(sourcePaths: string[]): Promise<void> {
+        if (sourcePaths.length === 0) return;
+
+        // 过滤掉已完全缓存的文件（3 级都已加载）
+        const needed = sourcePaths.filter((sp) => {
+            const entry = this.cache.get(sp);
+            if (!entry) return true;
+            return entry.levels.some((l) => l == null);
+        });
+
+        if (needed.length === 0) return;
+
+        // 通知所有需要加载的文件进入 loading 状态
+        for (const sp of needed) {
+            this.notify(sp, "loading");
+        }
+
+        try {
+            // 单次 IPC 批量获取所有文件的 3 级 mipmap 数据
+            const batchResult =
+                await waveformApi.batchGetWaveformMipmap(needed);
+
+            // 遍历结果，解码并写入缓存
+            for (const [sourcePath, levels] of Object.entries(batchResult)) {
+                let hasError = false;
+                for (let level = 0; level < LEVEL_COUNT; level++) {
+                    const base64 = levels[level];
+                    if (!base64) {
+                        hasError = true;
+                        continue;
+                    }
+                    const decoded = decodeWaveformFromBase64(base64);
+                    if (decoded) {
+                        this.applyDecoded(
+                            sourcePath,
+                            level,
+                            decoded,
+                        );
+                    } else {
+                        hasError = true;
+                    }
+                }
+                this.notify(
+                    sourcePath,
+                    hasError ? "error" : "done",
+                    hasError ? "batch decode partial failure" : undefined,
+                );
+            }
+        } catch (err) {
+            // 批量 IPC 失败，回退到逐个 preload
+            console.warn(
+                "[WaveformMipmapStore] batchPreload failed, falling back to individual preload:",
+                err,
+            );
+            const promises = needed.map((sp) => this.preload(sp));
+            await Promise.allSettled(promises);
+        }
+    }
+
+    /**
      * 检查指定文件的指定级别是否已缓存
      */
     hasLevel(sourcePath: string, level: 0 | 1 | 2): boolean {
@@ -455,7 +522,7 @@ class WaveformMipmapStoreImpl {
                     sourcePath,
                     level,
                 );
-                const decoded = decodeWaveformFromNumberArray(raw);
+                const decoded = decodeWaveformFromBase64(raw);
 
                 if (decoded) {
                     this.applyDecoded(sourcePath, level, decoded);

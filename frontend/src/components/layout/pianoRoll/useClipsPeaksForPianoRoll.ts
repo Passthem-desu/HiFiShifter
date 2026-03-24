@@ -12,7 +12,6 @@ import { lruGet, lruSet } from "./peaksCache";
 import { waveformMipmapStore } from "../../../utils/waveformMipmapStore";
 
 /** 单个 clip 的 peaks 数据条目 */
-/** 单个 clip 的 peaks 数据条目 */
 export interface ClipPeaksEntry {
     /** clip ID */
     clipId: string;
@@ -145,11 +144,10 @@ function buildClipPeaksRequest(
  * Piano Roll 获取当前 track 下所有可见 clip 的 peaks 数据 (Mipmap 优化版)
  *
  * 特性：
- * 1. 使用 Mipmap 多级缓存，根据缩放级别自动选择最佳峰值分辨率
- * 2. Level 0 (div ~128): 放大显示，高精度
- * 3. Level 1 (div ~512): 中等缩放，平衡性能
- * 4. Level 2 (div ~2048): 小缩放，适合概览
- * 5. Level 3 (div ~8192): 全景视图，最低精度
+ * 1. 使用 Mipmap 三级缓存，根据缩放级别自动选择最佳峰值分辨率
+ * 2. Level 0 (div=64):   精细级，近距离对轨，spp ≤ 256
+ * 3. Level 1 (div=512):  中间级，日常编辑，256 < spp ≤ 2048
+ * 4. Level 2 (div=4096): 全局级，预览/导航，spp > 2048
  *
  * @param args.clips - 当前 track 下的所有 clip
  * @param args.visibleStartSec - 可见区域起始时间（秒）
@@ -212,6 +210,9 @@ export function useClipsPeaksForPianoRoll(args: {
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [clips, visibleStartSec, visibleEndSec, pxPerSec],
     );
+
+    /** 异步加载 debounce 定时器 */
+    const fetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         // 过滤出与可见区域有交叠的 clip（clip.startSec/lengthSec 是秒，直接比较）
@@ -300,68 +301,86 @@ export function useClipsPeaksForPianoRoll(args: {
 
         if (toFetch.length === 0) return;
 
+        // 清除前一轮的 debounce 定时器
+        if (fetchTimerRef.current) {
+            clearTimeout(fetchTimerRef.current);
+            fetchTimerRef.current = null;
+        }
+
         // 异步获取未缓存的 clip peaks (Mipmap优化版)
-        void (async () => {
-            const results = await Promise.allSettled(
-                toFetch.map(async ({ clip, req, level, cacheKey }) => {
-                    // 使用 waveformMipmapStore（三级整文件缓存）获取峰值数据
-                    const inflightKey = `${req.sourcePath}|${level}`;
-                    let p = clipPeaksInflight.get(inflightKey);
-                    if (!p) {
-                        p = (async () => {
-                            // 确保数据已预加载（preload 内部会去重并等待正在进行的加载）
-                            await waveformMipmapStore.preload(req.sourcePath);
-                            const slice = waveformMipmapStore.getSlice(
-                                req.sourcePath,
-                                level,
-                                req.startSec,
-                                req.durSec,
-                            );
-                            if (!slice) return null;
-                            const entry: CachedEntry = {
-                                min: Array.from(slice.min),
-                                max: Array.from(slice.max),
-                                startSec: req.startSec,
-                                durSec: req.durSec,
-                                t: Date.now(),
-                            };
-                            lruSet(
-                                clipPeaksCache,
-                                cacheKey,
-                                entry,
-                                CLIP_PEAKS_CACHE_LIMIT,
-                            );
-                            return entry;
-                        })().finally(() => {
-                            clipPeaksInflight.delete(inflightKey);
-                        });
-                        clipPeaksInflight.set(inflightKey, p);
-                    }
+        // 使用 50ms debounce，避免快速缩放/滚动时产生大量冗余 IPC 请求
+        fetchTimerRef.current = setTimeout(() => {
+            fetchTimerRef.current = null;
+            void (async () => {
+                const results = await Promise.allSettled(
+                    toFetch.map(async ({ clip, req, level, cacheKey }) => {
+                        // 使用 waveformMipmapStore（三级整文件缓存）获取峰值数据
+                        const inflightKey = `${req.sourcePath}|${level}`;
+                        let p = clipPeaksInflight.get(inflightKey);
+                        if (!p) {
+                            p = (async () => {
+                                // 确保数据已预加载（preload 内部会去重并等待正在进行的加载）
+                                await waveformMipmapStore.preload(req.sourcePath);
+                                const slice = waveformMipmapStore.getSlice(
+                                    req.sourcePath,
+                                    level,
+                                    req.startSec,
+                                    req.durSec,
+                                );
+                                if (!slice) return null;
+                                const entry: CachedEntry = {
+                                    min: Array.from(slice.min),
+                                    max: Array.from(slice.max),
+                                    startSec: req.startSec,
+                                    durSec: req.durSec,
+                                    t: Date.now(),
+                                };
+                                lruSet(
+                                    clipPeaksCache,
+                                    cacheKey,
+                                    entry,
+                                    CLIP_PEAKS_CACHE_LIMIT,
+                                );
+                                return entry;
+                            })().finally(() => {
+                                clipPeaksInflight.delete(inflightKey);
+                            });
+                            clipPeaksInflight.set(inflightKey, p);
+                        }
 
-                    const entry = await p;
-                    return { clipId: clip.id, entry };
-                }),
-            );
+                        const entry = await p;
+                        return { clipId: clip.id, entry };
+                    }),
+                );
 
-            if (
-                !mountedRef.current ||
-                currentRequestId !== requestIdRef.current
-            )
-                return;
+                if (
+                    !mountedRef.current ||
+                    currentRequestId !== requestIdRef.current
+                )
+                    return;
 
-            setPeaksMap((prev) => {
-                const next = new Map(prev);
-                for (const result of results) {
-                    if (result.status === "fulfilled" && result.value) {
-                        const { clipId, entry } = result.value;
-                        if (entry) {
-                            next.set(clipId, entry);
+                setPeaksMap((prev) => {
+                    const next = new Map(prev);
+                    for (const result of results) {
+                        if (result.status === "fulfilled" && result.value) {
+                            const { clipId, entry } = result.value;
+                            if (entry) {
+                                next.set(clipId, entry);
+                            }
                         }
                     }
-                }
-                return next;
-            });
-        })();
+                    return next;
+                });
+            })();
+        }, 50);
+
+        // cleanup: 取消 debounce 定时器
+        return () => {
+            if (fetchTimerRef.current) {
+                clearTimeout(fetchTimerRef.current);
+                fetchTimerRef.current = null;
+            }
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [peaksRequestKeys, visibleStartSec, visibleEndSec, pxPerSec]);
 

@@ -714,9 +714,6 @@ pub struct AppState {
     pub suppress_checkpoints: std::sync::atomic::AtomicBool,
 
     pub waveform_cache_dir: std::sync::Mutex<PathBuf>,
-    pub waveform_cache: std::sync::Mutex<
-        std::collections::HashMap<String, std::sync::Arc<crate::waveform::CachedPeaks>>,
-    >,
 
     /// V2 多级 mipmap 波形缓存 (key = source_path)
     pub waveform_cache_v2: std::sync::Mutex<
@@ -765,9 +762,8 @@ impl Default for AppState {
             suppress_checkpoints: std::sync::atomic::AtomicBool::new(false),
 
             waveform_cache_dir: std::sync::Mutex::new(
-                crate::waveform_disk_cache::default_cache_dir(),
+                crate::hfspeaks_v2::default_cache_dir(),
             ),
-            waveform_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             waveform_cache_v2: std::sync::Mutex::new(std::collections::HashMap::new()),
 
             app_handle: OnceLock::new(),
@@ -800,71 +796,8 @@ impl AppState {
         guard.take()
     }
 
-    pub fn get_or_compute_waveform_peaks(
-        &self,
-        source_path: &str,
-        hop: usize,
-    ) -> Result<std::sync::Arc<crate::waveform::CachedPeaks>, String> {
-        if source_path.trim().is_empty() {
-            return Err("empty source_path".to_string());
-        }
-
-        let cache_key = format!("{}|{}", source_path, hop);
-
-        {
-            let cache = self
-                .waveform_cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            if let Some(found) = cache.get(&cache_key) {
-                return Ok(found.clone());
-            }
-        }
-
-        // Disk cache (best-effort): if present, load and populate the in-memory cache.
-        let cache_dir = {
-            self.waveform_cache_dir
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone()
-        };
-        let disk_path = crate::waveform_disk_cache::cache_file_path(&cache_dir, source_path, hop);
-        if let Some(found) = crate::waveform_disk_cache::try_load_peaks(&disk_path) {
-            if found.hop == hop {
-                let found = std::sync::Arc::new(found);
-                let mut cache = self
-                    .waveform_cache
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner());
-                cache.insert(cache_key.clone(), found.clone());
-                return Ok(found);
-            }
-        }
-
-        let peaks = crate::waveform::CachedPeaks::compute(std::path::Path::new(source_path), hop)?;
-
-        // Save to disk cache (best-effort; ignore failures).
-        let _ = crate::waveform_disk_cache::save_peaks(&disk_path, &peaks);
-
-        let peaks = std::sync::Arc::new(peaks);
-        let mut cache = self
-            .waveform_cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        cache.insert(cache_key, peaks.clone());
-        Ok(peaks)
-    }
-
-    pub fn clear_waveform_cache(&self) -> crate::waveform_disk_cache::ClearStats {
-        {
-            let mut cache = self
-                .waveform_cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            cache.clear();
-        }
-
-        // 也清理 v2 缓存
+    pub fn clear_waveform_cache(&self) -> crate::hfspeaks_v2::ClearStats {
+        // 清理 v2 内存缓存
         {
             let mut cache_v2 = self
                 .waveform_cache_v2
@@ -879,7 +812,7 @@ impl AppState {
                 .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner())
                 .clone()
         };
-        crate::waveform_disk_cache::clear_dir(&cache_dir)
+        crate::hfspeaks_v2::clear_cache_dir(&cache_dir)
     }
 
     /// 获取或计算 v2 多级 mipmap 峰值数据

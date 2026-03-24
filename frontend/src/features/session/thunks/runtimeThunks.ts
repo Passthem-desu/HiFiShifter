@@ -1,7 +1,13 @@
+/**
+ * 运行时相关异步 thunk。
+ *
+ * 负责刷新运行时状态、清理波形缓存，以及读写 UI 持久化设置。
+ */
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { webApi } from "../../../services/webviewApi";
 import { settingsApi } from "../../../services/api";
 import type { SessionState } from "../sessionSlice";
+
 
 export const refreshRuntime = createAsyncThunk(
     "session/refreshRuntime",
@@ -42,9 +48,9 @@ export const persistUiSettings = createAsyncThunk(
             showClipboardPreview: s.showClipboardPreview,
             showParamValuePopup: s.showParamValuePopup,
             lockParamLines: s.lockParamLinesEnabled,
-            dragDirection: s.selectDragDirection,
             selectDragDirection: s.selectDragDirection,
             drawDragDirection: s.drawDragDirection,
+
             lineVibratoDragDirection: s.lineVibratoDragDirection,
             smoothnessPercent: s.edgeSmoothnessPercent,
             customScalePresets: s.customScalePresets,

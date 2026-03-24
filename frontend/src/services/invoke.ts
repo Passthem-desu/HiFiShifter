@@ -334,6 +334,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "preload_waveform_mipmap":
             return { sourcePath: args[0] };
 
+        case "batch_get_waveform_mipmap":
+            return { sourcePaths: args[0] };
+
         case "get_root_mix_waveform_peaks_segment":
         case "get_track_mix_waveform_peaks_segment":
             return {

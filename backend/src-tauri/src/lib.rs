@@ -66,10 +66,6 @@ mod vocalshifter_import;
 #[cfg(feature = "vslib")]
 #[path = "vocoder/vslib.rs"]
 mod vslib;
-#[path = "audio/waveform.rs"]
-mod waveform;
-#[path = "audio/waveform_disk_cache.rs"]
-mod waveform_disk_cache;
 #[path = "vocoder/world.rs"]
 mod world;
 #[path = "vocoder/world_vocoder.rs"]
@@ -136,7 +132,7 @@ pub fn run() {
             let base = app
                 .path()
                 .app_cache_dir()
-                .unwrap_or_else(|_| waveform_disk_cache::default_cache_dir());
+                .unwrap_or_else(|_| hfspeaks_v2::default_cache_dir());
             let dir = base.join("hifishifter").join("waveform_peaks_cache");
             {
                 let mut d = state
@@ -145,7 +141,7 @@ pub fn run() {
                     .unwrap_or_else(|e| e.into_inner());
                 *d = dir.clone();
             }
-            let _ = waveform_disk_cache::ensure_dir(&dir);
+            let _ = hfspeaks_v2::ensure_cache_dir(&dir);
 
             // 加载持久化的最近工程列表
             if let Ok(cfg_base) = app.path().app_config_dir() {
@@ -252,6 +248,7 @@ pub fn run() {
             commands::clear_waveform_cache,
             commands::get_waveform_mipmap_binary,
             commands::preload_waveform_mipmap,
+            commands::batch_get_waveform_mipmap,
             commands::import_audio_item,
             commands::import_audio_bytes,
             commands::add_track,

@@ -897,16 +897,21 @@ export const TimelinePanel: React.FC = () => {
     }, [s.clips]);
 
     // ========================================
-    // Mipmap 预加载：clip 列表变化时，对新 sourcePath 自动预加载三级波形数据
+    // Mipmap 预加载：clip 列表变化时，收集新 sourcePath 批量预加载
+    // 使用 batchPreload 将 N×4 次 IPC 合并为 1 次
     // ========================================
     const preloadedPathsRef = useRef(new Set<string>());
     useEffect(() => {
+        const newPaths: string[] = [];
         for (const clip of s.clips) {
             const sp = clip.sourcePath;
             if (sp && !preloadedPathsRef.current.has(sp)) {
                 preloadedPathsRef.current.add(sp);
-                void waveformMipmapStore.preload(sp);
+                newPaths.push(sp);
             }
+        }
+        if (newPaths.length > 0) {
+            void waveformMipmapStore.batchPreload(newPaths);
         }
     }, [s.clips]);
 
