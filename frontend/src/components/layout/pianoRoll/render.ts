@@ -26,6 +26,7 @@ import {
     renderWaveform,
     type WaveformRenderParams,
 } from "../../../utils/waveformRenderer";
+import { waveformMipmapStore } from "../../../utils/waveformMipmapStore";
 import { resolveScaleNotes } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
 
@@ -647,159 +648,92 @@ export function drawPianoRoll(args: {
     if (!offCtx) return;
 
     // Background waveform: per-clip 叠加绘制
-    // peaks 数据覆盖整个 source 文件，渲染时根据 sourceStartSec/playbackRate 计算偏移，
-    // 裁剪到 clip 可视区域，trim 拖动不影响 peaks 数据本身。
+    // 与 WaveformTrackCanvas 保持一致的数据路径：
+    // waveformMipmapStore.getInterleavedSlice() → applyGainsToPeaks → renderWaveform
     for (const entry of clipPeaks) {
-        if (!entry.peaks) continue;
-        const { min: pMin, max: pMax, durSec: pDurSec } = entry.peaks;
-        if (pMin.length < 2 || pMax.length < 2) continue;
+        if (!entry.sourcePath) continue;
 
         const pr = entry.playbackRate > 0 ? entry.playbackRate : 1;
         const sourceStartSec = entry.sourceStartSec ?? 0;
-        const sourceDurSec =
-            entry.sourceDurationSec > 0 ? entry.sourceDurationSec : pDurSec;
+        const sourceDurSec = entry.sourceDurationSec;
+        if (sourceDurSec <= 0) continue;
 
         const clipStartSec = entry.startSec;
         const clipEndSec = clipStartSec + entry.lengthSec;
         const clipWidthPx = entry.lengthSec * pxPerSec;
         if (clipWidthPx <= 0) continue;
 
-        // 只渲染当前视口内的片段，避免高缩放时创建超大离屏 canvas
-        const visibleClipStartSec = Math.max(clipStartSec, visibleStartSec);
-        const visibleClipEndSec = Math.min(
-            clipEndSec,
-            visibleStartSec + visibleDurSec,
-        );
-        if (visibleClipEndSec <= visibleClipStartSec) continue;
+        // 只渲染当前视口内的片段
+        const visStartSec = Math.max(clipStartSec, visibleStartSec);
+        const visEndSec = Math.min(clipEndSec, visibleStartSec + visibleDurSec);
+        if (visEndSec <= visStartSec) continue;
 
-        const visibleClipStartX = visibleClipStartSec * pxPerSec - scrollLeft;
+        const visibleClipStartX = visStartSec * pxPerSec - scrollLeft;
         const visibleClipWidthPx = Math.max(
             1,
-            Math.ceil((visibleClipEndSec - visibleClipStartSec) * pxPerSec),
+            Math.ceil((visEndSec - visStartSec) * pxPerSec),
         );
 
-        // peaks 覆盖整个 source 文件（0 ~ sourceDurSec），列数 = peaksCols
-        const peaksCols = pMin.length;
+        // 可见部分在 clip 内的比例 → 映射到源文件时间
+        const clipLen = entry.lengthSec;
+        const ratioStart = (visStartSec - clipStartSec) / Math.max(1e-6, clipLen);
+        const ratioEnd = (visEndSec - clipStartSec) / Math.max(1e-6, clipLen);
 
-        // 计算可见区域的 source 范围
-        const visibleSourceStartSec = Math.max(
+        const clipSourceEndSec = sourceDurSec;
+        const clipSourceSpanSec = Math.max(
             0,
-            sourceStartSec + (visibleClipStartSec - clipStartSec) * pr,
+            Math.min(clipLen * pr, clipSourceEndSec - sourceStartSec),
         );
-        const visibleSourceEndSec = Math.min(
-            sourceDurSec,
-            sourceStartSec + (visibleClipEndSec - clipStartSec) * pr,
-        );
-        const visibleSourceDurSec = Math.max(
-            0.001,
-            visibleSourceEndSec - visibleSourceStartSec,
-        );
+        const sourceTimeStart = Math.max(0, sourceStartSec + ratioStart * clipSourceSpanSec);
+        const sourceTimeEnd = Math.min(sourceDurSec, sourceStartSec + ratioEnd * clipSourceSpanSec);
+        const sourceDuration = Math.max(0.001, sourceTimeEnd - sourceTimeStart);
 
-        // 计算在 peaks 数组中的范围（根据时间比例）
-        const startRatio = visibleSourceStartSec / sourceDurSec;
-        const endRatio = visibleSourceEndSec / sourceDurSec;
-        const sourceStartCol = Math.floor(startRatio * peaksCols);
-        const sourceEndCol = Math.min(
-            peaksCols,
-            Math.ceil(endRatio * peaksCols),
+        // 选择 mipmap 级别（与 WaveformTrackCanvas 一致）
+        const sampleRate = entry.sourceSampleRate || 44100;
+        const spp = Math.max(1, Math.round(sampleRate / pxPerSec));
+        const stableLevel = waveformMipmapStore.selectLevelStable(spp);
+
+        // 从 mipmap 缓存获取 interleaved 数据
+        const result = waveformMipmapStore.getInterleavedSlice(
+            entry.sourcePath,
+            stableLevel,
+            sourceTimeStart,
+            sourceDuration,
         );
-        const visibleCols = Math.max(2, sourceEndCol - sourceStartCol);
+        if (!result || result.interleaved.length < 4) continue;
 
-        // 计算可见区域的像素宽度
-        const visibleSourceColsPx = visibleClipWidthPx;
+        // clip 内的像素偏移
+        const clipPixelOffset = (visStartSec - clipStartSec) * pxPerSec;
 
-        // 目标采样宽度：每像素 2 个采样点，保证精度同时控制数据量
-        const targetRenderWidth = Math.max(
-            2,
-            Math.min(Math.floor(visibleSourceColsPx * 2), visibleCols),
-        );
+        // 构建渲染参数（与 WaveformTrackCanvas 一致的参数结构）
+        const params: WaveformRenderParams = {
+            canvasWidth: visibleClipWidthPx,
+            canvasHeight: displayedOffH,
+            centerY: displayedOffH / 2,
+            sourceStartSec,
+            clipDuration: entry.lengthSec,
+            playbackRate: pr,
+            sourceDurationSec: sourceDurSec,
+            volumeGain: Number(entry.gain ?? 1) || 1,
+            fadeInSec: Number(entry.fadeInSec ?? 0) || 0,
+            fadeOutSec: Number(entry.fadeOutSec ?? 0) || 0,
+            fadeInCurve: entry.fadeInCurve ?? "linear",
+            fadeOutCurve: entry.fadeOutCurve ?? "linear",
+            dataStartSec: result.dataStartSec,
+            dataDurationSec: result.dataDurationSec,
+            clipPixelOffset,
+            clipTotalWidthPx: Math.max(1, clipWidthPx),
+        };
 
-        // 直接从 peaks 数据构建 interleaved Float32Array（内联 resample，不依赖 waveform-data.js）
-        const sliceMin = pMin.slice(sourceStartCol, sourceEndCol);
-        const sliceMax = pMax.slice(sourceStartCol, sourceEndCol);
-        const resampledWidth = Math.max(1, Math.min(targetRenderWidth, sliceMin.length));
-        const interleavedPeaks = new Float32Array(resampledWidth * 2);
-        const srcLen = sliceMin.length;
-        if (resampledWidth >= srcLen) {
-            // 上采样：线性插值
-            for (let i = 0; i < resampledWidth; i++) {
-                const srcPos = srcLen > 1 ? (i / (resampledWidth - 1)) * (srcLen - 1) : 0;
-                const idx = Math.floor(srcPos);
-                const frac = srcPos - idx;
-                if (idx >= srcLen - 1) {
-                    interleavedPeaks[i * 2] = sliceMin[srcLen - 1];
-                    interleavedPeaks[i * 2 + 1] = sliceMax[srcLen - 1];
-                } else {
-                    interleavedPeaks[i * 2] = sliceMin[idx] * (1 - frac) + sliceMin[idx + 1] * frac;
-                    interleavedPeaks[i * 2 + 1] = sliceMax[idx] * (1 - frac) + sliceMax[idx + 1] * frac;
-                }
-            }
-        } else {
-            // 降采样：每像素取 min/max 聚合
-            for (let i = 0; i < resampledWidth; i++) {
-                const srcStart = (i / resampledWidth) * srcLen;
-                const srcEnd = ((i + 1) / resampledWidth) * srcLen;
-                const iStart = Math.max(0, Math.floor(srcStart));
-                const iEnd = Math.min(srcLen - 1, Math.ceil(srcEnd));
-                let pMinV = Infinity;
-                let pMaxV = -Infinity;
-                for (let j = iStart; j <= iEnd; j++) {
-                    if (sliceMin[j] < pMinV) pMinV = sliceMin[j];
-                    if (sliceMax[j] > pMaxV) pMaxV = sliceMax[j];
-                }
-                interleavedPeaks[i * 2] = pMinV === Infinity ? 0 : pMinV;
-                interleavedPeaks[i * 2 + 1] = pMaxV === -Infinity ? 0 : pMaxV;
-            }
-        }
+        // 应用增益（音量 + 淡入淡出）
+        const withGains = applyGainsToPeaks(result.interleaved, params);
 
         // 使用固定尺寸的离屏 canvas，避免缩放过程中频繁重设宽度导致闪烁
         offCtx.setTransform(offDpr, 0, 0, offDpr, 0, 0);
         offCtx.clearRect(0, 0, displayedOffW, displayedOffH);
 
-        // 构建 renderWaveform 参数：仅在离屏画布左侧渲染当前可见片段
-        // clipDuration 必须与 canvasWidth 对应，表示可见片段的 timeline 时长，
-        // 否则时间→像素映射会被挤压导致窗口边缘波形横向压缩。
-        const visibleClipDuration = visibleSourceDurSec / pr;
-        const pianoRollWfParams: WaveformRenderParams = {
-            canvasWidth: visibleClipWidthPx,
-            canvasHeight: displayedOffH,
-            centerY: displayedOffH / 2,
-            sourceStartSec: visibleSourceStartSec,
-            clipDuration: visibleClipDuration,
-            playbackRate: pr,
-            sourceDurationSec: sourceDurSec,
-            volumeGain: 1,
-            fadeInSec: 0,
-            fadeOutSec: 0,
-            fadeInCurve: "linear",
-            fadeOutCurve: "linear",
-            dataStartSec: visibleSourceStartSec,
-            dataDurationSec: visibleSourceDurSec,
-        };
-
-        // 增益（音量 + 淡入淡出）需要基于完整 clip 坐标系来计算，
-        // 因为淡入淡出的时间基准是相对于整个 clip 起止位置的。
-        const gainParams: WaveformRenderParams = {
-            ...pianoRollWfParams,
-            sourceStartSec: sourceStartSec,
-            clipDuration: entry.lengthSec,
-            volumeGain: entry.gain ?? 1,
-            fadeInSec: entry.fadeInSec ?? 0,
-            fadeOutSec: entry.fadeOutSec ?? 0,
-            fadeInCurve: entry.fadeInCurve ?? "linear",
-            fadeOutCurve: entry.fadeOutCurve ?? "linear",
-            dataStartSec: visibleSourceStartSec,
-            dataDurationSec: visibleSourceDurSec,
-        };
-
-        // 应用增益（音量 + 淡入淡出）到波形数据
-        const withGains = applyGainsToPeaks(interleavedPeaks, gainParams);
-
-        // 渲染波形（jitter 抖动线模式）
-        renderWaveform(offCtx, withGains, pianoRollWfParams, waveformColors.stroke, 0.5, "jitter");
-
-        // 计算渲染目标位置：clip 在主 canvas 上的起始位置
-        const destX = visibleClipStartX;
+        // 渲染波形（line 竖线模式）
+        renderWaveform(offCtx, withGains, params, waveformColors.stroke, 0.5, "line");
 
         // 裁剪到 clip 的可视 x 范围，避免溢出到相邻 clip
         ctx.save();
@@ -807,15 +741,17 @@ export function drawPianoRoll(args: {
         ctx.rect(visibleClipStartX, 0, visibleClipWidthPx, h);
         ctx.clip();
 
+        // 静音 clip 半透明
+        ctx.globalAlpha = entry.muted ? 0.2 : 0.5;
+
         // 使用 drawImage 精确绘制
-        ctx.globalAlpha = 0.5;
         ctx.drawImage(
             offCanvas,
             0,
             0,
             Math.max(1, Math.floor(visibleClipWidthPx * offDpr)),
             internalOffH,
-            destX,
+            visibleClipStartX,
             0,
             visibleClipWidthPx,
             h,
