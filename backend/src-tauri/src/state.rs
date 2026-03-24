@@ -1647,6 +1647,17 @@ impl TimelineState {
         }
     }
 
+    /// 批量删除多个 clip，只触发一次状态变更
+    pub fn remove_clips(&mut self, clip_ids: &[String]) {
+        let id_set: HashSet<&str> = clip_ids.iter().map(|s| s.as_str()).collect();
+        self.clips.retain(|c| !id_set.contains(c.id.as_str()));
+        if let Some(ref sel) = self.selected_clip_id {
+            if id_set.contains(sel.as_str()) {
+                self.selected_clip_id = None;
+            }
+        }
+    }
+
     pub fn move_clip(
         &mut self,
         clip_id: &str,

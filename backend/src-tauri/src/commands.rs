@@ -386,6 +386,14 @@ pub fn remove_clip(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn remove_clips(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    timeline::remove_clips(state, clip_ids)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn move_clip(
     state: State<'_, AppState>,
     clip_id: String,

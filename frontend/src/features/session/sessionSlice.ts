@@ -31,6 +31,7 @@ import {
     moveClipsRemote,
     moveTrackRemote,
     removeClipRemote,
+    removeClipsRemote,
     removeTrackRemote,
     replaceClipSourceRemote,
     selectClipRemote,
@@ -808,6 +809,7 @@ export {
     addClipOnTrack,
     createClipsRemote,
     removeClipRemote,
+    removeClipsRemote,
     moveClipRemote,
     moveClipsRemote,
     duplicateTrackRemote,
@@ -2423,6 +2425,16 @@ const sessionSlice = createSlice({
             })
 
             .addCase(removeClipRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(removeClipsRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;

@@ -24,7 +24,7 @@ import {
     setClipGain,
     setClipFades,
     glueClipsRemote,
-    removeClipRemote,
+    removeClipsRemote,
     splitClipRemote,
     setMultiSelectedClipIds as setMultiSelectedClipIdsAction,
     setSelectedClip,
@@ -2640,9 +2640,7 @@ export const TimelinePanel: React.FC = () => {
                                 onDelete={(ids) => {
                                     setContextMenu(null);
                                     setMultiSelectedClipIds([]);
-                                    for (const id of ids) {
-                                        void dispatch(removeClipRemote(id));
-                                    }
+                                    void dispatch(removeClipsRemote(ids));
                                 }}
                                 onMute={(ids, muted) => {
                                     for (const id of ids) {
@@ -2686,11 +2684,7 @@ export const TimelinePanel: React.FC = () => {
                                         clipClipboardRef.current = templates;
                                         setContextMenu(null);
                                         setMultiSelectedClipIds([]);
-                                        for (const id of ids) {
-                                            void dispatch(
-                                                removeClipRemote(id),
-                                            );
-                                        }
+                                        void dispatch(removeClipsRemote(ids));
                                     })();
                                 }}
                                 onReplace={(ids) => {
