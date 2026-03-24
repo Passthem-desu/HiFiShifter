@@ -14,6 +14,12 @@
  *      d. renderWaveform() 绘制波形
  *      e. ctx.restore()
  *
+ * 防闪烁策略（缩放时消除白闪/黑闪）：
+ *   - Canvas 物理尺寸只增不减（避免浏览器清空画布内容）
+ *   - 通过 CSS width/height 控制显示区域，物理尺寸保持 ≥ 显示尺寸
+ *   - backBuffer 按实际需要尺寸绘制，drawImage 到主 Canvas 时只覆盖所需区域
+ *   - 尺寸增大时先画新帧到 backBuffer，再扩展主 Canvas 并立即 blit，无空白帧
+ *
  * 性能优势：
  *   - 100+ clip 场景下只需 10-20 个 Canvas 上下文（= 轨道数）
  *   - 无 DOM 布局抖动：clip 拖拽时只需 requestAnimationFrame 重绘 Canvas
@@ -78,6 +84,26 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
     const backBufferRef = React.useRef<HTMLCanvasElement | null>(null);
     const lastLevelByPathRef = React.useRef<Record<string, 0 | 1 | 2>>({});
+
+    /**
+     * 确保 Canvas 物理尺寸 ≥ 目标尺寸（只增不减，避免清空内容导致闪烁）。
+     * 返回 true 表示尺寸被修改过。
+     */
+    const ensureCanvasSize = React.useCallback(
+        (canvas: HTMLCanvasElement, w: number, h: number): boolean => {
+            let changed = false;
+            if (canvas.width < w) {
+                canvas.width = w;
+                changed = true;
+            }
+            if (canvas.height < h) {
+                canvas.height = h;
+                changed = true;
+            }
+            return changed;
+        },
+        [],
+    );
 
     // 强制重绘计数器（mipmap 数据加载完成时 +1 触发重绘）
     const [redrawTick, setRedrawTick] = React.useState(0);
@@ -270,12 +296,10 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             backCtx.restore();
         }
 
-        if (canvas.width !== internalW) {
-            canvas.width = internalW;
-        }
-        if (canvas.height !== internalH) {
-            canvas.height = internalH;
-        }
+        // 防闪烁：主 Canvas 物理尺寸只增不减，避免 canvas.width 赋值清空内容
+        ensureCanvasSize(canvas, internalW, internalH);
+
+        // CSS 尺寸控制实际显示区域
         const nextStyleWidth = `${displayW}px`;
         const nextStyleHeight = `${displayH}px`;
         if (canvas.style.width !== nextStyleWidth) {
@@ -287,8 +311,21 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
 
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
-        ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+        // 关键：使用基于实际物理尺寸的缩放比例，而非 internalW / displayW。
+        // 当 canvas.width > internalW 时（只增不减策略），浏览器会把整个 canvas.width
+        // 映射到 CSS displayW，因此绘制时必须按 canvas.width / displayW 缩放，
+        // 才能让波形在 CSS 坐标系中的位置正确。
+        const actualScaleX = canvas.width / Math.max(1, displayW);
+        const actualScaleY = canvas.height / Math.max(1, displayH);
+        ctx.setTransform(actualScaleX, 0, 0, actualScaleY, 0, 0);
+
+        // 清除整个画布（CSS 坐标系下，displayW/H 刚好覆盖整个物理画布）
         ctx.clearRect(0, 0, displayW, displayH);
+
+        // 将 backBuffer (internalW×internalH) 绘制到 CSS 坐标系的 (0,0,displayW,displayH)
+        // 经过 actualScale 变换后，实际写入物理像素 (0,0, canvas.width, canvas.height)
+        // 但 backBuffer 源区域只取 internalW×internalH（当前帧的实际数据）
         ctx.drawImage(backBuffer, 0, 0, internalW, internalH, 0, 0, displayW, displayH);
         if (ctx.globalAlpha !== 1) {
             ctx.globalAlpha = 1;

@@ -14,6 +14,11 @@
  * - 逐像素绘制：每个像素列取对应时间范围内的 min/max，画一条竖线
  * - 无锯齿：无论缩放级别如何，波形始终连贯平滑
  *
+ * 防闪烁策略（缩放时消除白闪/黑闪）：
+ * - Canvas 物理尺寸只增不减（避免浏览器清空画布内容）
+ * - 通过 CSS width/height 控制显示区域，物理尺寸保持 ≥ 显示尺寸
+ * - 每帧 clearRect 全画布再 drawImage 新帧，无空白帧
+ *
  * 缓存特性（三级 mipmap）：
  * - L0 (div=64):   精细级，spp ≤ 256
  * - L1 (div=512):  中间级，256 < spp ≤ 2048
@@ -303,12 +308,15 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
             }
         }
 
-        if (canvas.width !== internalW) {
+        // 防闪烁：主 Canvas 物理尺寸只增不减，避免 canvas.width 赋值清空内容
+        if (canvas.width < internalW) {
             canvas.width = internalW;
         }
-        if (canvas.height !== internalH) {
+        if (canvas.height < internalH) {
             canvas.height = internalH;
         }
+
+        // CSS 尺寸控制实际显示区域
         const nextStyleWidth = `${displayedW}px`;
         const nextStyleHeight = `${displayedH}px`;
         if (canvas.style.width !== nextStyleWidth) {
@@ -320,8 +328,19 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
 
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
-        ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
+        // 关键：使用基于实际物理尺寸的缩放比例，而非 internalW / displayedW。
+        // 当 canvas.width > internalW 时（只增不减策略），浏览器会把整个 canvas.width
+        // 映射到 CSS displayedW，因此绘制时必须按 canvas.width / displayedW 缩放，
+        // 才能让波形在 CSS 坐标系中的位置正确。
+        const actualScaleX = canvas.width / Math.max(1, displayedW);
+        const actualScaleY = canvas.height / Math.max(1, displayedH);
+        ctx.setTransform(actualScaleX, 0, 0, actualScaleY, 0, 0);
+
+        // 清除整个画布（CSS 坐标系下，displayedW/H 刚好覆盖整个物理画布）
         ctx.clearRect(0, 0, displayedW, displayedH);
+
+        // 将 backBuffer (internalW×internalH) 绘制到 CSS 坐标系的 (0,0,displayedW,displayedH)
         ctx.drawImage(backBuffer, 0, 0, internalW, internalH, 0, 0, displayedW, displayedH);
         if (ctx.globalAlpha !== 1) {
             ctx.globalAlpha = 1;

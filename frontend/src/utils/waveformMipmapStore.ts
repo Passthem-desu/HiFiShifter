@@ -75,6 +75,41 @@ class WaveformMipmapStoreImpl {
     /** 正在进行的加载 Promise（用于 preload 等待已发起的加载） */
     private loadingPromises = new Map<string, Promise<void>>();
 
+    /**
+     * interleaved 缓冲区复用池。
+     * 每次 getInterleavedSlice 会优先从池中取出同等大小的 Float32Array 进行复用，
+     * 避免快速缩放时每帧 new Float32Array 产生的 GC 压力。
+     */
+    private interleavedPool: Float32Array[] = [];
+    /** 池的最大容量（条目数） */
+    private static readonly POOL_MAX = 8;
+
+    /**
+     * 从池中获取一个 length === exactLen 的 Float32Array，或新建一个
+     */
+    private acquireInterleaved(exactLen: number): Float32Array {
+        for (let i = 0; i < this.interleavedPool.length; i++) {
+            if (this.interleavedPool[i].length === exactLen) {
+                const buf = this.interleavedPool[i];
+                this.interleavedPool.splice(i, 1);
+                return buf;
+            }
+        }
+        return new Float32Array(exactLen);
+    }
+
+    /**
+     * 归还 buffer 到池（供下一帧复用）
+     */
+    releaseInterleaved(buf: Float32Array): void {
+        if (
+            buf.length > 0 &&
+            this.interleavedPool.length < WaveformMipmapStoreImpl.POOL_MAX
+        ) {
+            this.interleavedPool.push(buf);
+        }
+    }
+
     // ---------- 公共 API ----------
 
     /**
@@ -345,7 +380,7 @@ class WaveformMipmapStoreImpl {
         );
 
         const len = slice.min.length;
-        const interleaved = new Float32Array(len * 2);
+        const interleaved = this.acquireInterleaved(len * 2);
         for (let i = 0; i < len; i++) {
             interleaved[i * 2] = slice.min[i] ?? 0;
             interleaved[i * 2 + 1] = slice.max[i] ?? 0;
