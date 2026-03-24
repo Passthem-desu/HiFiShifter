@@ -1,5 +1,5 @@
+// 命令层共用工具函数
 use crate::state::AppState;
-use crate::waveform;
 use serde::Serialize;
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -29,13 +29,13 @@ pub(crate) fn guard_json_command(
 
 pub(crate) fn guard_waveform_command(
     name: &str,
-    f: impl FnOnce() -> waveform::WaveformPeaksSegmentPayload,
-) -> waveform::WaveformPeaksSegmentPayload {
+    f: impl FnOnce() -> super::waveform::WaveformPeaksSegmentPayload,
+) -> super::waveform::WaveformPeaksSegmentPayload {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(v) => v,
         Err(_) => {
             eprintln!("command panicked: {name}");
-            waveform::WaveformPeaksSegmentPayload {
+            super::waveform::WaveformPeaksSegmentPayload {
                 ok: false,
                 min: vec![],
                 max: vec![],

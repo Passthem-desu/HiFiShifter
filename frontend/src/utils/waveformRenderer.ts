@@ -1,12 +1,20 @@
 /**
- * 波形渲染工具模块
+ * 波形渲染工具模块（Canvas per-pixel 渲染）
  *
- * 核心功能：
- * 1. 支持增益应用：clip 音量 + 淡入淡出曲线（applyGainsToPeaks）
- * 2. per-pixel min/max 渲染：支持竖线模式（line）和抖动线模式（jitter）（renderWaveform）
- * 3. SVG 路径生成（renderWaveformSvg）
+ * 本模块负责将已降采样的 peaks 数据绘制到 Canvas 上，是波形可视化的最后一环。
  *
- * 降采样由 waveformMipmapStore 内置 resample 负责。
+ * ## 数据流
+ *   waveformMipmapStore（降采样 / resample）
+ *     → applyGainsToPeaks（叠加音量 + 淡入淡出增益）
+ *       → renderWaveform（Canvas per-pixel 绘制）
+ *
+ * ## 坐标系映射链
+ *   canvas 本地像素 → clip 全局像素 → timeline 时间 → 源文件时间 → peaks 数据索引
+ *
+ * ## 导出
+ * - {@link WaveformRenderParams} — 渲染参数接口
+ * - {@link applyGainsToPeaks}    — 增益应用（音量 × 淡入淡出曲线）
+ * - {@link renderWaveform}       — Canvas 绘制（line 竖线 / jitter 抖动线）
  *
  * @module waveformRenderer
  */
@@ -14,133 +22,18 @@
 import type { FadeCurveType } from "../components/layout/timeline/paths";
 import { fadeCurveGain } from "../components/layout/timeline/paths";
 
-/** 处理后的波形数据 */
-export interface ProcessedWaveformData {
-    /** 处理后的最小值数组 */
-    min: number[];
-    /** 处理后的最大值数组 */
-    max: number[];
-    /** 每个数据点对应的时间戳（秒） */
-    timestamps: number[];
-    /** 采样步长 */
-    stride: number;
-}
-
-/** SVG 渲染配置 */
-export interface SvgRenderOptions {
-    /** viewBox 宽度 */
-    width: number;
-    /** viewBox 高度 */
-    height: number;
-    /** 中心 Y 坐标 */
-    centerY: number;
-    /** 半高（振幅范围的一半） */
-    halfHeight: number;
-    /** 振幅缩放系数（默认 1.0） */
-    amplitudeScale?: number;
-}
+// ============================================================================
+// 类型定义
+// ============================================================================
 
 /**
- * 生成 SVG 波形路径
+ * 波形渲染参数
  *
- * 生成闭合的 SVG path `d` 属性字符串，用于波形面积填充。
- * 路径先正向遍历 max 值，再反向遍历 min 值，形成闭合多边形。
- *
- * @param data - 处理后的波形数据
- * @param options - 渲染配置
- * @returns SVG path `d` 属性字符串
- *
- * @example
- * ```typescript
- * const pathD = renderWaveformSvg(processedData, {
- *   width: 100,
- *   height: 24,
- *   centerY: 12,
- *   halfHeight: 5,
- *   amplitudeScale: 1.0
- * });
- * // 使用: <path d={pathD} fill="rgba(255,255,255,0.2)" />
- * ```
+ * 包含三类信息：
+ * 1. Canvas 物理尺寸（canvasWidth / canvasHeight / centerY）
+ * 2. 时间域参数（sourceStartSec / clipDuration / playbackRate / fade 等）
+ * 3. 可视区裁剪参数（clipPixelOffset / clipTotalWidthPx，由调用方传入）
  */
-export function renderWaveformSvg(
-    data: ProcessedWaveformData,
-    options: SvgRenderOptions,
-): string {
-    const {
-        width,
-        height,
-        centerY,
-        halfHeight,
-        amplitudeScale = 1.0,
-    } = options;
-
-    const { min, max, timestamps } = data;
-    const n = Math.min(min.length, max.length);
-    if (n === 0) return "";
-
-    const scale = halfHeight * amplitudeScale;
-
-    // 处理均匀分布的数据点（Clip场景）或基于时间戳的数据点（Piano Roll场景）
-    const useTimestamp = timestamps.length > 0 && timestamps.length === n;
-    let visibleStartSec = 0;
-    let visibleDurSec = 1;
-
-    if (useTimestamp) {
-        visibleStartSec = timestamps[0];
-        const visibleEndSec = timestamps[timestamps.length - 1];
-        visibleDurSec = Math.max(1e-9, visibleEndSec - visibleStartSec);
-    }
-
-    const yMax: number[] = new Array(n);
-    const yMin: number[] = new Array(n);
-    const xCoords: number[] = new Array(n);
-
-    for (let i = 0; i < n; i++) {
-        // 计算 X 坐标：使用时间戳或均匀分布
-        let x: number;
-        if (useTimestamp) {
-            const t = timestamps[i];
-            x = ((t - visibleStartSec) / visibleDurSec) * width;
-        } else {
-            // 均匀分布（用于 Clip）
-            x = (i / Math.max(1, n - 1)) * width;
-        }
-
-        const mi = min[i] ?? 0;
-        const ma = max[i] ?? 0;
-
-        // 计算 Y 坐标（中心对齐）
-        let top = centerY - ma * scale;
-        let bot = centerY - mi * scale;
-
-        // 静音段最小可见高度
-        if (Math.abs(bot - top) < 0.75) {
-            bot = top + (bot >= top ? 0.75 : -0.75);
-        }
-
-        xCoords[i] = x;
-        yMax[i] = Math.max(0, Math.min(height, top));
-        yMin[i] = Math.max(0, Math.min(height, bot));
-    }
-
-    // 生成闭合路径：正向遍历 max，反向遍历 min
-    let d = `M${xCoords[0]} ${yMax[0]}`;
-    for (let i = 1; i < n; i++) {
-        d += `L${xCoords[i]} ${yMax[i]}`;
-    }
-    for (let i = n - 1; i >= 0; i--) {
-        d += `L${xCoords[i]} ${yMin[i]}`;
-    }
-    d += "Z";
-
-    return d;
-}
-
-// ============================================================================
-// 增益应用和波形渲染
-// ============================================================================
-
-/** 波形渲染参数 */
 export interface WaveformRenderParams {
     /** canvas 宽度（像素） */
     canvasWidth: number;
@@ -172,7 +65,7 @@ export interface WaveformRenderParams {
     dataDurationSec?: number;
 
     // ========================================
-    // 可视区裁剪参数（由 WaveformCanvas 传入）
+    // 可视区裁剪参数（由调用方传入）
     // ========================================
     /** 当前 canvas 在 clip 内的像素偏移量（canvas 左边缘对应 clip 的第几个像素） */
     clipPixelOffset?: number;
@@ -180,23 +73,24 @@ export interface WaveformRenderParams {
     clipTotalWidthPx?: number;
 }
 
-/**
- * 从 base peaks 中降采样提取指定时间范围的波形数据
- *
- * 修复：使用时间域映射 + 插值，确保目标采样数不超过源数据范围
- *
- * @param basePeaks - Float32Array，格式 [min0, max0, min1, max1, ...]
- * @param params - 渲染参数
- * @returns Float32Array 格式的降采样后数据 [min0, max0, min1, max1, ...]
- */
-
+// ============================================================================
+// applyGainsToPeaks — 增益应用
+// ============================================================================
 
 /**
- * 应用增益（音量 + 淡入淡出）到波形数据
+ * 将音量增益和淡入淡出曲线应用到波形 peaks 数据上
  *
- * @param peaks - Float32Array 格式的波形数据 [min0, max0, min1, max1, ...]
- * @param params - 渲染参数
- * @returns 应用增益后的 Float32Array
+ * 对每个采样点：
+ *   1. 根据 position 线性插值算出该点对应的 **源文件时间**
+ *   2. 将源文件时间映射为 **timeline 时间**（÷ playbackRate）
+ *   3. 根据 timeline 时间判断是否处于淡入/淡出区间，计算淡入淡出增益
+ *   4. 最终增益 = volumeGain × fadeGain，同时乘到 min 和 max 上
+ *
+ * 快速路径：若无淡入淡出且 volumeGain ≈ 1，直接复制原数组。
+ *
+ * @param peaks  - Float32Array，交错格式 [min0, max0, min1, max1, ...]
+ * @param params - 渲染参数（需要时间域 + fade 相关字段）
+ * @returns 新 Float32Array，与 peaks 等长，已叠加增益
  */
 export function applyGainsToPeaks(
     peaks: Float32Array,
@@ -264,31 +158,36 @@ export function applyGainsToPeaks(
     return result;
 }
 
+// ============================================================================
+// renderWaveform — Canvas per-pixel 绘制
+// ============================================================================
+
 /**
- * 波形渲染（Canvas，per-pixel 模式）
+ * 将 peaks 数据绘制到 Canvas 上（per-pixel 模式）
  *
- * 支持两种渲染模式：
- * - "line"（默认）：per-pixel min/max 竖线模式（DAW 标准做法）
- * - "jitter"：抖动线模式，交替取 min/max 包络内 0.25/0.75 位置画折线
+ * ## 渲染模式
+ * - **line**（默认）：per-pixel min/max 竖线 —— DAW 标准做法，每像素列一条从 yTop 到 yBot 的竖线
+ * - **jitter**：抖动线 —— 偶数列取包络 25% 位置、奇数列取 75% 位置，连成折线，视觉更平滑
  *
- * 核心算法：
- * - 遍历画布的每个像素列
- * - 计算该像素列对应的源文件时间范围
- * - 在数据中找到该时间范围覆盖的所有采样点
- * - line 模式：取 min/max 画竖线；jitter 模式：交替取包络内点画折线
+ * ## 核心流程
+ * 1. **可视区裁剪**：根据 clipPixelOffset / clipTotalWidthPx 确定 canvas 与 clip 的映射关系，
+ *    再与数据的时间范围求交集，只遍历有数据覆盖的像素列
+ * 2. **像素→时间→索引**：每个像素列 px 覆盖 [px-0.5, px+0.5) 的时间段，
+ *    通过 pxToSourceTime → timeToIndex 映射到 peaks 数据索引范围
+ * 3. **滑动指针扫描**：cursor 只前进不后退，保证整体 O(W + N) 复杂度
+ * 4. **绘制**：line 模式 moveTo/lineTo 竖线；jitter 模式连续 lineTo 折线
  *
- * 优点：
- * - 无论数据密度如何，每像素恰好一条竖线/一个采样点，无锯齿
- * - 数据过多时自动聚合（多个采样点合并到一个像素）
- * - 数据不足时优雅降级（相邻像素复用同一采样点）
- * - 支持数据裁剪：只渲染数据与 clip 范围重叠的部分
+ * ## 性能特性
+ * - 数据密度高时自动聚合（多采样点 → 一像素取 min/max）
+ * - 数据密度低时优雅降级（相邻像素复用同一采样点）
+ * - 静音段保证最小 0.5px 可见高度
  *
- * @param ctx - Canvas 2D 上下文
- * @param peaks - Float32Array 格式的波形数据 [min0, max0, min1, max1, ...]
- * @param params - 渲染参数
- * @param strokeColor - 描边颜色
- * @param strokeWidth - 描边宽度
- * @param mode - 渲染模式："line"（竖线）或 "jitter"（抖动线），默认 "jitter"
+ * @param ctx         - Canvas 2D 上下文
+ * @param peaks       - Float32Array，交错格式 [min0, max0, min1, max1, ...]
+ * @param params      - 渲染参数（含 canvas 尺寸 + 时间域 + 裁剪信息）
+ * @param strokeColor - 描边颜色（默认 "currentColor"）
+ * @param strokeWidth - 描边宽度（默认 1）
+ * @param mode        - 渲染模式："line"（竖线）或 "jitter"（抖动线），默认 "line"
  */
 export function renderWaveform(
     ctx: CanvasRenderingContext2D,
@@ -455,5 +354,6 @@ export function renderWaveform(
 
     ctx.stroke();
 }
+
 
 

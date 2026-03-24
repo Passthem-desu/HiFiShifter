@@ -216,7 +216,7 @@ pub fn get_root_mix_waveform_peaks_segment(
     start_sec: f64,
     duration_sec: f64,
     columns: usize,
-) -> crate::waveform::WaveformPeaksSegmentPayload {
+) -> self::waveform::WaveformPeaksSegmentPayload {
     waveform::get_root_mix_waveform_peaks_segment(state, track_id, start_sec, duration_sec, columns)
 }
 
@@ -227,7 +227,7 @@ pub fn get_track_mix_waveform_peaks_segment(
     start_sec: f64,
     duration_sec: f64,
     columns: usize,
-) -> crate::waveform::WaveformPeaksSegmentPayload {
+) -> self::waveform::WaveformPeaksSegmentPayload {
     waveform::get_track_mix_waveform_peaks_segment(
         state,
         track_id,
@@ -249,7 +249,7 @@ pub fn get_waveform_mipmap_binary(
     state: State<'_, AppState>,
     source_path: String,
     level: u8,
-) -> Vec<u8> {
+) -> String {
     waveform::get_waveform_mipmap_binary(state, source_path, level)
 }
 
@@ -259,6 +259,14 @@ pub fn preload_waveform_mipmap(
     source_path: String,
 ) -> serde_json::Value {
     waveform::preload_waveform_mipmap(state, source_path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn batch_get_waveform_mipmap(
+    state: State<'_, AppState>,
+    source_paths: Vec<String>,
+) -> std::collections::HashMap<String, [String; 3]> {
+    waveform::batch_get_waveform_mipmap(state, source_paths)
 }
 
 // ===================== timeline =====================

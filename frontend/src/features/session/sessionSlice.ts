@@ -1490,17 +1490,10 @@ const sessionSlice = createSlice({
                     );
                 if (s.scaleHighlightMode != null)
                     state.scaleHighlightMode = s.scaleHighlightMode === "always" ? "always" : "off";
-                if ((s as any).lockParamLines != null)
+                if (s.lockParamLines != null)
                     state.lockParamLinesEnabled = Boolean(
-                        (s as any).lockParamLines,
+                        s.lockParamLines,
                     );
-                const legacyDir = (s as any).dragDirection;
-                if (legacyDir != null) {
-                    const validDirs = ["free", "x-only", "y-only"];
-                    if (validDirs.includes(legacyDir)) {
-                        state.selectDragDirection = legacyDir as DragDirection;
-                    }
-                }
                 const selectDir = (s as any).selectDragDirection;
                 if (selectDir != null && ["free", "x-only", "y-only"].includes(selectDir)) {
                     state.selectDragDirection = selectDir as DragDirection;
