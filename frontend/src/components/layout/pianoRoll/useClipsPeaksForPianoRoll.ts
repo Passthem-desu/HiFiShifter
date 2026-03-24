@@ -25,6 +25,8 @@ export interface ClipPeaksEntry {
     sourceStartSec: number;
     /** source 文件总时长（秒） */
     sourceDurationSec: number;
+    /** clip 在源文件中的结束位置（秒），裁剪后的终点 */
+    sourceEndSec: number;
     /** source 文件采样率 */
     sourceSampleRate: number;
     /** 播放速率 */
@@ -129,6 +131,10 @@ export function useClipsPeaksForPianoRoll(args: {
                     ? playbackRate
                     : 1;
 
+            // sourceEndSec：与 WaveformTrackCanvas 一致，优先使用 clip.sourceEndSec
+            const clipSourceEndSec =
+                Number(clip.sourceEndSec ?? sourceDurationSec) || sourceDurationSec;
+
             return {
                 clipId: clip.id,
                 startSec: clip.startSec,
@@ -139,6 +145,7 @@ export function useClipsPeaksForPianoRoll(args: {
                 ),
                 sourceDurationSec:
                     sourceDurationSec > 0 ? sourceDurationSec : 0,
+                sourceEndSec: clipSourceEndSec,
                 sourceSampleRate,
                 playbackRate: pr,
                 gain: clip.gain ?? 1,

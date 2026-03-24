@@ -627,7 +627,13 @@ export function drawPianoRoll(args: {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const drawPianoRollRef = drawPianoRoll as unknown as {
         _offCanvas?: HTMLCanvasElement;
+        _lastLevelByPath?: Record<string, 0 | 1 | 2>;
     };
+    // 初始化 previousLevel 跟踪映射（与 WaveformTrackCanvas 的 lastLevelByPathRef 一致）
+    if (!drawPianoRollRef._lastLevelByPath) {
+        drawPianoRollRef._lastLevelByPath = {};
+    }
+    const lastLevelByPath = drawPianoRollRef._lastLevelByPath;
     const offCanvas =
         drawPianoRollRef._offCanvas || document.createElement("canvas");
     drawPianoRollRef._offCanvas = offCanvas;
@@ -679,7 +685,8 @@ export function drawPianoRoll(args: {
         const ratioStart = (visStartSec - clipStartSec) / Math.max(1e-6, clipLen);
         const ratioEnd = (visEndSec - clipStartSec) / Math.max(1e-6, clipLen);
 
-        const clipSourceEndSec = sourceDurSec;
+        const clipSourceEndSec =
+            Number(entry.sourceEndSec ?? sourceDurSec) || sourceDurSec;
         const clipSourceSpanSec = Math.max(
             0,
             Math.min(clipLen * pr, clipSourceEndSec - sourceStartSec),
@@ -688,10 +695,12 @@ export function drawPianoRoll(args: {
         const sourceTimeEnd = Math.min(sourceDurSec, sourceStartSec + ratioEnd * clipSourceSpanSec);
         const sourceDuration = Math.max(0.001, sourceTimeEnd - sourceTimeStart);
 
-        // 选择 mipmap 级别（与 WaveformTrackCanvas 一致）
+        // 选择 mipmap 级别（与 WaveformTrackCanvas 一致，使用 previousLevel 实现滞后防抖）
         const sampleRate = entry.sourceSampleRate || 44100;
         const spp = Math.max(1, Math.round(sampleRate / pxPerSec));
-        const stableLevel = waveformMipmapStore.selectLevelStable(spp);
+        const previousLevel = lastLevelByPath[entry.sourcePath];
+        const stableLevel = waveformMipmapStore.selectLevelStable(spp, previousLevel);
+        lastLevelByPath[entry.sourcePath] = stableLevel;
 
         // 从 mipmap 缓存获取 interleaved 数据
         const result = waveformMipmapStore.getInterleavedSlice(
