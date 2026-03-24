@@ -2335,7 +2335,6 @@ export const TimelinePanel: React.FC = () => {
                                     viewportWidthPx={viewportWidth}
                                     viewportStartSec={viewportStartSec}
                                     viewportEndSec={viewportEndSec}
-                                    clipWaveforms={s.clipWaveforms}
                                     altPressed={altPressed}
                                     selectedClipId={s.selectedClipId}
                                     multiSelectedClipIds={multiSelectedClipIds}

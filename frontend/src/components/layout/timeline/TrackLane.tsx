@@ -11,8 +11,6 @@ import { WaveformTrackCanvas } from "../../waveform/WaveformTrackCanvas";
 import { useAppTheme } from "../../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../../theme/waveformColors";
 
-type WaveformPreview = number[] | { l: number[]; r: number[] };
-
 export const TrackLane = React.memo(function TrackLane(props: {
     track: TrackInfo;
     allTracks: TrackInfo[];
@@ -24,8 +22,6 @@ export const TrackLane = React.memo(function TrackLane(props: {
     viewportWidthPx: number;
     viewportStartSec: number;
     viewportEndSec: number;
-
-    clipWaveforms: Record<string, WaveformPreview | undefined>;
 
     altPressed: boolean;
 
@@ -87,7 +83,6 @@ export const TrackLane = React.memo(function TrackLane(props: {
         viewportWidthPx,
         viewportStartSec,
         viewportEndSec,
-        clipWaveforms,
         altPressed,
         selectedClipId,
         multiSelectedClipIds,
@@ -207,7 +202,6 @@ export const TrackLane = React.memo(function TrackLane(props: {
                     multiSelectedClipIds.length > 0
                         ? multiSelectedSet.has(clip.id)
                         : selectedClipId === clip.id;
-                const waveform = clipWaveforms[clip.id];
 
                 return (
                     <ClipItem
@@ -215,7 +209,6 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         clip={clip}
                         rowHeight={rowHeight}
                         pxPerSec={pxPerSec}
-                        waveform={waveform}
                         altPressed={altPressed}
                         selected={selected}
                         isInMultiSelectedSet={multiSelectedSet.has(clip.id)}

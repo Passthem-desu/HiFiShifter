@@ -30,7 +30,7 @@ import {
     renderWaveform,
     type WaveformRenderParams,
 } from "../../utils/waveformRenderer";
-import { waveformMipmapStore } from "../../utils/waveformMipmapStore";
+import { waveformMipmapStore, type WaveformMipmapLevel } from "../../utils/waveformMipmapStore";
 import type { FadeCurveType } from "../layout/timeline/paths";
 
 /** 可视区缓冲（像素），防止滚动时出现空白；固定像素数，不随缩放膨胀 */
@@ -101,6 +101,9 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
 
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
     const backBufferRef = React.useRef<HTMLCanvasElement | null>(null);
+
+    /** 上一帧的 mipmap 级别（用于 selectLevelStable 滞后保护，防止缩放边界闪烁） */
+    const prevLevelRef = React.useRef<WaveformMipmapLevel | null>(null);
 
     // 强制重绘计数器（mipmap 数据加载完成时 +1 触发重绘）
     const [redrawTick, setRedrawTick] = React.useState(0);
@@ -275,12 +278,20 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
 
         // 从 mipmap 缓存获取 resample 后的数据
         if (sourcePath && samplesPerPixel && viewportInfo) {
+            // 使用 selectLevelStable 滞后保护，防止缩放边界 mipmap 级别频繁切换
+            const stableLevel = waveformMipmapStore.selectLevelStable(
+                samplesPerPixel,
+                prevLevelRef.current,
+            );
+            prevLevelRef.current = stableLevel;
+
             const result = waveformMipmapStore.getResampledSlice(
                 sourcePath,
                 samplesPerPixel,
                 viewportInfo.sourceTimeStart,
                 viewportInfo.sourceDuration,
                 displayedW,
+                stableLevel,
             );
 
             if (result && result.interleaved.length >= 4) {
