@@ -125,30 +125,40 @@ class WaveformMipmapStoreImpl {
         samplesPerPixel: number,
         previousLevel?: WaveformMipmapLevel | null,
     ): WaveformMipmapLevel {
+        let newLevel: WaveformMipmapLevel;
+
         if (previousLevel == null) {
-            return this.selectLevel(samplesPerPixel);
+            newLevel = this.selectLevel(samplesPerPixel);
+        } else {
+            const enterL1 = SPP_THRESHOLDS[0] * SPP_HYSTERESIS_ENTER_SCALE;
+            const exitL1 = SPP_THRESHOLDS[0] * SPP_HYSTERESIS_EXIT_SCALE;
+            const enterL2 = SPP_THRESHOLDS[1] * SPP_HYSTERESIS_ENTER_SCALE;
+            const exitL2 = SPP_THRESHOLDS[1] * SPP_HYSTERESIS_EXIT_SCALE;
+
+            if (previousLevel === 0) {
+                if (samplesPerPixel > enterL2) newLevel = 2;
+                else if (samplesPerPixel > enterL1) newLevel = 1;
+                else newLevel = 0;
+            } else if (previousLevel === 1) {
+                if (samplesPerPixel <= exitL1) newLevel = 0;
+                else if (samplesPerPixel > enterL2) newLevel = 2;
+                else newLevel = 1;
+            } else {
+                if (samplesPerPixel <= exitL1) newLevel = 0;
+                else if (samplesPerPixel <= exitL2) newLevel = 1;
+                else newLevel = 2;
+            }
         }
 
-        const enterL1 = SPP_THRESHOLDS[0] * SPP_HYSTERESIS_ENTER_SCALE;
-        const exitL1 = SPP_THRESHOLDS[0] * SPP_HYSTERESIS_EXIT_SCALE;
-        const enterL2 = SPP_THRESHOLDS[1] * SPP_HYSTERESIS_ENTER_SCALE;
-        const exitL2 = SPP_THRESHOLDS[1] * SPP_HYSTERESIS_EXIT_SCALE;
-
-        if (previousLevel === 0) {
-            if (samplesPerPixel > enterL2) return 2;
-            if (samplesPerPixel > enterL1) return 1;
-            return 0;
+        // 日志：级别切换时打印
+        if (previousLevel != null && newLevel !== previousLevel) {
+            const levelLabels = ["L0(div=64)", "L1(div=512)", "L2(div=4096)"];
+            console.info(
+                `[WaveformMipmap] 🔀 级别切换: ${levelLabels[previousLevel]} → ${levelLabels[newLevel]} | spp=${Math.round(samplesPerPixel)}`,
+            );
         }
 
-        if (previousLevel === 1) {
-            if (samplesPerPixel <= exitL1) return 0;
-            if (samplesPerPixel > enterL2) return 2;
-            return 1;
-        }
-
-        if (samplesPerPixel <= exitL1) return 0;
-        if (samplesPerPixel <= exitL2) return 1;
-        return 2;
+        return newLevel;
     }
 
     /**
@@ -434,6 +444,10 @@ class WaveformMipmapStoreImpl {
 
         if (needed.length === 0) return;
 
+        console.info(
+            `[WaveformMipmap] 🔄 批量预加载开始: ${needed.length} 个文件`,
+        );
+
         // 通知所有需要加载的文件进入 loading 状态
         for (const sp of needed) {
             this.notify(sp, "loading");
@@ -470,6 +484,18 @@ class WaveformMipmapStoreImpl {
                     hasError ? "batch decode partial failure" : undefined,
                 );
             }
+
+            // 汇总日志
+            const totalCached = this.cache.size;
+            let totalPeaks = 0;
+            for (const [, entry] of this.cache) {
+                for (const lv of entry.levels) {
+                    if (lv) totalPeaks += lv.min.length;
+                }
+            }
+            console.info(
+                `[WaveformMipmap] ✅ 批量预加载完成: ${needed.length} 个文件 | 缓存总计: ${totalCached} 个文件, ${(totalPeaks * 2 * 4 / 1024 / 1024).toFixed(1)}MB peaks 数据`,
+            );
         } catch (err) {
             // 批量 IPC 失败，回退到逐个 preload
             console.warn(
@@ -563,10 +589,16 @@ class WaveformMipmapStoreImpl {
                     this.applyDecoded(sourcePath, level, decoded);
                     this.notify(sourcePath, "done");
                 } else {
+                    console.warn(
+                        `[WaveformMipmap] ⚠️ 解码失败: "${sourcePath.split(/[/\\]/).pop()}" L${level}`,
+                    );
                     this.notify(sourcePath, "error", "decode failed");
                 }
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
+                console.error(
+                    `[WaveformMipmap] ❌ 加载失败: "${sourcePath.split(/[/\\]/).pop()}" L${level} — ${msg}`,
+                );
                 this.notify(sourcePath, "error", msg);
             } finally {
                 entry!.loadingLevels.delete(level);
@@ -604,6 +636,13 @@ class WaveformMipmapStoreImpl {
             divisionFactor: decoded.divisionFactor,
             sampleRate: decoded.sampleRate,
         };
+
+        // 日志：单级 mipmap 数据写入缓存
+        const fileName = sourcePath.split(/[/\\]/).pop() ?? sourcePath;
+        const levelLabel = ["L0(div=64)", "L1(div=512)", "L2(div=4096)"][clampedLevel];
+        console.info(
+            `[WaveformMipmap] 📦 缓存写入: "${fileName}" ${levelLabel} | peaks=${decoded.peakCount} | sr=${decoded.sampleRate} | div=${decoded.divisionFactor}`,
+        );
     }
 
     private getSliceFromPeaks(
