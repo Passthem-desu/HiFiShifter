@@ -411,8 +411,8 @@ export function drawPianoRoll(args: {
               pitchGridC: "rgba(0,0,0,0.12)",
               pitchGridOther: "rgba(0,0,0,0.06)",
               // 曲线
-              origCurve: "rgba(80,80,80,0.55)",
-              editCurve: "rgba(0,0,0,0.85)",
+              origCurve: "rgba(100,120,150,0.50)",
+              editCurve: "rgba(50,80,140,0.80)",
               selectionCurve: "rgba(30,120,200,0.95)",
               // 叠加文字 & 播放头
               overlayTextColor: "rgba(0,0,0,0.35)",
