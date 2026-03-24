@@ -656,6 +656,12 @@ export function drawPianoRoll(args: {
     // Background waveform: per-clip 叠加绘制
     // 与 WaveformTrackCanvas 保持一致的数据路径：
     // waveformMipmapStore.getInterleavedSlice() → applyGainsToPeaks → renderWaveform
+    console.info(
+        `[PianoRoll] 🎨 波形渲染开始 | clips=${clipPeaks.length} | pxPerSec=${pxPerSec.toFixed(1)} | visible=[${visibleStartSec.toFixed(2)}s, ${(visibleStartSec + visibleDurSec).toFixed(2)}s]`,
+    );
+    let prRenderedCount = 0;
+    let prSkippedCount = 0;
+
     for (const entry of clipPeaks) {
         if (!entry.sourcePath) continue;
 
@@ -702,6 +708,9 @@ export function drawPianoRoll(args: {
         const stableLevel = waveformMipmapStore.selectLevelStable(spp, previousLevel);
         lastLevelByPath[entry.sourcePath] = stableLevel;
 
+        const levelLabels = ["L0(div=64)", "L1(div=512)", "L2(div=4096)"];
+        const fileName = entry.sourcePath.split(/[/\\]/).pop() ?? entry.sourcePath;
+
         // 从 mipmap 缓存获取 interleaved 数据
         const result = waveformMipmapStore.getInterleavedSlice(
             entry.sourcePath,
@@ -709,7 +718,18 @@ export function drawPianoRoll(args: {
             sourceTimeStart,
             sourceDuration,
         );
-        if (!result || result.interleaved.length < 4) continue;
+        if (!result || result.interleaved.length < 4) {
+            console.warn(
+                `[PianoRoll] ⏭️ clip 跳过: "${fileName}" | level=${levelLabels[stableLevel]} | spp=${spp} | 原因=${!result ? "数据未加载" : "interleaved 太短(" + result.interleaved.length + ")"}`,
+            );
+            prSkippedCount++;
+            continue;
+        }
+
+        console.debug(
+            `[PianoRoll] ✅ clip 渲染: "${fileName}" | level=${levelLabels[stableLevel]} | spp=${spp} | srcTime=[${sourceTimeStart.toFixed(3)}s, ${sourceTimeEnd.toFixed(3)}s] | interleaved=${result.interleaved.length}`,
+        );
+        prRenderedCount++;
 
         // clip 内的像素偏移
         const clipPixelOffset = (visStartSec - clipStartSec) * pxPerSec;
@@ -768,6 +788,11 @@ export function drawPianoRoll(args: {
 
         ctx.restore();
     }
+
+    console.info(
+        `[PianoRoll] 🎨 波形渲染完成 | 渲染=${prRenderedCount} | 跳过=${prSkippedCount} | 总clips=${clipPeaks.length}`,
+    );
+
     // Selection (time band)
     if (selection) {
         const a = Math.min(selection.aBeat, selection.bBeat);

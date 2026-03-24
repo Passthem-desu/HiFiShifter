@@ -175,6 +175,12 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         const canvasStartSec = bufferedStartSec;
 
         // 遍历所有 clip，绘制波形
+        console.info(
+            `[Timeline] 🎨 渲染开始 | clips=${clips.length} | pxPerSec=${pxPerSec.toFixed(1)} | buffered=[${bufferedStartSec.toFixed(2)}s, ${bufferedEndSec.toFixed(2)}s] | canvasW=${canvasWidthPx}`,
+        );
+        let renderedCount = 0;
+        let skippedCount = 0;
+
         for (const clip of clips) {
             if (!clip.sourcePath || !clip.durationSec || clip.durationSec <= 0) continue;
 
@@ -210,6 +216,9 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             );
             lastLevelByPathRef.current[clip.sourcePath] = stableLevel;
 
+            const levelLabels = ["L0(div=64)", "L1(div=512)", "L2(div=4096)"];
+            const fileName = clip.sourcePath.split(/[/\\]/).pop() ?? clip.sourcePath;
+
             // 可见部分在 clip 内的比例
             const ratioStart = (sampleStartSec - clipStartSec) / Math.max(1e-6, clipLen);
             const ratioEnd = (sampleEndSec - clipStartSec) / Math.max(1e-6, clipLen);
@@ -240,7 +249,18 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 sourceDuration,
             );
 
-            if (!result || result.interleaved.length < 4) continue;
+            if (!result || result.interleaved.length < 4) {
+                console.warn(
+                    `[Timeline] ⏭️ clip 跳过: "${fileName}" | level=${levelLabels[stableLevel]} | spp=${spp} | 原因=${!result ? "数据未加载" : "interleaved 太短(" + result.interleaved.length + ")"}`,
+                );
+                skippedCount++;
+                continue;
+            }
+
+            console.debug(
+                `[Timeline] ✅ clip 渲染: "${fileName}" | level=${levelLabels[stableLevel]} | spp=${spp} | srcTime=[${sourceTimeStart.toFixed(3)}s, ${sourceTimeEnd.toFixed(3)}s] | interleaved=${result.interleaved.length} | clipPx=[${visLeftPx.toFixed(0)}, ${visRightPx.toFixed(0)}]`,
+            );
+            renderedCount++;
 
             // 计算 clip 内的偏移
             const clipPixelOffset = (visStartSec - clipStartSec) * pxPerSec;
@@ -295,6 +315,10 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
 
             backCtx.restore();
         }
+
+        console.info(
+            `[Timeline] 🎨 渲染完成 | 渲染=${renderedCount} | 跳过=${skippedCount} | 总clips=${clips.length}`,
+        );
 
         // 防闪烁：主 Canvas 物理尺寸只增不减，避免 canvas.width 赋值清空内容
         ensureCanvasSize(canvas, internalW, internalH);
