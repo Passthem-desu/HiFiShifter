@@ -30,6 +30,7 @@ import {
     setSelectedClip,
     setSelectedClipPreservingTrack,
     setTrackName,
+    setTrackVolume,
 } from "../../features/session/sessionSlice";
 
 import type { ClipTemplate } from "../../features/session/sessionTypes";
@@ -1823,6 +1824,10 @@ export const TimelinePanel: React.FC = () => {
                     }));
                 }}
                 onVolumeCommit={(trackId, nextVolume) => {
+                    // 先同步更新 Redux 中的 track.volume 为新值，
+                    // 再清除 trackVolumeUi 覆盖，这样即使 setTrackStateRemote
+                    // 尚未完成，TrackList 也能从 backendVolume 读到正确的值，避免回弹。
+                    dispatch(setTrackVolume({ trackId, volume: nextVolume }));
                     setTrackVolumeUi((prev) => {
                         const copy = { ...prev };
                         delete copy[trackId];
