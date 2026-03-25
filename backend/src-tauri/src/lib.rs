@@ -266,6 +266,7 @@ pub fn run() {
             commands::get_static_param,
             commands::set_static_param,
             commands::remove_clip,
+            commands::remove_clips,
             commands::move_clip,
             commands::move_clips,
             commands::get_clip_linked_params,
