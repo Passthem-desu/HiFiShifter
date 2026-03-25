@@ -720,6 +720,13 @@ pub struct AppState {
         std::collections::HashMap<String, std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile>>,
     >,
 
+    /// Inflight deduplication for waveform peak computation.
+    /// When a file is being computed, its source_path is in this set.
+    /// Other threads calling get_or_compute for the same path will wait
+    /// on the Condvar until computation finishes, then read from cache.
+    pub waveform_inflight: std::sync::Mutex<std::collections::HashSet<String>>,
+    pub waveform_inflight_cv: std::sync::Condvar,
+
     // Set in Tauri setup. Used for async notifications.
     pub app_handle: OnceLock<tauri::AppHandle>,
 
@@ -765,6 +772,9 @@ impl Default for AppState {
                 crate::hfspeaks_v2::default_cache_dir(),
             ),
             waveform_cache_v2: std::sync::Mutex::new(std::collections::HashMap::new()),
+
+            waveform_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
+            waveform_inflight_cv: std::sync::Condvar::new(),
 
             app_handle: OnceLock::new(),
             pitch_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -817,7 +827,9 @@ impl AppState {
 
     /// 获取或计算 v2 多级 mipmap 峰值数据
     ///
-    /// 优先从内存缓存读取，其次从磁盘缓存读取，最后计算
+    /// 优先从内存缓存读取，其次从磁盘缓存读取，最后计算。
+    /// 使用 inflight 去重：如果另一线程正在计算同一文件，当前线程会等待
+    /// 其完成后直接从缓存读取，避免重复计算和重复进度事件。
     /// 首次计算时会通过 Tauri 事件推送进度（waveform_analysis_progress）
     pub fn get_or_compute_waveform_peaks_v2(
         &self,
@@ -827,7 +839,7 @@ impl AppState {
             return Err("empty source_path".to_string());
         }
 
-        // 检查内存缓存
+        // ── 1. 检查内存缓存 ──
         {
             let cache = self
                 .waveform_cache_v2
@@ -850,7 +862,49 @@ impl AppState {
             }
         }
 
-        // 磁盘缓存
+        // ── 2. Inflight 去重检查 ──
+        // 如果另一线程已在计算同一文件，等待它完成后从缓存读取
+        {
+            let mut inflight = self
+                .waveform_inflight
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+
+            if inflight.contains(source_path) {
+                // 另一线程正在计算此文件，等待 Condvar 通知
+                let key = source_path.to_string();
+                let _guard = self
+                    .waveform_inflight_cv
+                    .wait_while(inflight, |set| set.contains(&*key))
+                    .unwrap_or_else(|e| e.into_inner());
+
+                // 计算已完成，从缓存读取
+                let cache = self
+                    .waveform_cache_v2
+                    .lock()
+                    .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+                if let Some(found) = cache.get(source_path) {
+                    if let Some(handle) = self.app_handle.get() {
+                        use tauri::Emitter;
+                        let _ = handle.emit(
+                            "waveform_analysis_progress",
+                            serde_json::json!({
+                                "sourcePath": source_path,
+                                "progress": 1.0,
+                                "status": "cached",
+                            }),
+                        );
+                    }
+                    return Ok(found.clone());
+                }
+                // 极端情况：前一线程计算失败未放入缓存，继续往下重新计算
+            } else {
+                // 标记当前线程为此文件的计算者
+                inflight.insert(source_path.to_string());
+            }
+        }
+
+        // ── 3. 磁盘缓存 ──
         let cache_dir = {
             self.waveform_cache_dir
                 .lock()
@@ -865,11 +919,13 @@ impl AppState {
         if let Some(cached) = hfs_cache.try_load(path) {
             let cached: std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile> =
                 std::sync::Arc::new(cached);
-            let mut cache = self
-                .waveform_cache_v2
-                .lock()
-                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
-            cache.insert(source_path.to_string(), cached.clone());
+            {
+                let mut cache = self
+                    .waveform_cache_v2
+                    .lock()
+                    .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+                cache.insert(source_path.to_string(), cached.clone());
+            }
             // 磁盘缓存命中：发送 cached 状态事件
             if let Some(handle) = self.app_handle.get() {
                 use tauri::Emitter;
@@ -882,9 +938,12 @@ impl AppState {
                     }),
                 );
             }
+            // 移除 inflight 标记并通知等待线程
+            self.remove_waveform_inflight(source_path);
             return Ok(cached);
         }
 
+        // ── 4. 计算新的峰值数据 ──
         // 发送 computing 状态事件（进度 0）
         let source_path_owned = source_path.to_string();
         if let Some(handle) = self.app_handle.get() {
@@ -917,8 +976,17 @@ impl AppState {
         };
 
         // 计算新的峰值数据（带进度回调）
-        let peaks =
-            crate::hfspeaks_v2::compute_mipmap_peaks_with_progress(path, Some(progress_cb))?;
+        let result =
+            crate::hfspeaks_v2::compute_mipmap_peaks_with_progress(path, Some(progress_cb));
+
+        // 如果计算失败，移除 inflight 标记并返回错误
+        let peaks = match result {
+            Ok(p) => p,
+            Err(e) => {
+                self.remove_waveform_inflight(source_path);
+                return Err(e);
+            }
+        };
 
         // 保存到磁盘缓存
         if let Err(e) = hfs_cache.save(path, &peaks) {
@@ -939,12 +1007,26 @@ impl AppState {
         }
 
         let peaks = std::sync::Arc::new(peaks);
-        let mut cache = self
-            .waveform_cache_v2
-            .lock()
-            .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
-        cache.insert(source_path.to_string(), peaks.clone());
+        {
+            let mut cache = self
+                .waveform_cache_v2
+                .lock()
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+            cache.insert(source_path.to_string(), peaks.clone());
+        }
+        // 移除 inflight 标记并通知等待线程
+        self.remove_waveform_inflight(source_path);
         Ok(peaks)
+    }
+
+    /// 辅助方法：从 inflight 集合中移除 source_path 并通知所有等待线程
+    fn remove_waveform_inflight(&self, source_path: &str) {
+        let mut inflight = self
+            .waveform_inflight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        inflight.remove(source_path);
+        self.waveform_inflight_cv.notify_all();
     }
 
     pub fn project_meta_payload(&self) -> ProjectMetaPayload {
