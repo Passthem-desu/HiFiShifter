@@ -211,6 +211,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "remove_clip":
             return { clipId: args[0] };
 
+        case "remove_clips":
+            return { clipIds: args[0] };
+
         case "move_clip":
             return {
                 clipId: args[0],

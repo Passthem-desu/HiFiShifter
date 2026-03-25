@@ -553,6 +553,8 @@ export function useClipDrag(deps: {
                                     Number(now.playbackRate ?? 1) || 1,
                                 fadeInSec: Number(now.fadeInSec ?? 0) || 0,
                                 fadeOutSec: Number(now.fadeOutSec ?? 0) || 0,
+                                fadeInCurve: now.fadeInCurve,
+                                fadeOutCurve: now.fadeOutCurve,
                                 linkedParams: linkedParamsResult.ok
                                     ? linkedParamsResult.linkedParams
                                     : undefined,
