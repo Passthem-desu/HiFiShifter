@@ -637,7 +637,8 @@ export function drawPianoRoll(args: {
     const offCanvas =
         drawPianoRollRef._offCanvas || document.createElement("canvas");
     drawPianoRollRef._offCanvas = offCanvas;
-    const offDpr = Math.max(1, window.devicePixelRatio || 1);
+    // 限制 dpr 为 1，与主 canvas 一致
+    const offDpr = 1;
     const displayedOffW = Math.max(1, w);
     const displayedOffH = Math.max(1, h);
     const internalOffW = Math.max(1, Math.floor(displayedOffW * offDpr));

@@ -35,8 +35,22 @@ import {
     type WaveformRenderParams,
 } from "../../utils/waveformRenderer";
 
+/**
+ * 向上取整到最近的 2 的幂次（用于离屏 Canvas 预分配，避免频繁 resize）
+ */
+function nextPow2(v: number): number {
+    let n = Math.ceil(v);
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    return n + 1;
+}
+
 export interface WaveformTrackCanvasProps {
-    /** 当前轨道上所有 clip（已由 TrackLane 做过可视区过滤） */
+    /** 当前轨道上的完整 clip 列表，由组件内部按视口自行过滤以保持引用稳定 */
     clips: ClipInfo[];
     /** 轨道高度（像素），包含 header 和 padding */
     trackHeight: number;
@@ -77,6 +91,11 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
     const lastLevelByPathRef = React.useRef<Record<string, 0 | 1 | 2>>({});
     const rafRef = React.useRef<number | null>(null);
     const offCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
+
+    // 绘制时间戳节流（方案3：避免同帧多次绘制）
+    const lastDrawTimeRef = React.useRef(0);
+    /** 最小绘制间隔（ms），略低于 120fps 以兼容高刷屏 */
+    const DRAW_MIN_INTERVAL = 6;
 
     // 高频参数用 ref 存储，避免依赖数组变化触发 useLayoutEffect
     const pxPerSecRef = React.useRef(props.pxPerSec);
@@ -125,6 +144,32 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         const canvas = canvasRef.current;
         if (!canvas) return;
 
+        // ========================================
+        // 方案3：时间戳节流 — 避免同帧多次绘制
+        // 如果距上次绘制 < DRAW_MIN_INTERVAL ms，推迟到下一帧
+        // ========================================
+        const now = performance.now();
+        if (now - lastDrawTimeRef.current < DRAW_MIN_INTERVAL) {
+            if (rafRef.current == null) {
+                rafRef.current = requestAnimationFrame(() => {
+                    rafRef.current = null;
+                    drawRef.current();
+                });
+            }
+            return;
+        }
+        lastDrawTimeRef.current = now;
+
+        // ========================================
+        // 性能诊断探针（通过 localStorage 开关）
+        // 开启: localStorage.setItem('hifishifter.debugWaveformPerf', '1')
+        // 关闭: localStorage.removeItem('hifishifter.debugWaveformPerf')
+        // ========================================
+        const __perfDebug = typeof window !== "undefined" &&
+            window.localStorage?.getItem("hifishifter.debugWaveformPerf") === "1";
+        const __t0 = __perfDebug ? performance.now() : 0;
+        let __tSetup = 0, __clipTimings: { name: string; sliceMs: number; downsampleMs: number; gainMs: number; renderMs: number; drawImageMs: number; interleavedLen: number; visibleWidthPx: number; downsampledTo: number }[] = [];
+
         const currentPxPerSec = pxPerSecRef.current;
         const currentViewportStartSec = viewportStartSecRef.current;
         const currentViewportEndSec = viewportEndSecRef.current;
@@ -136,7 +181,8 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         const displayW = Math.max(1, Math.ceil(currentViewportWidthPx));
         const displayH = currentWaveformHeight;
 
-        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        // 限制 dpr 为 1，降低高分屏下 Canvas 像素量以提升渲染性能
+        const dpr = 1;
         const internalW = Math.max(1, Math.floor(displayW * dpr));
         const internalH = Math.max(1, Math.floor(displayH * dpr));
 
@@ -163,6 +209,8 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         }
         const offCanvas = offCanvasRef.current;
         const offDpr = dpr;
+
+        if (__perfDebug) __tSetup = performance.now() - __t0;
 
         for (const clip of currentClips) {
             if (!clip.sourcePath || !clip.durationSec || clip.durationSec <= 0) continue;
@@ -213,15 +261,53 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             // ========================================
             // 从 mipmap 缓存获取 interleaved 数据（不 resample，与 PianoRoll 一致）
             // ========================================
+            const __tSlice0 = __perfDebug ? performance.now() : 0;
             const result = waveformMipmapStore.getInterleavedSlice(
                 clip.sourcePath,
                 stableLevel,
                 sourceTimeStart,
                 sourceDuration,
             );
+            const __tSlice1 = __perfDebug ? performance.now() : 0;
 
             if (!result || result.interleaved.length < 4) {
                 continue;
+            }
+
+            // ========================================
+            // 方案2：限制数据量 — 当原始数据点数远超可视像素时，快速预降采样
+            // 减少后续 applyGainsToPeaks + renderWaveform 的 per-pixel 扫描开销
+            // ========================================
+            const __tDs0 = __perfDebug ? performance.now() : 0;
+            const storeInterleaved = result.interleaved;
+            let renderInterleaved: Float32Array = storeInterleaved;
+            let releasedStoreInterleaved = false;
+            const rawSampleCount = storeInterleaved.length / 2;
+            const targetSamples = visibleWidthPx * 2; // 每像素 2 个采样点就足够
+            if (rawSampleCount > targetSamples && targetSamples >= 2) {
+                const w = Math.ceil(targetSamples);
+                const downsampled = new Float32Array(w * 2);
+                for (let i = 0; i < w; i++) {
+                    const srcStart = Math.floor((i / w) * rawSampleCount);
+                    const srcEnd = Math.min(
+                        rawSampleCount - 1,
+                        Math.ceil(((i + 1) / w) * rawSampleCount),
+                    );
+                    let pMin = Infinity;
+                    let pMax = -Infinity;
+                    for (let j = srcStart; j <= srcEnd; j++) {
+                        const sMin = storeInterleaved[j * 2];
+                        const sMax = storeInterleaved[j * 2 + 1];
+                        if (sMin < pMin) pMin = sMin;
+                        if (sMax > pMax) pMax = sMax;
+                    }
+                    downsampled[i * 2] = pMin === Infinity ? 0 : pMin;
+                    downsampled[i * 2 + 1] = pMax === -Infinity ? 0 : pMax;
+                }
+                // 归还原始 buffer 到复用池
+                waveformMipmapStore.releaseInterleaved(storeInterleaved);
+                releasedStoreInterleaved = true;
+                renderInterleaved = downsampled;
             }
 
             const clipPixelOffset = (visStartSec - clipStartSec) * currentPxPerSec;
@@ -247,15 +333,25 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             };
 
             // 应用增益（音量 + 淡入淡出）
-            const withGains = applyGainsToPeaks(result.interleaved, params);
+            const __tDs1 = __perfDebug ? performance.now() : 0;
+            const __tGain0 = __perfDebug ? performance.now() : 0;
+            const withGains = applyGainsToPeaks(renderInterleaved, params);
+            const __tGain1 = __perfDebug ? performance.now() : 0;
+
 
             // ========================================
-            // 离屏 Canvas 渲染（与 PianoRoll 一致）
+            // 离屏 Canvas 渲染
+            // 方案1：预分配为 nextPow2 大小，只增不减，消除频繁 resize 导致的 GPU 纹理重分配
             // ========================================
             const offInternalW = Math.max(1, Math.floor(visibleWidthPx * offDpr));
             const offInternalH = Math.max(1, Math.floor(displayH * offDpr));
-            if (offCanvas.width < offInternalW) offCanvas.width = offInternalW;
-            if (offCanvas.height < offInternalH) offCanvas.height = offInternalH;
+            if (offCanvas.width < offInternalW) {
+                // 向上取整到 2 的幂（最小 512），避免缩放过程中频繁 resize
+                offCanvas.width = Math.max(512, nextPow2(offInternalW));
+            }
+            if (offCanvas.height < offInternalH) {
+                offCanvas.height = Math.max(256, nextPow2(offInternalH));
+            }
 
             const offCtx = offCanvas.getContext("2d");
             if (!offCtx) continue;
@@ -263,6 +359,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             offCtx.setTransform(offDpr, 0, 0, offDpr, 0, 0);
             offCtx.clearRect(0, 0, visibleWidthPx, displayH);
 
+            const __tRender0 = __perfDebug ? performance.now() : 0;
             renderWaveform(
                 offCtx,
                 withGains,
@@ -271,6 +368,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 currentStrokeWidth,
                 "line",
             );
+            const __tRender1 = __perfDebug ? performance.now() : 0;
 
             // 裁剪到 clip 可视范围，drawImage 到主 Canvas
             ctx.save();
@@ -281,6 +379,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             // 静音 clip 半透明
             ctx.globalAlpha = clip.muted ? 0.4 : 1.0;
 
+            const __tDraw0 = __perfDebug ? performance.now() : 0;
             ctx.drawImage(
                 offCanvas,
                 0,
@@ -292,20 +391,65 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 visibleWidthPx,
                 displayH,
             );
+            const __tDraw1 = __perfDebug ? performance.now() : 0;
 
             ctx.restore();
 
-            // 归还增益 buffer
-            if (withGains !== result.interleaved) {
+            // 归还增益 buffer（仅当 applyGainsToPeaks 返回了新数组时才归还）
+            if (withGains !== renderInterleaved) {
                 releaseGainBuffer(withGains);
             }
 
-            // 归还 interleaved buffer 到 store 复用池
-            waveformMipmapStore.releaseInterleaved(result.interleaved);
+            // 归还 store 复用池 buffer；若预降采样已提前归还则跳过
+            if (!releasedStoreInterleaved) {
+                waveformMipmapStore.releaseInterleaved(storeInterleaved);
+            }
+
+            // 收集诊断数据
+            if (__perfDebug) {
+                const fileName = clip.sourcePath?.split(/[/\\]/).pop() ?? "?";
+                __clipTimings.push({
+                    name: fileName,
+                    sliceMs: __tSlice1 - __tSlice0,
+                    downsampleMs: __tDs1 - __tDs0,
+                    gainMs: __tGain1 - __tGain0,
+                    renderMs: __tRender1 - __tRender0,
+                    drawImageMs: __tDraw1 - __tDraw0,
+                    interleavedLen: storeInterleaved.length,
+                    visibleWidthPx,
+                    downsampledTo: renderInterleaved.length / 2,
+                });
+            }
+
         }
 
         if (ctx.globalAlpha !== 1) {
             ctx.globalAlpha = 1;
+        }
+
+        // ========================================
+        // 性能诊断输出
+        // ========================================
+        if (__perfDebug) {
+            const totalMs = performance.now() - __t0;
+            const clipCount = __clipTimings.length;
+            const sumSlice = __clipTimings.reduce((s, c) => s + c.sliceMs, 0);
+            const sumDs = __clipTimings.reduce((s, c) => s + c.downsampleMs, 0);
+            const sumGain = __clipTimings.reduce((s, c) => s + c.gainMs, 0);
+            const sumRender = __clipTimings.reduce((s, c) => s + c.renderMs, 0);
+            const sumDrawImg = __clipTimings.reduce((s, c) => s + c.drawImageMs, 0);
+            console.log(
+                `%c[WaveformPerf] frame ${totalMs.toFixed(1)}ms | setup=${__tSetup.toFixed(1)}ms | clips=${clipCount} | pxPerSec=${currentPxPerSec.toFixed(0)} | canvasW=${displayW} | dpr=${dpr}`,
+                totalMs > 16 ? "color:red;font-weight:bold" : "color:green",
+            );
+            console.log(
+                `  ├ slice=${sumSlice.toFixed(1)}ms | downsample=${sumDs.toFixed(1)}ms | gain=${sumGain.toFixed(1)}ms | render=${sumRender.toFixed(1)}ms | drawImage=${sumDrawImg.toFixed(1)}ms`,
+            );
+            for (const c of __clipTimings) {
+                console.log(
+                    `  └ clip "${c.name}": interleaved=${c.interleavedLen} → ds=${c.downsampledTo} | visPx=${c.visibleWidthPx} | slice=${c.sliceMs.toFixed(2)} ds=${c.downsampleMs.toFixed(2)} gain=${c.gainMs.toFixed(2)} render=${c.renderMs.toFixed(2)} draw=${c.drawImageMs.toFixed(2)}`,
+                );
+            }
         }
     };
 

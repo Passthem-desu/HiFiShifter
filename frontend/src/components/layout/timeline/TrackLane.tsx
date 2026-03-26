@@ -1,4 +1,8 @@
+/**
+ * TrackLane - 时间轴单轨道视图，负责布局轨道波形、剪辑项与拖拽中的 ghost 预览。
+ */
 import React from "react";
+
 
 import type {
     ClipInfo,
