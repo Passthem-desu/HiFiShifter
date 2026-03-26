@@ -139,6 +139,9 @@ impl Default for ReaperTake {
 pub struct ReaperSource {
     pub source_type: String,
     pub file_path: String,
+    /// Reaper SECTION SOURCE 的 MODE 值。
+    /// 当 MODE > 0 时表示该 SECTION 以反向方式读取。
+    pub section_mode: i32,
     file_path_full: Option<String>,
 }
 
@@ -147,6 +150,7 @@ impl ReaperSource {
         Self {
             source_type: String::new(),
             file_path: String::new(),
+            section_mode: 0,
             file_path_full: None,
         }
     }
@@ -780,6 +784,9 @@ fn parse_source_block(block: &Block) -> ReaperSource {
             "FILE" => {
                 source.file_path = parse_path_string(&tokens);
             }
+            "MODE" if tokens.len() >= 2 => {
+                source.section_mode = parse_int(tokens[1]);
+            }
             _ => {}
         }
     }
@@ -790,6 +797,7 @@ fn parse_source_block(block: &Block) -> ReaperSource {
             if child.block_type().as_deref() == Some("SOURCE") {
                 let inner = parse_source_block(child);
                 source.file_path = inner.file_path;
+                // MODE 信息来自外层 SECTION；仅补齐内部 SOURCE 的其它字段。
                 break;
             }
         }

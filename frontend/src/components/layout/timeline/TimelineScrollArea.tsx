@@ -108,12 +108,8 @@ export const TimelineScrollArea: React.FC<
 
         pendingZoomRef.current = null;
         const { secAtPointer, pointerX } = pending;
-        // 直接使用 projectSec * pxPerSec 计算 maxScroll，避免依赖 DOM scrollWidth 的更新时序
-        // DOM 的 scrollWidth 在 useLayoutEffect 执行时可能还未更新到新值
-        const maxScroll = Math.max(
-            0,
-            projectSec * pxPerSec - scroller.clientWidth,
-        );
+        const contentWidth = Math.max(projectSec * pxPerSec, scroller.scrollWidth);
+        const maxScroll = Math.max(0, contentWidth - scroller.clientWidth);
         const nextScrollLeft = Math.min(
             maxScroll,
             Math.max(0, secAtPointer * pxPerSec - pointerX),
@@ -189,28 +185,37 @@ export const TimelineScrollArea: React.FC<
             const dir = e.deltaY < 0 ? 1 : -1;
             const factor = dir > 0 ? 1.1 : 0.9;
             const bounds = scroller.getBoundingClientRect();
+            const basePxPerSec =
+                zoomPendingRef.current?.nextPxPerSec ?? pxPerSecRef.current;
+
+            // 连续滚轮事件会在 DOM 真正完成 scrollLeft 修正前抵达。
+            // 使用上一帧 pending 的虚拟 scrollLeft 计算锚点，避免从最小缩放放大时出现向左漂移。
+            const effectiveScrollLeft = zoomPendingRef.current
+                ? zoomPendingRef.current.secAtPointer *
+                      zoomPendingRef.current.nextPxPerSec -
+                  zoomPendingRef.current.pointerX
+                : scroller.scrollLeft;
 
             // Playhead-based zoom: use playhead as anchor instead of pointer
             let anchorX: number;
             let anchorSec: number;
             if (playheadZoomEnabled && playheadSec != null) {
                 anchorSec = playheadSec;
-                anchorX = anchorSec * pxPerSec - scroller.scrollLeft;
+                anchorX = anchorSec * basePxPerSec - effectiveScrollLeft;
                 // 如果 playhead 在可视区域外，先将其居中，再以其为锚点缩放
                 if (anchorX < 0 || anchorX > bounds.width) {
                     const centeredScrollLeft =
-                        anchorSec * pxPerSec - bounds.width / 2;
+                        anchorSec * basePxPerSec - bounds.width / 2;
                     scroller.scrollLeft = Math.max(0, centeredScrollLeft);
-                    anchorX = anchorSec * pxPerSec - scroller.scrollLeft;
+                    anchorX = anchorSec * basePxPerSec - scroller.scrollLeft;
                 }
             } else {
                 anchorX = e.clientX - bounds.left;
                 anchorSec =
-                    (anchorX + scroller.scrollLeft) / Math.max(1e-9, pxPerSec);
+                    (anchorX + effectiveScrollLeft) /
+                    Math.max(1e-9, basePxPerSec);
             }
 
-            const basePxPerSec =
-                zoomPendingRef.current?.nextPxPerSec ?? pxPerSecRef.current;
             const next = clamp(
                 basePxPerSec * factor,
                 MIN_PX_PER_SEC,

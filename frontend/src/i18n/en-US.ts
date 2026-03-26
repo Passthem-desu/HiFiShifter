@@ -216,6 +216,10 @@ export const enUS = {
     ctx_replace: "Replace",
     ctx_split_at_playhead: "Split at Playhead",
     ctx_normalize: "Normalize",
+    ctx_reverse: "Reverse",
+    ctx_unreverse: "Unreverse",
+    ctx_reverse_selected: "Reverse Selected",
+    ctx_unreverse_selected: "Unreverse Selected",
     clip_replace_same_source_confirm:
         "Other clips in this project use the same source file path as the selected clip(s). Replace those same-source clips as well?",
     missing_file_replace_title: "Missing File",

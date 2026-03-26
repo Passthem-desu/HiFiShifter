@@ -63,6 +63,107 @@ fn convert_volume(vol: f64) -> f32 {
     (vol as f32).clamp(0.0, 1.0)
 }
 
+fn reaper_fade_length_sec(values: &[f64]) -> f64 {
+    if values.len() >= 2 {
+        values[1].max(0.0)
+    } else {
+        values.first().copied().unwrap_or(0.0).max(0.0)
+    }
+}
+
+fn reaper_fade_curve(values: &[f64]) -> String {
+    let shape = values.first().copied().unwrap_or(0.0).round() as i32;
+    match shape {
+        0 => "linear",
+        1 => "sine",
+        2 => "exponential",
+        3 => "logarithmic",
+        4 => "scurve",
+        5 => "exponential",
+        6 => "logarithmic",
+        _ => "sine",
+    }
+    .to_string()
+}
+
+fn derive_fades_from_item_volume_envelope(item: &ReaperItem, item_length: f64) -> (Option<f64>, Option<f64>) {
+    let mut points: Vec<(f64, f64)> = item
+        .envelopes
+        .iter()
+        .filter(|env| {
+            let t = env.env_type.to_uppercase();
+            env.act.first().copied().unwrap_or(1) != 0 && (t.contains("VOLENV") || t == "VOLENV")
+        })
+        .flat_map(|env| {
+            env.points.iter().filter_map(|pt| {
+                if pt.len() >= 2 {
+                    let t = pt[0];
+                    let v = pt[1];
+                    if t.is_finite() && v.is_finite() {
+                        Some((t.clamp(0.0, item_length.max(0.0)), v))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+
+    if points.len() < 2 || item_length <= 0.0 {
+        return (None, None);
+    }
+
+    points.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    const UNITY_THRESHOLD: f64 = 0.98;
+    let edge_sec = item_length.mul_add(0.05, 0.0).max(0.05);
+
+    let first = points.first().copied();
+    let last = points.last().copied();
+
+    let fade_in = first.and_then(|(t0, v0)| {
+        if t0 <= edge_sec && v0 < UNITY_THRESHOLD {
+            points
+                .iter()
+                .find(|(t, v)| *t > t0 && *v >= UNITY_THRESHOLD)
+                .map(|(t, _)| t.clamp(0.0, item_length))
+        } else {
+            None
+        }
+    });
+
+    let fade_out = last.and_then(|(t1, v1)| {
+        if item_length - t1 <= edge_sec && v1 < UNITY_THRESHOLD {
+            points
+                .iter()
+                .rev()
+                .find(|(t, v)| *t < t1 && *v >= UNITY_THRESHOLD)
+                .map(|(t, _)| (item_length - *t).clamp(0.0, item_length))
+        } else {
+            None
+        }
+    });
+
+    (fade_in, fade_out)
+}
+
+fn effective_item_fades(item: &ReaperItem, item_length: f64) -> (f64, f64) {
+    let mut fade_in_sec = reaper_fade_length_sec(&item.fade_in).clamp(0.0, item_length.max(0.0));
+    let mut fade_out_sec = reaper_fade_length_sec(&item.fade_out).clamp(0.0, item_length.max(0.0));
+    let (env_fade_in, env_fade_out) = derive_fades_from_item_volume_envelope(item, item_length.max(0.0));
+
+    if let Some(v) = env_fade_in {
+        fade_in_sec = v.clamp(0.0, item_length.max(0.0));
+    }
+    if let Some(v) = env_fade_out {
+        fade_out_sec = v.clamp(0.0, item_length.max(0.0));
+    }
+
+    (fade_in_sec, fade_out_sec)
+}
+
 pub struct ReaperImportResult {
     pub timeline: TimelineState,
     pub skipped_files: Vec<String>,
@@ -498,7 +599,14 @@ fn process_item(
     let source_duration_sec = duration_sec.unwrap_or(0.0);
 
     // 获取 take 参数
-    let play_rate = take.play_rate.first().copied().unwrap_or(1.0).max(0.01);
+    let raw_play_rate = take.play_rate.first().copied().unwrap_or(1.0);
+    let source_section_reversed = take
+        .source
+        .as_ref()
+        .map(|src| src.section_mode > 0)
+        .unwrap_or(false);
+    let item_reversed = raw_play_rate < 0.0 || source_section_reversed;
+    let play_rate = raw_play_rate.abs().max(0.01);
     let item_pitch_semitones = take.play_rate.get(2).copied().unwrap_or(0.0); // 整体音高偏移
     let take_volume = take.vol_pan.first().copied().unwrap_or(1.0);
     // vol_pan[2] 在 Reaper 中是 gainTrim
@@ -507,8 +615,9 @@ fn process_item(
     let s_offs = take.s_offs; // source offset (seconds)
     let item_pos = item.position; // timeline position (seconds)
     let item_length = item.length; // visible length (seconds)
-    let fade_in_sec = item.fade_in.get(1).copied().unwrap_or(0.0);
-    let fade_out_sec = item.fade_out.get(1).copied().unwrap_or(0.0);
+    let (fade_in_sec, fade_out_sec) = effective_item_fades(item, item_length.max(0.0));
+    let fade_in_curve = reaper_fade_curve(&item.fade_in);
+    let fade_out_curve = reaper_fade_curve(&item.fade_out);
 
     // 获取音高包络（如果有）
     let pitch_envelope = find_pitch_envelope(&item.envelopes);
@@ -594,6 +703,7 @@ fn process_item(
                 source_start_sec: clip_src_start.max(0.0),
                 source_end_sec: clip_src_end,
                 playback_rate: (effective_rate as f32).clamp(0.1, 10.0),
+                reversed: item_reversed,
                 fade_in_sec: 0.0,
                 fade_out_sec: 0.0,
                 fade_in_curve: "sine".to_string(),
@@ -641,8 +751,21 @@ fn process_item(
                 fade_out_sec.min(clip.length_sec.max(0.0))
             };
 
+            let fade_in_curve_name = if seg_idx == 0 {
+                fade_in_curve.clone()
+            } else {
+                "sine".to_string()
+            };
+            let fade_out_curve_name = if seg_idx + 1 == seg_count {
+                fade_out_curve.clone()
+            } else {
+                "sine".to_string()
+            };
+
             clip.fade_in_sec = fade_in_sec;
             clip.fade_out_sec = fade_out_sec;
+            clip.fade_in_curve = fade_in_curve_name;
+            clip.fade_out_curve = fade_out_curve_name;
         }
     } else {
         // 无 stretch markers：使用 take 的 play_rate
@@ -678,10 +801,11 @@ fn process_item(
                 source_end
             },
             playback_rate: (effective_rate as f32).clamp(0.1, 10.0),
+            reversed: item_reversed,
             fade_in_sec,
             fade_out_sec,
-            fade_in_curve: "sine".to_string(),
-            fade_out_curve: "sine".to_string(),
+            fade_in_curve,
+            fade_out_curve,
             extra_curves: None,
             extra_params: None,
         });

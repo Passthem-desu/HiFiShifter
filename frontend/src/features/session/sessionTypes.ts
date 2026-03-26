@@ -54,6 +54,7 @@ export interface ClipInfo {
     sourceStartSec: number;
     sourceEndSec: number;
     playbackRate: number;
+    reversed: boolean;
     fadeInSec: number;
     fadeOutSec: number;
     fadeInCurve: FadeCurveType;

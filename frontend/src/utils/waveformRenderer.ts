@@ -265,6 +265,25 @@ export function applyGainsToPeaks(
 }
 
 /**
+ * 将 interleaved peaks 数组按采样点倒序。
+ *
+ * 输入/输出格式均为 [min0, max0, min1, max1, ...]。
+ */
+export function reverseInterleavedPeaks(peaks: Float32Array): Float32Array {
+    const n = Math.floor(peaks.length / 2);
+    if (n <= 1) return peaks;
+
+    const out = new Float32Array(peaks.length);
+    for (let i = 0; i < n; i++) {
+        const src = (n - 1 - i) * 2;
+        const dst = i * 2;
+        out[dst] = peaks[src];
+        out[dst + 1] = peaks[src + 1];
+    }
+    return out;
+}
+
+/**
  * 波形渲染（Canvas，per-pixel 模式）
  *
  * 支持两种渲染模式：

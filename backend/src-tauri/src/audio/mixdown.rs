@@ -129,6 +129,20 @@ pub(crate) fn linear_resample_interleaved(
     out
 }
 
+pub(crate) fn reverse_interleaved_frames(samples: &mut [f32], channels: usize) {
+    if channels == 0 {
+        return;
+    }
+    let frames = samples.len() / channels;
+    for i in 0..(frames / 2) {
+        let li = i * channels;
+        let ri = (frames - 1 - i) * channels;
+        for ch in 0..channels {
+            samples.swap(li + ch, ri + ch);
+        }
+    }
+}
+
 fn build_parent_map(tracks: &[Track]) -> HashMap<String, Option<String>> {
     let mut map = HashMap::new();
     for t in tracks {
@@ -399,7 +413,12 @@ pub fn render_mixdown_interleaved(
         }
 
         let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
-        let segment = linear_resample_interleaved(segment, in_channels_usize, in_rate, out_rate);
+        let mut segment =
+            linear_resample_interleaved(segment, in_channels_usize, in_rate, out_rate);
+
+        if clip.reversed {
+            reverse_interleaved_frames(&mut segment, in_channels_usize);
+        }
 
         // Convert to stereo if needed.
         let segment = if in_channels == 1 {

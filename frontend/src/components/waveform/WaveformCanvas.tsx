@@ -23,6 +23,7 @@ import React from "react";
 import {
     applyGainsToPeaks,
     renderWaveform,
+    reverseInterleavedPeaks,
     type WaveformRenderParams,
 } from "../../utils/waveformRenderer";
 import { waveformMipmapStore } from "../../utils/waveformMipmapStore";
@@ -48,6 +49,8 @@ export type WaveformCanvasProps = {
     clipDurationSec?: number;
     /** 播放速度 */
     playbackRate?: number;
+    /** 是否倒放 */
+    reversed?: boolean;
     /** clip 音量增益（线性值） */
     volumeGain?: number;
     /** 淡入时长（秒） */
@@ -84,6 +87,7 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
         sourceStartSec = 0,
         clipDurationSec,
         playbackRate = 1,
+        reversed = false,
         volumeGain = 1,
         fadeInSec = 0,
         fadeOutSec = 0,
@@ -298,7 +302,10 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
                     clipTotalWidthPx: targetWidthPx,
                 };
 
-                const withGains = applyGainsToPeaks(result.interleaved, params);
+                const peaksForRender = reversed
+                    ? reverseInterleavedPeaks(result.interleaved)
+                    : result.interleaved;
+                const withGains = applyGainsToPeaks(peaksForRender, params);
                 renderWaveform(backCtx, withGains, params, stroke, strokeWidth);
             }
         }
@@ -335,6 +342,7 @@ export default function WaveformCanvas(props: WaveformCanvasProps) {
         sourceStartSec,
         clipDurationSec,
         playbackRate,
+        reversed,
         volumeGain,
         fadeInSec,
         fadeOutSec,

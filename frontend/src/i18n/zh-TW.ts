@@ -213,6 +213,10 @@ export const zhTW = {
     ctx_replace: "取代",
     ctx_split_at_playhead: "在播放頭處分割",
     ctx_normalize: "正規化",
+    ctx_reverse: "倒放",
+    ctx_unreverse: "取消倒放",
+    ctx_reverse_selected: "倒放選取項目",
+    ctx_unreverse_selected: "取消倒放選取項目",
     clip_replace_same_source_confirm:
         "專案中還有其他音訊片段使用與目前音訊片段相同的來源檔案路徑。是否同時取代這些同來源音訊片段？",
     missing_file_replace_title: "檔案遺失",

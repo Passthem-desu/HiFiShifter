@@ -32,6 +32,7 @@ import { waveformMipmapStore } from "../../utils/waveformMipmapStore";
 import {
     applyGainsToPeaks,
     renderWaveform,
+    reverseInterleavedPeaks,
     type WaveformRenderParams,
 } from "../../utils/waveformRenderer";
 
@@ -240,7 +241,10 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             };
 
             // 应用增益（音量 + 淡入淡出）
-            const withGains = applyGainsToPeaks(result.interleaved, params);
+            const peaksForRender = clip.reversed
+                ? reverseInterleavedPeaks(result.interleaved)
+                : result.interleaved;
+            const withGains = applyGainsToPeaks(peaksForRender, params);
 
             // 使用 clip 裁剪区域绘制
             backCtx.save();

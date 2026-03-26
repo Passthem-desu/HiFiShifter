@@ -212,6 +212,10 @@ export const zhCN = {
     ctx_replace: "替换",
     ctx_split_at_playhead: "在播放头处分割",
     ctx_normalize: "规格化",
+    ctx_reverse: "倒放",
+    ctx_unreverse: "取消倒放",
+    ctx_reverse_selected: "倒放选中项",
+    ctx_unreverse_selected: "取消倒放选中项",
     clip_replace_same_source_confirm:
         "工程中还有其他音频块使用与当前音频块相同的源文件路径。是否同时替换这些同源音频块？",
     missing_file_replace_title: "缺失文件",

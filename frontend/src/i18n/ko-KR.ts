@@ -217,6 +217,10 @@ export const koKR = {
     ctx_replace: "교체",
     ctx_split_at_playhead: "재생 헤드에서 분할",
     ctx_normalize: "노멀라이즈",
+    ctx_reverse: "역재생",
+    ctx_unreverse: "역재생 해제",
+    ctx_reverse_selected: "선택 항목 역재생",
+    ctx_unreverse_selected: "선택 항목 역재생 해제",
     clip_replace_same_source_confirm:
         "프로젝트 안에 선택한 클립과 같은 원본 파일 경로를 사용하는 다른 클립이 있습니다. 같은 원본 경로를 사용하는 클립도 함께 교체할까요?",
     missing_file_replace_title: "파일을 찾을 수 없음",

@@ -486,6 +486,7 @@ function applyTimelineState(
                 return raw;
             })(),
             playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
+            reversed: Boolean(clip.reversed),
             fadeInSec: Math.max(0, Number(clip.fade_in_sec ?? 0)),
             fadeOutSec: Math.max(0, Number(clip.fade_out_sec ?? 0)),
             fadeInCurve: (clip.fade_in_curve ?? "sine") as FadeCurveType,
@@ -659,6 +660,7 @@ function upsertImportedClip(
         sourceStartSec: 0,
         sourceEndSec: meta?.durationSec ?? lengthSec,
         playbackRate: 1,
+        reversed: false,
         fadeInSec: 0,
         fadeOutSec: 0,
         fadeInCurve: "sine" as FadeCurveType,
@@ -1222,6 +1224,7 @@ const sessionSlice = createSlice({
                 sourceStartSec: 0,
                 sourceEndSec: 2,
                 playbackRate: 1,
+                reversed: false,
                 fadeInSec: 0,
                 fadeOutSec: 0,
                 fadeInCurve: "sine" as FadeCurveType,

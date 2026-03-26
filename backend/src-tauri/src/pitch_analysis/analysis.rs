@@ -1387,8 +1387,15 @@ pub(crate) fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f3
         let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
 
         // Resample to analysis rate (44100) and convert to mono.
-        let segment =
-            crate::mixdown::linear_resample_interleaved(segment, in_channels_usize, in_rate, 44100);
+        let mut segment = crate::mixdown::linear_resample_interleaved(
+            segment,
+            in_channels_usize,
+            in_rate,
+            44100,
+        );
+        if clip.reversed {
+            crate::mixdown::reverse_interleaved_frames(&mut segment, in_channels_usize);
+        }
 
         let seg_frames = segment.len() / in_channels_usize;
         if seg_frames < 2 {

@@ -478,6 +478,14 @@ pub fn lookup_pending_rendered_key(clip_id: &str) -> Option<RenderedClipCacheKey
     map.get(clip_id).cloned()
 }
 
+/// 清除单个 clip 的 pending rendered key。
+pub fn remove_pending_rendered_key(clip_id: &str) {
+    let mut map = global_pending_rendered_keys()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    map.remove(clip_id);
+}
+
 /// 清空所有 pending rendered keys（播放停止或新一轮渲染开始时调用）。
 pub fn clear_pending_rendered_keys() {
     let mut map = global_pending_rendered_keys()

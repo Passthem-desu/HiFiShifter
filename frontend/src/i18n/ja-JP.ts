@@ -218,6 +218,10 @@ export const jaJP = {
     ctx_replace: "置換",
     ctx_split_at_playhead: "再生ヘッドで分割",
     ctx_normalize: "ノーマライズ",
+    ctx_reverse: "逆再生",
+    ctx_unreverse: "逆再生を解除",
+    ctx_reverse_selected: "選択項目を逆再生",
+    ctx_unreverse_selected: "選択項目の逆再生を解除",
     clip_replace_same_source_confirm:
         "プロジェクト内に、選択したクリップと同じソースファイルパスを使う他のクリップがあります。これらの同一ソースクリップもまとめて置換しますか？",
     missing_file_replace_title: "ファイルが見つかりません",

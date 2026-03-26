@@ -2749,6 +2749,16 @@ export const TimelinePanel: React.FC = () => {
                                     );
                                 }}
                                 onNormalize={normalizeClips}
+                                onToggleReverse={(ids, reversed) => {
+                                    for (const id of ids) {
+                                        void dispatch(
+                                            setClipStateRemote({
+                                                clipId: id,
+                                                reversed,
+                                            }),
+                                        );
+                                    }
+                                }}
                             />
                         );
                     })()

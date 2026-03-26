@@ -599,12 +599,23 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     // 当某个 root_track 的 pitch_edit 曲线发生变化时，
     // 使该 track 上所有 clip 的合成缓存失效，触发下次播放时重新合成。
     // WORLD 和 ONNX 共享同一个 synth_clip_cache。
-    for clip in &tl.clips {
-        // 检查该 clip 所在 track 的 pitch_edit 是否发生变化
-        let pitch_changed = s
-            .last_timeline
-            .as_ref()
-            .map(|old_tl| {
+    if let Some(old_tl) = s.last_timeline.as_ref() {
+        use std::collections::HashSet;
+
+        let new_clip_ids: HashSet<&str> = tl.clips.iter().map(|c| c.id.as_str()).collect();
+
+        // 删除的 clip 立即全量失效缓存，避免残留 pending key / 旧渲染结果。
+        for old_clip in &old_tl.clips {
+            if !new_clip_ids.contains(old_clip.id.as_str()) {
+                crate::synth_clip_cache::invalidate_clip_all_caches(&old_clip.id);
+            }
+        }
+
+        for clip in &tl.clips {
+            let old_clip = old_tl.clips.iter().find(|c| c.id == clip.id);
+
+            // 检查该 clip 所在 track 的 pitch_edit 是否发生变化
+            let pitch_changed = {
                 // 先解析 root_track_id，否则子轨道中的 clip 无法正确失效缓存
                 let old_root = old_tl.resolve_root_track_id(&clip.track_id);
                 let new_root = tl.resolve_root_track_id(&clip.track_id);
@@ -618,14 +629,27 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
                     (Some(_), None) => true, // track params 被删除
                     (None, None) => false,
                 }
-            })
-            .unwrap_or(false); // 首次 timeline，不触发重新合成
+            };
 
-        if pitch_changed {
-            // 修改：不再暴力清除全部缓存，而是仅清除片段缓存和解绑 pending_key。
-            // 这样系统会自然计算出新的 Hash，并在新 Hash 未渲染完成时，
-            // 利用留存下来的 RenderedClipCache 进行无缝垫音播放
-            crate::synth_clip_cache::invalidate_clip_for_pitch_edit(&clip.id);
+            let render_shape_changed = old_clip
+                .map(|old| {
+                    old.source_path != clip.source_path
+                        || old.track_id != clip.track_id
+                        || (old.source_start_sec - clip.source_start_sec).abs() > 1e-6
+                        || (old.source_end_sec - clip.source_end_sec).abs() > 1e-6
+                        || (old.playback_rate - clip.playback_rate).abs() > 1e-6
+                        || old.reversed != clip.reversed
+                        || (old.length_sec - clip.length_sec).abs() > 1e-6
+                })
+                .unwrap_or(false);
+
+            if render_shape_changed {
+                // 片段源范围/轨道归属/速率/长度等变化后，旧渲染结果不可安全复用。
+                crate::synth_clip_cache::invalidate_clip_all_caches(&clip.id);
+            } else if pitch_changed {
+                // 仅 pitch 曲线变化时保留最近一次完整渲染，允许短时无缝垫音。
+                crate::synth_clip_cache::invalidate_clip_for_pitch_edit(&clip.id);
+            }
         }
     }
 
