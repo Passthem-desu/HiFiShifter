@@ -3,6 +3,8 @@
 //! This module provides structures and functions for tracking the overall
 //! progress of parallel pitch analysis jobs across multiple clips.
 
+#![allow(dead_code)]
+
 use crate::state::Clip;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

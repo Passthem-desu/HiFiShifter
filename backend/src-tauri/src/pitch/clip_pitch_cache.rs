@@ -4,6 +4,8 @@
 //! redundant expensive F0 analysis operations. The cache uses LRU eviction
 //! and generates keys based on all parameters that affect pitch analysis results.
 
+#![allow(dead_code)]
+
 use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::Path;

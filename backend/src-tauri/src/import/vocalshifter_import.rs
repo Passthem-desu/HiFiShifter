@@ -56,6 +56,7 @@ const MAGIC: [u8; 4] = [0x56, 0x53, 0x50, 0x44]; // "VSPD"
 struct VspProject {
     sample_rate: u32,
     time_sig_num: i32,
+    #[allow(dead_code)]
     time_sig_den: i32,
     bpm: f64,
 }
@@ -64,6 +65,7 @@ struct VspProject {
 struct VspTrack {
     name: String,
     volume: f64,
+    #[allow(dead_code)]
     pan: f64,
     muted: bool,
     solo: bool,
@@ -89,16 +91,20 @@ struct VspItemExt {
 #[derive(Debug, Clone, Copy)]
 struct VspPitchPoint {
     disabled: bool,
+    #[allow(dead_code)]
     original_pitch: i16, // *PIT (offset 20)
     pitch: i16,          // PIT (offset 22)
     formant: i16,        // FRM (offset 24)
     bre: i16,            // BRE (offset 26)
+    #[allow(dead_code)]
     eq1: i16,            // EQ1 (offset 28)
+    #[allow(dead_code)]
     eq2: i16,            // EQ2 (offset 30)
     dyn_orig: f64,       // *DYN (offset 32)
     dyn_edit: f64,       // DYN (offset 40)
     vol: f64,            // VOL (offset 48)
     pan: f64,            // PAN (offset 56)
+    #[allow(dead_code)]
     heq_or_mrp: i16,     // HEQ/MRP (offset 82)
 }
 
@@ -211,16 +217,19 @@ impl<'a> BinReader<'a> {
         }
     }
 
+    #[allow(dead_code)]
     fn read_i16_le(&mut self) -> Option<i16> {
         let b = self.read_bytes(2)?;
         Some(i16::from_le_bytes([b[0], b[1]]))
     }
 
+    #[allow(dead_code)]
     fn read_i32_le(&mut self) -> Option<i32> {
         let b = self.read_bytes(4)?;
         Some(i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
+    #[allow(dead_code)]
     fn read_f64_le(&mut self) -> Option<f64> {
         let b = self.read_bytes(8)?;
         Some(f64::from_le_bytes([
@@ -464,6 +473,7 @@ fn algo_synth_mode(algo_type: i16) -> i32 {
 }
 
 /// 根据 (is_world, synth_mode) 对返回轨道名称后缀。
+#[allow(dead_code)]
 fn algo_pair_suffix(is_world: bool, synth_mode: i32) -> &'static str {
     if is_world {
         " (World)"

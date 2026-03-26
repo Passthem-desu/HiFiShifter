@@ -13,6 +13,7 @@ pub enum ExportFormat {
     #[default]
     Wav16,
     /// 24-bit 整型（高质量存档）。
+    #[allow(dead_code)]
     Wav24,
     /// 32-bit 浮点（最高质量，用于最终导出）。
     Wav32f,
@@ -38,6 +39,7 @@ pub struct MixdownOptions {
     /// 导出格式（位深），默认 [`ExportFormat::Wav16`]。
     pub export_format: ExportFormat,
     /// 质量预设，默认 [`QualityPreset::Realtime`]。
+    #[allow(dead_code)]
     pub quality_preset: QualityPreset,
 }
 
@@ -47,6 +49,7 @@ pub struct MixdownResult {
     pub duration_sec: f64,
 }
 
+#[allow(dead_code)]
 fn beat_sec(bpm: f64) -> f64 {
     60.0 / bpm.max(1e-6)
 }

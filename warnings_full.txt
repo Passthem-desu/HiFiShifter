@@ -1,0 +1,118 @@
+src\audio_engine\mod.rs:10:16: warning: unused import: `snapshot::make_stretch_key`
+src\pitch\clip_rendering_state.rs:8:5: warning: unused import: `Arc`
+src\pitch\pitch_clip.rs:5:23: warning: unused import: `Arc`
+src\renderer\mod.rs:19:34: warning: unused imports: `ProcessorChain` and `StageContext`
+src\renderer\mod.rs:21:68: warning: unused imports: `ProcessorCapabilities`, `RenderContext`, and `RendererCapabilities`
+src\renderer\mod.rs:24:17: warning: unused imports: `clip_midi_at_time` and `edit_midi_at_time_or_none`
+src\lib.rs:75:5: warning: unused import: `tauri::WindowEvent`
+src\lib.rs:76:5: warning: unused import: `tauri::Size as TauriSize`
+src\lib.rs:77:5: warning: unused import: `tauri::LogicalSize as TauriLogicalSize`
+src\lib.rs:78:5: warning: unused import: `tauri::Position as TauriPosition`
+src\lib.rs:79:5: warning: unused import: `tauri::LogicalPosition as TauriLogicalPosition`
+src\audio_engine\engine.rs:508:12: warning: method `play_file` is never used
+src\audio_engine\types.rs:53:16: warning: field `track_id` is never read
+src\pitch\clip_pitch_cache.rs:15:11: warning: constant `CACHE_FORMAT_VERSION` is never used
+src\pitch\clip_pitch_cache.rs:25:12: warning: struct `ClipCacheKey` is never constructed
+src\pitch\clip_pitch_cache.rs:62:12: warning: methods `get` and `put` are never used
+src\pitch\clip_pitch_cache.rs:108:9: warning: fields `hits` and `misses` are never read
+src\pitch\clip_pitch_cache.rs:117:8: warning: function `quantize_f64` is never used
+src\pitch\clip_pitch_cache.rs:125:8: warning: function `quantize_i64` is never used
+src\pitch\clip_pitch_cache.rs:133:8: warning: function `get_file_signature` is never used
+src\pitch\clip_pitch_cache.rs:149:8: warning: function `generate_clip_cache_key` is never used
+src\pitch\clip_rendering_state.rs:15:5: warning: variant `Pending` is never constructed
+src\pitch\clip_rendering_state.rs:30:9: warning: fields `progress`, `error`, and `start_time` are never read
+src\pitch\clip_rendering_state.rs:42:5: warning: field `timeout_seconds` is never read
+src\pitch\clip_rendering_state.rs:88:12: warning: multiple methods are never used
+src\pitch\clip_rendering_state.rs:207:12: warning: struct `ClipRenderingStateEvent` is never constructed
+src\pitch\clip_rendering_state.rs:220:12: warning: associated function `new` is never used
+src\commands\file_browser.rs:35:7: warning: constant `AUDIO_EXTENSIONS` is never used
+src\audio\mixdown.rs:16:5: warning: variant `Wav24` is never constructed
+src\audio\mixdown.rs:41:9: warning: field `quality_preset` is never read
+src\audio\mixdown.rs:50:4: warning: function `beat_sec` is never used
+src\pitch_analysis\mod.rs:15:15: warning: function `hz_to_midi` is never used
+src\pitch_analysis\mod.rs:140:16: warning: fields `frame_period_ms`, `target_frames`, `algo`, and `timeline` are never read
+src\pitch_analysis\mod.rs:175:15: warning: function `resample_curve_linear` is never used
+src\pitch_analysis\analysis.rs:62:4: warning: function `build_timeline_snapshot` is never used
+src\pitch_analysis\analysis.rs:110:6: warning: enum `ClipChangeType` is never used
+src\pitch_analysis\analysis.rs:119:8: warning: struct `SnapshotComparison` is never constructed
+src\pitch_analysis\analysis.rs:140:4: warning: function `compare_snapshots` is never used
+src\pitch_analysis\analysis.rs:212:4: warning: function `determine_clips_to_analyze` is never used
+src\pitch_analysis\analysis.rs:285:4: warning: function `analyze_clip_with_cache` is never used
+src\pitch_analysis\analysis.rs:467:8: warning: struct `ClipAnalysisResult` is never constructed
+src\pitch_analysis\analysis.rs:483:4: warning: function `process_single_clip` is never used
+src\pitch_analysis\analysis.rs:653:4: warning: function `compute_pitch_curve_parallel` is never used
+src\pitch_analysis\analysis.rs:840:4: warning: function `compute_pitch_curve_with_incremental_refresh` is never used
+src\pitch_analysis\analysis.rs:986:4: warning: function `beat_sec` is never used
+src\pitch_analysis\analysis.rs:990:4: warning: function `clamp01` is never used
+src\pitch_analysis\analysis.rs:996:4: warning: function `clip_weight_at_frame` is never used
+src\pitch_analysis\analysis.rs:1066:4: warning: function `fuse_clip_pitches_optimized` is never used
+src\pitch_analysis\analysis.rs:1248:15: warning: function `compute_pitch_curve` is never used
+src\pitch\pitch_clip.rs:95:5: warning: fields `clip_id`, `pre_silence_sec`, and `is_full_source` are never read
+src\pitch\pitch_clip.rs:150:4: warning: function `quantize_i64` is never used
+src\pitch\pitch_clip.rs:279:4: warning: function `beat_sec` is never used
+src\pitch\pitch_clip.rs:892:8: warning: function `invalidate_clip_pitch_cache` is never used
+src\pitch\pitch_clip.rs:904:8: warning: function `clear_clip_inflight` is never used
+src\pitch\pitch_config.rs:5:12: warning: struct `PitchAnalysisConfig` is never constructed
+src\pitch\pitch_config.rs:14:12: warning: associated function `global` is never used
+src\pitch\pitch_config.rs:28:4: warning: function `env_u32` is never used
+src\pitch\pitch_config.rs:35:4: warning: function `env_f64` is never used
+src\pitch\pitch_config.rs:42:8: warning: function `compute_rms_windows` is never used
+src\pitch\pitch_config.rs:64:8: warning: function `classify_voiced_ranges` is never used
+src\pitch\pitch_config.rs:100:8: warning: function `merge_adjacent_voiced_ranges` is never used
+src\pitch\pitch_config.rs:129:8: warning: function `split_into_chunks` is never used
+src\pitch\pitch_config.rs:149:8: warning: function `extend_with_context` is never used
+src\pitch\pitch_config.rs:162:8: warning: function `apply_crossfade` is never used
+src\pitch_editing.rs:102:15: warning: function `selected_pitch_curves_snapshot` is never used
+src\pitch_editing.rs:241:8: warning: function `selected_pitch_edit_algorithm` is never used
+src\pitch_editing.rs:783:8: warning: function `is_pitch_edit_active` is never used
+src\pitch_editing.rs:815:8: warning: function `is_pitch_edit_backend_available` is never used
+src\pitch_editing.rs:839:8: warning: function `does_clip_need_pitch_edit` is never used
+src\pitch\pitch_progress.rs:15:12: warning: struct `ProgressTracker` is never constructed
+src\pitch\pitch_progress.rs:42:12: warning: multiple associated items are never used
+src\renderer\chain.rs:88:8: warning: method `display_name` is never used
+src\renderer\chain.rs:102:9: warning: field `display_name` is never read
+src\renderer\traits.rs:40:12: warning: struct `RendererCapabilities` is never constructed
+src\renderer\traits.rs:69:8: warning: methods `display_name`, `kind`, `is_available`, and `capabilities` are never used
+src\renderer\traits.rs:132:9: warning: fields `supports_formant` and `supports_breathiness` are never read
+src\renderer\traits.rs:185:8: warning: method `display_name` is never used
+src\synth_clip_cache.rs:39:9: warning: fields `frames` and `sample_rate` are never read
+src\synth_clip_cache.rs:149:8: warning: function `is_clip_rendered` is never used
+src\synth_clip_cache.rs:163:8: warning: function `set_clip_rendering_state` is never used
+src\synth_clip_cache.rs:186:8: warning: function `is_clip_ready` is never used
+src\synth_clip_cache.rs:195:8: warning: function `mark_clip_rendering_start` is never used
+src\synth_clip_cache.rs:200:8: warning: function `mark_clip_rendering_complete` is never used
+src\synth_clip_cache.rs:218:8: warning: function `mark_clip_rendering_failed` is never used
+src\synth_clip_cache.rs:223:8: warning: function `cleanup_timeout_rendering_tasks` is never used
+src\synth_clip_cache.rs:345:9: warning: fields `frames` and `sample_rate` are never read
+src\synth_clip_cache.rs:687:9: warning: fields `frames` and `sample_rate` are never read
+src\synth_clip_cache.rs:789:9: warning: fields `frames` and `sample_rate` are never read
+src\vocoder\hnsep_onnx.rs:155:8: warning: function `probe_load` is never used
+src\audio\hfspeaks_v2.rs:59:11: warning: constant `SPP_THRESHOLDS` is never used
+src\audio\hfspeaks_v2.rs:238:12: warning: associated items `with_capacity`, `is_empty`, and `data_size` are never used
+src\audio\hfspeaks_v2.rs:378:12: warning: methods `select_mipmap_level` and `get_peaks_segment` are never used
+src\audio\hfspeaks_v2.rs:582:12: warning: struct `PeaksSegmentResult` is never constructed
+src\audio\hfspeaks_v2.rs:605:12: warning: struct `PeaksResponse` is never constructed
+src\audio\hfspeaks_v2.rs:639:5: warning: fields `sample_rate`, `channels`, and `total_frames` are never read
+src\audio\hfspeaks_v2.rs:735:8: warning: function `compute_mipmap_peaks` is never used
+src\audio\hfspeaks_v2.rs:1216:12: warning: associated function `load_mipmap_level` is never used
+src\audio\hfspeaks_v2.rs:1410:12: warning: methods `get_or_compute` and `clear` are never used
+src\import\midi_import.rs:36:9: warning: field `velocity` is never read
+src\import\reaper_parser.rs:28:9: warning: field `beat_note` is never read
+src\audio\sstretch.rs:62:5: warning: fields `channels`, `time_ratio`, `out_buffer`, and `temp_out` are never read
+src\audio\sstretch.rs:76:12: warning: associated items `new`, `reset`, `process_interleaved`, and `retrieve_interleaved_into` are never used
+src\audio\sstretch.rs:20:8: warning: function `sstretch_reset` is never used
+src\audio\sstretch.rs:22:8: warning: function `sstretch_set_transpose_factor` is never used
+src\state.rs:236:9: warning: field `allow_close` is never read
+src\state.rs:694:9: warning: fields `clips`, `bpm`, and `frame_period_ms` are never read
+src\state.rs:1835:12: warning: method `set_clip_state` is never used
+src\vocoder\streaming_world.rs:32:12: warning: struct `StreamingWorldAnalyzer` is never constructed
+src\vocoder\streaming_world.rs:56:12: warning: struct `AnalysisFrames` is never constructed
+src\vocoder\streaming_world.rs:76:12: warning: associated items `new`, `push_samples`, `pull_frames`, `flush`, `fft_size`, and `advance_buffer` are never used
+src\import\vocalshifter_clipboard.rs:46:9: warning: fields `original_pitch_cents`, `eq1`, `eq2`, and `heq_mrp` are never read
+src\import\vocalshifter_import.rs:59:5: warning: field `time_sig_den` is never read
+src\import\vocalshifter_import.rs:67:5: warning: field `pan` is never read
+src\import\vocalshifter_import.rs:92:5: warning: fields `original_pitch`, `eq1`, `eq2`, and `heq_or_mrp` are never read
+src\import\vocalshifter_import.rs:214:8: warning: methods `read_i16_le`, `read_i32_le`, and `read_f64_le` are never used
+src\import\vocalshifter_import.rs:467:4: warning: function `algo_pair_suffix` is never used
+src\vocoder\world_vocoder.rs:479:4: warning: function `vocode_one` is never used
+src\vocoder\world_vocoder.rs:120:12: warning: function `RefreshSynthesizer` is never used

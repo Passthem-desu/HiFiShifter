@@ -2,7 +2,7 @@ use crate::state::{Clip, TimelineState};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::Instant;
 
 // ── 全局 clip pitch 分析进度状态 ─────────────────────────────────────────────
@@ -92,12 +92,15 @@ pub fn get_clip_pitch_batch_progress() -> Option<ClipPitchBatchProgress> {
 
 #[derive(Debug, Clone)]
 struct ClipPitchKey {
+    #[allow(dead_code)]
     clip_id: String,
     key: String,
     frame_period_ms: f64,
     sample_rate: u32,
+    #[allow(dead_code)]
     pre_silence_sec: f64,
     /// true = playback_rate==1，分析源音频全量，cache key 不含 trim
+    #[allow(dead_code)]
     is_full_source: bool,
 }
 
@@ -147,6 +150,7 @@ fn hz_to_midi(hz: f64) -> f32 {
     }
 }
 
+#[allow(dead_code)]
 fn quantize_i64(x: f64, scale: f64) -> i64 {
     if !x.is_finite() {
         return 0;
@@ -276,6 +280,7 @@ fn resample_curve_linear(values: &[f32], out_len: usize) -> Vec<f32> {
     out
 }
 
+#[allow(dead_code)]
 fn beat_sec(bpm: f64) -> f64 {
     60.0 / bpm.max(1e-6)
 }
@@ -889,6 +894,7 @@ pub fn trim_and_resample_midi(
 /// 使指定 clip 的 pitch MIDI 缓存失效（例如源文件变化后调用）。
 /// 以 clip 所对应的 content_hash 为 key 删除缓存，影响所有共享该源文件的 clip。
 /// 下次 `schedule_clip_pitch_jobs` 时会重新提交检测任务。
+#[allow(dead_code)]
 pub fn invalidate_clip_pitch_cache(tl: &TimelineState, clip: &Clip) {
     let root = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
     let Some(ck) = build_clip_pitch_key(tl, clip, &root, 5.0) else {
@@ -901,6 +907,7 @@ pub fn invalidate_clip_pitch_cache(tl: &TimelineState, clip: &Clip) {
 /// 清除指定 clip 对应源文件的 inflight 标记。
 /// 当拉伸完成（handle_stretch_ready）后调用，确保后续的
 /// schedule_clip_pitch_jobs 不会因为残留的 inflight 标记而跳过该 clip。
+#[allow(dead_code)]
 pub fn clear_clip_inflight(tl: &TimelineState, clip: &Clip) {
     let root = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
     let Some(ck) = build_clip_pitch_key(tl, clip, &root, 5.0) else {

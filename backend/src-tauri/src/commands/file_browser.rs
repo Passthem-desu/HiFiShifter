@@ -32,6 +32,7 @@ pub struct AudioPreviewData {
 }
 
 /// 支持的音频扩展名（用于前端标记）
+#[allow(dead_code)]
 const AUDIO_EXTENSIONS: &[&str] = &["wav", "mp3", "flac", "ogg", "aac", "aif", "aiff", "m4a"];
 
 fn _is_audio_extension(ext: &str) -> bool {

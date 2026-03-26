@@ -233,6 +233,7 @@ pub struct ProjectState {
     pub custom_scale: Option<CustomScale>,
     pub beats_per_bar: u32,
     pub grid_size: String,
+    #[allow(dead_code)]
     pub allow_close: bool,
 }
 
@@ -1832,6 +1833,7 @@ impl TimelineState {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub fn set_clip_state(
         &mut self,
         clip_id: &str,

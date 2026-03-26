@@ -50,6 +50,7 @@ pub(crate) struct ResampledStereo {
 #[derive(Debug, Clone)]
 pub(crate) struct EngineClip {
     pub(crate) clip_id: String,
+    #[allow(dead_code)]
     pub(crate) track_id: String,
 
     pub(crate) start_frame: u64,

@@ -99,6 +99,7 @@ impl<'a> PitchCurvesSnapshot<'a> {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn selected_pitch_curves_snapshot<'a>(
     timeline: &'a TimelineState,
 ) -> Option<PitchCurvesSnapshot<'a>> {
@@ -238,6 +239,7 @@ impl PitchEditAlgorithm {
     }
 }
 
+#[allow(dead_code)]
 pub fn selected_pitch_edit_algorithm(timeline: &TimelineState) -> PitchEditAlgorithm {
     let selected = timeline
         .selected_track_id
@@ -780,6 +782,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     Ok(true)
 }
 
+#[allow(dead_code)]
 pub fn is_pitch_edit_active(timeline: &TimelineState) -> bool {
     let selected = timeline
         .selected_track_id
@@ -812,6 +815,7 @@ pub fn is_pitch_edit_active(timeline: &TimelineState) -> bool {
     entry.pitch_edit_user_modified
 }
 
+#[allow(dead_code)]
 pub fn is_pitch_edit_backend_available(timeline: &TimelineState) -> bool {
     let selected = timeline
         .selected_track_id
@@ -836,6 +840,7 @@ pub fn semitone_to_ratio(semitones: f64) -> f64 {
 
 /// 检测指定clip是否需要pitch edit
 /// 返回true表示该clip需要pitch edit处理
+#[allow(dead_code)]
 pub fn does_clip_need_pitch_edit(
     timeline: &TimelineState,
     clip: &crate::state::Clip,
