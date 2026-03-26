@@ -1467,6 +1467,10 @@ impl TimelineState {
 
         self.tracks.retain(|t| !remove_set.contains(t.id.as_str()));
 
+        // 清理被删除根轨道的参数数据（音高曲线、张力曲线等），防止数据残留。
+        self.params_by_root_track
+            .retain(|root_id, _| !remove_set.contains(root_id.as_str()));
+
         if self.selected_track_id.as_deref() == Some(track_id) {
             self.selected_track_id = self.tracks.first().map(|t| t.id.clone());
         }
