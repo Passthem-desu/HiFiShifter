@@ -1047,6 +1047,7 @@ export const TimelinePanel: React.FC = () => {
 
                 const sec = updateAt(ev.clientX, false);
                 const finalSec = sec == null ? lastSec : sec;
+                dispatch(setplayheadSec(finalSec));
                 void dispatch(seekPlayhead(finalSec));
             };
 
@@ -2466,6 +2467,7 @@ export const TimelinePanel: React.FC = () => {
                                             false,
                                         );
                                     }
+                                    void dispatch(setplayheadSec(drag.lastBeat));
                                     void dispatch(seekPlayhead(drag.lastBeat));
                                     window.removeEventListener(
                                         "pointermove",
