@@ -87,14 +87,18 @@ export function useClipsPeaksForPianoRoll(args: {
         return unsub;
     }, [clips]);
 
-    // 触发预加载所有可见 clip 的 mipmap 数据
+    // 触发预加载所有可见 clip 的 mipmap 数据（使用 batchPreload 合并 IPC 调用）
     const preloadedPathsRef = useRef(new Set<string>());
     useEffect(() => {
+        const newPaths: string[] = [];
         for (const clip of clips) {
             if (clip.sourcePath && !preloadedPathsRef.current.has(clip.sourcePath)) {
                 preloadedPathsRef.current.add(clip.sourcePath);
-                void waveformMipmapStore.preload(clip.sourcePath);
+                newPaths.push(clip.sourcePath);
             }
+        }
+        if (newPaths.length > 0) {
+            void waveformMipmapStore.batchPreload(newPaths);
         }
     }, [clips]);
 
