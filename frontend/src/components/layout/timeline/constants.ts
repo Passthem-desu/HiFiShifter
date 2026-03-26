@@ -11,6 +11,7 @@ export const MAX_PX_PER_SEC = 8000;
 export const DEFAULT_ROW_HEIGHT = 96;
 export const MIN_ROW_HEIGHT = 80;
 export const MAX_ROW_HEIGHT = 192;
+export const TRACK_ADD_ROW_HEIGHT = 32;
 
 export const CLIP_HEADER_HEIGHT = 18;
 export const CLIP_BODY_PADDING_Y = 6;

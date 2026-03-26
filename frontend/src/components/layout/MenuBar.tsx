@@ -32,6 +32,7 @@ import {
 } from "../../features/keybindings/keybindingsSlice";
 import type { ActionId } from "../../features/keybindings/types";
 import { KeybindingsDialog } from "./KeybindingsDialog";
+import { AppearanceSettingsDialog } from "./AppearanceSettingsDialog";
 import {
     TransposeCentsDialog,
     TransposeDegreesDialog,
@@ -65,6 +66,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const theme = useAppTheme();
     const keybindings = useAppSelector(selectMergedKeybindings);
     const [kbDialogOpen, setKbDialogOpen] = useState(false);
+    const [appearanceDialogOpen, setAppearanceDialogOpen] = useState(false);
 
     // Edit dialog states
     const [transposeCentsOpen, setTransposeCentsOpen] = useState(false);
@@ -430,7 +432,14 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         {t("track_add")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
-                        disabled={!s.selectedTrackId}
+                        disabled={
+                            !s.selectedTrackId ||
+                            // 只剩最后一个根轨道时，禁止删除根轨道
+                            (s.tracks.filter((t) => !t.parentId).length <= 1 &&
+                                !s.tracks.find(
+                                    (t) => t.id === s.selectedTrackId,
+                                )?.parentId)
+                        }
                         onSelect={() =>
                             s.selectedTrackId &&
                             dispatch(removeTrackRemote(s.selectedTrackId))
@@ -465,6 +474,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         {theme.mode === "dark"
                             ? t("theme_dark")
                             : t("theme_light")}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => setAppearanceDialogOpen(true)}>
+                        {tAny("menu_appearance_settings")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item onSelect={() => setKbDialogOpen(true)}>
@@ -501,6 +513,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         <DropdownMenu.Item onSelect={() => setLocale("zh-CN")}>
                             {t("lang_zh")}
                         </DropdownMenu.Item>
+                        <DropdownMenu.Item onSelect={() => setLocale("zh-TW")}>
+                            {t("lang_zh_tw")}
+                        </DropdownMenu.Item>
                         <DropdownMenu.Item onSelect={() => setLocale("ja-JP")}>
                             {t("lang_ja")}
                         </DropdownMenu.Item>
@@ -515,6 +530,12 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <KeybindingsDialog
                 open={kbDialogOpen}
                 onOpenChange={setKbDialogOpen}
+            />
+
+            {/* 外观设置对话框 */}
+            <AppearanceSettingsDialog
+                open={appearanceDialogOpen}
+                onOpenChange={setAppearanceDialogOpen}
             />
 
             {/* 菜单导入模式选择（多文件） */}

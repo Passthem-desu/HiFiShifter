@@ -233,6 +233,7 @@ pub struct ProjectState {
     pub custom_scale: Option<CustomScale>,
     pub beats_per_bar: u32,
     pub grid_size: String,
+    #[allow(dead_code)]
     pub allow_close: bool,
 }
 
@@ -714,14 +715,18 @@ pub struct AppState {
     pub suppress_checkpoints: std::sync::atomic::AtomicBool,
 
     pub waveform_cache_dir: std::sync::Mutex<PathBuf>,
-    pub waveform_cache: std::sync::Mutex<
-        std::collections::HashMap<String, std::sync::Arc<crate::waveform::CachedPeaks>>,
-    >,
 
     /// V2 多级 mipmap 波形缓存 (key = source_path)
     pub waveform_cache_v2: std::sync::Mutex<
         std::collections::HashMap<String, std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile>>,
     >,
+
+    /// Inflight deduplication for waveform peak computation.
+    /// When a file is being computed, its source_path is in this set.
+    /// Other threads calling get_or_compute for the same path will wait
+    /// on the Condvar until computation finishes, then read from cache.
+    pub waveform_inflight: std::sync::Mutex<std::collections::HashSet<String>>,
+    pub waveform_inflight_cv: std::sync::Condvar,
 
     // Set in Tauri setup. Used for async notifications.
     pub app_handle: OnceLock<tauri::AppHandle>,
@@ -743,6 +748,9 @@ pub struct AppState {
 
     /// App config directory for persisting recent projects etc.
     pub config_dir: OnceLock<std::path::PathBuf>,
+
+    /// 启动参数传入的待打开工程路径（一次性消费）。
+    pub pending_startup_project_path: Mutex<Option<String>>,
 }
 
 impl Default for AppState {
@@ -762,10 +770,12 @@ impl Default for AppState {
             suppress_checkpoints: std::sync::atomic::AtomicBool::new(false),
 
             waveform_cache_dir: std::sync::Mutex::new(
-                crate::waveform_disk_cache::default_cache_dir(),
+                crate::hfspeaks_v2::default_cache_dir(),
             ),
-            waveform_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
             waveform_cache_v2: std::sync::Mutex::new(std::collections::HashMap::new()),
+
+            waveform_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
+            waveform_inflight_cv: std::sync::Condvar::new(),
 
             app_handle: OnceLock::new(),
             pitch_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -775,76 +785,30 @@ impl Default for AppState {
 
             audio_engine: AudioEngine::new(),
             config_dir: OnceLock::new(),
+            pending_startup_project_path: Mutex::new(None),
         }
     }
 }
 
 impl AppState {
-    pub fn get_or_compute_waveform_peaks(
-        &self,
-        source_path: &str,
-        hop: usize,
-    ) -> Result<std::sync::Arc<crate::waveform::CachedPeaks>, String> {
-        if source_path.trim().is_empty() {
-            return Err("empty source_path".to_string());
-        }
-
-        let cache_key = format!("{}|{}", source_path, hop);
-
-        {
-            let cache = self
-                .waveform_cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            if let Some(found) = cache.get(&cache_key) {
-                return Ok(found.clone());
-            }
-        }
-
-        // Disk cache (best-effort): if present, load and populate the in-memory cache.
-        let cache_dir = {
-            self.waveform_cache_dir
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone()
-        };
-        let disk_path = crate::waveform_disk_cache::cache_file_path(&cache_dir, source_path, hop);
-        if let Some(found) = crate::waveform_disk_cache::try_load_peaks(&disk_path) {
-            if found.hop == hop {
-                let found = std::sync::Arc::new(found);
-                let mut cache = self
-                    .waveform_cache
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner());
-                cache.insert(cache_key.clone(), found.clone());
-                return Ok(found);
-            }
-        }
-
-        let peaks = crate::waveform::CachedPeaks::compute(std::path::Path::new(source_path), hop)?;
-
-        // Save to disk cache (best-effort; ignore failures).
-        let _ = crate::waveform_disk_cache::save_peaks(&disk_path, &peaks);
-
-        let peaks = std::sync::Arc::new(peaks);
-        let mut cache = self
-            .waveform_cache
+    pub fn set_pending_startup_project_path(&self, path: Option<String>) {
+        let mut guard = self
+            .pending_startup_project_path
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        cache.insert(cache_key, peaks.clone());
-        Ok(peaks)
+        *guard = path;
     }
 
-    pub fn clear_waveform_cache(&self) -> crate::waveform_disk_cache::ClearStats {
-        {
-            let mut cache = self
-                .waveform_cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            cache.clear();
-        }
+    pub fn take_pending_startup_project_path(&self) -> Option<String> {
+        let mut guard = self
+            .pending_startup_project_path
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.take()
+    }
 
-        // 也清理 v2 缓存
+    pub fn clear_waveform_cache(&self) -> crate::hfspeaks_v2::ClearStats {
+        // 清理 v2 内存缓存
         {
             let mut cache_v2 = self
                 .waveform_cache_v2
@@ -859,12 +823,14 @@ impl AppState {
                 .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner())
                 .clone()
         };
-        crate::waveform_disk_cache::clear_dir(&cache_dir)
+        crate::hfspeaks_v2::clear_cache_dir(&cache_dir)
     }
 
     /// 获取或计算 v2 多级 mipmap 峰值数据
     ///
-    /// 优先从内存缓存读取，其次从磁盘缓存读取，最后计算
+    /// 优先从内存缓存读取，其次从磁盘缓存读取，最后计算。
+    /// 使用 inflight 去重：如果另一线程正在计算同一文件，当前线程会等待
+    /// 其完成后直接从缓存读取，避免重复计算和重复进度事件。
     /// 首次计算时会通过 Tauri 事件推送进度（waveform_analysis_progress）
     pub fn get_or_compute_waveform_peaks_v2(
         &self,
@@ -874,7 +840,7 @@ impl AppState {
             return Err("empty source_path".to_string());
         }
 
-        // 检查内存缓存
+        // ── 1. 检查内存缓存 ──
         {
             let cache = self
                 .waveform_cache_v2
@@ -897,7 +863,49 @@ impl AppState {
             }
         }
 
-        // 磁盘缓存
+        // ── 2. Inflight 去重检查 ──
+        // 如果另一线程已在计算同一文件，等待它完成后从缓存读取
+        {
+            let mut inflight = self
+                .waveform_inflight
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+
+            if inflight.contains(source_path) {
+                // 另一线程正在计算此文件，等待 Condvar 通知
+                let key = source_path.to_string();
+                let _guard = self
+                    .waveform_inflight_cv
+                    .wait_while(inflight, |set| set.contains(&*key))
+                    .unwrap_or_else(|e| e.into_inner());
+
+                // 计算已完成，从缓存读取
+                let cache = self
+                    .waveform_cache_v2
+                    .lock()
+                    .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+                if let Some(found) = cache.get(source_path) {
+                    if let Some(handle) = self.app_handle.get() {
+                        use tauri::Emitter;
+                        let _ = handle.emit(
+                            "waveform_analysis_progress",
+                            serde_json::json!({
+                                "sourcePath": source_path,
+                                "progress": 1.0,
+                                "status": "cached",
+                            }),
+                        );
+                    }
+                    return Ok(found.clone());
+                }
+                // 极端情况：前一线程计算失败未放入缓存，继续往下重新计算
+            } else {
+                // 标记当前线程为此文件的计算者
+                inflight.insert(source_path.to_string());
+            }
+        }
+
+        // ── 3. 磁盘缓存 ──
         let cache_dir = {
             self.waveform_cache_dir
                 .lock()
@@ -912,11 +920,13 @@ impl AppState {
         if let Some(cached) = hfs_cache.try_load(path) {
             let cached: std::sync::Arc<crate::hfspeaks_v2::HfsPeakFile> =
                 std::sync::Arc::new(cached);
-            let mut cache = self
-                .waveform_cache_v2
-                .lock()
-                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
-            cache.insert(source_path.to_string(), cached.clone());
+            {
+                let mut cache = self
+                    .waveform_cache_v2
+                    .lock()
+                    .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+                cache.insert(source_path.to_string(), cached.clone());
+            }
             // 磁盘缓存命中：发送 cached 状态事件
             if let Some(handle) = self.app_handle.get() {
                 use tauri::Emitter;
@@ -929,9 +939,12 @@ impl AppState {
                     }),
                 );
             }
+            // 移除 inflight 标记并通知等待线程
+            self.remove_waveform_inflight(source_path);
             return Ok(cached);
         }
 
+        // ── 4. 计算新的峰值数据 ──
         // 发送 computing 状态事件（进度 0）
         let source_path_owned = source_path.to_string();
         if let Some(handle) = self.app_handle.get() {
@@ -964,8 +977,17 @@ impl AppState {
         };
 
         // 计算新的峰值数据（带进度回调）
-        let peaks =
-            crate::hfspeaks_v2::compute_mipmap_peaks_with_progress(path, Some(progress_cb))?;
+        let result =
+            crate::hfspeaks_v2::compute_mipmap_peaks_with_progress(path, Some(progress_cb));
+
+        // 如果计算失败，移除 inflight 标记并返回错误
+        let peaks = match result {
+            Ok(p) => p,
+            Err(e) => {
+                self.remove_waveform_inflight(source_path);
+                return Err(e);
+            }
+        };
 
         // 保存到磁盘缓存
         if let Err(e) = hfs_cache.save(path, &peaks) {
@@ -986,12 +1008,26 @@ impl AppState {
         }
 
         let peaks = std::sync::Arc::new(peaks);
-        let mut cache = self
-            .waveform_cache_v2
-            .lock()
-            .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
-        cache.insert(source_path.to_string(), peaks.clone());
+        {
+            let mut cache = self
+                .waveform_cache_v2
+                .lock()
+                .unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+            cache.insert(source_path.to_string(), peaks.clone());
+        }
+        // 移除 inflight 标记并通知等待线程
+        self.remove_waveform_inflight(source_path);
         Ok(peaks)
+    }
+
+    /// 辅助方法：从 inflight 集合中移除 source_path 并通知所有等待线程
+    fn remove_waveform_inflight(&self, source_path: &str) {
+        let mut inflight = self
+            .waveform_inflight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        inflight.remove(source_path);
+        self.waveform_inflight_cv.notify_all();
     }
 
     pub fn project_meta_payload(&self) -> ProjectMetaPayload {
@@ -1413,10 +1449,17 @@ impl TimelineState {
     }
 
     pub fn remove_track(&mut self, track_id: &str) {
-        // Remove clips first.
-        self.clips.retain(|c| c.track_id != track_id);
+        // 守卫：如果目标是根轨道且只剩最后一个根轨道，禁止删除。
+        let target = self.tracks.iter().find(|t| t.id == track_id);
+        let is_root = target.map_or(false, |t| t.parent_id.is_none());
+        if is_root {
+            let root_count = self.tracks.iter().filter(|t| t.parent_id.is_none()).count();
+            if root_count <= 1 {
+                return;
+            }
+        }
 
-        // Remove descendants.
+        // BFS 收集要删除的轨道及其所有后代。
         let mut to_remove = vec![track_id.to_string()];
         let mut idx = 0;
         while idx < to_remove.len() {
@@ -1432,7 +1475,17 @@ impl TimelineState {
             }
             idx += 1;
         }
-        self.tracks.retain(|t| !to_remove.contains(&t.id));
+
+        // Remove clips belonging to the removed tracks.
+        let remove_set: std::collections::HashSet<&str> =
+            to_remove.iter().map(|s| s.as_str()).collect();
+        self.clips.retain(|c| !remove_set.contains(c.track_id.as_str()));
+
+        self.tracks.retain(|t| !remove_set.contains(t.id.as_str()));
+
+        // 清理被删除根轨道的参数数据（音高曲线、张力曲线等），防止数据残留。
+        self.params_by_root_track
+            .retain(|root_id, _| !remove_set.contains(root_id.as_str()));
 
         if self.selected_track_id.as_deref() == Some(track_id) {
             self.selected_track_id = self.tracks.first().map(|t| t.id.clone());
@@ -1627,6 +1680,17 @@ impl TimelineState {
         }
     }
 
+    /// 批量删除多个 clip，只触发一次状态变更
+    pub fn remove_clips(&mut self, clip_ids: &[String]) {
+        let id_set: HashSet<&str> = clip_ids.iter().map(|s| s.as_str()).collect();
+        self.clips.retain(|c| !id_set.contains(c.id.as_str()));
+        if let Some(ref sel) = self.selected_clip_id {
+            if id_set.contains(sel.as_str()) {
+                self.selected_clip_id = None;
+            }
+        }
+    }
+
     pub fn move_clip(
         &mut self,
         clip_id: &str,
@@ -1769,6 +1833,7 @@ impl TimelineState {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub fn set_clip_state(
         &mut self,
         clip_id: &str,

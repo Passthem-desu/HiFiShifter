@@ -25,7 +25,14 @@ function getDefaultLocale(): Locale {
     return stored as Locale;
   }
   const lang = navigator.language.toLowerCase();
-  if (lang.startsWith("zh")) return "zh-CN";
+  if (lang.startsWith("zh")) {
+    // 區分繁體中文地區（台灣、香港、澳門）與簡體中文
+    if (lang === "zh-tw" || lang === "zh-hk" || lang === "zh-mo"
+      || lang === "zh-hant" || lang.includes("hant")) {
+      return "zh-TW";
+    }
+    return "zh-CN";
+  }
   if (lang.startsWith("ja")) return "ja-JP";
   if (lang.startsWith("ko")) return "ko-KR";
   return "en-US";

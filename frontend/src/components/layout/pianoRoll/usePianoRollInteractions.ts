@@ -2573,6 +2573,14 @@ export function usePianoRollInteractions(args: {
                                     };
                                     updateSelectionUi(selectionRef.current);
 
+                                    if (paramValuePopupEnabled) {
+                                        onParamValuePreviewChange?.({
+                                            clientX: ev.clientX,
+                                            clientY: ev.clientY,
+                                            value: pointerValue(ev.clientY),
+                                        });
+                                    }
+
                                     invalidate();
                                 };
 
@@ -2758,6 +2766,11 @@ export function usePianoRollInteractions(args: {
                                         if (liveEditActiveRef)
                                             liveEditActiveRef.current = false;
                                     }
+                                    // 清除参数浮窗预览（如果启用）
+                                    if (paramValuePopupEnabled) {
+                                        onParamValuePreviewChange?.(null);
+                                    }
+
                                     if (editParam === "pitch") {
                                         onPitchSnapGestureActiveChange?.(false);
                                     }

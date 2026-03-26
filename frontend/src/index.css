@@ -31,6 +31,12 @@
   --qt-graph-grid-weak: #373737;
   --qt-scrollbar-thumb: #555555;
   --qt-scrollbar-thumb-hover: #707070;
+  /* 面板内层次 — 微弱色差（深色下叠白、浅色下叠黑） */
+  --qt-subtle-1: rgba(255,255,255,0.025);
+  --qt-subtle-2: rgba(255,255,255,0.045);
+  --qt-subtle-3: rgba(255,255,255,0.07);
+  --qt-subtle-hover: rgba(255,255,255,0.04);
+  --qt-divider: rgba(255,255,255,0.04);
 }
 
 .qt-theme.light {
@@ -56,10 +62,17 @@
   --qt-graph-grid-weak: var(--gray-6);
   --qt-scrollbar-thumb: var(--gray-8);
   --qt-scrollbar-thumb-hover: var(--gray-9);
+  /* 面板内层次 — 微弱色差（浅色下叠黑） */
+  --qt-subtle-1: rgba(0,0,0,0.03);
+  --qt-subtle-2: rgba(0,0,0,0.05);
+  --qt-subtle-3: rgba(0,0,0,0.08);
+  --qt-subtle-hover: rgba(0,0,0,0.04);
+  --qt-divider: rgba(0,0,0,0.06);
 }
 
 :root {
-  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --qt-font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--qt-font-family);
 }
 
 :root[data-theme='dark'] {
@@ -138,4 +151,33 @@ button:focus-visible,
 .custom-scrollbar::-webkit-scrollbar {
   width: 8px;
   height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+  border: none;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--qt-scrollbar-thumb, #555555);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--qt-scrollbar-thumb-hover, #777777);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* 隐藏纵向滚动条（保留滚动功能）用于左侧轨道头 */
+.hide-v-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE 10+ */
+}
+.hide-v-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }

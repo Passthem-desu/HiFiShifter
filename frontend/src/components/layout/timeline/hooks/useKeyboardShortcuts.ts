@@ -3,7 +3,7 @@ import type { AppDispatch } from "../../../../app/store";
 import { useAppSelector } from "../../../../app/hooks";
 import type { SessionState } from "../../../../features/session/sessionSlice";
 import {
-    removeClipRemote,
+    removeClipsRemote,
 } from "../../../../features/session/sessionSlice";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { selectMergedKeybindings } from "../../../../features/keybindings/keybindingsSlice";
@@ -139,17 +139,7 @@ export function useKeyboardShortcuts(deps: {
                 }
             }
 
-            // clip.delete: 当焦点在 PianoRoll 且工具为 select 时，Delete 应触发
-            // edit.initialize 而非删除音频块，此处跳过以让 PianoRoll 处理
-            if (actionId === "clip.delete") {
-                const active = document.activeElement as HTMLElement | null;
-                const inPianoRoll =
-                    active?.hasAttribute("data-piano-roll-scroller") ||
-                    active?.closest?.("[data-piano-roll-scroller]");
-                if (inPianoRoll && s.toolMode === "select") {
-                    return;
-                }
-            }
+            // 不再对 clip.delete 做焦点位于 PianoRoll 的特殊放行。
 
             switch (actionId) {
                 case "clip.delete": {
@@ -157,9 +147,7 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     setMultiSelectedClipIds([]);
-                    for (const id of selectedIds) {
-                        void dispatch(removeClipRemote(id));
-                    }
+                    void dispatch(removeClipsRemote(selectedIds));
                     return;
                 }
 
@@ -216,9 +204,7 @@ export function useKeyboardShortcuts(deps: {
                             // ignore
                         }
                         setMultiSelectedClipIds([]);
-                        for (const id of selectedIds) {
-                            void dispatch(removeClipRemote(id));
-                        }
+                        void dispatch(removeClipsRemote(selectedIds));
                     })();
                     return;
                 }

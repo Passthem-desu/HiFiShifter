@@ -505,6 +505,7 @@ impl AudioEngine {
         });
     }
 
+    #[allow(dead_code)]
     pub fn play_file(&self, path: &Path, offset_sec: f64, target: &str) {
         let _ = self.tx.send(EngineCommand::PlayFile {
             path: path.to_path_buf(),

@@ -28,7 +28,8 @@ export const zhCN = {
     menu_pick_output: "选择导出路径",
     language: "语言",
     lang_en: "English",
-    lang_zh: "中文",
+    lang_zh: "简体中文",
+    lang_zh_tw: "繁體中文",
     lang_ja: "日本語",
     lang_ko: "한국어",
 
@@ -92,8 +93,7 @@ export const zhCN = {
     param_editor: "参数编辑器",
     pitch_requires_compose: "请在根轨开启 Compose（C）以生成音高曲线",
     pitch_requires_algo: "请选择算法以启用编辑",
-    pitch_backend_unavailable:
-        "音高后端不可用（请检查 WORLD DLL / ONNX 模型）",
+    pitch_backend_unavailable: "音高后端不可用（请检查 WORLD DLL / ONNX 模型）",
     pitch_edit_not_modified_hint: "尚未修改曲线：当前等同原始音高",
     pitch_status_label: "音高",
     pitch_status_off: "关闭",
@@ -148,8 +148,7 @@ export const zhCN = {
     unsaved_changes_title: "未保存更改",
     unsaved_changes_switch_desc:
         "当前工程有未保存的更改。切换工程前是否先保存？",
-    unsaved_changes_exit_desc:
-        "当前工程有未保存的更改。关闭应用前是否先保存？",
+    unsaved_changes_exit_desc: "当前工程有未保存的更改。关闭应用前是否先保存？",
     unsaved_changes_discard: "不保存",
 
     menu_export_separated: "导出分轨音频",
@@ -294,7 +293,7 @@ export const zhCN = {
     kb_mode_vibrato_tool: "切换到直线/颤音工具",
     kb_modifier_slip_edit: "Slip 编辑（拖动音频块时按住）",
     kb_modifier_stretch: "拉伸（拖动边缘时按住）",
-    kb_modifier_no_snap: "自由移动（拖动音频块时按住）",
+    kb_modifier_no_snap: "拖动时切换网格吸附（按住可反转当前网格吸附）",
     kb_modifier_copy_drag: "复制拖动（拖动音频块时按住）",
     kb_modifier_horizontal_zoom: "水平缩放（按住+滚轮）",
     kb_modifier_pr_vzoom: "垂直缩放（按住+滚轮）",
@@ -316,13 +315,11 @@ export const zhCN = {
     vs_paste_clipboard_not_found: "未找到 VocalShifter 剪贴板数据。",
     vs_paste_clipboard_invalid_format:
         "剪贴板文件格式不正确（文件大小不是 0x80 的整数倍，或记录损坏）。",
-    vs_paste_clipboard_io_error:
-        "读取 VocalShifter 剪贴板文件时发生 IO 错误。",
+    vs_paste_clipboard_io_error: "读取 VocalShifter 剪贴板文件时发生 IO 错误。",
     vs_paste_no_pitch_line: "当前没有选中的音高线，请先选择一条音高线。",
     vs_import_read_failed: "读取 VocalShifter 工程文件失败。",
     vs_import_parse_failed: "解析 VocalShifter 工程失败。",
-    vs_import_skipped_header:
-        "以下音频文件因格式不支持或文件不存在而被跳过：",
+    vs_import_skipped_header: "以下音频文件因格式不支持或文件不存在而被跳过：",
 
     // MIDI 导入
     midi_import: "导入 MIDI",
@@ -410,8 +407,7 @@ export const zhCN = {
 
     // Modifier key rename
     kb_modifier_toggle_snap: "自由移动（拖动音频块时按住）",
-    hint_toggle_snap:
-        "拖动音频块时按住 Shift 可自由移动；否则默认吸附到网格",
+    hint_toggle_snap: "拖动音频块时按住 Shift 可自由移动；否则默认吸附到网格",
 
     // File browser enhancements
     fb_regex: "正则",
@@ -420,6 +416,7 @@ export const zhCN = {
     fb_sort_size: "大小",
     fb_sort_label: "排序",
     fb_regex_error: "无效的正则表达式",
+    fb_audio_only: "仅显示音频文件",
 
     // Edit menu new items
     menu_deselect: "取消选择",
@@ -539,4 +536,75 @@ export const zhCN = {
     drag_direction_x_only: "仅 X",
     drag_direction_y_only: "仅 Y",
     drag_direction: "拖动方向",
+
+    // 外观设置
+    menu_appearance_settings: "外观设置...",
+    appearance_title: "外观设置",
+    appearance_section_basic: "基础设置",
+    appearance_section_font: "字体设置",
+    appearance_section_colors: "自定义颜色",
+    appearance_tab_basic: "基础",
+    appearance_tab_font: "字体",
+    appearance_tab_colors: "颜色",
+    appearance_tab_theme: "主题",
+    appearance_color_group_base: "背景与表面",
+    appearance_color_group_text: "文本",
+    appearance_color_group_ui: "界面元素",
+    appearance_color_group_danger: "危险",
+    appearance_color_group_warning: "警告",
+    appearance_color_group_graph: "图表",
+    appearance_color_group_scrollbar: "滚动条",
+    appearance_mode: "主题模式",
+    appearance_accent: "强调色",
+    appearance_gray: "灰阶色系",
+    appearance_radius: "圆角风格",
+    appearance_font: "字体",
+
+    appearance_font_system: "系统字体",
+    appearance_font_detect: "检测系统字体",
+    appearance_font_detecting: "检测中...",
+    appearance_font_not_supported: "浏览器不支持",
+    appearance_font_search_placeholder: "搜索字体...",
+    appearance_font_no_results: "未找到匹配字体",
+    appearance_font_count: "已检测到 {count} 个字体",
+    appearance_reset: "重置",
+    appearance_apply: "应用",
+    appearance_new_theme: "新建主题",
+    appearance_import_theme: "导入...",
+    appearance_export_theme: "导出",
+    appearance_reset_colors: "重置颜色",
+    appearance_reset_all_colors: "重置所有颜色",
+    appearance_saved_themes: "已保存的主题",
+    appearance_theme_name: "主题名称",
+    appearance_custom_theme: "自定义主题",
+    appearance_no_custom_colors: "暂无自定义颜色覆盖。点击「新建主题」创建。",
+    appearance_quick_colors: "快捷颜色调整",
+    appearance_quick_colors_hint: "此处调整常用颜色。如需编辑全部颜色，请切换到「颜色」页。",
+    appearance_theme_management: "主题管理",
+    appearance_modified_count: "已修改 {count} 项颜色",
+    appearance_waveform_colors: "波形颜色",
+    appearance_waveform_fill: "波形填充色",
+    appearance_waveform_stroke: "波形描边色",
+    appearance_color_window: "窗口背景",
+    appearance_color_base: "基底色",
+    appearance_color_panel: "面板色",
+    appearance_color_surface: "表面色",
+    appearance_color_text: "文本色",
+    appearance_color_text_muted: "次要文本",
+    appearance_color_highlight: "高亮色",
+    appearance_color_playhead: "播放头",
+    appearance_color_button: "按钮",
+    appearance_color_button_hover: "按钮悬停",
+    appearance_color_border: "边框",
+    appearance_color_danger_bg: "危险背景",
+    appearance_color_danger_text: "危险文本",
+    appearance_color_danger_border: "危险边框",
+    appearance_color_warning_bg: "警告背景",
+    appearance_color_warning_text: "警告文本",
+    appearance_color_warning_border: "警告边框",
+    appearance_color_graph_bg: "图表背景",
+    appearance_color_graph_grid_strong: "图表网格（强）",
+    appearance_color_graph_grid_weak: "图表网格（弱）",
+    appearance_color_scrollbar_thumb: "滚动条滑块",
+    appearance_color_scrollbar_thumb_hover: "滚动条滑块悬停",
 } as const;

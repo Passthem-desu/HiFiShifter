@@ -9,6 +9,7 @@ import { Flex, Box, Text, IconButton, Slider, Select } from "@radix-ui/themes";
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
 import type { TrackInfo } from "../../../features/session/sessionTypes";
 import type { MessageKey } from "../../../i18n/messages";
+import { TRACK_ADD_ROW_HEIGHT } from "./constants";
 
 /** 轨道颜色调色板（与后端 add_track 预设一致） */
 const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
@@ -45,6 +46,7 @@ export const TrackList: React.FC<{
   onAlgoChange?: (trackId: string, algo: string) => void;
   onTrackNameChange?: (trackId: string, name: string) => void;
   onDuplicateTrack?: (trackId: string) => void;
+  onScrollTopChange?: (scrollTop: number) => void;
   /** 外部持有该滚动容器的 ref，用于同步右侧轨道区的竖向滚动 */
   listScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
 }> = ({
@@ -66,9 +68,15 @@ export const TrackList: React.FC<{
   onAlgoChange,
   onTrackNameChange,
   onDuplicateTrack,
+  onScrollTopChange,
   listScrollRef,
 }) => {
   const listRef = useRef<HTMLDivElement | null>(null);
+  const panRef = useRef<{
+    pointerId: number | null;
+    startY: number;
+    scrollTop: number;
+  } | null>(null);
   const dragRef = useRef<{
     pointerId: number;
     trackId: string;
@@ -160,6 +168,23 @@ export const TrackList: React.FC<{
     return m;
   }, [tracks]);
 
+  /** 根轨道数量 */
+  const rootTrackCount = useMemo(
+    () => tracks.filter((t) => (t.parentId ?? null) == null).length,
+    [tracks],
+  );
+
+  /**
+   * 判断是否不允许删除该轨道：
+   * 当该轨道是根轨道且只剩最后一个根轨道时，禁止删除（否则会导致零轨道）。
+   * 子轨道的删除不会导致零轨道，始终允许。
+   */
+  function isLastRootTrack(trackId: string): boolean {
+    if (rootTrackCount > 1) return false;
+    const track = tracks.find((t) => t.id === trackId);
+    return !!track && (track.parentId ?? null) == null;
+  }
+
   useEffect(() => {
     return () => {
       // Safety cleanup.
@@ -167,6 +192,104 @@ export const TrackList: React.FC<{
       setDragUi(null);
     };
   }, []);
+
+  function isEditableTarget(target: EventTarget | null) {
+    const el = target as HTMLElement | null;
+    if (!el) return false;
+    const tag = (el.tagName ?? "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    if (el.isContentEditable) return true;
+    if (el.closest?.('input,textarea,select,[contenteditable="true"]')) return true;
+    return false;
+  }
+
+  function startPanPointerLocal(e: React.PointerEvent) {
+    // Intercept middle-button mouse to prevent browser native autoscroll
+    if (e.pointerType === "mouse" && e.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (e.pointerType !== "mouse") return;
+    if (e.button !== 1) return;
+    if (isEditableTarget(e.target)) return;
+    const el = listRef.current;
+    if (!el) return;
+
+    panRef.current = {
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      scrollTop: el.scrollTop,
+    };
+
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {}
+
+    function onMove(ev: PointerEvent) {
+      const pan = panRef.current;
+      const cur = listRef.current;
+      if (!pan || !cur) return;
+      if (pan.pointerId != null && ev.pointerId !== pan.pointerId) return;
+      cur.scrollTop = pan.scrollTop - (ev.clientY - pan.startY);
+      onScrollTopChange?.(cur.scrollTop);
+    }
+
+    function end(ev: PointerEvent) {
+      const pan = panRef.current;
+      if (!pan) return;
+      if (pan.pointerId != null && ev.pointerId !== pan.pointerId) return;
+      panRef.current = null;
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    }
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  }
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+
+    const handler: EventListener = (evt) => {
+      const e = evt as WheelEvent;
+      // Keep ctrl/meta wheel available for global zoom/system gestures.
+      if (e.ctrlKey || e.metaKey) return;
+
+      const useY = Math.abs(e.deltaY) >= Math.abs(e.deltaX);
+      const delta = useY ? e.deltaY : e.deltaX;
+      if (!Number.isFinite(delta) || Math.abs(delta) < 0.01) return;
+
+      const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (maxScrollTop <= 0) return;
+
+      const nextScrollTop = Math.max(
+        0,
+        Math.min(maxScrollTop, el.scrollTop + delta),
+      );
+      if (Math.abs(nextScrollTop - el.scrollTop) < 0.5) return;
+
+      e.preventDefault();
+      el.scrollTop = nextScrollTop;
+      onScrollTopChange?.(nextScrollTop);
+    };
+
+    el.addEventListener("wheel", handler, {
+      passive: false,
+    } as AddEventListenerOptions);
+    return () => {
+      el.removeEventListener("wheel", handler);
+    };
+  }, [onScrollTopChange]);
 
   function wouldCreateCycle(trackId: string, parentTrackId: string | null) {
     let cur = parentTrackId;
@@ -312,8 +435,22 @@ export const TrackList: React.FC<{
             el;
           if (listScrollRef) listScrollRef.current = el;
         }}
-        className="flex-1 relative"
-        style={{ overflowY: "hidden" }}
+        onPointerDown={(e) => startPanPointerLocal?.(e)}
+        onAuxClick={(e) => {
+          // Prevent native autoscroll overlay on middle click
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onMouseDown={(e) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }}
+        className="flex-1 relative overflow-y-auto custom-scrollbar hide-v-scrollbar"
+        onScroll={(e) => {
+          onScrollTopChange?.((e.currentTarget as HTMLDivElement).scrollTop);
+        }}
       >
         {dragUi?.mode === "reorder" && typeof dragUi.indicatorY === "number" ? (
           <div
@@ -652,7 +789,7 @@ export const TrackList: React.FC<{
                       variant="ghost"
                       color="gray"
                       className="opacity-0 group-hover:opacity-100"
-                      disabled={tracks.length <= 1}
+                      disabled={isLastRootTrack(track.id)}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -785,6 +922,7 @@ export const TrackList: React.FC<{
           align="center"
           justify="center"
           className="h-8 border-b border-qt-border border-dashed text-qt-text-muted hover:text-qt-text hover:bg-qt-button-hover cursor-pointer transition-colors"
+          style={{ height: TRACK_ADD_ROW_HEIGHT }}
           onClick={onAddTrack}
         >
           <PlusIcon className="mr-1" /> <Text size="1">{t("track_add")}</Text>
@@ -812,7 +950,7 @@ export const TrackList: React.FC<{
           </button>
           <button
             className="w-full text-left px-3 py-1.5 text-sm hover:bg-qt-button-hover transition-colors text-red-400 hover:text-red-300"
-            disabled={tracks.length <= 1}
+            disabled={isLastRootTrack(trackCtxMenu.trackId)}
             onClick={() => {
               onRemoveTrack(trackCtxMenu.trackId);
               setTrackCtxMenu(null);

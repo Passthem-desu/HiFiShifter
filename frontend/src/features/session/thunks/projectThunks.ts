@@ -176,6 +176,26 @@ export const openVocalShifterFromDialog = createAsyncThunk(
     },
 );
 
+export const openVocalShifterFromPath = createAsyncThunk(
+    "session/openVocalShifterFromPath",
+    async (vspPath: string, { rejectWithValue }) => {
+        let result = await webApi.importVocalShifterProject(vspPath);
+        if (!result?.ok) {
+            return rejectWithValue(result?.error ?? "import_vocalshifter_failed");
+        }
+        result = await resolveMissingFilesInteractively(
+            result,
+            (result as any)?.missing_files,
+        );
+        return {
+            ok: true,
+            canceled: false,
+            timeline: result,
+            skippedFiles: result.skipped_files as string[] | undefined,
+        } as const;
+    },
+);
+
 export const openReaperFromDialog = createAsyncThunk(
     "session/openReaperFromDialog",
     async (_, { rejectWithValue }) => {
@@ -185,6 +205,26 @@ export const openReaperFromDialog = createAsyncThunk(
             return { ok: true, canceled: true } as const;
         }
         let result = await webApi.importReaperProject(picked.path);
+        if (!result?.ok) {
+            return rejectWithValue(result?.error ?? "import_reaper_failed");
+        }
+        result = await resolveMissingFilesInteractively(
+            result,
+            (result as any)?.missing_files,
+        );
+        return {
+            ok: true,
+            canceled: false,
+            timeline: result,
+            skippedFiles: result.skipped_files as string[] | undefined,
+        } as const;
+    },
+);
+
+export const openReaperFromPath = createAsyncThunk(
+    "session/openReaperFromPath",
+    async (rppPath: string, { rejectWithValue }) => {
+        let result = await webApi.importReaperProject(rppPath);
         if (!result?.ok) {
             return rejectWithValue(result?.error ?? "import_reaper_failed");
         }

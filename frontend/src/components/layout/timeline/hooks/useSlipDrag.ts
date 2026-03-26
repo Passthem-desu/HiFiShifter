@@ -5,6 +5,8 @@ import {
     checkpointHistory,
     setClipStateRemote,
     setClipSourceRange,
+    beginInteraction,
+    endInteraction,
 } from "../../../../features/session/sessionSlice";
 
 export type SlipDragState = {
@@ -54,6 +56,7 @@ export function useSlipDrag(deps: {
         if (!scroller) return;
 
         dispatch(checkpointHistory());
+        dispatch(beginInteraction());
 
         const bounds = scroller.getBoundingClientRect();
         const beatAtPointer = beatFromClientX(e.clientX, bounds, scroller.scrollLeft);
@@ -140,18 +143,29 @@ export function useSlipDrag(deps: {
             if (!drag || drag.pointerId !== e.pointerId) return;
             slipDragRef.current = null;
 
+            // 交互锁在最终持久化请求完成后才释放，
+            // 避免 endInteraction() 到 fulfilled 之间的窗口内，
+            // 其他 in-flight thunk 的旧快照覆盖前端乐观更新导致闪烁。
+
             const session = sessionRef.current;
+            const persistPromises: Promise<unknown>[] = [];
             for (const id of drag.clipIds) {
                 const now = session.clips.find((c) => c.id === id);
                 if (!now) continue;
-                void dispatch(
-                    setClipStateRemote({
-                        clipId: id,
-                        sourceStartSec: Number(now.sourceStartSec ?? 0) || 0,
-                        sourceEndSec: Number(now.sourceEndSec ?? 0) || 0,
-                    }),
+                persistPromises.push(
+                    dispatch(
+                        setClipStateRemote({
+                            clipId: id,
+                            sourceStartSec: Number(now.sourceStartSec ?? 0) || 0,
+                            sourceEndSec: Number(now.sourceEndSec ?? 0) || 0,
+                        }),
+                    ).unwrap(),
                 );
             }
+
+            void Promise.allSettled(persistPromises).finally(() => {
+                dispatch(endInteraction());
+            });
 
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", end);

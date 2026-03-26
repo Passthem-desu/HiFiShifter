@@ -56,6 +56,7 @@ pub const DEFAULT_DIVISION_FACTORS: [u32; MAX_MIPMAP_LEVELS] = [
 /// spp ≤ SPP_THRESHOLDS[0] → L0
 /// SPP_THRESHOLDS[0] < spp ≤ SPP_THRESHOLDS[1] → L1
 /// spp > SPP_THRESHOLDS[1] → L2
+#[allow(dead_code)]
 pub const SPP_THRESHOLDS: [f64; 2] = [256.0, 2048.0];
 
 // ============== 文件头结构 ==============
@@ -235,6 +236,7 @@ impl MipmapData {
     }
 
     /// 创建指定容量的峰值数据
+    #[allow(dead_code)]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             min: Vec::with_capacity(capacity),
@@ -248,11 +250,13 @@ impl MipmapData {
     }
 
     /// 是否为空
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// 计算数据大小 (bytes)
+    #[allow(dead_code)]
     pub fn data_size(&self, channels: u16) -> usize {
         self.len() * channels as usize * 8 // min(f32) + max(f32) = 8 bytes per channel per peak
     }
@@ -375,6 +379,7 @@ impl HfsPeakFile {
     ///
     /// # 返回
     /// 最佳 mipmap 级别索引
+    #[allow(dead_code)]
     pub fn select_mipmap_level(&self, samples_per_pixel: f64) -> usize {
         // 根据 spp 阈值选择最佳 mipmap 级别
         // spp ≤ 256 → L0 (div=64, 精细级)
@@ -447,6 +452,7 @@ impl HfsPeakFile {
     ///
     /// # 返回
     /// 裁剪后的峰值数据
+    #[allow(dead_code)]
     pub fn get_peaks_segment(
         &self,
         level: usize,
@@ -602,6 +608,7 @@ pub struct PeaksSegmentResult {
 /// 多级峰值查询响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub struct PeaksResponse {
     /// 是否成功
     pub ok: bool,
@@ -634,6 +641,7 @@ pub fn calculate_division_factors(sample_rate: u32) -> Vec<u32> {
 use std::path::Path;
 
 /// 多级 Mipmap 峰值计算器
+#[allow(dead_code)]
 pub struct MipmapPeakCalculator {
     /// 采样率
     sample_rate: u32,
@@ -732,6 +740,7 @@ impl MipmapPeakCalculator {
 ///
 /// # 参数
 /// - `progress_cb`: 可选的进度回调，参数为 0.0~1.0 的进度值
+#[allow(dead_code)]
 pub fn compute_mipmap_peaks(path: &Path) -> Result<HfsPeakFile, String> {
     compute_mipmap_peaks_with_progress(path, None::<fn(f32)>)
 }
@@ -1213,6 +1222,7 @@ impl HfsPeakFile {
 
     /// 从文件加载，仅读取指定级别的 mipmap 数据
     /// 用于按需加载，减少内存占用
+    #[allow(dead_code)]
     pub fn load_mipmap_level(
         path: &Path,
         level: usize,
@@ -1271,6 +1281,71 @@ impl HfsPeakFile {
 // ============== 缓存管理 ==============
 
 use std::path::PathBuf;
+
+/// 缓存清理统计（原 waveform_disk_cache::ClearStats）
+#[derive(Debug, Clone, Copy)]
+pub struct ClearStats {
+    pub removed_files: u64,
+    pub removed_bytes: u64,
+}
+
+/// 获取默认缓存目录路径（原 waveform_disk_cache::default_cache_dir）
+pub fn default_cache_dir() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            return dir.join("peaks");
+        }
+    }
+    std::env::temp_dir()
+        .join("hifishifter")
+        .join("waveform_peaks_cache")
+}
+
+/// 确保目录存在（原 waveform_disk_cache::ensure_dir）
+pub fn ensure_cache_dir(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())
+}
+
+/// 清理缓存目录中的 .hfspeaks 文件（原 waveform_disk_cache::clear_dir）
+pub fn clear_cache_dir(dir: &Path) -> ClearStats {
+    let mut removed_files = 0u64;
+    let mut removed_bytes = 0u64;
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(v) => v,
+        Err(_) => {
+            return ClearStats {
+                removed_files,
+                removed_bytes,
+            }
+        }
+    };
+
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_file() {
+            let is_peaks = p
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|s| s.eq_ignore_ascii_case("hfspeaks"))
+                .unwrap_or(false);
+            if !is_peaks {
+                continue;
+            }
+            if let Ok(meta) = e.metadata() {
+                removed_bytes = removed_bytes.saturating_add(meta.len());
+            }
+            if std::fs::remove_file(&p).is_ok() {
+                removed_files = removed_files.saturating_add(1);
+            }
+        }
+    }
+
+    ClearStats {
+        removed_files,
+        removed_bytes,
+    }
+}
 
 /// HFSPeaks v2 缓存管理器
 pub struct HfsPeaksCache {
@@ -1342,6 +1417,7 @@ impl HfsPeaksCache {
     /// 获取或计算峰值数据
     ///
     /// 优先从缓存加载，缓存不存在时计算并保存
+    #[allow(dead_code)]
     pub fn get_or_compute(&self, source_path: &Path) -> Result<HfsPeakFile, String> {
         // 尝试从缓存加载
         if let Some(cached) = self.try_load(source_path) {
@@ -1360,6 +1436,7 @@ impl HfsPeaksCache {
     }
 
     /// 清理缓存目录
+    #[allow(dead_code)]
     pub fn clear(&self) -> std::io::Result<(u64, u64)> {
         let mut removed_files = 0u64;
         let mut removed_bytes = 0u64;
@@ -1393,30 +1470,6 @@ impl HfsPeaksCache {
         Ok((removed_files, removed_bytes))
     }
 
-    /// 尝试从旧版缓存迁移
-    ///
-    /// 查找旧版缓存文件，如果存在则迁移到 v2 格式
-    pub fn try_migrate_from_v1(
-        &self,
-        source_path: &Path,
-        old_cache_path: &Path,
-    ) -> Option<HfsPeakFile> {
-        // 尝试加载旧格式
-        let legacy = try_load_v1_format(old_cache_path)?;
-
-        // 迁移到 v2 格式
-        let v2 = migrate_v1_to_v2(legacy, source_path);
-
-        // 保存 v2 格式
-        if let Err(e) = self.save(source_path, &v2) {
-            eprintln!("Warning: failed to save migrated v2 cache: {}", e);
-        } else {
-            // 删除旧版缓存文件
-            let _ = std::fs::remove_file(old_cache_path);
-        }
-
-        Some(v2)
-    }
 }
 
 /// 获取文件元数据指纹
@@ -1435,202 +1488,4 @@ fn get_metadata_fingerprint(path: &Path) -> (u64, u64) {
         .unwrap_or(0);
 
     (len, mtime_ns)
-}
-
-// ============== 旧格式兼容与迁移 ==============
-
-/// 旧版 HFSPEAKS v1 格式常量
-const V1_MAGIC: &[u8; 8] = b"HFSPEAKS";
-const V1_VERSION: u32 = 1;
-
-/// 旧版缓存数据结构（兼容 v1 格式）
-pub struct LegacyCachedPeaks {
-    pub sample_rate: u32,
-    pub hop: usize,
-    pub min: Vec<f32>,
-    pub max: Vec<f32>,
-    pub total_frames: u64,
-}
-
-/// 尝试从旧版 v1 格式加载
-///
-/// v1 格式结构：
-/// - MAGIC: 8 bytes "HFSPEAKS"
-/// - VERSION: 4 bytes u32 = 1
-/// - sample_rate: 4 bytes u32
-/// - hop: 4 bytes u32
-/// - total_frames: 8 bytes u64
-/// - len: 4 bytes u32
-/// - min[]: len * 4 bytes f32
-/// - max[]: len * 4 bytes f32
-pub fn try_load_v1_format(path: &Path) -> Option<LegacyCachedPeaks> {
-    use std::io::Read;
-
-    let mut f = File::open(path).ok()?;
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf).ok()?;
-
-    let mut off: usize = 0;
-    let mut take = |n: usize| -> Option<&[u8]> {
-        if off + n > buf.len() {
-            return None;
-        }
-        let s = &buf[off..off + n];
-        off += n;
-        Some(s)
-    };
-
-    // 验证 MAGIC
-    if take(8)? != V1_MAGIC {
-        return None;
-    }
-
-    // 验证 VERSION
-    let ver = u32::from_le_bytes(take(4)?.try_into().ok()?);
-    if ver != V1_VERSION {
-        return None;
-    }
-
-    let sample_rate = u32::from_le_bytes(take(4)?.try_into().ok()?);
-    let hop = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
-    let total_frames = u64::from_le_bytes(take(8)?.try_into().ok()?);
-    let len = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
-
-    if len == 0 || len > 10_000_000 {
-        return None;
-    }
-
-    let mut read_f32_vec = |count: usize| -> Option<Vec<f32>> {
-        let bytes = take(count * 4)?;
-        let mut out = Vec::with_capacity(count);
-        for i in 0..count {
-            let j = i * 4;
-            let v = f32::from_le_bytes(bytes[j..j + 4].try_into().ok()?);
-            out.push(v);
-        }
-        Some(out)
-    };
-
-    let min = read_f32_vec(len)?;
-    let max = read_f32_vec(len)?;
-
-    Some(LegacyCachedPeaks {
-        sample_rate,
-        hop,
-        min,
-        max,
-        total_frames,
-    })
-}
-
-/// 将旧版 v1 格式迁移到 v2 多级 mipmap 格式
-///
-/// 由于 v1 只有一级峰值，迁移策略：
-/// - Level 0: 直接使用 v1 数据（如果 hop 接近 128）
-/// - Level 1-3: 从 Level 0 降采样生成
-pub fn migrate_v1_to_v2(legacy: LegacyCachedPeaks, source_path: &Path) -> HfsPeakFile {
-    let (source_file_size, source_modified_ns) = get_metadata_fingerprint(source_path);
-
-    // 确定最佳 mipmap 分配
-    // v1 的 hop 通常是根据请求的 columns 动态计算的
-    // 我们需要根据实际 hop 值决定如何分配
-
-    let sample_rate = legacy.sample_rate;
-    let total_frames = legacy.total_frames;
-    let channels = 1u16; // v1 不存储声道数，假设为单声道
-
-    // 构建 mipmap 数据
-    let mut mipmap_headers = Vec::new();
-    let mut mipmap_data = Vec::new();
-    let mut data_offset: u64 = (HfsPeakHeader::SIZE + 4 * MipmapHeader::SIZE) as u64; // 4 级 mipmap
-
-    // Level 0: 使用原始数据或插值
-    let level0_div = DEFAULT_DIVISION_FACTORS[0];
-    let level0_min = legacy.min.clone();
-    let level0_max = legacy.max.clone();
-
-    let level0_count = level0_min.len() as u32;
-    mipmap_headers.push(MipmapHeader {
-        division_factor: level0_div,
-        peak_count: level0_count,
-        data_offset,
-    });
-    mipmap_data.push(MipmapData {
-        min: level0_min,
-        max: level0_max,
-    });
-    data_offset += level0_count as u64 * 8; // 每个 min/max 对 8 bytes
-
-    // Level 1-3: 降采样生成
-    for level in 1..4 {
-        let div_factor = DEFAULT_DIVISION_FACTORS[level];
-        let prev_data = &mipmap_data[level - 1];
-        let downsampled = downsample_mipmap(&prev_data.min, &prev_data.max, 4);
-
-        // 计算实际的 peak count
-        let peak_count = downsampled.0.len() as u32;
-
-        mipmap_headers.push(MipmapHeader {
-            division_factor: div_factor,
-            peak_count,
-            data_offset,
-        });
-        mipmap_data.push(MipmapData {
-            min: downsampled.0,
-            max: downsampled.1,
-        });
-        data_offset += peak_count as u64 * 8;
-    }
-
-    // 构建文件头
-    let header = HfsPeakHeader {
-        magic: *MAGIC,
-        version: VERSION,
-        channels,
-        sample_rate,
-        total_frames,
-        source_file_size,
-        source_modified_ns,
-        mipmap_count: 4,
-        reserved: [0; 8],
-    };
-
-    HfsPeakFile {
-        header,
-        mipmap_headers,
-        mipmap_data,
-    }
-}
-
-/// 降采样 mipmap 数据
-fn downsample_mipmap(min: &[f32], max: &[f32], factor: usize) -> (Vec<f32>, Vec<f32>) {
-    if factor <= 1 || min.is_empty() {
-        return (min.to_vec(), max.to_vec());
-    }
-
-    let n = min.len();
-    let mut result_min = Vec::new();
-    let mut result_max = Vec::new();
-
-    for i in (0..n).step_by(factor) {
-        let end = (i + factor).min(n);
-        let mut w_min = f32::INFINITY;
-        let mut w_max = f32::NEG_INFINITY;
-
-        for j in i..end {
-            let min_val = min[j];
-            let max_val = max[j];
-            if min_val < w_min {
-                w_min = min_val;
-            }
-            if max_val > w_max {
-                w_max = max_val;
-            }
-        }
-
-        result_min.push(if w_min.is_infinite() { 0.0 } else { w_min });
-        result_max.push(if w_max.is_infinite() { 0.0 } else { w_max });
-    }
-
-    (result_min, result_max)
 }
