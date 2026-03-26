@@ -40,6 +40,7 @@ import {
     transposePitchByScaleSteps,
 } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
+import { computeAnchoredHorizontalZoom } from "../../../utils/horizontalZoom";
 import { getParamEditorWheelAction } from "./wheelGesture";
 import { transformSelectionByRightDrag } from "./selectionTransforms";
 
@@ -1269,41 +1270,49 @@ export function usePianoRollInteractions(args: {
 
             // Playhead-based zoom: use playhead position as anchor instead of pointer
             const secPerBeatLocal = 60 / Math.max(1, bpm);
+            const totalBeats = Math.max(
+                0,
+                dynamicProjectSec / Math.max(1e-9, secPerBeatLocal),
+            );
             let anchorX: number;
             let anchorBeat: number;
             if (playheadZoomEnabled && playheadSec != null) {
-                anchorBeat = playheadSec / secPerBeatLocal;
+                anchorBeat = clamp(
+                    playheadSec / secPerBeatLocal,
+                    0,
+                    totalBeats,
+                );
                 anchorX = anchorBeat * curPxPerBeat - el.scrollLeft;
-                // 如果 playhead 在可视区域外，先将其居中，再以其为锚点缩放
                 if (anchorX < 0 || anchorX > bounds.width) {
-                    const centeredScrollLeft = anchorBeat * curPxPerBeat - bounds.width / 2;
-                    el.scrollLeft = Math.max(0, centeredScrollLeft);
-                    syncScrollLeft(el);
-                    anchorX = anchorBeat * curPxPerBeat - el.scrollLeft;
+                    anchorX = bounds.width / 2;
                 }
                 anchorX = clamp(anchorX, 0, Math.max(1, bounds.width));
             } else {
                 anchorX = clamp(pointerXRaw, 0, Math.max(1, bounds.width));
-                anchorBeat =
-                    (anchorX + el.scrollLeft) / Math.max(1e-9, curPxPerBeat);
+                anchorBeat = clamp(
+                    (anchorX + el.scrollLeft) / Math.max(1e-9, curPxPerBeat),
+                    0,
+                    totalBeats,
+                );
             }
 
             const minPxPerBeat = MIN_PX_PER_SEC * secPerBeatLocal;
             const maxPxPerBeat = MAX_PX_PER_SEC * secPerBeatLocal;
 
-            const next = clamp(
-                curPxPerBeat * factor,
-                minPxPerBeat,
-                maxPxPerBeat,
-            );
-            if (Math.abs(next - curPxPerBeat) < 1e-9) return;
+            const zoomResult = computeAnchoredHorizontalZoom({
+                currentScale: curPxPerBeat,
+                factor,
+                minScale: minPxPerBeat,
+                maxScale: maxPxPerBeat,
+                scrollLeft: el.scrollLeft,
+                viewportWidth: Math.max(1, bounds.width),
+                anchorSec: anchorBeat,
+                contentSec: totalBeats,
+            });
+            if (!zoomResult) return;
 
-            setPxPerBeat(next);
-            const nextScrollLeft = anchorBeat * next - anchorX;
-            // 使用 dynamicProjectSec 计算正确的 maxScroll，避免缩放时波形偏移
-            const totalBeats = dynamicProjectSec / secPerBeatLocal;
-            const maxScroll = Math.max(0, totalBeats * next - el.clientWidth);
-            el.scrollLeft = clamp(nextScrollLeft, 0, maxScroll);
+            setPxPerBeat(zoomResult.nextScale);
+            el.scrollLeft = zoomResult.nextScrollLeft;
             syncScrollLeft(el);
         },
         [
@@ -2811,13 +2820,81 @@ export function usePianoRollInteractions(args: {
 
                 // 默认行为：仅左键创建新选区；右键不应在 pointerdown 时清除选区
                 if (e.button === 0) {
-                    selectionRef.current = { aBeat: b, bBeat: b };
+                    const maxSelectableBeat = Math.max(
+                        0,
+                        dynamicProjectSec / Math.max(1e-9, secPerBeat),
+                    );
+                    const clampSelectionBeat = (beat: number) =>
+                        clamp(beat, 0, maxSelectableBeat);
+
+                    const selectionBeatFromClientX = (
+                        clientX: number,
+                        allowAutoScroll: boolean,
+                    ) => {
+                        const scroller = scrollerRef.current;
+                        if (!scroller) {
+                            return clampSelectionBeat(pointerBeat(clientX));
+                        }
+
+                        const bounds = scroller.getBoundingClientRect();
+                        const edgePx = 32;
+                        const maxStepPx = 18;
+
+                        if (allowAutoScroll) {
+                            let deltaPx = 0;
+                            if (clientX < bounds.left + edgePx) {
+                                const ratio =
+                                    (bounds.left + edgePx - clientX) / edgePx;
+                                deltaPx = -clamp(ratio, 0, 1.5) * maxStepPx;
+                            } else if (clientX > bounds.right - edgePx) {
+                                const ratio =
+                                    (clientX - (bounds.right - edgePx)) /
+                                    edgePx;
+                                deltaPx = clamp(ratio, 0, 1.5) * maxStepPx;
+                            }
+
+                            if (Math.abs(deltaPx) > 0.01) {
+                                const maxScrollLeft = Math.max(
+                                    0,
+                                    maxSelectableBeat *
+                                        Math.max(1e-9, pxPerBeatRef.current) -
+                                        scroller.clientWidth,
+                                );
+                                const nextScrollLeft = clamp(
+                                    scroller.scrollLeft + deltaPx,
+                                    0,
+                                    maxScrollLeft,
+                                );
+                                if (
+                                    Math.abs(nextScrollLeft - scroller.scrollLeft) >
+                                    0.01
+                                ) {
+                                    scroller.scrollLeft = nextScrollLeft;
+                                    syncScrollLeft(scroller);
+                                }
+                            }
+                        }
+
+                        const clampedClientX = clamp(
+                            clientX,
+                            bounds.left,
+                            bounds.right,
+                        );
+                        const beat =
+                            (scroller.scrollLeft +
+                                (clampedClientX - bounds.left)) /
+                            Math.max(1e-9, pxPerBeatRef.current);
+                        return clampSelectionBeat(beat);
+                    };
+
+                    const startBeat = selectionBeatFromClientX(e.clientX, false);
+                    selectionRef.current = { aBeat: startBeat, bBeat: startBeat };
                     updateSelectionUi(selectionRef.current);
                     const pid = e.pointerId;
                     (e.currentTarget as HTMLCanvasElement).setPointerCapture(pid);
                     const onMove = (ev: globalThis.PointerEvent) => {
                         if (selectionRef.current == null) return;
-                        const bb = pointerBeat(ev.clientX);
+                        const bb = selectionBeatFromClientX(ev.clientX, true);
                         selectionRef.current = {
                             aBeat: selectionRef.current.aBeat,
                             bBeat: bb,

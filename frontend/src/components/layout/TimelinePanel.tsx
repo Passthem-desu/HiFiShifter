@@ -106,6 +106,7 @@ export const TimelinePanel: React.FC = () => {
         scrollHorizontalKb,
         scrollVerticalKb,
         horizontalZoomKb,
+        verticalZoomKb,
         slipEditKb,
         noSnapKb,
         copyDragKb,
@@ -510,6 +511,7 @@ export const TimelinePanel: React.FC = () => {
                     scrollHorizontalKb={scrollHorizontalKb}
                     scrollVerticalKb={scrollVerticalKb}
                     horizontalZoomKb={horizontalZoomKb}
+                    verticalZoomKb={verticalZoomKb}
                     playheadSec={s.playheadSec}
                     playheadZoomEnabled={s.playheadZoomEnabled}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"

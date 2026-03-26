@@ -197,7 +197,7 @@ export const ClipItem = React.memo(function ClipItem({
                 e.preventDefault();
                 e.stopPropagation();
                 const keepExistingMultiSelection =
-                    multiSelectedCount > 0 && isInMultiSelectedSet;
+                    multiSelectedCount > 1;
                 if (!keepExistingMultiSelection) {
                     ensureSelected(clip.id);
                     selectClipRemote(clip.id);

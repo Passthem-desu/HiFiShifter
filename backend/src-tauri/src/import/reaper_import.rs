@@ -5,7 +5,8 @@
 use crate::audio_utils::try_read_audio_header_only;
 use crate::models::PitchRange;
 use crate::reaper_parser::{
-    self, stretch_segments_from_markers, ReaperData, ReaperEnvelope, ReaperItem, ReaperTrack,
+    self, stretch_segments_from_markers, ReaperData, ReaperEnvelope, ReaperItem, ReaperTake,
+    ReaperTrack,
 };
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
 use std::collections::BTreeMap;
@@ -162,6 +163,59 @@ fn effective_item_fades(item: &ReaperItem, item_length: f64) -> (f64, f64) {
     }
 
     (fade_in_sec, fade_out_sec)
+}
+
+fn compute_item_source_window_sec(
+    take: &ReaperTake,
+    consumed_sec: f64,
+    source_duration_sec: Option<f64>,
+    raw_play_rate: f64,
+) -> (f64, f64) {
+    let section_start = take
+        .source
+        .as_ref()
+        .and_then(|src| src.section_start_sec)
+        .unwrap_or(0.0);
+    let section_length = take
+        .source
+        .as_ref()
+        .and_then(|src| src.section_length_sec)
+        .filter(|len| len.is_finite() && *len > 0.0);
+
+    let mut min_bound = 0.0;
+    let mut max_bound = f64::INFINITY;
+    let has_section = take
+        .source
+        .as_ref()
+        .and_then(|src| src.section_start_sec)
+        .is_some();
+    if has_section {
+        min_bound = section_start.max(0.0);
+        if let Some(section_len) = section_length {
+            max_bound = (section_start + section_len).max(min_bound);
+        }
+    }
+    if let Some(total_sec) = source_duration_sec.filter(|v| v.is_finite() && *v > 0.0) {
+        max_bound = max_bound.min(total_sec);
+    }
+
+    let base = if has_section {
+        section_start + take.s_offs.max(0.0)
+    } else {
+        take.s_offs
+    }
+    .clamp(min_bound, max_bound);
+
+    let consumed = consumed_sec.max(0.0);
+    if raw_play_rate < 0.0 {
+        let end = base;
+        let start = (end - consumed).max(min_bound);
+        (start, end.max(start))
+    } else {
+        let start = base;
+        let end = (start + consumed).min(max_bound).max(start);
+        (start, end)
+    }
 }
 
 pub struct ReaperImportResult {
@@ -596,7 +650,6 @@ fn process_item(
         ),
         None => (None, None, None),
     };
-    let source_duration_sec = duration_sec.unwrap_or(0.0);
 
     // 获取 take 参数
     let raw_play_rate = take.play_rate.first().copied().unwrap_or(1.0);
@@ -770,8 +823,12 @@ fn process_item(
     } else {
         // 无 stretch markers：使用 take 的 play_rate
         let effective_rate = play_rate;
-        let source_start = s_offs;
-        let source_end = s_offs + item_length * effective_rate;
+        let (source_start, source_end) = compute_item_source_window_sec(
+            take,
+            item_length * effective_rate,
+            duration_sec,
+            raw_play_rate,
+        );
         let clip_name = clip_name_from_path(&audio_path);
         let clip_id = new_clip_id();
         let clip_start = item_pos + time_offset;
@@ -795,11 +852,7 @@ fn process_item(
             gain: convert_volume(take_volume * gain_trim),
             muted: item_muted,
             source_start_sec: source_start.max(0.0),
-            source_end_sec: if source_duration_sec > 0.0 {
-                source_end.min(source_duration_sec)
-            } else {
-                source_end
-            },
+            source_end_sec: source_end,
             playback_rate: (effective_rate as f32).clamp(0.1, 10.0),
             reversed: item_reversed,
             fade_in_sec,

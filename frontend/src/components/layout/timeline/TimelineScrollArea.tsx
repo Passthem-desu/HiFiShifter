@@ -27,6 +27,7 @@ export const TimelineScrollArea: React.FC<
         scrollHorizontalKb?: Keybinding;
         scrollVerticalKb?: Keybinding;
         horizontalZoomKb?: Keybinding;
+        verticalZoomKb?: Keybinding;
         playheadSec?: number;
         playheadZoomEnabled?: boolean;
     }
@@ -44,6 +45,7 @@ export const TimelineScrollArea: React.FC<
     scrollHorizontalKb,
     scrollVerticalKb,
     horizontalZoomKb,
+    verticalZoomKb,
     playheadSec,
     playheadZoomEnabled,
     ...divProps
@@ -108,8 +110,12 @@ export const TimelineScrollArea: React.FC<
 
         pendingZoomRef.current = null;
         const { secAtPointer, pointerX } = pending;
-        const contentWidth = Math.max(projectSec * pxPerSec, scroller.scrollWidth);
-        const maxScroll = Math.max(0, contentWidth - scroller.clientWidth);
+        // 直接使用 projectSec * pxPerSec 计算 maxScroll，避免依赖 DOM scrollWidth 的更新时序
+        // DOM 的 scrollWidth 在 useLayoutEffect 执行时可能还未更新到新值
+        const maxScroll = Math.max(
+            0,
+            projectSec * pxPerSec - scroller.clientWidth,
+        );
         const nextScrollLeft = Math.min(
             maxScroll,
             Math.max(0, secAtPointer * pxPerSec - pointerX),
@@ -141,6 +147,7 @@ export const TimelineScrollArea: React.FC<
                 return isModifierActive(kb, e);
             };
             const horizontalZoomRequested = isWheelBindingRequested(horizontalZoomKb);
+            const verticalZoomRequested = isWheelBindingRequested(verticalZoomKb);
 
             // Scroll modifier: convert wheel to horizontal scroll
             if (isWheelBindingRequested(scrollHorizontalKb)) {
@@ -164,16 +171,43 @@ export const TimelineScrollArea: React.FC<
                 return;
             }
 
-            // Ctrl + wheel: vertical zoom (track height)
-            if (e.ctrlKey) {
+            // Vertical zoom (track height), anchored to pointer Y.
+            if (verticalZoomRequested) {
                 e.preventDefault();
                 const dir = e.deltaY < 0 ? 1 : -1;
                 const factor = dir > 0 ? 1.1 : 0.9;
-                setRowHeight((prev) =>
-                    Math.round(
-                        clamp(prev * factor, MIN_ROW_HEIGHT, MAX_ROW_HEIGHT),
-                    ),
+                const bounds = scroller.getBoundingClientRect();
+                const pointerY = clamp(
+                    e.clientY - bounds.top,
+                    0,
+                    Math.max(1, bounds.height),
                 );
+                const anchorContentY = scroller.scrollTop + pointerY;
+
+                setRowHeight((prev) => {
+                    const next = Math.round(
+                        clamp(prev * factor, MIN_ROW_HEIGHT, MAX_ROW_HEIGHT),
+                    );
+                    if (Math.abs(next - prev) < 1e-9) {
+                        return prev;
+                    }
+
+                    requestAnimationFrame(() => {
+                        const scale = next / Math.max(1e-9, prev);
+                        const maxScrollTop = Math.max(
+                            0,
+                            scroller.scrollHeight - scroller.clientHeight,
+                        );
+                        const nextScrollTop = clamp(
+                            anchorContentY * scale - pointerY,
+                            0,
+                            maxScrollTop,
+                        );
+                        scroller.scrollTop = nextScrollTop;
+                    });
+
+                    return next;
+                });
                 return;
             }
 
@@ -185,37 +219,30 @@ export const TimelineScrollArea: React.FC<
             const dir = e.deltaY < 0 ? 1 : -1;
             const factor = dir > 0 ? 1.1 : 0.9;
             const bounds = scroller.getBoundingClientRect();
-            const basePxPerSec =
-                zoomPendingRef.current?.nextPxPerSec ?? pxPerSecRef.current;
-
-            // 连续滚轮事件会在 DOM 真正完成 scrollLeft 修正前抵达。
-            // 使用上一帧 pending 的虚拟 scrollLeft 计算锚点，避免从最小缩放放大时出现向左漂移。
-            const effectiveScrollLeft = zoomPendingRef.current
-                ? zoomPendingRef.current.secAtPointer *
-                      zoomPendingRef.current.nextPxPerSec -
-                  zoomPendingRef.current.pointerX
-                : scroller.scrollLeft;
 
             // Playhead-based zoom: use playhead as anchor instead of pointer
             let anchorX: number;
             let anchorSec: number;
+            const width = Math.max(1, bounds.width);
             if (playheadZoomEnabled && playheadSec != null) {
-                anchorSec = playheadSec;
-                anchorX = anchorSec * basePxPerSec - effectiveScrollLeft;
-                // 如果 playhead 在可视区域外，先将其居中，再以其为锚点缩放
-                if (anchorX < 0 || anchorX > bounds.width) {
-                    const centeredScrollLeft =
-                        anchorSec * basePxPerSec - bounds.width / 2;
-                    scroller.scrollLeft = Math.max(0, centeredScrollLeft);
-                    anchorX = anchorSec * basePxPerSec - scroller.scrollLeft;
+                anchorSec = clamp(playheadSec, 0, Math.max(0, projectSec));
+                anchorX = anchorSec * pxPerSecRef.current - scroller.scrollLeft;
+                if (anchorX < 0 || anchorX > width) {
+                    anchorX = width / 2;
                 }
+                anchorX = clamp(anchorX, 0, width);
             } else {
-                anchorX = e.clientX - bounds.left;
-                anchorSec =
-                    (anchorX + effectiveScrollLeft) /
-                    Math.max(1e-9, basePxPerSec);
+                anchorX = clamp(e.clientX - bounds.left, 0, width);
+                anchorSec = clamp(
+                    (anchorX + scroller.scrollLeft) /
+                        Math.max(1e-9, pxPerSecRef.current),
+                    0,
+                    Math.max(0, projectSec),
+                );
             }
 
+            const basePxPerSec =
+                zoomPendingRef.current?.nextPxPerSec ?? pxPerSecRef.current;
             const next = clamp(
                 basePxPerSec * factor,
                 MIN_PX_PER_SEC,
@@ -255,6 +282,7 @@ export const TimelineScrollArea: React.FC<
         scrollHorizontalKb,
         scrollVerticalKb,
         horizontalZoomKb,
+        verticalZoomKb,
         playheadSec,
         playheadZoomEnabled,
     ]);

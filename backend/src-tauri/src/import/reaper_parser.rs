@@ -96,15 +96,19 @@ impl Default for ReaperItem {
 impl ReaperItem {
     /// 返回当前活跃的 take。
     /// 如果没有显式 take，返回 item 的默认 take（隐式首 take）。
-    /// 如果有显式 take，先检查被标记 selected 的；否则返回默认 take。
+    /// 如果有显式 take，先检查被标记 selected 的；否则优先返回
+    /// 有 source 的默认 take，再回退到第一个显式 take。
     pub fn active_take(&self) -> &ReaperTake {
-        // Reaper 的 item 自身就是第一个 take
-        // 如果有多个 TAKE 块，source 会按顺序分配
-        // 被标记 SEL 的 take 是活跃的
         for take in &self.takes {
             if take.selected {
                 return take;
             }
+        }
+        if self.default_take.source.is_some() {
+            return &self.default_take;
+        }
+        if let Some(first_take) = self.takes.first() {
+            return first_take;
         }
         &self.default_take
     }
@@ -142,6 +146,10 @@ pub struct ReaperSource {
     /// Reaper SECTION SOURCE 的 MODE 值。
     /// 当 MODE > 0 时表示该 SECTION 以反向方式读取。
     pub section_mode: i32,
+    /// Reaper SECTION SOURCE 的起点（秒）。
+    pub section_start_sec: Option<f64>,
+    /// Reaper SECTION SOURCE 的长度（秒）。
+    pub section_length_sec: Option<f64>,
     file_path_full: Option<String>,
 }
 
@@ -151,6 +159,8 @@ impl ReaperSource {
             source_type: String::new(),
             file_path: String::new(),
             section_mode: 0,
+            section_start_sec: None,
+            section_length_sec: None,
             file_path_full: None,
         }
     }
@@ -740,7 +750,11 @@ fn parse_item_block(block: &Block) -> ReaperItem {
     let mut source_idx: isize = -1;
     for child in &block.children {
         let block_type = child.block_type();
-        if block_type.as_deref() == Some("SOURCE") {
+        if block_type.as_deref() == Some("TAKE") {
+            let (take, take_envs) = parse_take_block(child);
+            item.takes.push(take);
+            item.envelopes.extend(take_envs);
+        } else if block_type.as_deref() == Some("SOURCE") {
             let source = parse_source_block(child);
             source_idx += 1;
             if source_idx == 0 {
@@ -769,6 +783,58 @@ fn current_take_mut<'a>(item: &'a mut ReaperItem, is_default: bool) -> Option<&'
     }
 }
 
+fn parse_take_block(block: &Block) -> (ReaperTake, Vec<ReaperEnvelope>) {
+    let mut take = ReaperTake::default();
+    let mut envelopes: Vec<ReaperEnvelope> = Vec::new();
+
+    for line in &block.lines {
+        let tokens = split_tokens(line);
+        if tokens.is_empty() {
+            continue;
+        }
+        match tokens[0].to_uppercase().as_str() {
+            "<TAKE" => {
+                take.selected = tokens
+                    .iter()
+                    .skip(1)
+                    .any(|tok| tok.eq_ignore_ascii_case("SEL"));
+            }
+            "SEL" if tokens.len() >= 2 => {
+                take.selected = parse_bool(tokens[1]);
+            }
+            "NAME" => {
+                take.name = parse_path_string(&tokens);
+            }
+            "VOLPAN" | "TAKEVOLPAN" => {
+                take.vol_pan = parse_double_array(&tokens);
+            }
+            "SOFFS" if tokens.len() >= 2 => {
+                take.s_offs = parse_double(tokens[1]);
+            }
+            "PLAYRATE" => {
+                take.play_rate = parse_double_array(&tokens);
+            }
+            "CHANMODE" if tokens.len() >= 2 => {
+                take.chan_mode = parse_int(tokens[1]);
+            }
+            _ => {}
+        }
+    }
+
+    for child in &block.children {
+        let block_type = child.block_type();
+        if block_type.as_deref() == Some("SOURCE") {
+            take.source = Some(parse_source_block(child));
+        } else if let Some(ref bt) = block_type {
+            if is_envelope_type(bt) {
+                envelopes.push(parse_envelope_block(child));
+            }
+        }
+    }
+
+    (take, envelopes)
+}
+
 fn parse_source_block(block: &Block) -> ReaperSource {
     let mut source = ReaperSource::new();
 
@@ -787,6 +853,12 @@ fn parse_source_block(block: &Block) -> ReaperSource {
             "MODE" if tokens.len() >= 2 => {
                 source.section_mode = parse_int(tokens[1]);
             }
+            "STARTPOS" if tokens.len() >= 2 => {
+                source.section_start_sec = Some(parse_double(tokens[1]));
+            }
+            "LENGTH" if tokens.len() >= 2 => {
+                source.section_length_sec = Some(parse_double(tokens[1]));
+            }
             _ => {}
         }
     }
@@ -798,6 +870,12 @@ fn parse_source_block(block: &Block) -> ReaperSource {
                 let inner = parse_source_block(child);
                 source.file_path = inner.file_path;
                 // MODE 信息来自外层 SECTION；仅补齐内部 SOURCE 的其它字段。
+                if source.section_start_sec.is_none() {
+                    source.section_start_sec = inner.section_start_sec;
+                }
+                if source.section_length_sec.is_none() {
+                    source.section_length_sec = inner.section_length_sec;
+                }
                 break;
             }
         }

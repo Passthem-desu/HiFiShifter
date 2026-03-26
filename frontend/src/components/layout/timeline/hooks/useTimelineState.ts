@@ -108,6 +108,7 @@ export interface TimelineStateResult {
     scrollHorizontalKb: Keybinding;
     scrollVerticalKb: Keybinding;
     horizontalZoomKb: Keybinding;
+    verticalZoomKb: Keybinding;
     slipEditKb: Keybinding;
     noSnapKb: Keybinding;
     copyDragKb: Keybinding;
@@ -366,6 +367,9 @@ export function useTimelineState(): TimelineStateResult {
     );
     const horizontalZoomKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.horizontalZoom"),
+    );
+    const verticalZoomKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.pianoRollVerticalZoom"),
     );
     const stretchKbRef = useRef<Keybinding>(stretchKb);
     useEffect(() => {
@@ -804,6 +808,7 @@ export function useTimelineState(): TimelineStateResult {
         scrollHorizontalKb,
         scrollVerticalKb,
         horizontalZoomKb,
+        verticalZoomKb,
         slipEditKb,
         noSnapKb,
         copyDragKb,
