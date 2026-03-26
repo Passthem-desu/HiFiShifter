@@ -1433,10 +1433,17 @@ impl TimelineState {
     }
 
     pub fn remove_track(&mut self, track_id: &str) {
-        // Remove clips first.
-        self.clips.retain(|c| c.track_id != track_id);
+        // 守卫：如果目标是根轨道且只剩最后一个根轨道，禁止删除。
+        let target = self.tracks.iter().find(|t| t.id == track_id);
+        let is_root = target.map_or(false, |t| t.parent_id.is_none());
+        if is_root {
+            let root_count = self.tracks.iter().filter(|t| t.parent_id.is_none()).count();
+            if root_count <= 1 {
+                return;
+            }
+        }
 
-        // Remove descendants.
+        // BFS 收集要删除的轨道及其所有后代。
         let mut to_remove = vec![track_id.to_string()];
         let mut idx = 0;
         while idx < to_remove.len() {
@@ -1452,7 +1459,13 @@ impl TimelineState {
             }
             idx += 1;
         }
-        self.tracks.retain(|t| !to_remove.contains(&t.id));
+
+        // Remove clips belonging to the removed tracks.
+        let remove_set: std::collections::HashSet<&str> =
+            to_remove.iter().map(|s| s.as_str()).collect();
+        self.clips.retain(|c| !remove_set.contains(c.track_id.as_str()));
+
+        self.tracks.retain(|t| !remove_set.contains(t.id.as_str()));
 
         if self.selected_track_id.as_deref() == Some(track_id) {
             self.selected_track_id = self.tracks.first().map(|t| t.id.clone());
