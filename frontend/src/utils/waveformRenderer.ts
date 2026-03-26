@@ -215,7 +215,7 @@ export function reverseInterleavedPeaks(peaks: Float32Array): Float32Array {
 }
 
 /**
- * 波形渲染（Canvas，per-pixel 模式）
+ * 将 peaks 数据绘制到 Canvas 上（per-pixel 模式）
  *
  * ## 渲染模式
  * - **line**（默认）：per-pixel min/max 竖线 —— DAW 标准做法，每像素列一条从 yTop 到 yBot 的竖线

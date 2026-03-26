@@ -584,6 +584,12 @@ function applyTimelineState(
             delete state.clipPitchCurves[clipId];
         }
     }
+    // 清理已删除 clip 的多选 ID，避免删除轨道组后残留无效的 clip 引用
+    if (state.multiSelectedClipIds.length > 0) {
+        state.multiSelectedClipIds = state.multiSelectedClipIds.filter(
+            (id) => availableClipIds.has(id),
+        );
+    }
 
     const nextWaveforms: Record<string, WaveformPreview> = {};
     const nextPitchRanges: Record<string, { min: number; max: number }> = {};
