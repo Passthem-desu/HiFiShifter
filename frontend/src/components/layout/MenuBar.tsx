@@ -430,7 +430,14 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         {t("track_add")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
-                        disabled={!s.selectedTrackId}
+                        disabled={
+                            !s.selectedTrackId ||
+                            // 只剩最后一个根轨道时，禁止删除根轨道
+                            (s.tracks.filter((t) => !t.parentId).length <= 1 &&
+                                !s.tracks.find(
+                                    (t) => t.id === s.selectedTrackId,
+                                )?.parentId)
+                        }
                         onSelect={() =>
                             s.selectedTrackId &&
                             dispatch(removeTrackRemote(s.selectedTrackId))
