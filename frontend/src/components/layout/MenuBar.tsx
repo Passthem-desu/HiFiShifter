@@ -32,6 +32,7 @@ import {
 } from "../../features/keybindings/keybindingsSlice";
 import type { ActionId } from "../../features/keybindings/types";
 import { KeybindingsDialog } from "./KeybindingsDialog";
+import { AppearanceSettingsDialog } from "./AppearanceSettingsDialog";
 import {
     TransposeCentsDialog,
     TransposeDegreesDialog,
@@ -65,6 +66,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const theme = useAppTheme();
     const keybindings = useAppSelector(selectMergedKeybindings);
     const [kbDialogOpen, setKbDialogOpen] = useState(false);
+    const [appearanceDialogOpen, setAppearanceDialogOpen] = useState(false);
 
     // Edit dialog states
     const [transposeCentsOpen, setTransposeCentsOpen] = useState(false);
@@ -473,6 +475,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                             ? t("theme_dark")
                             : t("theme_light")}
                     </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => setAppearanceDialogOpen(true)}>
+                        {tAny("menu_appearance_settings")}
+                    </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item onSelect={() => setKbDialogOpen(true)}>
                         {(t as (key: string) => string)("menu_keybindings")}
@@ -525,6 +530,12 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <KeybindingsDialog
                 open={kbDialogOpen}
                 onOpenChange={setKbDialogOpen}
+            />
+
+            {/* 外观设置对话框 */}
+            <AppearanceSettingsDialog
+                open={appearanceDialogOpen}
+                onOpenChange={setAppearanceDialogOpen}
             />
 
             {/* 菜单导入模式选择（多文件） */}
