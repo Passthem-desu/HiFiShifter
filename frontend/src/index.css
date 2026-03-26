@@ -59,7 +59,8 @@
 }
 
 :root {
-  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --qt-font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--qt-font-family);
 }
 
 :root[data-theme='dark'] {

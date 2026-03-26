@@ -30,13 +30,7 @@ export default {
                 },
             },
             fontFamily: {
-                sans: [
-                    "Segoe UI",
-                    "Roboto",
-                    "Helvetica",
-                    "Arial",
-                    "sans-serif",
-                ],
+                sans: ["var(--qt-font-family)"],
             },
             fontSize: {
                 xs: "0.7rem",
