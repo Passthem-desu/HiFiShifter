@@ -563,6 +563,7 @@ export const enUS = {
     appearance_tab_basic: "Basic",
     appearance_tab_font: "Font",
     appearance_tab_colors: "Colors",
+    appearance_tab_theme: "Theme",
     appearance_color_group_base: "Background & Surface",
     appearance_color_group_text: "Text",
     appearance_color_group_ui: "UI Elements",

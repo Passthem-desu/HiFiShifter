@@ -568,6 +568,7 @@ export const jaJP = {
     appearance_tab_basic: "基本",
     appearance_tab_font: "フォント",
     appearance_tab_colors: "カラー",
+    appearance_tab_theme: "テーマ",
     appearance_color_group_base: "背景・サーフェス",
     appearance_color_group_text: "テキスト",
     appearance_color_group_ui: "UI要素",

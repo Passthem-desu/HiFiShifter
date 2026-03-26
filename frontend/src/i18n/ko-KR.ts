@@ -562,6 +562,7 @@ export const koKR = {
     appearance_tab_basic: "기본",
     appearance_tab_font: "글꼴",
     appearance_tab_colors: "색상",
+    appearance_tab_theme: "테마",
     appearance_color_group_base: "배경 및 표면",
     appearance_color_group_text: "텍스트",
     appearance_color_group_ui: "UI 요소",

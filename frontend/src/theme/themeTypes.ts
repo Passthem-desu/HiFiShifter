@@ -1,7 +1,8 @@
 /**
  * 主题系统类型定义
  *
- * 定义 Radix 颜色、Qt 颜色 token、自定义主题、外观设置等类型
+ * 定义 Radix 颜色、Qt 颜色 token、自定义主题、外观设置等类型。
+ * 支持统一的主题导出格式，可包含通用设置（强调色、灰阶、圆角）和全部颜色覆盖。
  */
 
 /* ─────────────────── Radix Theme 颜色类型 ─────────────────── */
@@ -105,6 +106,28 @@ export interface CustomTheme {
     /** 覆盖的 --qt-* 颜色值 */
     colors: Partial<Record<QtColorToken, string>>;
     /** 自定义波形颜色 */
+    waveformColors?: { fill: string; stroke: string };
+    /** 通用设置（Radix 强调色、灰阶、圆角），用于完整导出 */
+    accentColor?: RadixAccentColor;
+    grayColor?: RadixGrayColor;
+    radius?: RadixRadius;
+}
+
+/* ─────────────────── 主题导出格式 ─────────────────── */
+
+/** 统一主题导出 JSON 格式（v2），包含通用设置 + 所有颜色覆盖 */
+export interface ThemeExportData {
+    /** 格式版本号 */
+    version: 2;
+    name: string;
+    base: "dark" | "light";
+    /** Radix 通用设置 */
+    accentColor?: RadixAccentColor;
+    grayColor?: RadixGrayColor;
+    radius?: RadixRadius;
+    /** --qt-* 颜色覆盖 */
+    colors: Partial<Record<QtColorToken, string>>;
+    /** 波形颜色 */
     waveformColors?: { fill: string; stroke: string };
 }
 

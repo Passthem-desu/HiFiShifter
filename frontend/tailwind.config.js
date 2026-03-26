@@ -27,6 +27,11 @@ export default {
                     "graph-grid-weak": "var(--qt-graph-grid-weak)",
                     "scrollbar-thumb": "var(--qt-scrollbar-thumb)",
                     "scrollbar-thumb-hover": "var(--qt-scrollbar-thumb-hover)",
+                    "subtle-1": "var(--qt-subtle-1)",
+                    "subtle-2": "var(--qt-subtle-2)",
+                    "subtle-3": "var(--qt-subtle-3)",
+                    "subtle-hover": "var(--qt-subtle-hover)",
+                    divider: "var(--qt-divider)",
                 },
             },
             fontFamily: {

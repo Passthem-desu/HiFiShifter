@@ -546,6 +546,7 @@ export const zhCN = {
     appearance_tab_basic: "基础",
     appearance_tab_font: "字体",
     appearance_tab_colors: "颜色",
+    appearance_tab_theme: "主题",
     appearance_color_group_base: "背景与表面",
     appearance_color_group_text: "文本",
     appearance_color_group_ui: "界面元素",

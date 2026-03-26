@@ -547,6 +547,7 @@ export const zhTW = {
     appearance_tab_basic: "基礎",
     appearance_tab_font: "字型",
     appearance_tab_colors: "顏色",
+    appearance_tab_theme: "主題",
     appearance_color_group_base: "背景與表面",
     appearance_color_group_text: "文字",
     appearance_color_group_ui: "介面元素",
