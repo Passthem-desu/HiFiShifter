@@ -891,13 +891,18 @@ export const TrackList: React.FC<{
                       </div>
                     ) : null}
                     <Box flexGrow="1" />
+                  </Flex>
+                  <Flex justify="end">
                     <div
-                      className="shrink-0 w-[108px]"
+                      className="w-[132px]"
                       data-track-volume-control
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <Flex justify="end" className="mb-1">
+                      <Flex justify="between" align="center" className="mb-1">
+                        <Text size="1" color="gray">
+                          VOL
+                        </Text>
                         <Text size="1" color="gray">
                           {Math.round(volume * 100)}%
                         </Text>
