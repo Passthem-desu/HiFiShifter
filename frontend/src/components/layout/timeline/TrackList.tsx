@@ -891,27 +891,36 @@ export const TrackList: React.FC<{
                       </div>
                     ) : null}
                     <Box flexGrow="1" />
-                    <Text size="1" color="gray">
-                      {Math.round(volume * 100)}%
-                    </Text>
+                    <div
+                      className="shrink-0 w-[108px]"
+                      data-track-volume-control
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Flex justify="end" className="mb-1">
+                        <Text size="1" color="gray">
+                          {Math.round(volume * 100)}%
+                        </Text>
+                      </Flex>
+                      <Slider
+                        value={[Math.round(volume * 100)]}
+                        size="1"
+                        className="w-full"
+                        onValueChange={(v) => {
+                          const next =
+                            Math.max(0, Math.min(100, Number(v[0] ?? 0))) /
+                            100;
+                          onVolumeUiChange(track.id, next);
+                        }}
+                        onValueCommit={(v) => {
+                          const next =
+                            Math.max(0, Math.min(100, Number(v[0] ?? 0))) /
+                            100;
+                          onVolumeCommit(track.id, next);
+                        }}
+                      />
+                    </div>
                   </Flex>
-
-                  <Slider
-                    value={[Math.round(volume * 100)]}
-                    size="1"
-                    className="w-full"
-                    onValueChange={(v) => {
-                      const next =
-                        Math.max(0, Math.min(100, Number(v[0] ?? 0))) / 100;
-                      onVolumeUiChange(track.id, next);
-                    }}
-                    onValueCommit={(v) => {
-                      const next =
-                        Math.max(0, Math.min(100, Number(v[0] ?? 0))) / 100;
-                      onVolumeCommit(track.id, next);
-                    }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                  />
                 </Flex>
               </Box>
             </div>
