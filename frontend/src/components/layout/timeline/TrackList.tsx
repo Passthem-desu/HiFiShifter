@@ -7,7 +7,10 @@ import React, {
 } from "react";
 import { Flex, Box, Text, IconButton, Slider, Select } from "@radix-ui/themes";
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
-import type { TrackInfo } from "../../../features/session/sessionTypes";
+import type {
+  TrackInfo,
+  TrackMeterInfo,
+} from "../../../features/session/sessionTypes";
 import type { MessageKey } from "../../../i18n/messages";
 import { TRACK_ADD_ROW_HEIGHT } from "./constants";
 
@@ -23,9 +26,73 @@ const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
   { value: "#f87171", key: "color_red" },
 ];
 
+const TRACK_METER_MIN_DB = -48;
+const TRACK_METER_MAX_DB = 3;
+const TRACK_GAIN_MIN_DB = -60;
+const TRACK_GAIN_MAX_DB = 12;
+
+function gainToDb(gain: number): number {
+  if (!Number.isFinite(gain) || gain <= 1e-4) return TRACK_GAIN_MIN_DB;
+  return 20 * Math.log10(gain);
+}
+
+function dbToGain(db: number): number {
+  if (!Number.isFinite(db) || db <= TRACK_GAIN_MIN_DB) return 0;
+  return Math.pow(10, db / 20);
+}
+
+function gainToSliderValue(gain: number): number {
+  const db = Math.min(TRACK_GAIN_MAX_DB, Math.max(TRACK_GAIN_MIN_DB, gainToDb(gain)));
+  return db - TRACK_GAIN_MIN_DB;
+}
+
+function sliderValueToGain(value: number): number {
+  const db = TRACK_GAIN_MIN_DB + Math.max(0, Math.min(TRACK_GAIN_MAX_DB - TRACK_GAIN_MIN_DB, value));
+  return dbToGain(db);
+}
+
+function formatGainLabel(gain: number): string {
+  const db = gainToDb(gain);
+  if (!Number.isFinite(db) || db <= TRACK_GAIN_MIN_DB + 0.05) return "-inf dB";
+  const clampedDb = Math.min(TRACK_GAIN_MAX_DB, Math.max(TRACK_GAIN_MIN_DB, db));
+  if (Math.abs(clampedDb) < 0.05) return "0.0 dB";
+  return `${clampedDb > 0 ? "+" : ""}${clampedDb.toFixed(1)} dB`;
+}
+
+function linearToDb(linear: number): number {
+  if (!Number.isFinite(linear) || linear <= 1e-6) return -Infinity;
+  return 20 * Math.log10(linear);
+}
+
+function meterHeightPercent(linear: number): number {
+  const db = linearToDb(linear);
+  if (!Number.isFinite(db)) return 0;
+  const normalized =
+    (Math.min(TRACK_METER_MAX_DB, Math.max(TRACK_METER_MIN_DB, db)) -
+      TRACK_METER_MIN_DB) /
+    (TRACK_METER_MAX_DB - TRACK_METER_MIN_DB);
+  return normalized * 100;
+}
+
+function formatPeakLabel(maxPeakLinear: number, clipped: boolean): string {
+  if (clipped || maxPeakLinear >= 1) return "CLIP";
+  const db = linearToDb(maxPeakLinear);
+  if (!Number.isFinite(db)) return "-inf";
+  return db.toFixed(1);
+}
+
+function meterFillClass(peakLinear: number, clipped: boolean): string {
+  if (clipped || peakLinear >= 1) return "bg-red-500";
+  const db = linearToDb(peakLinear);
+  if (db >= -6) return "bg-orange-400";
+  if (db >= -18) return "bg-yellow-400";
+  return "bg-emerald-400";
+}
+
 export const TrackList: React.FC<{
   t: (key: MessageKey) => string;
   tracks: TrackInfo[];
+  trackMeters: Record<string, TrackMeterInfo>;
   selectedTrackId: string | null;
   rowHeight: number;
   trackVolumeUi: Record<string, number>;
@@ -52,6 +119,7 @@ export const TrackList: React.FC<{
 }> = ({
   t,
   tracks,
+  trackMeters,
   selectedTrackId,
   rowHeight,
   trackVolumeUi,
@@ -472,12 +540,16 @@ export const TrackList: React.FC<{
           const composeEnabled = Boolean(track.composeEnabled);
           const backendVolume = Math.max(
             0,
-            Math.min(1, Number(track.volume ?? 0.9)),
+            Math.min(4, Number(track.volume ?? 1)),
           );
           const uiOverride = trackVolumeUi[track.id];
           const volume = Number.isFinite(uiOverride)
             ? uiOverride
             : backendVolume;
+          const meter = trackMeters[track.id];
+          const peakLinear = meter?.peakLinear ?? 0;
+          const maxPeakLinear = meter?.maxPeakLinear ?? 0;
+          const clipped = Boolean(meter?.clipped);
 
           const guideLines = depth > 0 ? Array.from({ length: depth }) : [];
 
@@ -690,127 +762,148 @@ export const TrackList: React.FC<{
                   />
                 ) : null}
 
-                <Flex
-                  direction="column"
-                  p="2"
-                  gap="2"
-                  height="100%"
-                  justify="center"
-                >
-                  <Flex justify="between" align="center">
-                    <Flex align="center" gap="1" className="min-w-0 flex-1">
-                      {/* 轨道颜色小圆点，点击弹出调色板 */}
-                      <div
-                        className="relative shrink-0"
-                        data-track-color-picker
-                      >
-                        <button
-                          className="w-3.5 h-3.5 rounded-full border border-white/20 hover:scale-125 transition-transform cursor-pointer"
-                          style={{
-                            backgroundColor: track.color || "#4f8ef7",
-                          }}
-                          title={t("track_change_color")}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setColorPickerTrackId(
-                              colorPickerTrackId === track.id ? null : track.id,
-                            );
-                          }}
-                        />
-                        {colorPickerTrackId === track.id && (
-                          <div
-                            className="absolute left-0 top-full mt-1 z-50 p-1.5 rounded border border-qt-border bg-qt-window shadow-lg flex gap-1 flex-wrap"
-                            style={{ width: 120 }}
-                            data-track-color-picker
-                          >
-                            {TRACK_COLOR_PALETTE_KEYS.map((opt) => (
-                              <button
-                                key={opt.value}
-                                title={t(opt.key)}
-                                className={`w-4 h-4 rounded-full transition-transform hover:scale-125 ${
-                                  (track.color || "#4f8ef7") === opt.value
-                                    ? "ring-2 ring-white/80 scale-110"
-                                    : ""
-                                }`}
-                                style={{
-                                  backgroundColor: opt.value,
-                                }}
-                                onPointerDown={(e) => e.stopPropagation()}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onTrackColorChange?.(track.id, opt.value);
-                                  setColorPickerTrackId(null);
-                                }}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      {editingTrackId === track.id ? (
-                        <input
-                          ref={nameInputRef}
-                          value={editingName}
-                          className="bg-transparent outline outline-1 outline-qt-highlight rounded px-0.5 flex-1 min-w-0 text-qt-text text-sm font-medium pr-2"
-                          onChange={(e) => setEditingName(e.target.value)}
-                          onBlur={commitTrackName}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              commitTrackName();
-                            } else if (e.key === "Escape") {
-                              setEditingTrackId(null);
-                            }
-                          }}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
-                          autoFocus
-                        />
-                      ) : (
-                        <Text
-                          size="2"
-                          weight="medium"
-                          className={`text-qt-text truncate pr-2 ${depth > 0 ? "opacity-90" : ""} cursor-text select-none`}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onDoubleClick={(e) => {
-                            e.stopPropagation();
-                            setEditingTrackId(track.id);
-                            setEditingName(track.name);
-                            setTimeout(() => {
-                              nameInputRef.current?.select();
-                            }, 0);
-                          }}
+                <Flex height="100%" align="stretch">
+                  <Flex
+                    direction="column"
+                    p="2"
+                    gap="2"
+                    justify="center"
+                    className="min-w-0 flex-1"
+                  >
+                    <Flex justify="between" align="center">
+                      <Flex align="center" gap="1" className="min-w-0 flex-1">
+                        {/* ??????????????? */}
+                        <div
+                          className="relative shrink-0"
+                          data-track-color-picker
                         >
-                          {track.name}
-                        </Text>
-                      )}
-                    </Flex>
-                    <IconButton
-                      size="1"
-                      variant="ghost"
-                      color="gray"
-                      className="opacity-0 group-hover:opacity-100"
-                      disabled={isLastRootTrack(track.id)}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveTrack(track.id);
-                      }}
-                    >
-                      <Cross2Icon />
-                    </IconButton>
-                  </Flex>
-
-                  <Flex gap="2" align="center">
-                    {isRoot ? (
+                          <button
+                            className="w-3.5 h-3.5 rounded-full border border-white/20 hover:scale-125 transition-transform cursor-pointer"
+                            style={{
+                              backgroundColor: track.color || "#4f8ef7",
+                            }}
+                            title={t("track_change_color")}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setColorPickerTrackId(
+                                colorPickerTrackId === track.id ? null : track.id,
+                              );
+                            }}
+                          />
+                          {colorPickerTrackId === track.id && (
+                            <div
+                              className="absolute left-0 top-full mt-1 z-50 p-1.5 rounded border border-qt-border bg-qt-window shadow-lg flex gap-1 flex-wrap"
+                              style={{ width: 120 }}
+                              data-track-color-picker
+                            >
+                              {TRACK_COLOR_PALETTE_KEYS.map((opt) => (
+                                <button
+                                  key={opt.value}
+                                  title={t(opt.key)}
+                                  className={`w-4 h-4 rounded-full transition-transform hover:scale-125 ${
+                                    (track.color || "#4f8ef7") === opt.value
+                                      ? "ring-2 ring-white/80 scale-110"
+                                      : ""
+                                  }`}
+                                  style={{
+                                    backgroundColor: opt.value,
+                                  }}
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onTrackColorChange?.(track.id, opt.value);
+                                    setColorPickerTrackId(null);
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {editingTrackId === track.id ? (
+                          <input
+                            ref={nameInputRef}
+                            value={editingName}
+                            className="bg-transparent outline outline-1 outline-qt-highlight rounded px-0.5 flex-1 min-w-0 text-qt-text text-sm font-medium pr-2"
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onBlur={commitTrackName}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                commitTrackName();
+                              } else if (e.key === "Escape") {
+                                setEditingTrackId(null);
+                              }
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            autoFocus
+                          />
+                        ) : (
+                          <Text
+                            size="2"
+                            weight="medium"
+                            className={`text-qt-text truncate pr-2 ${depth > 0 ? "opacity-90" : ""} cursor-text select-none`}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              setEditingTrackId(track.id);
+                              setEditingName(track.name);
+                              setTimeout(() => {
+                                nameInputRef.current?.select();
+                              }, 0);
+                            }}
+                          >
+                            {track.name}
+                          </Text>
+                        )}
+                      </Flex>
                       <IconButton
                         size="1"
-                        variant={composeEnabled ? "solid" : "ghost"}
-                        color={composeEnabled ? "blue" : "gray"}
-                        title={t("compose")}
+                        variant="ghost"
+                        color="gray"
+                        className="opacity-0 group-hover:opacity-100"
+                        disabled={isLastRootTrack(track.id)}
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onToggleCompose(track.id, !composeEnabled);
+                          onRemoveTrack(track.id);
+                        }}
+                      >
+                        <Cross2Icon />
+                      </IconButton>
+                    </Flex>
+
+                    <Flex gap="2" align="center">
+                      {isRoot ? (
+                        <IconButton
+                          size="1"
+                          variant={composeEnabled ? "solid" : "ghost"}
+                          color={composeEnabled ? "blue" : "gray"}
+                          title={t("compose")}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleCompose(track.id, !composeEnabled);
+                          }}
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 11,
+                            width: 20,
+                            height: 20,
+                          }}
+                        >
+                          C
+                        </IconButton>
+                      ) : null}
+                      <IconButton
+                        size="1"
+                        variant={muted ? "solid" : "ghost"}
+                        color={muted ? "red" : "gray"}
+                        title={muted ? t("clip_unmute") : t("clip_mute")}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleMute(track.id, !muted);
                         }}
                         style={{
                           fontWeight: 700,
@@ -819,113 +912,127 @@ export const TrackList: React.FC<{
                           height: 20,
                         }}
                       >
-                        C
+                        M
                       </IconButton>
-                    ) : null}
-                    <IconButton
-                      size="1"
-                      variant={muted ? "solid" : "ghost"}
-                      color={muted ? "red" : "gray"}
-                      title={muted ? t("clip_unmute") : t("clip_mute")}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleMute(track.id, !muted);
-                      }}
-                      style={{
-                        fontWeight: 700,
-                        fontSize: 11,
-                        width: 20,
-                        height: 20,
-                      }}
-                    >
-                      M
-                    </IconButton>
-                    <IconButton
-                      size="1"
-                      variant={solo ? "solid" : "ghost"}
-                      color={solo ? "amber" : "gray"}
-                      title={t("solo")}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleSolo(track.id, !solo);
-                      }}
-                      style={{
-                        fontWeight: 700,
-                        fontSize: 11,
-                        width: 20,
-                        height: 20,
-                      }}
-                    >
-                      S
-                    </IconButton>
-                    {isRoot && composeEnabled && onAlgoChange ? (
-                      <div onPointerDown={(e) => e.stopPropagation()}>
-                        <Select.Root
-                          size="1"
-                          value={
-                            [
-                              "world_dll",
-                              "nsf_hifigan_onnx",
-                              "vslib",
-                              "none",
-                            ].includes(track.pitchAnalysisAlgo)
-                              ? track.pitchAnalysisAlgo
-                              : "nsf_hifigan_onnx"
-                          }
-                          onValueChange={(v) => {
-                            onAlgoChange(track.id, v);
-                          }}
-                        >
-                          <Select.Trigger style={{ minWidth: 80 }} />
-                          <Select.Content>
-                            <Select.Item value="world_dll">world</Select.Item>
-                            <Select.Item value="nsf_hifigan_onnx">
-                              nsf-hifigan
-                            </Select.Item>
-                            <Select.Item value="vslib">vslib</Select.Item>
-                            <Select.Item value="none">{t("none")}</Select.Item>
-                          </Select.Content>
-                        </Select.Root>
-                      </div>
-                    ) : null}
-                    <Box flexGrow="1" />
-                  </Flex>
-                  <Flex justify="end">
+                      <IconButton
+                        size="1"
+                        variant={solo ? "solid" : "ghost"}
+                        color={solo ? "amber" : "gray"}
+                        title={t("solo")}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleSolo(track.id, !solo);
+                        }}
+                        style={{
+                          fontWeight: 700,
+                          fontSize: 11,
+                          width: 20,
+                          height: 20,
+                        }}
+                      >
+                        S
+                      </IconButton>
+                      {isRoot && composeEnabled && onAlgoChange ? (
+                        <div onPointerDown={(e) => e.stopPropagation()}>
+                          <Select.Root
+                            size="1"
+                            value={
+                              [
+                                "world_dll",
+                                "nsf_hifigan_onnx",
+                                "vslib",
+                                "none",
+                              ].includes(track.pitchAnalysisAlgo)
+                                ? track.pitchAnalysisAlgo
+                                : "nsf_hifigan_onnx"
+                            }
+                            onValueChange={(v) => {
+                              onAlgoChange(track.id, v);
+                            }}
+                          >
+                            <Select.Trigger style={{ minWidth: 80 }} />
+                            <Select.Content>
+                              <Select.Item value="world_dll">world</Select.Item>
+                              <Select.Item value="nsf_hifigan_onnx">
+                                nsf-hifigan
+                              </Select.Item>
+                              <Select.Item value="vslib">vslib</Select.Item>
+                              <Select.Item value="none">{t("none")}</Select.Item>
+                            </Select.Content>
+                          </Select.Root>
+                        </div>
+                      ) : null}
+                      <Box flexGrow="1" />
+                    </Flex>
+
                     <div
-                      className="w-[132px]"
+                      className="min-w-0 pt-1"
                       data-track-volume-control
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        onVolumeUiChange(track.id, 1);
+                        onVolumeCommit(track.id, 1);
+                      }}
                     >
-                      <Flex justify="between" align="center" className="mb-1">
-                        <Text size="1" color="gray">
-                          VOL
-                        </Text>
-                        <Text size="1" color="gray">
-                          {Math.round(volume * 100)}%
+                      <Flex justify="end" align="center" className="mb-1">
+                        <Text
+                          size="1"
+                          color={Math.abs(gainToDb(volume)) < 0.05 ? "blue" : "gray"}
+                          className="leading-none tabular-nums"
+                        >
+                          {formatGainLabel(volume)}
                         </Text>
                       </Flex>
                       <Slider
-                        value={[Math.round(volume * 100)]}
+                        min={0}
+                        max={TRACK_GAIN_MAX_DB - TRACK_GAIN_MIN_DB}
+                        step={0.1}
+                        value={[gainToSliderValue(volume)]}
                         size="1"
                         className="w-full"
                         onValueChange={(v) => {
-                          const next =
-                            Math.max(0, Math.min(100, Number(v[0] ?? 0))) /
-                            100;
+                          const next = sliderValueToGain(Number(v[0] ?? 0));
                           onVolumeUiChange(track.id, next);
                         }}
                         onValueCommit={(v) => {
-                          const next =
-                            Math.max(0, Math.min(100, Number(v[0] ?? 0))) /
-                            100;
+                          const next = sliderValueToGain(Number(v[0] ?? 0));
                           onVolumeCommit(track.id, next);
                         }}
                       />
                     </div>
                   </Flex>
+
+                  <div className="w-[15%] min-w-[38px] max-w-[46px] shrink-0 bg-[#2a2a2a]">
+                    <Flex
+                      direction="column"
+                      align="center"
+                      justify="between"
+                      className="h-full pt-1 pb-0"
+                    >
+                      <Text
+                        size="1"
+                        color={clipped ? "red" : "gray"}
+                        className="leading-none tabular-nums"
+                      >
+                        {formatPeakLabel(maxPeakLinear, clipped)}
+                      </Text>
+                      <div className="relative h-full w-full bg-[#1d1d1d]">
+                        <div
+                          className={`absolute inset-x-0 bottom-0 transition-[height] duration-75 ${meterFillClass(
+                            peakLinear,
+                            clipped,
+                          )}`}
+                          style={{
+                            height: `${meterHeightPercent(peakLinear)}%`,
+                            maxHeight: "100%",
+                          }}
+                        />
+                      </div>
+                    </Flex>
+                  </div>
                 </Flex>
               </Box>
             </div>

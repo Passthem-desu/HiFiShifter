@@ -265,7 +265,7 @@ impl Default for TimelineState {
                 order: 0,
                 muted: false,
                 solo: false,
-                volume: 0.9,
+                volume: 1.0,
 
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
@@ -1276,7 +1276,7 @@ impl TimelineState {
             order,
             muted: false,
             solo: false,
-            volume: 0.9,
+            volume: 1.0,
 
             compose_enabled: false,
             pitch_analysis_algo: PitchAnalysisAlgo::default(),
@@ -1528,7 +1528,7 @@ impl TimelineState {
                 t.solo = v;
             }
             if let Some(v) = volume {
-                t.volume = v.clamp(0.0, 1.0);
+                t.volume = v.clamp(0.0, 4.0);
             }
 
             if let Some(v) = compose_enabled {
@@ -1583,7 +1583,7 @@ impl TimelineState {
                 order: self.next_track_order,
                 muted: false,
                 solo: false,
-                volume: 0.9,
+                volume: 1.0,
 
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),

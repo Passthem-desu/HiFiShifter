@@ -369,6 +369,7 @@ export const TimelinePanel: React.FC = () => {
             <TrackList
                 t={t}
                 tracks={s.tracks}
+                trackMeters={s.trackMeters}
                 selectedTrackId={s.selectedTrackId}
                 rowHeight={rowHeight}
                 trackVolumeUi={trackVolumeUi}
