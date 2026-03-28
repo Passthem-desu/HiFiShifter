@@ -27,8 +27,8 @@ export const ClipItem = React.memo(function ClipItem({
     selected,
     isInMultiSelectedSet,
     multiSelectedCount,
-    viewportStartSec: _viewportStartSec,
-    viewportEndSec: _viewportEndSec,
+    viewportStartSec,
+    viewportEndSec,
     ensureSelected,
     selectClipRemote,
     openContextMenu,
@@ -173,6 +173,22 @@ export const ClipItem = React.memo(function ClipItem({
         ],
     );
 
+    // ========================================
+    // DOM 视口剔除
+    // ========================================
+    if (viewportStartSec !== undefined && viewportEndSec !== undefined) {
+        const clipEndSec = clip.startSec + clip.lengthSec;
+        // 增加 1.5 秒的缓冲余量，防止快速滚动时边缘 DOM 突然卸载造成的闪烁
+        const bufferSec = 1.5;
+        if (
+            clipEndSec < viewportStartSec - bufferSec ||
+            clip.startSec > viewportEndSec + bufferSec
+        ) {
+            // 完全在屏幕/缓冲带之外，直接卸载此 Clip 的一切 DOM 节点
+            return null;
+        }
+    }
+
     return (
         <div
             data-hs-clip-item="1"
@@ -288,8 +304,8 @@ export const ClipItem = React.memo(function ClipItem({
             {/* Body block (does not fill the entire track row; leaves header lane above) */}
             <div
                 className={`absolute left-0 right-0 bottom-0 rounded-sm shadow-sm overflow-visible border transition-colors ${selected
-                        ? "border-white/90"
-                        : "border-transparent group-hover:border-white/30"
+                    ? "border-white/90"
+                    : "border-transparent group-hover:border-white/30"
                     }`}
                 style={{
                     top: CLIP_HEADER_HEIGHT,
