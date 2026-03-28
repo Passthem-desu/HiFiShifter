@@ -166,6 +166,7 @@ export const koKR = {
     import_audio_failed: "오디오 가져오기에 실패했습니다",
 
     menu_about: "HiFiShifter 정보",
+    menu_appearance_settings: "외관 설정...",
     glue: "붙이기",
     none: "없음",
     bpm: "BPM",

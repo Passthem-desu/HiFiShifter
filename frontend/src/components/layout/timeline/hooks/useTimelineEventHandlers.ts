@@ -26,6 +26,7 @@ import {
     MAX_PX_PER_SEC,
 } from "../";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
+import { computeAutoFollowScrollLeft } from "../../../../utils/autoFollowScroll";
 
 // ── Args 类型 ─────────────────────────────────────────────────
 export interface UseTimelineEventHandlersArgs {
@@ -293,14 +294,13 @@ export function useTimelineEventHandlers(
         if (!autoScrollEnabled || !isPlaying) return;
         const scroller = scrollRef.current;
         if (!scroller) return;
-        const playheadX = playheadSec * pxPerSec;
-        const viewLeft = scroller.scrollLeft;
-        const viewRight = viewLeft + scroller.clientWidth;
-        if (playheadX < viewLeft || playheadX > viewRight) {
-            const next = Math.max(
-                0,
-                playheadX - scroller.clientWidth / 2,
-            );
+        const next = computeAutoFollowScrollLeft({
+            playheadSec,
+            pxPerSec,
+            viewportWidth: scroller.clientWidth,
+            contentWidth: scroller.scrollWidth,
+        });
+        if (Math.abs(scroller.scrollLeft - next) > 0.5) {
             scroller.scrollLeft = next;
             syncScrollLeft(next);
         }
@@ -311,11 +311,12 @@ export function useTimelineEventHandlers(
         function handler() {
             const scroller = scrollRef.current;
             if (!scroller) return;
-            const playheadX = playheadSec * pxPerSec;
-            const next = Math.max(
-                0,
-                playheadX - scroller.clientWidth / 2,
-            );
+            const next = computeAutoFollowScrollLeft({
+                playheadSec,
+                pxPerSec,
+                viewportWidth: scroller.clientWidth,
+                contentWidth: scroller.scrollWidth,
+            });
             scroller.scrollLeft = next;
             syncScrollLeft(next);
         }

@@ -1898,7 +1898,13 @@ const sessionSlice = createSlice({
             .addCase(playOriginal.rejected, setRejected)
 
             .addCase(stopAudioPlayback.pending, (state) =>
-                setPending(state, "Stopping audio..."),
+                {
+                    setPending(state, "Stopping audio...");
+                    // Pause UI immediately on user stop/pause command; backend sync will
+                    // confirm the final transport state shortly after.
+                    state.runtime.isPlaying = false;
+                    state.runtime.playbackTarget = null;
+                },
             )
             .addCase(stopAudioPlayback.fulfilled, (state, action) => {
                 state.busy = false;

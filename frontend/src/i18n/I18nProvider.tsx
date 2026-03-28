@@ -60,8 +60,10 @@ export function I18nProvider({ children }: PropsWithChildren) {
         setLocaleState(nextLocale);
         localStorage.setItem(STORAGE_KEY, nextLocale);
       },
-      t: (key: MessageKey) =>
-        messages[localeState][key] ?? messages["en-US"][key],
+      t: (key: MessageKey) => {
+        const localeMessages = messages[localeState] as Record<MessageKey, string>;
+        return localeMessages[key] ?? messages["en-US"][key];
+      },
     };
   }, [localeState]);
 
