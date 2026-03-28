@@ -83,6 +83,8 @@ import { getParamShiftStep } from "./pianoRoll/paramShiftStep";
 import { getParamEditorWheelAction } from "./pianoRoll/wheelGesture";
 import type { Keybinding } from "../../features/keybindings/types";
 import { pianoKeySound } from "../../utils/PianoKeySound";
+import { computeAutoFollowScrollLeft } from "../../utils/autoFollowScroll";
+import { useVisualPlayhead } from "../../hooks/useVisualPlayhead";
 import {
     getVisibleSecondaryParamIds,
     toggleSecondaryParamVisibility,
@@ -126,6 +128,9 @@ const NOTE_NAMES_SHARP = [
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
     const rafRef = useRef<number | null>(null);
+    const visualPlayheadSecRef = useRef(0);
+    const rulerPlayheadLineRef = useRef<HTMLDivElement | null>(null);
+    const rulerPlayheadHeadRef = useRef<HTMLDivElement | null>(null);
     const drawRef = useRef<() => void>(() => {});
     const invalidate = useCallback(() => {
         if (rafRef.current != null) return;
@@ -752,6 +757,43 @@ export const PianoRollPanel: React.FC = () => {
         invalidate();
     }, [s.playheadSec, invalidate]);
 
+    const isTransportAdvancing =
+        s.runtime.isPlaying && s.runtime.playbackPositionSec > 1e-4;
+
+    useVisualPlayhead({
+        syncedPlayheadSec: s.playheadSec,
+        isTransportAdvancing,
+        onFrame: useCallback(
+            (visualPlayheadSec: number) => {
+                visualPlayheadSecRef.current = visualPlayheadSec;
+                const playheadLeftPx = visualPlayheadSec * pxPerSecRef.current;
+                if (rulerPlayheadLineRef.current) {
+                    rulerPlayheadLineRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (rulerPlayheadHeadRef.current) {
+                    rulerPlayheadHeadRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (s.autoScrollEnabled && s.runtime.isPlaying) {
+                    const scroller = scrollerRef.current;
+                    if (scroller) {
+                        const next = computeAutoFollowScrollLeft({
+                            playheadSec: visualPlayheadSec,
+                            pxPerSec: pxPerSecRef.current,
+                            viewportWidth: scroller.clientWidth,
+                            contentWidth,
+                        });
+                        if (Math.abs(scroller.scrollLeft - next) > 0.5) {
+                            scroller.scrollLeft = next;
+                            syncScrollLeft(scroller);
+                        }
+                    }
+                }
+                invalidate();
+            },
+            [contentWidth, invalidate, s.autoScrollEnabled, s.runtime.isPlaying],
+        ),
+    });
+
     function syncScrollLeft(scroller: HTMLDivElement) {
         const next = scroller.scrollLeft;
         if (
@@ -1302,15 +1344,23 @@ export const PianoRollPanel: React.FC = () => {
         if (!s.autoScrollEnabled || !s.runtime.isPlaying) return;
         const scroller = scrollerRef.current;
         if (!scroller) return;
-        const playheadX = s.playheadSec * pxPerSec;
-        const viewLeft = scroller.scrollLeft;
-        const viewRight = viewLeft + scroller.clientWidth;
-        if (playheadX < viewLeft || playheadX > viewRight) {
-            const next = Math.max(0, playheadX - scroller.clientWidth / 2);
+        const next = computeAutoFollowScrollLeft({
+            playheadSec: visualPlayheadSecRef.current,
+            pxPerSec,
+            viewportWidth: scroller.clientWidth,
+            contentWidth,
+        });
+        if (Math.abs(scroller.scrollLeft - next) > 0.5) {
             scroller.scrollLeft = next;
             syncScrollLeft(scroller);
         }
-    }, [s.autoScrollEnabled, s.runtime.isPlaying, s.playheadSec, pxPerSec]);
+    }, [
+        s.autoScrollEnabled,
+        s.runtime.isPlaying,
+        s.playheadSec,
+        pxPerSec,
+        contentWidth,
+    ]);
 
     // Piano keys (axis) area: keep touchpad wheel behavior aligned with the main editor.
     useEffect(() => {
@@ -3243,6 +3293,8 @@ export const PianoRollPanel: React.FC = () => {
                         pxPerSec={pxPerSec}
                         secPerBeat={secPerBeat}
                         playheadSec={s.playheadSec}
+                        playheadLineRef={rulerPlayheadLineRef}
+                        playheadHeadRef={rulerPlayheadHeadRef}
                         contentRef={rulerContentRef}
                         onMouseDown={(e) => {
                             document.body.setAttribute(

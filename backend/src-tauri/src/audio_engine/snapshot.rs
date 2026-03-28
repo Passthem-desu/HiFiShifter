@@ -6,7 +6,7 @@ use crate::state::{Clip, TimelineState, Track};
 
 use super::io::{get_resampled_stereo_cached, is_audio_path};
 use super::types::{EngineClip, EngineSnapshot, ResampledStereo, StretchJob, StretchKey};
-use super::util::{clamp01, quantize_i64, quantize_u32};
+use super::util::{quantize_i64, quantize_u32};
 
 pub(crate) fn compute_track_gains<'a>(tracks: &'a [Track]) -> HashMap<&'a str, (f32, bool, bool)> {
     let by_id: HashMap<&str, &Track> = tracks.iter().map(|t| (t.id.as_str(), t)).collect();
@@ -24,7 +24,7 @@ pub(crate) fn compute_track_gains<'a>(tracks: &'a [Track]) -> HashMap<&'a str, (
 
         while let Some(id) = cur {
             if let Some(node) = by_id.get(id) {
-                gain *= clamp01(node.volume);
+                gain *= node.volume.clamp(0.0, 4.0);
                 muted |= node.muted;
                 soloed |= node.solo;
                 cur = node.parent_id.as_deref();
@@ -646,10 +646,19 @@ pub(crate) fn build_snapshot(
         }
     }
 
+    let mut track_ids = Vec::new();
+    let mut seen_track_ids = std::collections::HashSet::new();
+    for clip in &clips_out {
+        if seen_track_ids.insert(clip.track_id.clone()) {
+            track_ids.push(clip.track_id.clone());
+        }
+    }
+
     EngineSnapshot {
         bpm,
         sample_rate: out_rate,
         duration_frames,
+        track_ids: Arc::new(track_ids),
         clips: Arc::new(clips_out),
     }
 }
@@ -677,6 +686,7 @@ pub(crate) fn build_snapshot_for_file(
         bpm: 120.0,
         sample_rate: out_rate,
         duration_frames: length_frames,
+        track_ids: Arc::new(vec!["__file_preview__".to_string()]),
         clips: Arc::new(vec![EngineClip {
             clip_id: "__file_preview__".to_string(),
             track_id: "__file_preview__".to_string(),

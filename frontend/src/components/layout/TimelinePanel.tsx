@@ -62,9 +62,13 @@ import { useTimelineState } from "./timeline/hooks/useTimelineState";
 import { useTimelineDragDrop } from "./timeline/hooks/useTimelineDragDrop";
 import { useTimelineClipActions } from "./timeline/hooks/useTimelineClipActions";
 import { useTimelineEventHandlers } from "./timeline/hooks/useTimelineEventHandlers";
+import { useVisualPlayhead } from "../../hooks/useVisualPlayhead";
+import { computeAutoFollowScrollLeft } from "../../utils/autoFollowScroll";
 
 export const TimelinePanel: React.FC = () => {
     const { t } = useI18n();
+    const rulerPlayheadLineRef = React.useRef<HTMLDivElement | null>(null);
+    const rulerPlayheadHeadRef = React.useRef<HTMLDivElement | null>(null);
 
     // ── 1. State / refs / viewport / scroll / 坐标转换 ──────
     const state = useTimelineState();
@@ -225,6 +229,41 @@ export const TimelinePanel: React.FC = () => {
         playheadSec: s.playheadSec,
     });
 
+    const isTransportAdvancing =
+        s.runtime.isPlaying && s.runtime.playbackPositionSec > 1e-4;
+
+    useVisualPlayhead({
+        syncedPlayheadSec: s.playheadSec,
+        isTransportAdvancing,
+        onFrame: React.useCallback(
+            (visualPlayheadSec: number) => {
+                const playheadLeftPx = visualPlayheadSec * pxPerSecRef.current;
+                if (playheadRef.current) {
+                    playheadRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (rulerPlayheadLineRef.current) {
+                    rulerPlayheadLineRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (rulerPlayheadHeadRef.current) {
+                    rulerPlayheadHeadRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (!s.autoScrollEnabled || !s.runtime.isPlaying) return;
+                const scroller = scrollRef.current;
+                if (!scroller) return;
+                const next = computeAutoFollowScrollLeft({
+                    playheadSec: visualPlayheadSec,
+                    pxPerSec: pxPerSecRef.current,
+                    viewportWidth: scroller.clientWidth,
+                    contentWidth: scroller.scrollWidth,
+                });
+                if (Math.abs(scroller.scrollLeft - next) <= 0.5) return;
+                scroller.scrollLeft = next;
+                syncScrollLeft(next);
+            },
+            [pxPerSecRef, s.autoScrollEnabled, s.runtime.isPlaying, scrollRef, syncScrollLeft],
+        ),
+    });
+
     // ── 5. 拖拽 hooks 桥接 ──────────────────────────────────
     const { editDragRef: _editDragRef, startEditDrag } = useEditDrag({
         scrollRef,
@@ -330,6 +369,7 @@ export const TimelinePanel: React.FC = () => {
             <TrackList
                 t={t}
                 tracks={s.tracks}
+                trackMeters={s.trackMeters}
                 selectedTrackId={s.selectedTrackId}
                 rowHeight={rowHeight}
                 trackVolumeUi={trackVolumeUi}
@@ -452,6 +492,8 @@ export const TimelinePanel: React.FC = () => {
                     secPerBeat={secPerBeat}
                     viewportWidth={viewportWidth}
                     playheadSec={s.playheadSec}
+                    playheadLineRef={rulerPlayheadLineRef}
+                    playheadHeadRef={rulerPlayheadHeadRef}
                     contentRef={rulerContentRef}
                     onMouseDown={(e) => {
                         if (e.button !== 0) return;

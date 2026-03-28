@@ -179,7 +179,7 @@ fn convert_reaper_items_to_existing_tracks(
                 order: next_order,
                 muted: false,
                 solo: false,
-                volume: 0.9,
+                volume: 1.0,
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
                 color: TRACK_COLORS[color_idx].to_string(),

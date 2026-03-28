@@ -26,6 +26,7 @@ import {
     saveProjectAsRemote,
     exportAudio,
     pickOutputPath,
+    setTrackMeters,
     setToolMode,
     checkpointHistory,
     addTrackRemote,
@@ -413,6 +414,65 @@ function AppInner() {
             if (unlisten) unlisten();
         };
     }, []);
+
+    useEffect(() => {
+        let disposed = false;
+        let unlisten: null | (() => void) = null;
+
+        async function setup() {
+            try {
+                const mod = await import("@tauri-apps/api/event");
+                unlisten = await mod.listen("track_meter", (event: any) => {
+                    if (disposed) return;
+                    const payload = (event?.payload ?? {}) as {
+                        tracks?: Array<{
+                            trackId?: string;
+                            peakLinear?: number;
+                            maxPeakLinear?: number;
+                            clipped?: boolean;
+                        }>;
+                    };
+                    const next: Record<
+                        string,
+                        {
+                            peakLinear: number;
+                            maxPeakLinear: number;
+                            clipped: boolean;
+                        }
+                    > = {};
+
+                    for (const entry of payload?.tracks ?? []) {
+                        if (typeof entry?.trackId !== "string" || !entry.trackId) {
+                            continue;
+                        }
+                        next[entry.trackId] = {
+                            peakLinear:
+                                typeof entry.peakLinear === "number" &&
+                                Number.isFinite(entry.peakLinear)
+                                    ? Math.max(0, entry.peakLinear)
+                                    : 0,
+                            maxPeakLinear:
+                                typeof entry.maxPeakLinear === "number" &&
+                                Number.isFinite(entry.maxPeakLinear)
+                                    ? Math.max(0, entry.maxPeakLinear)
+                                    : 0,
+                            clipped: Boolean(entry.clipped),
+                        };
+                    }
+
+                    dispatch(setTrackMeters(next));
+                });
+            } catch {
+                // Safe no-op for non-Tauri builds.
+            }
+        }
+
+        void setup();
+        return () => {
+            disposed = true;
+            if (unlisten) unlisten();
+        };
+    }, [dispatch]);
 
     // 监听后端波形分析进度事件 (waveform_analysis_progress)
     useEffect(() => {

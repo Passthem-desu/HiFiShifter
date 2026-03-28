@@ -52,14 +52,6 @@ export const ClipHeader: React.FC<{
     const [gainInputVal, setGainInputVal] = useState("");
     const gainInputRef = useRef<HTMLInputElement>(null);
 
-    function openGainEditor() {
-        setGainInputVal(gainToDb(clip.gain).toFixed(1));
-        setGainEditing(true);
-        setTimeout(() => {
-            gainInputRef.current?.select();
-        }, 0);
-    }
-
     function commitGainEdit() {
         const parsed = parseFloat(gainInputVal);
         if (!isNaN(parsed)) {
@@ -149,7 +141,7 @@ export const ClipHeader: React.FC<{
                     onDoubleClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        openGainEditor();
+                        onGainCommit?.(clip.id, 0);
                     }}
                 >
                     <div className="w-4 h-4 rounded-full border border-white/60 bg-white/10" />
@@ -216,7 +208,7 @@ export const ClipHeader: React.FC<{
                     onDoubleClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        openGainEditor();
+                        onGainCommit?.(clip.id, 0);
                     }}
                 >
                     {gainToDb(clip.gain) >= 0 ? "+" : ""}
