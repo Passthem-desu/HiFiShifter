@@ -800,7 +800,7 @@ export const FileBrowserPanel: React.FC = () => {
                         pointerEvents: "none",
                         zIndex: 99999,
                         background: "var(--qt-highlight)",
-                        color: "#fff",
+                        color: "var(--qt-text)",
                         padding: "2px 8px",
                         borderRadius: 4,
                         fontSize: 11,

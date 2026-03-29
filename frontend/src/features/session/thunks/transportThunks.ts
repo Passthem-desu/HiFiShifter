@@ -13,9 +13,20 @@ export const fetchTimeline = createAsyncThunk(
 export const stopAudioPlayback = createAsyncThunk(
     "session/stopAudioPlayback",
     async (options: { restoreAnchor?: boolean } | void, { getState }) => {
-        const restoreAnchor = Boolean((options as { restoreAnchor?: boolean } | undefined)?.restoreAnchor);
+        const restoreAnchor = Boolean(
+            (options as { restoreAnchor?: boolean } | undefined)
+                ?.restoreAnchor,
+        );
         const state = getState() as { session: SessionState };
-        const wasPlaying = Boolean(state.session.runtime.isPlaying);
+        const positionSec = Number(state.session.runtime.playbackPositionSec ?? 0);
+        const wasPlaying = Boolean(
+            state.session.runtime.isPlaying ||
+                positionSec > 1e-4 ||
+                Math.abs(
+                    Number(state.session.playheadSec ?? 0) -
+                        Number(state.session.playbackAnchorSec ?? 0),
+                ) > 1e-4,
+        );
         const anchorSec = state.session.playbackAnchorSec;
         const result = await webApi.stopAudio();
         // Only restore when this stop action actually interrupted active playback.

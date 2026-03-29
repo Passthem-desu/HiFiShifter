@@ -38,6 +38,12 @@ export interface TrackInfo {
     color?: string;
 }
 
+export interface TrackMeterInfo {
+    peakLinear: number;
+    maxPeakLinear: number;
+    clipped: boolean;
+}
+
 export interface ClipInfo {
     id: string;
     trackId: string;

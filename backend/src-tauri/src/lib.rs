@@ -72,11 +72,6 @@ mod world;
 mod world_vocoder;
 
 use tauri::Manager;
-use tauri::WindowEvent;
-use tauri::Size as TauriSize;
-use tauri::LogicalSize as TauriLogicalSize;
-use tauri::Position as TauriPosition;
-use tauri::LogicalPosition as TauriLogicalPosition;
 
 pub fn nsf_hifigan_onnx_probe() -> Result<String, String> {
     // Probe ONNX model availability.

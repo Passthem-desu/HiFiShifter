@@ -15,6 +15,7 @@ import type {
     FadeCurveType,
     GridSize,
     PitchSnapUnit,
+    TrackMeterInfo,
     ToolMode,
     ToolModeGroup,
     TrackInfo,
@@ -105,6 +106,8 @@ import {
 import { markProjectDirty } from "./sessionDirtyState";
 import { resolveTrackIdForClipSelection } from "./selectionFocus";
 
+const MAX_TRACK_VOLUME = 4;
+
 export type {
     AutomationPoint,
     ClipInfo,
@@ -176,6 +179,7 @@ export interface SessionState {
 
     playheadSec: number;
     tracks: TrackInfo[];
+    trackMeters: Record<string, TrackMeterInfo>;
     clips: ClipInfo[];
     selectedTrackId: string | null;
     selectedClipId: string | null;
@@ -445,7 +449,7 @@ function applyTimelineState(
         childTrackIds: track.child_track_ids ?? [],
         muted: Boolean(track.muted),
         solo: Boolean(track.solo),
-        volume: clamp(Number(track.volume ?? 0.9), 0, 1),
+        volume: clamp(Number(track.volume ?? 1), 0, MAX_TRACK_VOLUME),
 
         composeEnabled: Boolean(track.compose_enabled),
         pitchAnalysisAlgo: String(
@@ -636,7 +640,7 @@ function upsertImportedClip(
             name: "Imported",
             muted: false,
             solo: false,
-            volume: 0.9,
+            volume: 1,
 
             composeEnabled: false,
             pitchAnalysisAlgo: "nsf_hifigan_onnx",
@@ -726,7 +730,7 @@ const initialState: SessionState = {
             name: "Main",
             muted: false,
             solo: false,
-            volume: 0.9,
+            volume: 1,
 
             composeEnabled: false,
             pitchAnalysisAlgo: "nsf_hifigan_onnx",
@@ -735,6 +739,7 @@ const initialState: SessionState = {
             childPitchOffsetDegrees: 3,
         },
     ],
+    trackMeters: {},
     clips: [],
     selectedTrackId: "track_main",
     selectedClipId: null,
@@ -901,6 +906,15 @@ const sessionSlice = createSlice({
             if (track) {
                 track.name = action.payload.name;
             }
+        },
+        setTrackMeters(
+            state,
+            action: PayloadAction<Record<string, TrackMeterInfo>>,
+        ) {
+            state.trackMeters = action.payload;
+        },
+        clearTrackMeters(state) {
+            state.trackMeters = {};
         },
         checkpointHistory(state) {
             pushHistory(state);
@@ -1285,7 +1299,7 @@ const sessionSlice = createSlice({
                 (entry) => entry.id === action.payload.trackId,
             );
             if (track) {
-                track.volume = clamp(action.payload.volume, 0, 1);
+                track.volume = clamp(action.payload.volume, 0, MAX_TRACK_VOLUME);
             }
         },
         addAutomationPoint(
@@ -1912,7 +1926,13 @@ const sessionSlice = createSlice({
             .addCase(playOriginal.rejected, setRejected)
 
             .addCase(stopAudioPlayback.pending, (state) =>
-                setPending(state, "Stopping audio..."),
+                {
+                    setPending(state, "Stopping audio...");
+                    // Pause UI immediately on user stop/pause command; backend sync will
+                    // confirm the final transport state shortly after.
+                    state.runtime.isPlaying = false;
+                    state.runtime.playbackTarget = null;
+                },
             )
             .addCase(stopAudioPlayback.fulfilled, (state, action) => {
                 state.busy = false;
@@ -2672,6 +2692,8 @@ export const {
     beginInteraction,
     endInteraction,
     setTrackName,
+    setTrackMeters,
+    clearTrackMeters,
     checkpointHistory,
     setToolMode,
     setEditParam,

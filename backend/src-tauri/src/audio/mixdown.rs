@@ -13,6 +13,7 @@ pub enum ExportFormat {
     #[default]
     Wav16,
     /// 24-bit 整型（高质量存档）。
+    #[allow(dead_code)]
     Wav24,
     /// 32-bit 浮点（最高质量，用于最终导出）。
     Wav32f,
@@ -38,6 +39,7 @@ pub struct MixdownOptions {
     /// 导出格式（位深），默认 [`ExportFormat::Wav16`]。
     pub export_format: ExportFormat,
     /// 质量预设，默认 [`QualityPreset::Realtime`]。
+    #[allow(dead_code)]
     pub quality_preset: QualityPreset,
 }
 
@@ -47,12 +49,13 @@ pub struct MixdownResult {
     pub duration_sec: f64,
 }
 
+#[allow(dead_code)]
 fn beat_sec(bpm: f64) -> f64 {
     60.0 / bpm.max(1e-6)
 }
 
-fn clamp01(x: f32) -> f32 {
-    x.clamp(0.0, 1.0)
+fn clamp_track_volume(x: f32) -> f32 {
+    x.clamp(0.0, 4.0)
 }
 
 fn clamp11(x: f32) -> f32 {
@@ -181,7 +184,7 @@ fn compute_track_gains(tracks: &[Track]) -> HashMap<String, (f32, bool, bool)> {
         let mut soloed = false;
         for id in &lineage {
             if let Some(node) = by_id.get(id) {
-                gain *= clamp01(node.volume);
+                gain *= clamp_track_volume(node.volume);
                 muted |= node.muted;
                 soloed |= node.solo;
             }

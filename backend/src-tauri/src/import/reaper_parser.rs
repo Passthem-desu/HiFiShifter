@@ -25,6 +25,7 @@ pub struct ReaperTempo {
     /// 每小节拍数（拍号分子）
     pub beats_per_bar: u32,
     /// 基准音符（4 = 四分音符，8 = 八分音符等）
+    #[allow(dead_code)]
     pub beat_note: u32,
 }
 

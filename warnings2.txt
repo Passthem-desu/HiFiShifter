@@ -1,0 +1,9 @@
+src\pitch\clip_rendering_state.rs:149:12: warning: methods `get_failed_clips`, `get_change_counter`, and `clear` are never used
+src\audio\hfspeaks_v2.rs:259:12: warning: method `data_size` is never used
+src\audio\hfspeaks_v2.rs:454:12: warning: method `get_peaks_segment` is never used
+src\audio\hfspeaks_v2.rs:741:8: warning: function `compute_mipmap_peaks` is never used
+src\audio\hfspeaks_v2.rs:1222:12: warning: associated function `load_mipmap_level` is never used
+src\audio\hfspeaks_v2.rs:1416:12: warning: method `get_or_compute` is never used
+src\state.rs:236:9: warning: field `allow_close` is never read
+src\vocoder\streaming_world.rs:58:9: warning: fields `f0`, `temporal_positions`, `spectrogram`, `aperiodicity`, `fft_size`, and `frame_period_ms` are never read
+src\vocoder\world_vocoder.rs:120:12: warning: function `RefreshSynthesizer` is never used

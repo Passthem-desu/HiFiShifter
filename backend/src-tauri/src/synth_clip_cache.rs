@@ -8,6 +8,8 @@
 //! - LRU 淘汰，容量上限 64 个 clip
 //! - `param_hash` 使用 FNV-1a 64-bit，覆盖 clip 时间参数 + pitch_edit 曲线片段
 
+#![allow(dead_code)]
+
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};

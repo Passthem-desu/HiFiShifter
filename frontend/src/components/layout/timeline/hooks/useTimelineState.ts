@@ -591,6 +591,9 @@ export function useTimelineState(): TimelineStateResult {
                 dispatch(setplayheadSec(beat));
                 void dispatch(seekPlayhead(beat));
             } else {
+                // 更新 Redux state 使三角形头部（TimeRulerPlayhead）与竖线同步
+                dispatch(setplayheadSec(beat));
+                // 同时直接操作 DOM 确保竖线无延迟跟随
                 if (playheadRef.current) {
                     playheadRef.current.style.left = `${beat * pxPerSecRef.current}px`;
                 }

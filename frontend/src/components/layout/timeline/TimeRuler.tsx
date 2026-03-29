@@ -83,18 +83,24 @@ const TimeRulerMarks = React.memo(function TimeRulerMarks({
 const TimeRulerPlayhead = React.memo(function TimeRulerPlayhead({
   playheadSec,
   pxPerSec,
+  lineRef,
+  headRef,
 }: {
   playheadSec: number;
   pxPerSec: number;
+  lineRef?: React.Ref<HTMLDivElement>;
+  headRef?: React.Ref<HTMLDivElement>;
 }) {
   const playheadLeft = playheadSec * pxPerSec;
   return (
     <>
       <div
+        ref={lineRef}
         className="absolute top-0 bottom-0 w-px bg-qt-playhead z-20"
         style={{ left: playheadLeft }}
       />
       <div
+        ref={headRef}
         className="absolute top-0 z-30"
         style={{
           left: playheadLeft,
@@ -116,6 +122,8 @@ export const TimeRuler: React.FC<{
   secPerBeat: number;
   viewportWidth?: number;
   playheadSec: number;
+  playheadLineRef?: React.Ref<HTMLDivElement>;
+  playheadHeadRef?: React.Ref<HTMLDivElement>;
   onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
   contentRef?: React.Ref<HTMLDivElement>;
 }> = ({
@@ -127,6 +135,8 @@ export const TimeRuler: React.FC<{
   secPerBeat,
   viewportWidth,
   playheadSec,
+  playheadLineRef,
+  playheadHeadRef,
   onMouseDown,
   contentRef,
 }) => {
@@ -174,7 +184,12 @@ export const TimeRuler: React.FC<{
           scrollLeft={scrollLeft}
           viewportWidth={viewportWidth}
         />
-        <TimeRulerPlayhead playheadSec={playheadSec} pxPerSec={pxPerSec} />
+        <TimeRulerPlayhead
+          playheadSec={playheadSec}
+          pxPerSec={pxPerSec}
+          lineRef={playheadLineRef}
+          headRef={playheadHeadRef}
+        />
       </div>
     </Box>
   );

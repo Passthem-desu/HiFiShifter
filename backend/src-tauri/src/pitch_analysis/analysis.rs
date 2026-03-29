@@ -1,6 +1,8 @@
 ﻿// pitch_analysis::analysis — 核心分析流水线
 // 包含：快照/diff、单 clip 分析、并行多 clip 分析、音高曲线合成。
 
+#![allow(dead_code)]
+
 use crate::state::{AppState, Clip, PitchAnalysisAlgo, TimelineState};
 use std::collections::HashSet;
 use std::path::Path;
