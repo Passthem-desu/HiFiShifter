@@ -610,13 +610,7 @@ export const AppearanceWindow: React.FC = () => {
      * 渲染 — 直接作为窗口内容，不需要 portal
      * ═══════════════════════════════════════════════════════════ */
     return (
-        <div
-            className="flex h-screen flex-col overflow-hidden select-none bg-qt-window"
-            style={{
-                backgroundImage:
-                    "radial-gradient(circle at top left, color-mix(in srgb, var(--qt-highlight) 18%, transparent) 0%, transparent 32%)",
-            }}
-        >
+        <div className="flex h-screen flex-col overflow-hidden select-none bg-qt-window">
             {/* ═══════ 头部：标题栏 + Tab 切换 ═══════ */}
             <div
                 className={`mx-auto w-full max-w-[1120px] ${CARD_CLASS} space-y-4 px-5 py-4 shrink-0`}
