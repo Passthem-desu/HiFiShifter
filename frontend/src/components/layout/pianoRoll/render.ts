@@ -146,7 +146,10 @@ function drawCurveTimed(args: {
     for (let i = 0; i < values.length; i += 1) {
         const frame = startFrame + i * step;
         const tSec = framesToTime(frame, fp);
-        if (tSec < visibleStartSec || tSec > visibleStartSec + visibleDurSec) {
+        if (tSec > visibleStartSec + visibleDurSec) {
+            break; 
+        }
+        if (tSec < visibleStartSec) {
             started = false;
             continue;
         }
@@ -623,36 +626,16 @@ export function drawPianoRoll(args: {
         }
     }
 
-    // 创建离屏 canvas 缓冲（复用，避免每帧创建）
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    // ========================================
+    // 废弃离屏 Canvas，保留 mipmap 级数状态即可
+    // ========================================
     const drawPianoRollRef = drawPianoRoll as unknown as {
-        _offCanvas?: HTMLCanvasElement;
         _lastLevelByPath?: Record<string, 0 | 1 | 2>;
     };
-    // 初始化 previousLevel 跟踪映射（与 WaveformTrackCanvas 的 lastLevelByPathRef 一致）
     if (!drawPianoRollRef._lastLevelByPath) {
         drawPianoRollRef._lastLevelByPath = {};
     }
     const lastLevelByPath = drawPianoRollRef._lastLevelByPath;
-    const offCanvas =
-        drawPianoRollRef._offCanvas || document.createElement("canvas");
-    drawPianoRollRef._offCanvas = offCanvas;
-    // 限制 dpr 为 1，与主 canvas 一致
-    const offDpr = 1;
-    const displayedOffW = Math.max(1, w);
-    const displayedOffH = Math.max(1, h);
-    const internalOffW = Math.max(1, Math.floor(displayedOffW * offDpr));
-    const internalOffH = Math.max(1, Math.floor(displayedOffH * offDpr));
-    if (offCanvas.width !== internalOffW) {
-        offCanvas.width = internalOffW;
-    }
-    if (offCanvas.height !== internalOffH) {
-        offCanvas.height = internalOffH;
-    }
-    offCanvas.style.width = `${displayedOffW}px`;
-    offCanvas.style.height = `${displayedOffH}px`;
-    const offCtx = offCanvas.getContext("2d");
-    if (!offCtx) return;
 
     // Background waveform: per-clip 叠加绘制
     // 与 WaveformTrackCanvas 保持一致的数据路径：
@@ -735,11 +718,11 @@ export function drawPianoRoll(args: {
         // clip 内的像素偏移
         const clipPixelOffset = (visStartSec - clipStartSec) * pxPerSec;
 
-        // 构建渲染参数（与 WaveformTrackCanvas 一致的参数结构）
+        // 构建渲染参数
         const params: WaveformRenderParams = {
             canvasWidth: visibleClipWidthPx,
-            canvasHeight: displayedOffH,
-            centerY: displayedOffH / 2,
+            canvasHeight: h, // 直接使用主画布高度
+            centerY: h / 2,
             sourceStartSec,
             clipDuration: entry.lengthSec,
             playbackRate: pr,
@@ -757,38 +740,28 @@ export function drawPianoRoll(args: {
 
         // 应用增益（音量 + 淡入淡出）
         const withGains = applyGainsToPeaks(result.interleaved, params);
-
-        // 使用固定尺寸的离屏 canvas，避免缩放过程中频繁重设宽度导致闪烁
-        offCtx.setTransform(offDpr, 0, 0, offDpr, 0, 0);
-        offCtx.clearRect(0, 0, displayedOffW, displayedOffH);
-
-        // 渲染波形（line 竖线模式）
-        renderWaveform(offCtx, withGains, params, waveformColors.stroke, 0.5, "line");
-
-        // 裁剪到 clip 的可视 x 范围，避免溢出到相邻 clip
         ctx.save();
+
+        // 严格裁剪在 clip 实际可见范围内，防止溢出
         ctx.beginPath();
         ctx.rect(visibleClipStartX, 0, visibleClipWidthPx, h);
         ctx.clip();
 
         // 静音 clip 半透明
         ctx.globalAlpha = entry.muted ? 0.2 : 0.5;
-
-        // 使用 drawImage 精确绘制
-        ctx.drawImage(
-            offCanvas,
-            0,
-            0,
-            Math.max(1, Math.floor(visibleClipWidthPx * offDpr)),
-            internalOffH,
-            visibleClipStartX,
-            0,
-            visibleClipWidthPx,
-            h,
+        // 因为 renderWaveform 内部是从 x=0 开始画的，所以我们把画布的原点平移到 Clip 的可视起始点
+        ctx.translate(visibleClipStartX, 0);
+        renderWaveform(
+            ctx,
+            withGains,
+            params,
+            waveformColors.stroke,
+            0.5,
+            "line",
         );
 
         ctx.restore();
-    }
+        }
 
     console.info(
         `[PianoRoll] 🎨 波形渲染完成 | 渲染=${prRenderedCount} | 跳过=${prSkippedCount} | 总clips=${clipPeaks.length}`,
@@ -852,8 +825,11 @@ export function drawPianoRoll(args: {
                 // 计算当前帧的时间（秒），统一用 sec 坐标系
                 const frameSec = curveStartSec + (i * fp) / 1000;
                 const x = frameSec * pxPerSec - scrollLeft;
-                // 裁剪到可见区域
-                if (x < -10 || x > w + 10) continue;
+
+                if (x > w + 10) break;
+
+                // 裁剪左侧不可见区域
+                if (x < -10) continue;
 
                 // 无声帧（midi <= 0）：跳过，但保持连续性
                 if (midi <= 0) {

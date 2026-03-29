@@ -102,7 +102,7 @@ VocalShifter提供的算法库。
 | 另存为                       | Ctrl + Shift + S                |
 | 导出音频                     | Ctrl + E                        |
 | 模式切换（选择/绘制）        | Tab                             |
-| 删除选中剪辑                 | Delete / Backspace              |
+| 删除选中剪辑                 | Delete                          |
 | 复制选中剪辑（应用内剪贴板） | Ctrl + C                        |
 | 粘贴到播放头位置             | Ctrl + V                        |
 | 参数面板复制选区曲线         | Ctrl + C（Select 模式）         |
