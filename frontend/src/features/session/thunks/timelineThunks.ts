@@ -172,9 +172,13 @@ export const createClipsRemote = createAsyncThunk(
         const knownIds = new Set(state0.session.clips.map((c) => c.id));
         const createdIdsInBatch = new Set<string>();
 
-        // 并行创建所�?clip，提升批量操作性能
-        const results = await Promise.all(
-            templates.map(async (tpl) => {
+        // ========================================
+        // 废弃 Promise.all 并发推测
+        // ========================================
+        const results: Array<{ createdId: string; timeline: TimelineState }> = [];
+
+        try {
+            for (const tpl of templates) {
                 const added = await webApi.addClip({
                     trackId: tpl.trackId,
                     name: tpl.name,
@@ -201,9 +205,11 @@ export const createClipsRemote = createAsyncThunk(
                     !createdIdsInBatch.has(addedTimeline.selected_clip_id)
                         ? addedTimeline.selected_clip_id
                         : null);
+                
                 if (!createdId) {
                     throw new Error("add_clip_failed");
                 }
+                // 串行推入已知 ID
                 createdIdsInBatch.add(createdId);
 
                 const updated = await webApi.setClipState({
@@ -219,6 +225,7 @@ export const createClipsRemote = createAsyncThunk(
                     fadeInCurve: tpl.fadeInCurve,
                     fadeOutCurve: tpl.fadeOutCurve,
                 });
+                
                 if (!(updated as { ok?: boolean }).ok) {
                     throw new Error(
                         (updated as { error?: { message?: string } }).error?.message ??
@@ -241,8 +248,6 @@ export const createClipsRemote = createAsyncThunk(
                     finalTimeline = linkedApplied as TimelineState;
                 }
 
-                // Keep waveform visible after cut→paste even when backend cannot
-                // reconstruct preview metadata from source_path (e.g. stale/relative path).
                 if (Array.isArray(tpl.waveformPreview)) {
                     const createdClip = finalTimeline.clips.find(
                         (c) => c.id === createdId,
@@ -256,13 +261,17 @@ export const createClipsRemote = createAsyncThunk(
                     }
                 }
 
-                return { createdId, timeline: finalTimeline };
-            }),
-        ).catch((err: unknown) => {
+                results.push({ createdId, timeline: finalTimeline });
+            }
+        } catch (err: unknown) {
             return rejectWithValue(
                 err instanceof Error ? err.message : "create_clips_failed",
             );
-        });
+        }
+
+        if (results.length === 0) {
+            return rejectWithValue("create_clips_failed");
+        }
 
         if (!results || !Array.isArray(results)) {
             return results as ReturnType<typeof rejectWithValue>;

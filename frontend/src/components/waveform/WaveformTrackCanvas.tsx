@@ -35,19 +35,27 @@ import {
     reverseInterleavedPeaks,
     type WaveformRenderParams,
 } from "../../utils/waveformRenderer";
+// ========================================
+// 局部 Buffer 复用池
+// ========================================
+const _downsamplePool: Float32Array[] = [];
+const POOL_MAX = 8;
 
-/**
- * 向上取整到最近的 2 的幂次（用于离屏 Canvas 预分配，避免频繁 resize）
- */
-function nextPow2(v: number): number {
-    let n = Math.ceil(v);
-    n--;
-    n |= n >> 1;
-    n |= n >> 2;
-    n |= n >> 4;
-    n |= n >> 8;
-    n |= n >> 16;
-    return n + 1;
+function acquireDownsampleBuffer(minLen: number): Float32Array {
+    for (let i = 0; i < _downsamplePool.length; i++) {
+        if (_downsamplePool[i].buffer.byteLength / 4 >= minLen) {
+            const buf = _downsamplePool[i];
+            _downsamplePool.splice(i, 1);
+            return new Float32Array(buf.buffer, 0, minLen);
+        }
+    }
+    return new Float32Array(minLen);
+}
+
+function releaseDownsampleBuffer(buf: Float32Array): void {
+    if (buf.length > 0 && _downsamplePool.length < POOL_MAX) {
+        _downsamplePool.push(new Float32Array(buf.buffer));
+    }
 }
 
 export interface WaveformTrackCanvasProps {
@@ -118,17 +126,11 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
     strokeWidthRef.current = strokeWidth;
     viewportWidthPxRef.current = viewportWidthPx;
 
-    // Canvas 固定宽度 = 视口宽度（不随缩放改变）
-    const canvasWidthPx = Math.max(1, Math.ceil(viewportWidthPx));
-
-    // Canvas 在 timeline 全局坐标系中的左侧位置（跟随视口滚动）
-    const canvasLeftPx = props.viewportStartSec * props.pxPerSec;
-
     // ========================================
     // invalidate + rAF 帧合并（与 PianoRoll 完全一致）
     // 同一帧内无论有多少次 invalidate 调用，只执行一次绘制
     // ========================================
-    const drawRef = React.useRef<() => void>(() => {});
+    const drawRef = React.useRef<() => void>(() => { });
 
     const invalidate = React.useCallback(() => {
         if (rafRef.current != null) return; // 已有待执行帧，跳过
@@ -182,8 +184,8 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         const displayW = Math.max(1, Math.ceil(currentViewportWidthPx));
         const displayH = currentWaveformHeight;
 
-        // 限制 dpr 为 1，降低高分屏下 Canvas 像素量以提升渲染性能
-        const dpr = 1;
+        // 取消限制 dpr 为 1
+        const dpr = window.devicePixelRatio || 1;
         const internalW = Math.max(1, Math.floor(displayW * dpr));
         const internalH = Math.max(1, Math.floor(displayH * dpr));
 
@@ -208,8 +210,6 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         if (!offCanvasRef.current) {
             offCanvasRef.current = document.createElement("canvas");
         }
-        const offCanvas = offCanvasRef.current;
-        const offDpr = dpr;
 
         if (__perfDebug) __tSetup = performance.now() - __t0;
 
@@ -277,26 +277,33 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
 
             // ========================================
             // 方案2：限制数据量 — 当原始数据点数远超可视像素时，快速预降采样
-            // 减少后续 applyGainsToPeaks + renderWaveform 的 per-pixel 扫描开销
             // ========================================
             const __tDs0 = __perfDebug ? performance.now() : 0;
             const storeInterleaved = result.interleaved;
             let renderInterleaved: Float32Array = storeInterleaved;
             let releasedStoreInterleaved = false;
             const rawSampleCount = storeInterleaved.length / 2;
-            const targetSamples = visibleWidthPx * 2; // 每像素 2 个采样点就足够
+            const targetSamples = visibleWidthPx * 2;
+
             if (rawSampleCount > targetSamples && targetSamples >= 2) {
                 const w = Math.ceil(targetSamples);
-                const downsampled = new Float32Array(w * 2);
+
+                // 从局部池获取 Buffer
+                const downsampled = acquireDownsampleBuffer(w * 2);
+
+                // 提取线性步长常数，将循环内的 4 次浮点乘除降至 1 次加法
+                const srcStep = rawSampleCount / w;
+
                 for (let i = 0; i < w; i++) {
-                    const srcStart = Math.floor((i / w) * rawSampleCount);
-                    const srcEnd = Math.min(
-                        rawSampleCount - 1,
-                        Math.ceil(((i + 1) / w) * rawSampleCount),
-                    );
+                    const srcStart = i * srcStep;
+                    const srcEnd = srcStart + srcStep;
+
+                    const iStart = Math.max(0, Math.floor(srcStart));
+                    const iEnd = Math.min(rawSampleCount - 1, Math.ceil(srcEnd));
+
                     let pMin = Infinity;
                     let pMax = -Infinity;
-                    for (let j = srcStart; j <= srcEnd; j++) {
+                    for (let j = iStart; j <= iEnd; j++) {
                         const sMin = storeInterleaved[j * 2];
                         const sMax = storeInterleaved[j * 2 + 1];
                         if (sMin < pMin) pMin = sMin;
@@ -305,17 +312,20 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                     downsampled[i * 2] = pMin === Infinity ? 0 : pMin;
                     downsampled[i * 2 + 1] = pMax === -Infinity ? 0 : pMax;
                 }
-                // 归还原始 buffer 到复用池
+
                 waveformMipmapStore.releaseInterleaved(storeInterleaved);
                 releasedStoreInterleaved = true;
                 renderInterleaved = downsampled;
             }
 
-            const clipPixelOffset = (visStartSec - clipStartSec) * currentPxPerSec;
+            // --- 从这里开始替换 ---
+
+            // 偏移量改为相对于主屏幕，而不是裁剪视口
+            const clipPixelOffset = (currentViewportStartSec - clipStartSec) * currentPxPerSec;
 
             // 构建渲染参数
             const params: WaveformRenderParams = {
-                canvasWidth: visibleWidthPx,
+                canvasWidth: displayW,
                 canvasHeight: displayH,
                 centerY: displayH / 2,
                 sourceStartSec,
@@ -329,7 +339,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 fadeOutCurve: (clip.fadeOutCurve as FadeCurveType) ?? "sine",
                 dataStartSec: result.dataStartSec,
                 dataDurationSec: result.dataDurationSec,
-                clipPixelOffset,
+                clipPixelOffset, // 相对于主 Canvas 的偏移
                 clipTotalWidthPx: Math.max(1, clipWidthPx),
             };
 
@@ -343,69 +353,46 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             const withGains = applyGainsToPeaks(peaksForRender, params);
             const __tGain1 = __perfDebug ? performance.now() : 0;
 
-
             // ========================================
-            // 离屏 Canvas 渲染
-            // 方案1：预分配为 nextPow2 大小，只增不减，消除频繁 resize 导致的 GPU 纹理重分配
+            // 废弃离屏 Canvas
             // ========================================
-            const offInternalW = Math.max(1, Math.floor(visibleWidthPx * offDpr));
-            const offInternalH = Math.max(1, Math.floor(displayH * offDpr));
-            if (offCanvas.width < offInternalW) {
-                // 向上取整到 2 的幂（最小 512），避免缩放过程中频繁 resize
-                offCanvas.width = Math.max(512, nextPow2(offInternalW));
-            }
-            if (offCanvas.height < offInternalH) {
-                offCanvas.height = Math.max(256, nextPow2(offInternalH));
-            }
-
-            const offCtx = offCanvas.getContext("2d");
-            if (!offCtx) continue;
-
-            offCtx.setTransform(offDpr, 0, 0, offDpr, 0, 0);
-            offCtx.clearRect(0, 0, visibleWidthPx, displayH);
-
             const __tRender0 = __perfDebug ? performance.now() : 0;
+
+            ctx.save();
+            ctx.beginPath();
+            // 严格裁剪在 clip 实际可见范围内，防止越界绘制到其他片段上
+            ctx.rect(visLeftPx, 0, visRightPx - visLeftPx, displayH);
+            ctx.clip();
+
+            // 处理静音片段半透明
+            ctx.globalAlpha = clip.muted ? 0.4 : 1.0;
+
             renderWaveform(
-                offCtx,
+                ctx,
                 withGains,
                 params,
                 currentStrokeColor,
                 currentStrokeWidth,
                 "line",
             );
-            const __tRender1 = __perfDebug ? performance.now() : 0;
-
-            // 裁剪到 clip 可视范围，drawImage 到主 Canvas
-            ctx.save();
-            ctx.beginPath();
-            ctx.rect(visLeftPx, 0, visRightPx - visLeftPx, displayH);
-            ctx.clip();
-
-            // 静音 clip 半透明
-            ctx.globalAlpha = clip.muted ? 0.4 : 1.0;
-
-            const __tDraw0 = __perfDebug ? performance.now() : 0;
-            ctx.drawImage(
-                offCanvas,
-                0,
-                0,
-                offInternalW,
-                offInternalH,
-                visLeftPx,
-                0,
-                visibleWidthPx,
-                displayH,
-            );
-            const __tDraw1 = __perfDebug ? performance.now() : 0;
 
             ctx.restore();
 
-            // 归还增益 buffer（仅当 applyGainsToPeaks 返回了新数组时才归还）
+            const __tRender1 = __perfDebug ? performance.now() : 0;
+            const __tDraw0 = 0; // 已废弃 drawImage
+            const __tDraw1 = 0;
+
+            // 1. 归还增益 buffer
             if (withGains !== renderInterleaved) {
                 releaseGainBuffer(withGains);
             }
 
-            // 归还 store 复用池 buffer；若预降采样已提前归还则跳过
+            // 2. 归还预降采样产生的 buffer（如果有）
+            if (renderInterleaved !== storeInterleaved) {
+                releaseDownsampleBuffer(renderInterleaved);
+            }
+
+            // 3. 归还 store 复用池 buffer
             if (!releasedStoreInterleaved) {
                 waveformMipmapStore.releaseInterleaved(storeInterleaved);
             }
@@ -490,6 +477,10 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             viewportStartSecRef.current = vpStartSec;
             viewportEndSecRef.current = vpEndSec;
             viewportWidthPxRef.current = viewportWidth;
+            if (canvasRef.current) {
+                canvasRef.current.style.left = `${scrollLeft}px`;
+            }
+
             invalidate();
         });
         return unsub;
@@ -521,32 +512,34 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         };
     }, []);
 
+    // 移除原有的 canvasWidthPx 和 canvasLeftPx 的计算，直接替换 return
     return (
         <canvas
             ref={canvasRef}
             style={{
                 position: "absolute",
-                left: canvasLeftPx,
                 top: waveformTop,
-                width: canvasWidthPx,
+                // height 交给 style 控制比较稳定
                 height: waveformHeight,
                 pointerEvents: "none",
                 zIndex: 0,
+                // 移除 left 和 width
+                // 它们属于高频变化属性，已完全交由内部 drawRef 直接操作 DOM 更新。
             }}
         />
     );
 },
-// ★ 自定义比较函数：忽略高频 props（pxPerSec/viewportStartSec/viewportEndSec）
-// 这些高频参数由 timelineViewportBus 直接推送到 ref → invalidate，无需 React re-render
-(prev, next) => {
-    return (
-        prev.clips === next.clips &&
-        prev.trackHeight === next.trackHeight &&
-        prev.waveformTop === next.waveformTop &&
-        prev.waveformHeight === next.waveformHeight &&
-        prev.viewportWidthPx === next.viewportWidthPx &&
-        prev.strokeColor === next.strokeColor &&
-        prev.strokeWidth === next.strokeWidth
-        // 故意不比较 pxPerSec / viewportStartSec / viewportEndSec
-    );
-});
+    // ★ 自定义比较函数：忽略高频 props（pxPerSec/viewportStartSec/viewportEndSec）
+    // 这些高频参数由 timelineViewportBus 直接推送到 ref → invalidate，无需 React re-render
+    (prev, next) => {
+        return (
+            prev.clips === next.clips &&
+            prev.trackHeight === next.trackHeight &&
+            prev.waveformTop === next.waveformTop &&
+            prev.waveformHeight === next.waveformHeight &&
+            prev.viewportWidthPx === next.viewportWidthPx &&
+            prev.strokeColor === next.strokeColor &&
+            prev.strokeWidth === next.strokeWidth
+            // 故意不比较 pxPerSec / viewportStartSec / viewportEndSec
+        );
+    });

@@ -1,5 +1,5 @@
 import type { ParamName } from "./types.js";
-
+const _sharedOverlayValues: number[] = [];
 export function toggleSecondaryParamVisibility(
     current: Partial<Record<ParamName, boolean>>,
     param: ParamName,
@@ -35,7 +35,10 @@ export function resolveSecondaryOverlayValues(args: {
 }): number[] {
     const { orig, edit } = args;
     const length = Math.max(orig.length, edit.length);
-    const values = new Array<number>(length);
+    
+    // 复用共享数组，原地调整 length，不产生任何新对象
+    const values = _sharedOverlayValues;
+    values.length = length;
 
     for (let index = 0; index < length; index += 1) {
         const editValue = edit[index];
@@ -48,7 +51,7 @@ export function resolveSecondaryOverlayValues(args: {
         } else if (hasOrigValue) {
             values[index] = origValue;
         } else {
-            values[index] = 0;
+            values[index] = 0; 
         }
     }
 

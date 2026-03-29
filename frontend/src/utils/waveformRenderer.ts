@@ -154,21 +154,22 @@ export function applyGainsToPeaks(
         return result;
     }
 
-    // 预计算常数（避免循环内重复计算）
+    // 预计算常数
     const invTotalSamplesM1 = totalSamples > 1 ? 1 / (totalSamples - 1) : 0;
     const invPlaybackRate = 1 / playbackRate;
     const fadeOutStart = clipDuration - fadeOutSec;
     const invFadeInSec = fadeInSec > 0 ? 1 / fadeInSec : 0;
     const invFadeOutSec = fadeOutSec > 0 ? 1 / fadeOutSec : 0;
 
+    // 提取时间映射的线性步长与基准值
+    const baseTime = (effectiveDataStartSec - sourceStartSec) * invPlaybackRate;
+    const timeStep = totalSamples > 1 
+        ? (effectiveDataDurationSec * invTotalSamplesM1 * invPlaybackRate) 
+        : 0;
+
     for (let i = 0; i < totalSamples; i++) {
-        const position = i * invTotalSamplesM1; // 0~1
-
-        // 计算采样点对应的源文件时间
-        const sourceTime = effectiveDataStartSec + position * effectiveDataDurationSec;
-
-        // 计算该时间在 timeline 上的位置（秒）
-        const time = (sourceTime - sourceStartSec) * invPlaybackRate;
+        // 使用预计算的等差数列求解 time
+        const time = baseTime + i * timeStep;
 
         // 计算综合增益
         let gain = volumeGain;
@@ -329,6 +330,7 @@ export function renderWaveform(
 
     // 设置绘制样式
     ctx.strokeStyle = strokeColor;
+    ctx.fillStyle = strokeColor;
     ctx.lineWidth = strokeWidth;
     ctx.lineJoin = "round";
     ctx.lineCap = mode === "jitter" ? "round" : "butt";
@@ -336,13 +338,15 @@ export function renderWaveform(
     // ========================================
     // 滑动指针优化：O(W + N) 复杂度
     // ========================================
-    ctx.beginPath();
+    // 仅在连续折线模式下才开启矢量 Path
+    if (mode === "jitter") {
+        ctx.beginPath();
+    }
 
-    let cursor = 0;
-    let jitterStarted = false; // jitter 模式下是否已 moveTo
+    let jitterStarted = false;
 
     for (let px = localPxStart; px <= localPxEnd; px++) {
-        // 直接用预计算系数计算该像素列覆盖的索引范围
+        // 用预计算系数计算该像素列覆盖的索引范围
         const centerIdx = px * pxToIdxScale + pxToIdxBase;
         const rawIdxLeft = centerIdx - halfPixelIdx;
         const rawIdxRight = centerIdx + halfPixelIdx;
@@ -354,19 +358,14 @@ export function renderWaveform(
             : (rawIdxRight > idxAtDataEnd ? idxAtDataEnd : rawIdxRight);
 
         // 取该范围内所有采样点的 min/max
-        const iStart = idxLeft < 0 ? 0 : (idxLeft | 0); // 等价于 Math.max(0, Math.floor(idxLeft))
+        const iStart = idxLeft < 0 ? 0 : (idxLeft | 0);
         const iEnd = idxRight > maxIdx ? maxIdx : Math.ceil(idxRight);
-
-        // 滑动游标：确保 cursor 不回退，只前进
-        if (iStart > cursor) {
-            cursor = iStart;
-        }
 
         let pixelMin = Infinity;
         let pixelMax = -Infinity;
 
-        const scanStart = cursor < iStart ? cursor : iStart;
-        for (let i = scanStart; i <= iEnd; i++) {
+        // 直接干脆地遍历属于该像素的数据段
+        for (let i = iStart; i <= iEnd; i++) {
             const idx2 = i * 2;
             const sMin = peaks[idx2];
             const sMax = peaks[idx2 + 1];
@@ -374,15 +373,13 @@ export function renderWaveform(
             if (sMax > pixelMax) pixelMax = sMax;
         }
 
-        cursor = iEnd;
-
         if (pixelMin === Infinity) continue;
 
         if (mode === "jitter") {
             // ========================================
-            // 抖动线模式：交替取包络内 0.25/0.75 位置，画连续折线
+            // 抖动线模式
             // ========================================
-            const t = px & 1 ? 0.75 : 0.25; // 位运算替代 px % 2
+            const t = px & 1 ? 0.75 : 0.25; 
             const value = pixelMax + (pixelMin - pixelMax) * t;
             const y = centerY - value * amplitudeScale;
 
@@ -393,26 +390,22 @@ export function renderWaveform(
                 ctx.lineTo(px, y);
             }
         } else {
-            // ========================================
-            // 竖线模式：每像素画 min→max 竖线（DAW 标准做法）
-            // ========================================
             const yTop = centerY - pixelMax * amplitudeScale;
             const yBot = centerY - pixelMin * amplitudeScale;
 
             // 确保静音段至少有最小可见高度（0.5px）
             if (yBot - yTop < 0.5) {
                 const midY = (yTop + yBot) * 0.5;
-                ctx.moveTo(px, midY - 0.25);
-                ctx.lineTo(px, midY + 0.25);
+                // 用 px - strokeWidth / 2 确保矩形的中心点与原本线条的中轴完美对齐
+                ctx.fillRect(px - strokeWidth / 2, midY - 0.25, strokeWidth, 0.5);
             } else {
-                ctx.moveTo(px, yTop);
-                ctx.lineTo(px, yBot);
+                ctx.fillRect(px - strokeWidth / 2, yTop, strokeWidth, yBot - yTop);
             }
         }
     }
 
-    ctx.stroke();
-}
-
-
+    if (mode === "jitter") {
+        ctx.stroke();
+    }
+    }
 
