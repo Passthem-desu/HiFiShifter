@@ -136,6 +136,21 @@ pub fn load_project_file(bytes: &[u8]) -> Result<ProjectFile, String> {
     serde_json::from_slice(bytes).map_err(|e| format!("无法解析工程文件: {}", e))
 }
 
+pub fn is_json_project_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("json"))
+        .unwrap_or(false)
+}
+
+pub fn serialize_project_file_for_path(pf: &ProjectFile, path: &Path) -> Result<Vec<u8>, String> {
+    if is_json_project_path(path) {
+        // 当用户选择 .json 后缀时，按 JSON 文本保存工程。
+        return serde_json::to_vec_pretty(pf).map_err(|e| e.to_string());
+    }
+    rmp_serde::to_vec_named(pf).map_err(|e| e.to_string())
+}
+
 // ─── 路径处理 ──────────────────────────────────────────────────────────────────
 
 pub fn project_name_from_path(path: &Path) -> String {

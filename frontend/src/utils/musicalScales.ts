@@ -140,13 +140,31 @@ function positiveMod(a: number, b: number): number {
  * - -3 => -2 steps
  * - +8 => +7 steps (one octave)
  * - -8 => -7 steps (one octave)
+ *
+ * Fractional mapping keeps ratio between neighboring valid degree labels:
+ * - +3.5 => +2.5 steps
+ * - -2.25 => -1.25 steps
  */
 export function degreeInputToScaleSteps(inputDegrees: number): number {
     if (!Number.isFinite(inputDegrees)) return 0;
-    const d = Math.trunc(inputDegrees);
-    const ad = Math.abs(d);
-    if (ad <= 1) return 0;
-    return Math.sign(d) * (ad - 1);
+    if (inputDegrees > 1) return inputDegrees - 1;
+    if (inputDegrees < -1) return inputDegrees + 1;
+    return 0;
+}
+
+/**
+ * Convert internal degree-step shift back to user-facing music-theory degree labels.
+ *
+ * Internal steps intentionally avoid +/-1 in user display:
+ * - 0 => 0
+ * - +2 => +3
+ * - -1 => -2
+ */
+export function scaleStepsToDegreeDisplay(degreeSteps: number): number {
+    if (!Number.isFinite(degreeSteps)) return 0;
+    if (degreeSteps > 0) return degreeSteps + 1;
+    if (degreeSteps < 0) return degreeSteps - 1;
+    return 0;
 }
 
 /**
@@ -176,6 +194,18 @@ function scaleDegreeToMidi(absDegree: number, scale: ScaleLike): number {
     const targetOct = floorDiv(absDegree, degreeCount);
     const targetIdx = positiveMod(absDegree, degreeCount);
     return targetOct * 12 + offsets[targetIdx];
+}
+
+function scaleDegreeToMidiFractional(absDegree: number, scale: ScaleLike): number {
+    if (!Number.isFinite(absDegree)) return 0;
+    const lowerDegree = Math.floor(absDegree);
+    const frac = absDegree - lowerDegree;
+    if (frac <= 1e-9) {
+        return scaleDegreeToMidi(lowerDegree, scale);
+    }
+    const lowerMidi = scaleDegreeToMidi(lowerDegree, scale);
+    const upperMidi = scaleDegreeToMidi(lowerDegree + 1, scale);
+    return lowerMidi + (upperMidi - lowerMidi) * frac;
 }
 
 function getScaleDegreeAnchorsAroundMidi(
@@ -274,17 +304,17 @@ export function transposePitchByScaleSteps(
     if (!Number.isFinite(midi) || !Number.isFinite(degreeSteps)) return midi;
     if (degreeSteps === 0) return midi;
 
-    const stepShift = Math.trunc(degreeSteps);
+    const stepShift = degreeSteps;
     const { lower, upper, ratio } = getScaleDegreeAnchorsAroundMidi(
         midi,
         scale,
     );
 
-    const targetLowerMidi = scaleDegreeToMidi(
+    const targetLowerMidi = scaleDegreeToMidiFractional(
         lower.absDegree + stepShift,
         scale,
     );
-    const targetUpperMidi = scaleDegreeToMidi(
+    const targetUpperMidi = scaleDegreeToMidiFractional(
         upper.absDegree + stepShift,
         scale,
     );

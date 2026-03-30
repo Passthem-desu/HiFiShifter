@@ -29,6 +29,10 @@ import {
 import { waveformMipmapStore } from "../../../utils/waveformMipmapStore";
 import { resolveScaleNotes } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
+import {
+    childPitchOffsetValueToDisplay,
+    isChildPitchOffsetDegreesParam,
+} from "./childPitchOffsetParams";
 
 /** 为数值轴选择"好看"的刻度步长 */
 function niceAxisStep(range: number, targetCount: number): number {
@@ -44,9 +48,11 @@ function niceAxisStep(range: number, targetCount: number): number {
 }
 
 /** 格式化轴标记数值，避免浮点噪声 */
-function formatAxisMark(v: number): string {
+function formatAxisMark(v: number, param?: ParamName): string {
+    const displayValue =
+        param != null ? childPitchOffsetValueToDisplay(param, v) : v;
     // 最多保留 4 位有效数字，去掉尾随零
-    const s = parseFloat(v.toPrecision(4)).toString();
+    const s = parseFloat(displayValue.toPrecision(4)).toString();
     return s;
 }
 
@@ -546,13 +552,19 @@ export function drawPianoRoll(args: {
                     m += niceStep
                 ) {
                     const y = valueToY(editParam, m, h);
-                    ctx.fillText(formatAxisMark(m), 6, y);
+                    ctx.fillText(formatAxisMark(m, editParam), 6, y);
                     ctx.strokeStyle = colors.tensionLine;
                     ctx.lineWidth = 1;
                     ctx.beginPath();
                     ctx.moveTo(0, y + 0.5);
                     ctx.lineTo(w, y + 0.5);
                     ctx.stroke();
+                }
+
+                // Ensure degree-offset axis explicitly shows the 0 line label.
+                if (isChildPitchOffsetDegreesParam(editParam)) {
+                    const y0 = valueToY(editParam, 0, h);
+                    ctx.fillText(formatAxisMark(0, editParam), 6, y0);
                 }
             }
         }

@@ -1,6 +1,6 @@
 use crate::project::{
     load_project_file, make_paths_relative, project_name_from_path, resolve_paths_relative,
-    CustomScale, ProjectFile,
+    serialize_project_file_for_path, CustomScale, ProjectFile,
 };
 use crate::state::AppState;
 use crate::synth_clip_cache;
@@ -20,6 +20,40 @@ fn normalize_scale_key(raw: &str) -> String {
 
 fn normalize_custom_scale(input: Option<CustomScale>) -> Option<CustomScale> {
     input.map(|s| s.normalized())
+}
+
+fn base_scale_notes(scale: &str) -> Vec<u8> {
+    match normalize_scale_key(scale).as_str() {
+        "C" => vec![0, 2, 4, 5, 7, 9, 11],
+        "Db" => vec![1, 3, 5, 6, 8, 10, 0],
+        "D" => vec![2, 4, 6, 7, 9, 11, 1],
+        "Eb" => vec![3, 5, 7, 8, 10, 0, 2],
+        "E" => vec![4, 6, 8, 9, 11, 1, 3],
+        "F" => vec![5, 7, 9, 10, 0, 2, 4],
+        "Gb" => vec![6, 8, 10, 11, 1, 3, 5],
+        "G" => vec![7, 9, 11, 0, 2, 4, 6],
+        "Ab" => vec![8, 10, 0, 1, 3, 5, 7],
+        "A" => vec![9, 11, 1, 2, 4, 6, 8],
+        "Bb" => vec![10, 0, 2, 3, 5, 7, 9],
+        "B" => vec![11, 1, 3, 4, 6, 8, 10],
+        _ => vec![0, 2, 4, 5, 7, 9, 11],
+    }
+}
+
+fn effective_scale_notes(
+    base_scale: &str,
+    use_custom_scale: bool,
+    custom_scale: Option<&CustomScale>,
+) -> Vec<u8> {
+    if use_custom_scale {
+        if let Some(custom) = custom_scale {
+            let normalized = custom.normalized();
+            if !normalized.notes.is_empty() {
+                return normalized.notes;
+            }
+        }
+    }
+    base_scale_notes(base_scale)
 }
 
 fn normalize_beats_per_bar(raw: u32) -> u32 {
@@ -46,6 +80,14 @@ fn update_window_title(window: &Window, name: &str, dirty: bool) {
     let _ = window.set_title(&title);
 }
 
+fn latest_clip_end_sec(timeline: &crate::state::TimelineState) -> f64 {
+    timeline
+        .clips
+        .iter()
+        .map(|clip| (clip.start_sec + clip.length_sec).max(0.0))
+        .fold(0.0_f64, f64::max)
+}
+
 pub(crate) fn save_project_to_path_inner(
     state: &AppState,
     window: &Window,
@@ -54,11 +96,12 @@ pub(crate) fn save_project_to_path_inner(
     let path = PathBuf::from(&project_path);
     let name = project_name_from_path(&path);
 
-    let tl = state
+    let mut tl = state
         .timeline
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
+    tl.project_sec = latest_clip_end_sec(&tl).max(4.0).ceil();
     let (base_scale, use_custom_scale, custom_scale, beats_per_bar, grid_size) = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         (
@@ -73,8 +116,7 @@ pub(crate) fn save_project_to_path_inner(
     let mut pf = ProjectFile::new(name.clone(), tl_rel, base_scale, beats_per_bar, grid_size);
     pf.use_custom_scale = use_custom_scale && custom_scale.is_some();
     pf.custom_scale = custom_scale;
-    // 使用 MessagePack 格式保存（v2），体积更小、解析更快。
-    let bytes = rmp_serde::to_vec_named(&pf).map_err(|e| e.to_string())?;
+    let bytes = serialize_project_file_for_path(&pf, &path)?;
     // 使用原子保存，防止程序崩溃或断电导致工程文件损坏
     let tmp_path = path.with_extension("tmp_save");
     fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
@@ -133,13 +175,19 @@ pub(super) fn new_project(
         p.beats_per_bar = 4;
         p.grid_size = "1/4".to_string();
     }
+    {
+        let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        tl.project_scale_notes = base_scale_notes("C");
+        state.audio_engine.update_timeline(tl.clone());
+    }
     update_window_title(&window, "Untitled", false);
     get_timeline_state(state)
 }
 
 pub(super) fn open_project_dialog() -> serde_json::Value {
     let picked = rfd::FileDialog::new()
-        .add_filter("HiFiShifter Project", &["hshp", "hsp", "json"])
+        .add_filter("HiFiShifter Project", &["hshp", "hsp"])
+        .add_filter("JSON Project", &["json"])
         .pick_file();
     match picked {
         None => serde_json::json!({"ok": true, "canceled": true}),
@@ -193,6 +241,15 @@ pub(super) fn open_project(
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         *tl = pf.timeline.clone();
+        let normalized_base_scale = normalize_scale_key(&pf.base_scale);
+        let normalized_custom_scale = normalize_custom_scale(pf.custom_scale.clone());
+        let normalized_use_custom_scale =
+            pf.use_custom_scale && normalized_custom_scale.is_some();
+        tl.project_scale_notes = effective_scale_notes(
+            &normalized_base_scale,
+            normalized_use_custom_scale,
+            normalized_custom_scale.as_ref(),
+        );
         state.audio_engine.update_timeline(tl.clone());
     }
     state.clear_history();
@@ -252,7 +309,8 @@ pub(super) fn save_project_as(state: State<'_, AppState>, window: Window) -> ser
         }
     };
     let picked = rfd::FileDialog::new()
-        .add_filter("HiFiShifter Project", &["hshp", "hsp", "json"])
+        .add_filter("HiFiShifter Project", &["hshp", "hsp"])
+        .add_filter("JSON Project", &["json"])
         .set_file_name(format!("{}.hshp", default_name))
         .save_file();
     match picked {
@@ -306,6 +364,12 @@ pub(super) fn set_project_base_scale(
         }
     }
 
+    {
+        let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        tl.project_scale_notes = base_scale_notes(&normalized);
+        state.audio_engine.update_timeline(tl.clone());
+    }
+
     let payload = state.project_meta_payload();
     serde_json::json!({ "ok": true, "project": payload })
 }
@@ -324,7 +388,7 @@ pub(super) fn set_project_custom_scale(
             return serde_json::json!({ "ok": true, "project": state.project_meta_payload() });
         }
         let was_clean = !p.dirty;
-        p.custom_scale = Some(normalized);
+        p.custom_scale = Some(normalized.clone());
         p.use_custom_scale = true;
         p.dirty = true;
         (p.name.clone(), true, was_clean)
@@ -338,6 +402,12 @@ pub(super) fn set_project_custom_scale(
                 let _ = win.set_title(&title);
             }
         }
+    }
+
+    {
+        let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+        tl.project_scale_notes = normalized.notes.clone();
+        state.audio_engine.update_timeline(tl.clone());
     }
 
     serde_json::json!({ "ok": true, "project": state.project_meta_payload() })

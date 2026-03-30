@@ -248,11 +248,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 sourceStartSec: args[6],
                 sourceEndSec: args[7],
                 playbackRate: args[8],
-                fadeInSec: args[9],
-                fadeOutSec: args[10],
-                fadeInCurve: args[11],
-                fadeOutCurve: args[12],
-                color: args[13],
+                reversed: args[9],
+                fadeInSec: args[10],
+                fadeOutSec: args[11],
+                fadeInCurve: args[12],
+                fadeOutCurve: args[13],
+                color: args[14],
             };
 
         case "replace_clip_source":
@@ -285,6 +286,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
 
         case "save_separated":
             return { outputDir: args[0] };
+
+        case "export_audio_advanced":
+            return { request: args[0] };
+
+        case "preview_export_audio_plan":
+            return { request: args[0] };
 
         case "play_original":
             return { startSec: args[0] };

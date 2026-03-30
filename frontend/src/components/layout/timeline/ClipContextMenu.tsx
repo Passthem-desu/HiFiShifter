@@ -111,6 +111,7 @@ export const ClipContextMenu: React.FC<{
     onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
+    onToggleReverse: (ids: string[], reversed: boolean) => void;
     onFadeCurveChange?: (
         clipId: string,
         target: "in" | "out",
@@ -134,12 +135,17 @@ export const ClipContextMenu: React.FC<{
     onSplit,
     onGlue,
     onNormalize,
+    onToggleReverse,
     onFadeCurveChange,
 }) => {
     const { t } = useI18n();
     const menuRef = useRef<HTMLDivElement>(null);
-    const isMulti = selectedClips.length >= 2;
-    const ids = isMulti ? selectedClips.map((c) => c.id) : [clip.id];
+    const ids =
+        selectedClips.length >= 2
+            ? selectedClips.map((c) => c.id)
+            : [clip.id];
+    const isMulti = ids.length >= 2;
+    const isSingle = !isMulti;
 
     const normalizeKb = useAppSelector((state) =>
         selectKeybinding(state, "clip.normalize"),
@@ -158,6 +164,9 @@ export const ClipContextMenu: React.FC<{
 
     // 多选中是否全部静音
     const allMuted = isMulti ? selectedClips.every((c) => c.muted) : clip.muted;
+    const allReversed = isMulti
+        ? selectedClips.every((c) => c.reversed)
+        : clip.reversed;
 
     function close() {
         onClose();
@@ -184,8 +193,7 @@ export const ClipContextMenu: React.FC<{
             style={{ left: x, top: y }}
             onPointerDown={(e) => e.stopPropagation()}
         >
-            {isMulti ? (
-                // ── 多选菜单 ──
+            {isMulti && (
                 <>
                     <div className="px-3 py-1 text-[11px] text-qt-text/50 select-none">
                         {t("ctx_selected_n").replace(
@@ -194,60 +202,96 @@ export const ClipContextMenu: React.FC<{
                         )}
                     </div>
                     <Divider />
-                    <MenuItem
-                        label={t("ctx_delete_all")}
-                        danger
-                        onClick={() => {
-                            onDelete(ids);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={
-                            allMuted ? t("ctx_unmute_all") : t("ctx_mute_all")
-                        }
-                        onClick={() => {
-                            onMute(ids, !allMuted);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_copy_all")}
-                        onClick={() => {
-                            onCopy(ids);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_cut_all")}
-                        onClick={() => {
-                            onCut(ids);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_replace_all")}
-                        onClick={() => {
-                            onReplace(ids);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_split_at_playhead")}
-                        disabled={!canSplitSelected}
-                        onClick={() => {
-                            onSplit(ids);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_normalize_all")}
-                        shortcut={normalizeShortcut}
-                        onClick={() => {
-                            onNormalize(ids);
-                            close();
-                        }}
-                    />
+                </>
+            )}
+
+            <MenuItem
+                label={isMulti ? t("ctx_delete_all") : t("ctx_delete")}
+                danger
+                onClick={() => {
+                    onDelete(ids);
+                    close();
+                }}
+            />
+            <MenuItem
+                label={
+                    allMuted
+                        ? isMulti
+                            ? t("ctx_unmute_all")
+                            : t("clip_unmute")
+                        : isMulti
+                            ? t("ctx_mute_all")
+                            : t("clip_mute")
+                }
+                onClick={() => {
+                    onMute(ids, !allMuted);
+                    close();
+                }}
+            />
+            <MenuItem
+                label={
+                    allReversed
+                        ? isMulti
+                            ? t("ctx_unreverse_selected")
+                            : t("ctx_unreverse")
+                        : isMulti
+                            ? t("ctx_reverse_selected")
+                            : t("ctx_reverse")
+                }
+                onClick={() => {
+                    onToggleReverse(ids, !allReversed);
+                    close();
+                }}
+            />
+            {isSingle && (
+                <MenuItem
+                    label={t("ctx_rename")}
+                    onClick={() => {
+                        onRename(clip.id);
+                        close();
+                    }}
+                />
+            )}
+            <MenuItem
+                label={isMulti ? t("ctx_copy_all") : t("ctx_copy")}
+                onClick={() => {
+                    onCopy(ids);
+                    close();
+                }}
+            />
+            <MenuItem
+                label={isMulti ? t("ctx_cut_all") : t("ctx_cut")}
+                onClick={() => {
+                    onCut(ids);
+                    close();
+                }}
+            />
+            <MenuItem
+                label={isMulti ? t("ctx_replace_all") : t("ctx_replace")}
+                onClick={() => {
+                    onReplace(ids);
+                    close();
+                }}
+            />
+            <MenuItem
+                label={t("ctx_split_at_playhead")}
+                disabled={isMulti ? !canSplitSelected : !playheadInClip}
+                onClick={() => {
+                    onSplit(ids);
+                    close();
+                }}
+            />
+            <MenuItem
+                label={isMulti ? t("ctx_normalize_all") : t("ctx_normalize")}
+                shortcut={normalizeShortcut}
+                onClick={() => {
+                    onNormalize(ids);
+                    close();
+                }}
+            />
+
+            {isMulti && (
+                <>
                     <Divider />
                     <MenuItem
                         label={t("glue")}
@@ -258,127 +302,75 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                 </>
-            ) : (
-                // ── 单选菜单 ──
-                <>
-                    <MenuItem
-                        label={t("ctx_delete")}
-                        danger
-                        onClick={() => {
-                            onDelete([clip.id]);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={clip.muted ? t("clip_unmute") : t("clip_mute")}
-                        onClick={() => {
-                            onMute([clip.id], !clip.muted);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_rename")}
-                        onClick={() => {
-                            onRename(clip.id);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_copy")}
-                        onClick={() => {
-                            onCopy([clip.id]);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_cut")}
-                        onClick={() => {
-                            onCut([clip.id]);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_replace")}
-                        onClick={() => {
-                            onReplace([clip.id]);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_split_at_playhead")}
-                        disabled={!playheadInClip}
-                        onClick={() => {
-                            onSplit([clip.id]);
-                            close();
-                        }}
-                    />
-                    <MenuItem
-                        label={t("ctx_normalize")}
-                        shortcut={normalizeShortcut}
-                        onClick={() => {
-                            onNormalize([clip.id]);
-                            close();
-                        }}
-                    />
-                    {onFadeCurveChange &&
-                        (() => {
-                            const fadedClips = sortAndFilterFadedClips({
-                                clip,
-                                overlappingClips,
-                            });
-                            if (fadedClips.length === 0) return null;
-                            const showHeader = fadedClips.length > 1;
-                            return (
-                                <>
-                                    <Divider />
+            )}
+
+            {onFadeCurveChange &&
+                (() => {
+                    const fadedClips = isSingle
+                        ? sortAndFilterFadedClips({
+                              clip,
+                              overlappingClips,
+                          })
+                        : sortAndFilterFadedClips({
+                              clip: selectedClips[0] ?? clip,
+                              overlappingClips: selectedClips.slice(1),
+                          });
+                    if (fadedClips.length === 0) return null;
+
+                    const showHeader = isMulti || fadedClips.length > 1;
+
+                    return (
+                        <>
+                            <Divider />
+                            {showHeader && (
+                                <div className="px-3 py-1 text-[11px] text-qt-text/50 select-none">
+                                    {isMulti
+                                        ? t("ctx_selected_n").replace(
+                                              "{n}",
+                                              String(fadedClips.length),
+                                          )
+                                        : t("overlapping_clips_header").replace(
+                                              "{n}",
+                                              String(fadedClips.length),
+                                          )}
+                                </div>
+                            )}
+                            {fadedClips.map((fc) => (
+                                <React.Fragment key={fc.id}>
                                     {showHeader && (
-                                        <div className="px-3 py-1 text-[11px] text-qt-text/50 select-none">
-                                            {t("overlapping_clips_header").replace(
-                                                "{n}",
-                                                String(fadedClips.length),
-                                            )}
+                                        <div className="px-3 pt-1 text-[10px] text-qt-text/40 truncate">
+                                            {fc.name || fc.id}
                                         </div>
                                     )}
-                                    {fadedClips.map((fc) => (
-                                        <React.Fragment key={fc.id}>
-                                            {showHeader && (
-                                                <div className="px-3 pt-1 text-[10px] text-qt-text/40 truncate">
-                                                    {fc.name || fc.id}
-                                                </div>
-                                            )}
-                                            {fc.fadeInSec > 0 && (
-                                                <FadeCurveRow
-                                                    label={t("fade_in")}
-                                                    current={
-                                                        (fc.fadeInCurve as FadeCurveType) ??
-                                                        "sine"
-                                                    }
-                                                    onSelect={(c) => {
-                                                        onFadeCurveChange(fc.id, "in", c);
-                                                    }}
-                                                    t={t}
-                                                />
-                                            )}
-                                            {fc.fadeOutSec > 0 && (
-                                                <FadeCurveRow
-                                                    label={t("fade_out")}
-                                                    current={
-                                                        (fc.fadeOutCurve as FadeCurveType) ??
-                                                        "sine"
-                                                    }
-                                                    onSelect={(c) => {
-                                                        onFadeCurveChange(fc.id, "out", c);
-                                                    }}
-                                                    t={t}
-                                                />
-                                            )}
-                                        </React.Fragment>
-                                    ))}
-                                </>
-                            );
-                        })()}
-                </>
-            )}
+                                    {fc.fadeInSec > 0 && (
+                                        <FadeCurveRow
+                                            label={t("fade_in")}
+                                            current={
+                                                (fc.fadeInCurve as FadeCurveType) ?? "sine"
+                                            }
+                                            onSelect={(c) => {
+                                                onFadeCurveChange(fc.id, "in", c);
+                                            }}
+                                            t={t}
+                                        />
+                                    )}
+                                    {fc.fadeOutSec > 0 && (
+                                        <FadeCurveRow
+                                            label={t("fade_out")}
+                                            current={
+                                                (fc.fadeOutCurve as FadeCurveType) ?? "sine"
+                                            }
+                                            onSelect={(c) => {
+                                                onFadeCurveChange(fc.id, "out", c);
+                                            }}
+                                            t={t}
+                                        />
+                                    )}
+                                </React.Fragment>
+                            ))}
+                        </>
+                    );
+                })()}
         </div>
     );
 };

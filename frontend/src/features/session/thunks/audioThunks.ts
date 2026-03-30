@@ -1,5 +1,6 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { webApi } from "../../../services/webviewApi";
+import type { AdvancedExportRequest } from "../../../services/api/core";
 import { requestMissingFileReplacement } from "./missingFilePrompt";
 
 async function resolveMissingFilesInteractively(
@@ -81,6 +82,13 @@ export const exportSeparated = createAsyncThunk(
     "session/exportSeparated",
     async (outputDir: string) => {
         return webApi.saveSeparated(outputDir);
+    },
+);
+
+export const exportAudioAdvanced = createAsyncThunk(
+    "session/exportAudioAdvanced",
+    async (request: AdvancedExportRequest) => {
+        return webApi.exportAudioAdvanced(request);
     },
 );
 

@@ -334,8 +334,50 @@ export function useEditDrag(deps: {
                     Number(clipNow.playbackRate ?? 1) > 0
                         ? Number(clipNow.playbackRate ?? 1)
                         : 1;
-                let nextTrimStart =
-                    drag.baseSourceStartSec + desiredDelta * rate;
+                if (clipNow.reversed) {
+                    const sourceDuration = (() => {
+                        if (
+                            clipNow.durationFrames &&
+                            clipNow.sourceSampleRate &&
+                            clipNow.sourceSampleRate > 0
+                        ) {
+                            return (
+                                clipNow.durationFrames / clipNow.sourceSampleRate
+                            );
+                        }
+                        return Number(clipNow.durationSec ?? 0) || 0;
+                    })();
+                    let nextTrimEnd =
+                        drag.baseSourceEndSec - desiredDelta * rate;
+                    nextTrimEnd = Math.max(drag.baseSourceStartSec, nextTrimEnd);
+                    if (sourceDuration > 0) {
+                        nextTrimEnd = Math.min(nextTrimEnd, sourceDuration);
+                    }
+                    const actualDeltaTrim =
+                        drag.baseSourceEndSec - nextTrimEnd;
+                    const actualDeltaTimeline = actualDeltaTrim / rate;
+                    const nextStart = drag.basestartSec + actualDeltaTimeline;
+                    const nextLen = clamp(
+                        drag.baselengthSec - actualDeltaTimeline,
+                        minLen,
+                        10_000,
+                    );
+                    dispatch(
+                        moveClipStart({ clipId: drag.clipId, startSec: nextStart }),
+                    );
+                    dispatch(
+                        setClipLength({ clipId: drag.clipId, lengthSec: nextLen }),
+                    );
+                    dispatch(
+                        setClipSourceRange({
+                            clipId: drag.clipId,
+                            sourceEndSec: nextTrimEnd,
+                        }),
+                    );
+                    return;
+                }
+
+                let nextTrimStart = drag.baseSourceStartSec + desiredDelta * rate;
                 nextTrimStart = Math.max(0, nextTrimStart);
                 const actualDeltaTrim = nextTrimStart - drag.baseSourceStartSec;
                 const actualDeltaTimeline = actualDeltaTrim / rate;
@@ -429,6 +471,30 @@ export function useEditDrag(deps: {
                 const desiredLen = desiredRight - drag.basestartSec;
                 const nextLen = clamp(desiredLen, minLen, 10_000);
                 const usedDeltaTimeline = nextLen - drag.baselengthSec;
+                if (clipNow.reversed) {
+                    let nextTrimStart =
+                        drag.baseSourceStartSec - usedDeltaTimeline * rate;
+                    nextTrimStart = Math.max(0, nextTrimStart);
+                    nextTrimStart = Math.min(nextTrimStart, drag.baseSourceEndSec);
+                    const actualSourceLen =
+                        drag.baseSourceEndSec - nextTrimStart;
+                    const maxTimelineLen = actualSourceLen / rate;
+                    const finalLen =
+                        maxTimelineLen > 0
+                            ? Math.min(nextLen, maxTimelineLen)
+                            : nextLen;
+                    dispatch(
+                        setClipLength({ clipId: drag.clipId, lengthSec: finalLen }),
+                    );
+                    dispatch(
+                        setClipSourceRange({
+                            clipId: drag.clipId,
+                            sourceStartSec: nextTrimStart,
+                        }),
+                    );
+                    return;
+                }
+
                 let nextTrimEnd =
                     drag.baseSourceEndSec + usedDeltaTimeline * rate;
                 nextTrimEnd = Math.max(0, nextTrimEnd);
@@ -514,20 +580,26 @@ export function useEditDrag(deps: {
 
             let persistPromise: Promise<unknown> | null = null;
             if (drag.type === "trim_left") {
+                const sourceRangePatch = clipNow.reversed
+                    ? { sourceEndSec: clipNow.sourceEndSec }
+                    : { sourceStartSec: clipNow.sourceStartSec };
                 persistPromise = dispatch(
                     setClipStateRemote({
                         clipId: drag.clipId,
                         startSec: clipNow.startSec,
                         lengthSec: clipNow.lengthSec,
-                        sourceStartSec: clipNow.sourceStartSec,
+                        ...sourceRangePatch,
                     }),
                 ).unwrap();
             } else if (drag.type === "trim_right") {
+                const sourceRangePatch = clipNow.reversed
+                    ? { sourceStartSec: clipNow.sourceStartSec }
+                    : { sourceEndSec: clipNow.sourceEndSec };
                 persistPromise = dispatch(
                     setClipStateRemote({
                         clipId: drag.clipId,
                         lengthSec: clipNow.lengthSec,
-                        sourceEndSec: clipNow.sourceEndSec,
+                        ...sourceRangePatch,
                     }),
                 ).unwrap();
             } else if (drag.type === "stretch_left") {

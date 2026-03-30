@@ -54,7 +54,7 @@ mod waveform;
 // mod pitch_refresh_async;
 
 use crate::state::AppState;
-use tauri::{State, Window};
+use tauri::{Manager, State, Window};
 
 // This is used by the window close handler (crate-internal), not a tauri command.
 // pub(crate) use project::save_project_to_path_inner;
@@ -448,6 +448,7 @@ pub fn set_clip_state(
     source_start_sec: Option<f64>,
     source_end_sec: Option<f64>,
     playback_rate: Option<f32>,
+    reversed: Option<bool>,
     fade_in_sec: Option<f64>,
     fade_out_sec: Option<f64>,
     fade_in_curve: Option<String>,
@@ -465,6 +466,7 @@ pub fn set_clip_state(
         source_start_sec,
         source_end_sec,
         playback_rate,
+        reversed,
         fade_in_sec,
         fade_out_sec,
         fade_in_curve,
@@ -605,6 +607,41 @@ pub fn save_synthesized(state: State<'_, AppState>, output_path: String) -> serd
 #[tauri::command(rename_all = "camelCase")]
 pub fn save_separated(state: State<'_, AppState>, output_dir: String) -> serde_json::Value {
     synth::save_separated(state, output_dir)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn export_audio_advanced(
+    app: tauri::AppHandle,
+    request: synth::ExportAudioRequest,
+) -> serde_json::Value {
+    match tauri::async_runtime::spawn_blocking(move || {
+        let state: State<'_, AppState> = app.state();
+        synth::export_audio_advanced(state, request)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => serde_json::json!({
+            "ok": false,
+            "mode": "unknown",
+            "error": format!("Failed to join export task: {error}"),
+        }),
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_export_audio_defaults(
+    state: State<'_, AppState>,
+) -> synth::ExportAudioDefaultsPayload {
+    synth::get_export_audio_defaults(state)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn preview_export_audio_plan(
+    state: State<'_, AppState>,
+    request: synth::ExportAudioRequest,
+) -> synth::ExportAudioPlanPayload {
+    synth::preview_export_audio_plan(state, request)
 }
 
 // ===================== playback =====================

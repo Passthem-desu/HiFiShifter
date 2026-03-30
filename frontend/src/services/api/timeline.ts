@@ -190,6 +190,7 @@ export const timelineApi = {
         sourceStartSec?: number;
         sourceEndSec?: number;
         playbackRate?: number;
+        reversed?: boolean;
         fadeInSec?: number;
         fadeOutSec?: number;
         fadeInCurve?: string;
@@ -207,6 +208,7 @@ export const timelineApi = {
             payload.sourceStartSec,
             payload.sourceEndSec,
             payload.playbackRate,
+            payload.reversed,
             payload.fadeInSec,
             payload.fadeOutSec,
             payload.fadeInCurve,

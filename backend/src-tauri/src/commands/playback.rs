@@ -2,8 +2,27 @@ use crate::models::PlaybackStatePayload;
 use crate::state::AppState;
 use tauri::Emitter;
 use tauri::State;
+use tauri::Manager;
 
 use super::common::{guard_json_command, ok_bool, PlaybackRenderingStateEvent};
+
+fn timeline_render_signature(timeline: &crate::state::TimelineState) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let encoded = serde_json::to_vec(timeline).unwrap_or_default();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    encoded.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn timeline_signature_from_app(app: &tauri::AppHandle) -> u64 {
+    let state = app.state::<AppState>();
+    let timeline = match state.timeline.lock() {
+        Ok(g) => g.clone(),
+        Err(p) => p.into_inner().clone(),
+    };
+    timeline_render_signature(&timeline)
+}
 
 /// 检查 clip 的音高分析是否完成（clip_midi 非空）。
 ///
@@ -34,11 +53,11 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
         if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
             eprintln!("play_original(start_sec={})", start_sec);
         }
-        let timeline = state
-            .timeline
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
+        let timeline = match state.timeline.lock() {
+            Ok(g) => g.clone(),
+            Err(p) => p.into_inner().clone(),
+        };
+        let render_timeline_sig = timeline_render_signature(&timeline);
         let bpm = timeline.bpm;
         let playhead_sec = timeline.playhead_sec;
         if !(bpm.is_finite() && bpm > 0.0) {
@@ -111,6 +130,17 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 // 在播放窗口内需要 pitch edit（例如用户把所有点都清空为 0），
                 // 则无需进入预渲染路径，直接播放即可。
                 if clips_to_render.is_empty() {
+                    if timeline_signature_from_app(&app) != render_timeline_sig {
+                        let _ = app.emit(
+                            "playback_rendering_state",
+                            PlaybackRenderingStateEvent {
+                                active: false,
+                                progress: Some(1.0),
+                                target: Some("original".to_string()),
+                            },
+                        );
+                        return;
+                    }
                     engine.seek_sec(render_start_sec);
                     engine.update_timeline(tl_for_render);
                     engine.set_playing(true, Some("original"));
@@ -168,9 +198,17 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 let total = clips_to_render.len().max(1);
                 let mut rendered_count = 0u32;
                 let mut any_error = false;
+                let mut cancelled = false;
+                let mut pending_clip_ids_written: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
 
                 // 逐 clip 预渲染，全部完成后再开始播放
                 for clip_render_info in &clips_to_render {
+                    if timeline_signature_from_app(&app) != render_timeline_sig {
+                        cancelled = true;
+                        break;
+                    }
+
                     let mut base_entry = {
                         let mut cache = crate::synth_clip_cache::global_rendered_clip_cache()
                             .lock()
@@ -184,6 +222,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                             &clip_render_info.clip.id,
                             clip_render_info.cache_key.clone(),
                         );
+                        pending_clip_ids_written.insert(clip_render_info.clip.id.clone());
                     }
 
                     if base_entry.is_none() {
@@ -236,6 +275,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                     &clip_render_info.clip.id,
                                     clip_render_info.cache_key.clone(),
                                 );
+                                pending_clip_ids_written.insert(clip_render_info.clip.id.clone());
 
                                 base_entry = Some(entry);
                             }
@@ -314,6 +354,21 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     );
                 }
 
+                if cancelled {
+                    for clip_id in pending_clip_ids_written {
+                        crate::synth_clip_cache::remove_pending_rendered_key(&clip_id);
+                    }
+                    let _ = app.emit(
+                        "playback_rendering_state",
+                        PlaybackRenderingStateEvent {
+                            active: false,
+                            progress: Some(1.0),
+                            target: Some("original".to_string()),
+                        },
+                    );
+                    return;
+                }
+
                 // 所有 clip 渲染完成（或已尝试），开始播放
                 // 若有渲染失败，snapshot 中对应 clip 会有 needs_synthesis=true、rendered_pcm=None，
                 // 音频回调会陷入 has_pending_clip=true 的永久静音等待。
@@ -340,6 +395,22 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     engine.stop();
                     return;
                 }
+
+                if timeline_signature_from_app(&app) != render_timeline_sig {
+                    for clip_id in pending_clip_ids_written {
+                        crate::synth_clip_cache::remove_pending_rendered_key(&clip_id);
+                    }
+                    let _ = app.emit(
+                        "playback_rendering_state",
+                        PlaybackRenderingStateEvent {
+                            active: false,
+                            progress: Some(1.0),
+                            target: Some("original".to_string()),
+                        },
+                    );
+                    return;
+                }
+
                 engine.seek_sec(render_start_sec);
                 engine.update_timeline(tl_for_render);
                 engine.set_playing(true, Some("original"));
@@ -523,7 +594,7 @@ fn collect_clips_needing_render(
         let pitch_edit = entry.pitch_edit.as_slice();
         let frame_period_ms = entry.frame_period_ms.max(0.1);
 
-        let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
+        let mut param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
             &clip.id,
             source_path,
             start_frame,
@@ -536,6 +607,13 @@ fn collect_clips_needing_render(
             &entry.extra_curves,
             &entry.extra_params,
         );
+        let child_hash_salt = crate::pitch_editing::child_pitch_offset_hash_salt(timeline, clip);
+        if child_hash_salt != 0 {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(&param_hash, &mut hasher);
+            std::hash::Hash::hash(&child_hash_salt, &mut hasher);
+            param_hash = std::hash::Hasher::finish(&hasher);
+        }
         let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
             clip_id: clip.id.clone(),
             param_hash,
@@ -616,8 +694,16 @@ fn render_single_clip(
     }
 
     let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
-    let segment =
-        crate::mixdown::linear_resample_interleaved(segment, in_channels_usize, in_rate, out_rate);
+    let mut segment = crate::mixdown::linear_resample_interleaved(
+        segment,
+        in_channels_usize,
+        in_rate,
+        out_rate,
+    );
+
+    if clip.reversed {
+        crate::mixdown::reverse_interleaved_frames(&mut segment, in_channels_usize);
+    }
 
     // 4. 转 stereo
     let segment = if in_channels == 1 {

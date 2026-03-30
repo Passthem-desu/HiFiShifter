@@ -16,6 +16,10 @@ fn default_frame_period_ms() -> f64 {
     5.0
 }
 
+fn default_project_scale_notes() -> Vec<u8> {
+    vec![0, 2, 4, 5, 7, 9, 11]
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PitchAnalysisAlgo {
@@ -155,6 +159,8 @@ pub struct Clip {
     #[serde(alias = "trim_end_sec")]
     pub source_end_sec: f64,
     pub playback_rate: f32,
+    #[serde(default)]
+    pub reversed: bool,
     pub fade_in_sec: f64,
     pub fade_out_sec: f64,
     /// 淡入曲线类型（linear/sine/exponential/logarithmic/scurve），默认 sine
@@ -183,6 +189,7 @@ pub struct ClipStatePatch {
     pub source_start_sec: Option<f64>,
     pub source_end_sec: Option<f64>,
     pub playback_rate: Option<f32>,
+    pub reversed: Option<bool>,
     pub fade_in_sec: Option<f64>,
     pub fade_out_sec: Option<f64>,
     pub fade_in_curve: Option<String>,
@@ -212,6 +219,9 @@ pub struct TimelineState {
 
     #[serde(default)]
     pub params_by_root_track: BTreeMap<String, TrackParamsState>,
+
+    #[serde(default = "default_project_scale_notes")]
+    pub project_scale_notes: Vec<u8>,
 
     pub next_track_order: i32,
 }
@@ -279,6 +289,7 @@ impl Default for TimelineState {
             project_sec: 32.0, // 64 beats @ 120 BPM = 32 sec
 
             params_by_root_track: BTreeMap::new(),
+            project_scale_notes: default_project_scale_notes(),
             next_track_order: 1,
         }
     }
@@ -1224,6 +1235,7 @@ impl TimelineState {
                 source_start_sec: Some(c.source_start_sec),
                 source_end_sec: Some(c.source_end_sec),
                 playback_rate: Some(c.playback_rate),
+                reversed: Some(c.reversed),
                 fade_in_sec: Some(c.fade_in_sec),
                 fade_out_sec: Some(c.fade_out_sec),
                 fade_in_curve: Some(c.fade_in_curve.clone()),
@@ -1483,10 +1495,6 @@ impl TimelineState {
 
         self.tracks.retain(|t| !remove_set.contains(t.id.as_str()));
 
-        // 清理被删除根轨道的参数数据（音高曲线、张力曲线等），防止数据残留。
-        self.params_by_root_track
-            .retain(|root_id, _| !remove_set.contains(root_id.as_str()));
-
         if self.selected_track_id.as_deref() == Some(track_id) {
             self.selected_track_id = self.tracks.first().map(|t| t.id.clone());
         }
@@ -1660,6 +1668,7 @@ impl TimelineState {
             source_start_sec: 0.0,
             source_end_sec: computed_duration_sec.unwrap_or(ls),
             playback_rate: 1.0,
+            reversed: false,
             fade_in_sec: 0.0,
             fade_out_sec: 0.0,
             fade_in_curve: default_fade_curve(),
@@ -1843,6 +1852,7 @@ impl TimelineState {
         source_start_sec: Option<f64>,
         source_end_sec: Option<f64>,
         playback_rate: Option<f32>,
+        reversed: Option<bool>,
         fade_in_sec: Option<f64>,
         fade_out_sec: Option<f64>,
     ) {
@@ -1857,6 +1867,7 @@ impl TimelineState {
                 source_start_sec,
                 source_end_sec,
                 playback_rate,
+                reversed,
                 fade_in_sec,
                 fade_out_sec,
                 fade_in_curve: None,
@@ -1896,6 +1907,9 @@ impl TimelineState {
             }
             if let Some(v) = patch.playback_rate {
                 c.playback_rate = v.clamp(0.1, 10.0);
+            }
+            if let Some(v) = patch.reversed {
+                c.reversed = v;
             }
             if let Some(v) = patch.fade_in_sec {
                 c.fade_in_sec = v.max(0.0);
@@ -1949,12 +1963,21 @@ impl TimelineState {
         };
 
         self.clips[idx].length_sec = left_len;
-        // 更新左 clip 的 source_end_sec: 切分点对应的源时间
+        // 更新左 clip 的源区间：
+        // - 正放：左段吃掉前半段，收紧 source_end
+        // - 倒放：左段吃掉后半段，收紧 source_start
         {
+            let orig_src_start = self.clips[idx].source_start_sec;
             let orig_src_end = self.clips[idx].source_end_sec;
-            let new_src_end = self.clips[idx].source_start_sec + left_len * left_rate;
-            self.clips[idx].source_end_sec =
-                new_src_end.clamp(self.clips[idx].source_start_sec, orig_src_end);
+            if self.clips[idx].reversed {
+                let new_src_start = orig_src_end - left_len * left_rate;
+                self.clips[idx].source_start_sec =
+                    new_src_start.clamp(orig_src_start, orig_src_end);
+            } else {
+                let new_src_end = orig_src_start + left_len * left_rate;
+                self.clips[idx].source_end_sec =
+                    new_src_end.clamp(orig_src_start, orig_src_end);
+            }
         }
         // Fade semantics on split:
         // - fade-in is anchored to the original start, so only the left clip should keep it.
@@ -1978,7 +2001,12 @@ impl TimelineState {
         } else {
             1.0
         };
-        if right.source_start_sec.is_finite() {
+        if right.reversed {
+            if right.source_end_sec.is_finite() {
+                right.source_end_sec =
+                    (right.source_end_sec - left_len * rate).max(right.source_start_sec);
+            }
+        } else if right.source_start_sec.is_finite() {
             right.source_start_sec =
                 (right.source_start_sec + left_len * rate).clamp(-1_000_000.0, 1_000_000.0);
         }
@@ -2074,6 +2102,7 @@ impl TimelineState {
                 glued.source_start_sec = 0.0;
                 glued.source_end_sec = rendered_duration_sec;
                 glued.playback_rate = 1.0;
+                glued.reversed = false;
                 glued.gain = 1.0;
                 glued.muted = false;
                 glued.fade_in_sec = 0.0;

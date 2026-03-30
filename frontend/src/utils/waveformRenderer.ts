@@ -47,6 +47,8 @@ export interface WaveformRenderParams {
     clipDuration: number;
     /** 播放速度 */
     playbackRate: number;
+    /** 是否倒放 */
+    reversed?: boolean;
     /** 源文件时长（秒） */
     sourceDurationSec: number;
     /** clip 音量增益（线性值，0~2） */
@@ -123,6 +125,7 @@ export function applyGainsToPeaks(
         sourceStartSec,
         clipDuration,
         playbackRate,
+        reversed = false,
         volumeGain,
         fadeInSec,
         fadeOutSec,
@@ -157,14 +160,19 @@ export function applyGainsToPeaks(
     // 预计算常数
     const invTotalSamplesM1 = totalSamples > 1 ? 1 / (totalSamples - 1) : 0;
     const invPlaybackRate = 1 / playbackRate;
+    const clipSourceEndSec = sourceStartSec + clipDuration * playbackRate;
     const fadeOutStart = clipDuration - fadeOutSec;
     const invFadeInSec = fadeInSec > 0 ? 1 / fadeInSec : 0;
     const invFadeOutSec = fadeOutSec > 0 ? 1 / fadeOutSec : 0;
 
     // 提取时间映射的线性步长与基准值
-    const baseTime = (effectiveDataStartSec - sourceStartSec) * invPlaybackRate;
-    const timeStep = totalSamples > 1 
-        ? (effectiveDataDurationSec * invTotalSamplesM1 * invPlaybackRate) 
+    const baseTime = reversed
+        ? (clipSourceEndSec - effectiveDataStartSec) * invPlaybackRate
+        : (effectiveDataStartSec - sourceStartSec) * invPlaybackRate;
+    const timeStep = totalSamples > 1
+        ? (reversed
+            ? -(effectiveDataDurationSec * invTotalSamplesM1 * invPlaybackRate)
+            : (effectiveDataDurationSec * invTotalSamplesM1 * invPlaybackRate))
         : 0;
 
     for (let i = 0; i < totalSamples; i++) {
@@ -195,6 +203,25 @@ export function applyGainsToPeaks(
 // ============================================================================
 // renderWaveform — Canvas per-pixel 绘制（预计算常数优化版）
 // ============================================================================
+
+/**
+ * 将 interleaved peaks 数组按采样点倒序。
+ *
+ * 输入/输出格式均为 [min0, max0, min1, max1, ...]。
+ */
+export function reverseInterleavedPeaks(peaks: Float32Array): Float32Array {
+    const n = Math.floor(peaks.length / 2);
+    if (n <= 1) return peaks;
+
+    const out = new Float32Array(peaks.length);
+    for (let i = 0; i < n; i++) {
+        const src = (n - 1 - i) * 2;
+        const dst = i * 2;
+        out[dst] = peaks[src];
+        out[dst + 1] = peaks[src + 1];
+    }
+    return out;
+}
 
 /**
  * 将 peaks 数据绘制到 Canvas 上（per-pixel 模式）
@@ -235,6 +262,7 @@ export function renderWaveform(
     const {
         canvasWidth, canvasHeight, centerY,
         sourceStartSec, clipDuration, playbackRate,
+        reversed = false,
         dataStartSec, dataDurationSec,
         clipPixelOffset = 0, clipTotalWidthPx,
     } = params;
@@ -270,8 +298,12 @@ export function renderWaveform(
 
     // 重叠范围映射到 timeline 时间
     const invPlaybackRate = 1 / playbackRate;
-    const timelineOverlapStart = (overlapStartSec - sourceStartSec) * invPlaybackRate;
-    const timelineOverlapEnd = (overlapEndSec - sourceStartSec) * invPlaybackRate;
+    const timelineOverlapStart = reversed
+        ? (clipSourceEndSec - overlapEndSec) * invPlaybackRate
+        : (overlapStartSec - sourceStartSec) * invPlaybackRate;
+    const timelineOverlapEnd = reversed
+        ? (clipSourceEndSec - overlapStartSec) * invPlaybackRate
+        : (overlapEndSec - sourceStartSec) * invPlaybackRate;
 
     // 重叠范围映射到 clip 全局像素
     const invClipDuration = 1 / clipDuration;
@@ -300,10 +332,12 @@ export function renderWaveform(
     const pxToTimeScale = clipDuration * playbackRate / clipTotalW;
     const invDataDuration = 1 / effectiveDataDurationSec;
     const timeToIdxScale = (totalSamples - 1) * invDataDuration;
-    const pxToIdxScale = pxToTimeScale * timeToIdxScale;
-    const pxToIdxBase = (clipPixelOffset * pxToTimeScale + sourceStartSec - effectiveDataStartSec) * timeToIdxScale;
+    const pxToIdxScale = (reversed ? -1 : 1) * pxToTimeScale * timeToIdxScale;
+    const pxToIdxBase = reversed
+        ? (clipSourceEndSec - clipPixelOffset * pxToTimeScale - effectiveDataStartSec) * timeToIdxScale
+        : (clipPixelOffset * pxToTimeScale + sourceStartSec - effectiveDataStartSec) * timeToIdxScale;
     // halfPixelIdx 对应 0.5 像素覆盖的索引偏移量
-    const halfPixelIdx = 0.5 * pxToIdxScale;
+    const halfPixelIdx = Math.abs(0.5 * pxToIdxScale);
 
     // 数据边界（预计算，避免循环内重复调用 timeToIndex / Math.min/max）
     const idxAtDataEnd = (dataEndSec - effectiveDataStartSec) * timeToIdxScale;

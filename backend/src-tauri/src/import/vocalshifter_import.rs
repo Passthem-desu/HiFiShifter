@@ -827,6 +827,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     source_start_sec: seg_src_start,
                     source_end_sec: seg_src_end,
                     playback_rate: rate.clamp(0.1, 10.0),
+                    reversed: false,
                     fade_in_sec: 0.0,
                     fade_out_sec: 0.0,
                     fade_in_curve: String::new(),
@@ -926,6 +927,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 source_start_sec: 0.0,
                 source_end_sec: source_duration_sec,
                 playback_rate: rate.clamp(0.1, 10.0),
+                reversed: false,
                 fade_in_sec: 0.0,
                 fade_out_sec: 0.0,
                 fade_in_curve: String::new(),
@@ -1037,6 +1039,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
+        project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: track_order,
     };
 
@@ -1503,6 +1506,7 @@ pub fn import_vsp_clipboard(
                     source_start_sec: seg_src_start,
                     source_end_sec: seg_src_end,
                     playback_rate: rate.clamp(0.1, 10.0),
+                    reversed: false,
                     fade_in_sec: 0.0,
                     fade_out_sec: 0.0,
                     fade_in_curve: String::new(),
@@ -1601,6 +1605,7 @@ pub fn import_vsp_clipboard(
                 source_start_sec: 0.0,
                 source_end_sec: source_duration_sec,
                 playback_rate: rate.clamp(0.1, 10.0),
+                reversed: false,
                 fade_in_sec: 0.0,
                 fade_out_sec: 0.0,
                 fade_in_curve: String::new(),
@@ -1707,6 +1712,7 @@ pub fn import_vsp_clipboard(
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
+        project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: next_order,
     };
 
@@ -2000,6 +2006,7 @@ fn import_vsp_clipboard_selected_tracks(
                     source_start_sec: seg_src_start,
                     source_end_sec: seg_src_end,
                     playback_rate: rate.clamp(0.1, 10.0),
+                    reversed: false,
                     fade_in_sec: 0.0,
                     fade_out_sec: 0.0,
                     fade_in_curve: String::new(),
@@ -2096,6 +2103,7 @@ fn import_vsp_clipboard_selected_tracks(
                 source_start_sec: 0.0,
                 source_end_sec: source_duration_sec,
                 playback_rate: rate.clamp(0.1, 10.0),
+                reversed: false,
                 fade_in_sec: 0.0,
                 fade_out_sec: 0.0,
                 fade_in_curve: String::new(),
@@ -2199,6 +2207,7 @@ fn import_vsp_clipboard_selected_tracks(
         playhead_sec: 0.0,
         project_sec: project_end,
         params_by_root_track,
+        project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: track_order,
     };
 

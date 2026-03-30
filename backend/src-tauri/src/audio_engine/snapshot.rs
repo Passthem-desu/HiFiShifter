@@ -415,7 +415,7 @@ pub(crate) fn build_snapshot(
                     )) = processor_params
                     {
                         let end_frame = start_frame.saturating_add(length_frames);
-                        let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
+                        let mut param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
                             &clip.id,
                             source_path,
                             start_frame,
@@ -428,6 +428,14 @@ pub(crate) fn build_snapshot(
                             extra_curves,
                             extra_params,
                         );
+                        let child_hash_salt =
+                            crate::pitch_editing::child_pitch_offset_hash_salt(timeline, clip);
+                        if child_hash_salt != 0 {
+                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                            std::hash::Hash::hash(&param_hash, &mut hasher);
+                            std::hash::Hash::hash(&child_hash_salt, &mut hasher);
+                            param_hash = std::hash::Hasher::finish(&hasher);
+                        }
                         if debug {
                             eprintln!(
                                 "[snapshot] clip_id={} fallback self-computed hash={:#018x} (no pending key)",
@@ -555,7 +563,9 @@ pub(crate) fn build_snapshot(
                             // 这样下一次重新触发播放时，引擎才会识别到最新 Hash 未渲染而去重新渲染
                             (Some(old_pcm), fallback_breath, true)
                         } else {
-                            // 连旧版本都没有（可能是这个 clip 第一次编辑），判断是回退原声还是静音等待
+                            // 连旧版本都没有（可能是这个 clip 第一次编辑）：
+                            // 不再回退原声，避免出现“原始音频与处理后音频混播”残留问题。
+                            // 统一进入静音等待，直到当前参数对应的渲染结果可用。
                             let state = crate::synth_clip_cache::get_clip_rendering_state(&clip.id);
                             let is_rendering = matches!(
                                 state,
@@ -577,15 +587,18 @@ pub(crate) fn build_snapshot(
                                 })
                                 .unwrap_or(false);
 
-                            if !pitch_analysis_ready || !is_rendering {
-                                if debug {
-                                    eprintln!("[snapshot] clip_id={} cache missing, fallback to original PCM (ready={}, rendering={})", clip.id, pitch_analysis_ready, is_rendering);
-                                }
-                                (None, None, false)
-                            } else {
-                                eprintln!("[snapshot:WARN] clip_id={} hash={:#018x} cache_key found but rendered_pcm=None (rendering in progress, muting)", clip.id, key.param_hash);
-                                (None, None, true)
+                            if debug {
+                                eprintln!(
+                                    "[snapshot] clip_id={} cache missing, keep muted waiting render (ready={}, rendering={})",
+                                    clip.id,
+                                    pitch_analysis_ready,
+                                    is_rendering
+                                );
                             }
+                            if is_rendering || pitch_analysis_ready {
+                                eprintln!("[snapshot:WARN] clip_id={} hash={:#018x} cache_key found but rendered_pcm=None (rendering in progress, muting)", clip.id, key.param_hash);
+                            }
+                            (None, None, true)
                         }
                     } else {
                         (pcm, breath_noise, true)
@@ -606,6 +619,7 @@ pub(crate) fn build_snapshot(
             src: src_render,
             src_start_frame: src_start,
             src_end_frame: src_end,
+            reversed: clip.reversed,
             playback_rate: playback_rate_render,
             local_src_offset_frames,
             repeat,
@@ -695,6 +709,7 @@ pub(crate) fn build_snapshot_for_file(
             src,
             src_start_frame: offset_frames,
             src_end_frame,
+            reversed: false,
             playback_rate: 1.0,
             local_src_offset_frames: 0,
             repeat: false,
