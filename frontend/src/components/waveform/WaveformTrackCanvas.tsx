@@ -32,7 +32,6 @@ import {
     applyGainsToPeaks,
     releaseGainBuffer,
     renderWaveform,
-    reverseInterleavedPeaks,
     type WaveformRenderParams,
 } from "../../utils/waveformRenderer";
 // ========================================
@@ -249,14 +248,25 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 0,
                 Math.min(clip.lengthSec * pr, clipSourceEndSec - sourceStartSec),
             );
-            const sourceTimeStart = Math.max(
-                0,
-                sourceStartSec + ratioStart * clipSourceSpanSec,
-            );
-            const sourceTimeEnd = Math.min(
-                clip.durationSec,
-                sourceStartSec + ratioEnd * clipSourceSpanSec,
-            );
+            const clipSourceSpanEndSec = sourceStartSec + clipSourceSpanSec;
+            const sourceTimeStart = clip.reversed
+                ? Math.max(
+                    0,
+                    clipSourceSpanEndSec - ratioEnd * clipSourceSpanSec,
+                )
+                : Math.max(
+                    0,
+                    sourceStartSec + ratioStart * clipSourceSpanSec,
+                );
+            const sourceTimeEnd = clip.reversed
+                ? Math.min(
+                    clip.durationSec,
+                    clipSourceSpanEndSec - ratioStart * clipSourceSpanSec,
+                )
+                : Math.min(
+                    clip.durationSec,
+                    sourceStartSec + ratioEnd * clipSourceSpanSec,
+                );
             const sourceDuration = Math.max(0.001, sourceTimeEnd - sourceTimeStart);
 
             // ========================================
@@ -331,6 +341,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 sourceStartSec,
                 clipDuration: clip.lengthSec,
                 playbackRate: Number(clip.playbackRate ?? 1) || 1,
+                reversed: Boolean(clip.reversed),
                 sourceDurationSec: clip.durationSec,
                 volumeGain: Number(clip.gain ?? 1) || 1,
                 fadeInSec: Number(clip.fadeInSec ?? 0) || 0,
@@ -343,10 +354,8 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 clipTotalWidthPx: Math.max(1, clipWidthPx),
             };
 
-            // 应用增益（倒放 + 音量 + 淡入淡出）
-            const peaksForRender = clip.reversed
-                ? reverseInterleavedPeaks(result.interleaved)
-                : result.interleaved;
+            // 应用增益（音量 + 淡入淡出）
+            const peaksForRender = result.interleaved;
 
             const __tDs1 = __perfDebug ? performance.now() : 0;
             const __tGain0 = __perfDebug ? performance.now() : 0;

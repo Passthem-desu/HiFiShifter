@@ -5,14 +5,19 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Flex, Box, Text, IconButton, Slider, Select, TextField } from "@radix-ui/themes";
+import { Flex, Box, Text, IconButton, Slider, Select } from "@radix-ui/themes";
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
 import type {
   TrackInfo,
   TrackMeterInfo,
 } from "../../../features/session/sessionTypes";
+import {
+  isNoneBinding,
+  isModifierActive,
+} from "../../../features/keybindings/keybindingsSlice";
+import type { Keybinding } from "../../../features/keybindings/types";
 import type { MessageKey } from "../../../i18n/messages";
-import { TRACK_ADD_ROW_HEIGHT } from "./constants";
+import { MAX_ROW_HEIGHT, MIN_ROW_HEIGHT, TRACK_ADD_ROW_HEIGHT } from "./constants";
 
 /** ??????????? add_track ????? */
 const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
@@ -95,6 +100,8 @@ export const TrackList: React.FC<{
   trackMeters: Record<string, TrackMeterInfo>;
   selectedTrackId: string | null;
   rowHeight: number;
+  setRowHeight?: React.Dispatch<React.SetStateAction<number>>;
+  verticalZoomKb?: Keybinding;
   trackVolumeUi: Record<string, number>;
   onSelectTrack: (trackId: string) => void;
   onRemoveTrack: (trackId: string) => void;
@@ -111,12 +118,6 @@ export const TrackList: React.FC<{
   onAddTrack: () => void;
   onTrackColorChange?: (trackId: string, color: string) => void;
   onAlgoChange?: (trackId: string, algo: string) => void;
-  onChildPitchOffsetModeChange?: (
-    trackId: string,
-    mode: "cents" | "degrees",
-  ) => void;
-  onChildPitchOffsetCentsChange?: (trackId: string, cents: number) => void;
-  onChildPitchOffsetDegreesChange?: (trackId: string, degrees: number) => void;
   onTrackNameChange?: (trackId: string, name: string) => void;
   onDuplicateTrack?: (trackId: string) => void;
   onScrollTopChange?: (scrollTop: number) => void;
@@ -128,6 +129,8 @@ export const TrackList: React.FC<{
   trackMeters,
   selectedTrackId,
   rowHeight,
+  setRowHeight,
+  verticalZoomKb,
   trackVolumeUi,
   onSelectTrack,
   onRemoveTrack,
@@ -140,15 +143,17 @@ export const TrackList: React.FC<{
   onAddTrack,
   onTrackColorChange,
   onAlgoChange,
-  onChildPitchOffsetModeChange,
-  onChildPitchOffsetCentsChange,
-  onChildPitchOffsetDegreesChange,
   onTrackNameChange,
   onDuplicateTrack,
   onScrollTopChange,
   listScrollRef,
 }) => {
   const listRef = useRef<HTMLDivElement | null>(null);
+  const rowHeightRef = useRef(rowHeight);
+  const pendingVerticalZoomRef = useRef<{
+    nextRowHeight: number;
+    nextScrollTop: number;
+  } | null>(null);
   const panRef = useRef<{
     pointerId: number | null;
     startY: number;
@@ -270,6 +275,23 @@ export const TrackList: React.FC<{
     };
   }, []);
 
+  useEffect(() => {
+    rowHeightRef.current = rowHeight;
+  }, [rowHeight]);
+
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    const pending = pendingVerticalZoomRef.current;
+    if (!el || !pending) return;
+    if (Math.abs(pending.nextRowHeight - rowHeight) > 1e-9) return;
+
+    pendingVerticalZoomRef.current = null;
+    const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+    const nextScrollTop = Math.max(0, Math.min(maxScrollTop, pending.nextScrollTop));
+    el.scrollTop = nextScrollTop;
+    onScrollTopChange?.(nextScrollTop);
+  }, [rowHeight, onScrollTopChange]);
+
   function isEditableTarget(target: EventTarget | null) {
     const el = target as HTMLElement | null;
     if (!el) return false;
@@ -339,8 +361,43 @@ export const TrackList: React.FC<{
 
     const handler: EventListener = (evt) => {
       const e = evt as WheelEvent;
-      // Keep ctrl/meta wheel available for global zoom/system gestures.
-      if (e.ctrlKey || e.metaKey) return;
+      const noModifierPressed =
+        !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+      const verticalZoomRequested = (() => {
+        if (!verticalZoomKb) return false;
+        if (isNoneBinding(verticalZoomKb)) return noModifierPressed;
+        return isModifierActive(verticalZoomKb, e);
+      })();
+
+      if (verticalZoomRequested && setRowHeight) {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        const baseRowHeight =
+          pendingVerticalZoomRef.current?.nextRowHeight ?? rowHeightRef.current;
+        const bounds = el.getBoundingClientRect();
+        const pointerY = Math.max(
+          0,
+          Math.min(Math.max(1, bounds.height), e.clientY - bounds.top),
+        );
+        const rowUnitAtPointer =
+          (el.scrollTop + pointerY) / Math.max(1e-9, baseRowHeight);
+        const nextRowHeight = Math.round(
+          Math.max(
+            MIN_ROW_HEIGHT,
+            Math.min(MAX_ROW_HEIGHT, baseRowHeight * factor),
+          ),
+        );
+        if (Math.abs(nextRowHeight - baseRowHeight) < 1e-9) {
+          return;
+        }
+
+        pendingVerticalZoomRef.current = {
+          nextRowHeight,
+          nextScrollTop: Math.max(0, rowUnitAtPointer * nextRowHeight - pointerY),
+        };
+        setRowHeight(nextRowHeight);
+        return;
+      }
 
       const useY = Math.abs(e.deltaY) >= Math.abs(e.deltaX);
       const delta = useY ? e.deltaY : e.deltaX;
@@ -366,7 +423,7 @@ export const TrackList: React.FC<{
     return () => {
       el.removeEventListener("wheel", handler);
     };
-  }, [onScrollTopChange]);
+  }, [onScrollTopChange, setRowHeight, verticalZoomKb]);
 
   function wouldCreateCycle(trackId: string, parentTrackId: string | null) {
     let cur = parentTrackId;
@@ -971,79 +1028,6 @@ export const TrackList: React.FC<{
                             </Select.Content>
                           </Select.Root>
                         </div>
-                      ) : !isRoot ? (
-                        <Flex
-                          gap="1"
-                          align="center"
-                          onPointerDown={(e) => e.stopPropagation()}
-                        >
-                          <Select.Root
-                            size="1"
-                            value={
-                              track.childPitchOffsetMode === "degrees"
-                                ? "degrees"
-                                : "cents"
-                            }
-                            onValueChange={(v) => {
-                              if (v === "cents" || v === "degrees") {
-                                onChildPitchOffsetModeChange?.(track.id, v);
-                              }
-                            }}
-                          >
-                            <Select.Trigger style={{ minWidth: 72 }} />
-                            <Select.Content>
-                              <Select.Item value="cents">
-                                {t("child_pitch_mode_cents")}
-                              </Select.Item>
-                              <Select.Item value="degrees">
-                                {t("child_pitch_mode_degrees")}
-                              </Select.Item>
-                            </Select.Content>
-                          </Select.Root>
-                          {track.childPitchOffsetMode === "degrees" ? (
-                            <TextField.Root
-                              key={`deg-${track.id}-${track.childPitchOffsetDegrees}`}
-                              size="1"
-                              type="number"
-                              defaultValue={String(track.childPitchOffsetDegrees ?? 3)}
-                              style={{ width: 72 }}
-                              onBlur={(e) => {
-                                const raw = Number(e.currentTarget.value);
-                                const next = Number.isFinite(raw)
-                                  ? Math.trunc(raw)
-                                  : 3;
-                                onChildPitchOffsetDegreesChange?.(track.id, next);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  (e.currentTarget as HTMLInputElement).blur();
-                                }
-                              }}
-                              aria-label={t("child_pitch_offset_degrees_label")}
-                              placeholder={t("child_pitch_offset_degrees_short")}
-                            />
-                          ) : (
-                            <TextField.Root
-                              key={`cent-${track.id}-${track.childPitchOffsetCents}`}
-                              size="1"
-                              type="number"
-                              defaultValue={String(track.childPitchOffsetCents ?? 0)}
-                              style={{ width: 72 }}
-                              onBlur={(e) => {
-                                const raw = Number(e.currentTarget.value);
-                                const next = Number.isFinite(raw) ? raw : 0;
-                                onChildPitchOffsetCentsChange?.(track.id, next);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  (e.currentTarget as HTMLInputElement).blur();
-                                }
-                              }}
-                              aria-label={t("child_pitch_offset_cents_label")}
-                              placeholder={t("child_pitch_offset_cents_short")}
-                            />
-                          )}
-                        </Flex>
                       ) : null}
                       <Box flexGrow="1" />
                     </Flex>

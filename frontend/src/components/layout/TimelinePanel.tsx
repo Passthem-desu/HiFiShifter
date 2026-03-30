@@ -64,6 +64,7 @@ import { useTimelineClipActions } from "./timeline/hooks/useTimelineClipActions"
 import { useTimelineEventHandlers } from "./timeline/hooks/useTimelineEventHandlers";
 import { useVisualPlayhead } from "../../hooks/useVisualPlayhead";
 import { computeAutoFollowScrollLeft } from "../../utils/autoFollowScroll";
+import { writeSystemClipboardObject } from "../../utils/systemClipboard";
 
 export const TimelinePanel: React.FC = () => {
     const { t } = useI18n();
@@ -373,6 +374,8 @@ export const TimelinePanel: React.FC = () => {
                 trackMeters={s.trackMeters}
                 selectedTrackId={s.selectedTrackId}
                 rowHeight={rowHeight}
+                setRowHeight={setRowHeight}
+                verticalZoomKb={verticalZoomKb}
                 trackVolumeUi={trackVolumeUi}
                 listScrollRef={trackListScrollRef}
                 onSelectTrack={(trackId) => {
@@ -453,30 +456,6 @@ export const TimelinePanel: React.FC = () => {
                         setTrackStateRemote({
                             trackId,
                             pitchAnalysisAlgo: algo,
-                        }),
-                    );
-                }}
-                onChildPitchOffsetModeChange={(trackId, mode) => {
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            childPitchOffsetMode: mode,
-                        }),
-                    );
-                }}
-                onChildPitchOffsetCentsChange={(trackId, cents) => {
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            childPitchOffsetCents: cents,
-                        }),
-                    );
-                }}
-                onChildPitchOffsetDegreesChange={(trackId, degrees) => {
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            childPitchOffsetDegrees: degrees,
                         }),
                     );
                 }}
@@ -853,16 +832,6 @@ export const TimelinePanel: React.FC = () => {
                             )
                         ) {
                             return;
-                        }
-                        if (e.button === 0 || e.button === 2) {
-                            const trackId = trackIdFromClientY(e.clientY);
-                            if (
-                                trackId &&
-                                trackId !==
-                                    sessionRef.current.selectedTrackId
-                            ) {
-                                void dispatch(selectTrackRemote(trackId));
-                            }
                         }
                         if (e.button !== 1) return;
                         if (isEditableTarget(e.target)) return;
@@ -1428,6 +1397,15 @@ export const TimelinePanel: React.FC = () => {
                                         if (templates.length > 0) {
                                             clipClipboardRef.current =
                                                 templates;
+                                            try {
+                                                await writeSystemClipboardObject({
+                                                    version: 1,
+                                                    kind: "clip",
+                                                    templates,
+                                                });
+                                            } catch {
+                                                // ignore clipboard write errors
+                                            }
                                         }
                                     })();
                                 }}
@@ -1443,6 +1421,15 @@ export const TimelinePanel: React.FC = () => {
                                             return;
                                         clipClipboardRef.current =
                                             templates;
+                                        try {
+                                            await writeSystemClipboardObject({
+                                                version: 1,
+                                                kind: "clip",
+                                                templates,
+                                            });
+                                        } catch {
+                                            // ignore clipboard write errors
+                                        }
                                         setContextMenu(null);
                                         setMultiSelectedClipIds(
                                             [],

@@ -237,26 +237,38 @@ export function TransposeDegreesDialog({
 interface SetPitchProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  titleText?: string;
+  valueLabelText?: string;
+  defaultValue?: number;
   defaultSmoothness?: number;
-  onConfirm?: (midiNote: number, edgeSmoothnessPercent: number) => void;
+  onConfirm?: (value: number, edgeSmoothnessPercent: number) => void;
 }
 
 export function SetPitchDialog({
   open,
   onOpenChange,
+  titleText,
+  valueLabelText,
+  defaultValue = 60,
   defaultSmoothness = 0,
   onConfirm,
 }: SetPitchProps) {
   const { t } = useI18n();
   const tAny = t as (key: string) => string;
-  const [note, setNote] = useState("60"); // C4
+  const [note, setNote] = useState(String(defaultValue));
   const [smoothness, setSmoothness] = useState(
     String(Math.round(defaultSmoothness)),
   );
+  const paramFineAdjustKb = useAppSelector((state) =>
+    selectKeybinding(state, "modifier.paramFineAdjust"),
+  );
 
   useEffect(() => {
-    if (open) setSmoothness(String(Math.round(defaultSmoothness)));
-  }, [open, defaultSmoothness]);
+    if (open) {
+      setSmoothness(String(Math.round(defaultSmoothness)));
+      setNote(String(defaultValue));
+    }
+  }, [open, defaultSmoothness, defaultValue]);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -264,11 +276,11 @@ export function SetPitchDialog({
         style={{ maxWidth: 340 }}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        <Dialog.Title>{tAny("menu_set_pitch")}</Dialog.Title>
+        <Dialog.Title>{titleText ?? tAny("menu_set_pitch")}</Dialog.Title>
         <Flex direction="column" gap="3" mt="3">
           <Flex align="center" gap="2">
             <Text size="2" style={{ minWidth: 100 }}>
-              {tAny("dlg_midi_note")}
+              {valueLabelText ?? tAny("dlg_midi_note")}
             </Text>
             <TextField.Root
               size="2"
@@ -284,19 +296,26 @@ export function SetPitchDialog({
             <Text size="2" style={{ minWidth: 100 }}>
               {tAny("edge_smoothness")}
             </Text>
-            <TextField.Root
-              size="2"
-              type="number"
+            <input
+              type="range"
               min={0}
               max={100}
-              value={smoothness}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setSmoothness(e.target.value)
-              }
+              step={1}
+              value={Math.round(Number(smoothness) || 0)}
+              onWheel={(e) => {
+                e.preventDefault();
+                const fine = isModifierActive(paramFineAdjustKb, e.nativeEvent);
+                const step = fine ? 1 : 5;
+                const dir = e.deltaY < 0 ? 1 : -1;
+                const current = Math.round(Number(smoothness) || 0);
+                const next = Math.max(0, Math.min(100, current + dir * step));
+                setSmoothness(String(next));
+              }}
+              onChange={(e) => setSmoothness(e.currentTarget.value)}
               style={{ flex: 1 }}
             />
-            <Text size="1" color="gray">
-              %
+            <Text size="1" style={{ minWidth: 40, textAlign: "right" }}>
+              {Math.round(Number(smoothness) || 0)}%
             </Text>
           </Flex>
         </Flex>
@@ -308,8 +327,12 @@ export function SetPitchDialog({
           </Dialog.Close>
           <Button
             onClick={() => {
+              const parsedNote = Number(note);
+              const nextValue = Number.isFinite(parsedNote)
+                ? parsedNote
+                : defaultValue;
               onConfirm?.(
-                Number(note) || 60,
+                nextValue,
                 Math.max(0, Math.min(100, Number(smoothness) || 0)),
               );
               onOpenChange(false);
@@ -633,20 +656,27 @@ export function VibratoDialog({
 interface QuantizeProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  valueMode?: boolean;
+  defaultQuantizeUnit?: number;
+  defaultTolerance?: number;
   defaultScale?: ScaleKey;
   defaultUseProjectScale?: boolean;
   projectScaleLabel?: string;
   defaultToleranceCents?: number;
   onConfirm?: (
-    unit: "semitone" | "scale",
+    unit: "semitone" | "scale" | "value",
     scaleValue: string,
     toleranceCents: number,
+    quantizeUnit?: number,
   ) => void;
 }
 
 export function QuantizeDialog({
   open,
   onOpenChange,
+  valueMode = false,
+  defaultQuantizeUnit = 1,
+  defaultTolerance = 0,
   defaultScale = "C",
   defaultUseProjectScale = true,
   projectScaleLabel,
@@ -655,20 +685,25 @@ export function QuantizeDialog({
 }: QuantizeProps) {
   const { t } = useI18n();
   const tAny = t as (key: string) => string;
+  const toleranceDefault = defaultTolerance ?? defaultToleranceCents;
   const [unit, setUnit] = useState<"semitone" | "scale">("semitone");
   const [scaleValue, setScaleValue] = useState<string>(
     defaultUseProjectScale ? "__project__" : defaultScale,
   );
   const [toleranceCents, setToleranceCents] = useState<string>(
-    String(defaultToleranceCents),
+    String(toleranceDefault),
+  );
+  const [quantizeUnit, setQuantizeUnit] = useState<string>(
+    String(defaultQuantizeUnit),
   );
 
   useEffect(() => {
     if (open) {
       setScaleValue(defaultUseProjectScale ? "__project__" : defaultScale);
-      setToleranceCents(String(defaultToleranceCents));
+      setToleranceCents(String(toleranceDefault));
+      setQuantizeUnit(String(defaultQuantizeUnit));
     }
-  }, [open, defaultScale, defaultToleranceCents, defaultUseProjectScale]);
+  }, [open, defaultScale, toleranceDefault, defaultUseProjectScale, defaultQuantizeUnit]);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -678,27 +713,29 @@ export function QuantizeDialog({
       >
         <Dialog.Title>{tAny("menu_quantize")}</Dialog.Title>
         <Flex direction="column" gap="3" mt="3">
-          <Flex align="center" gap="2">
-            <Text size="2" style={{ minWidth: 80 }}>
-              {tAny("quantize_unit")}
-            </Text>
-            <Select.Root
-              value={unit}
-              size="2"
-              onValueChange={(v) => setUnit(v as "semitone" | "scale")}
-            >
-              <Select.Trigger style={{ flex: 1 }} />
-              <Select.Content>
-                <Select.Item value="semitone">
-                  {tAny("quantize_semitone")}
-                </Select.Item>
-                <Select.Item value="scale">
-                  {tAny("quantize_scale")}
-                </Select.Item>
-              </Select.Content>
-            </Select.Root>
-          </Flex>
-          {unit === "scale" && (
+          {!valueMode && (
+            <Flex align="center" gap="2">
+              <Text size="2" style={{ minWidth: 80 }}>
+                {tAny("quantize_unit")}
+              </Text>
+              <Select.Root
+                value={unit}
+                size="2"
+                onValueChange={(v) => setUnit(v as "semitone" | "scale")}
+              >
+                <Select.Trigger style={{ flex: 1 }} />
+                <Select.Content>
+                  <Select.Item value="semitone">
+                    {tAny("quantize_semitone")}
+                  </Select.Item>
+                  <Select.Item value="scale">
+                    {tAny("quantize_scale")}
+                  </Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </Flex>
+          )}
+          {!valueMode && unit === "scale" && (
             <Flex align="center" gap="2">
               <Text size="2" style={{ minWidth: 80 }}>
                 {tAny("base_scale")}
@@ -723,9 +760,25 @@ export function QuantizeDialog({
               </Select.Root>
             </Flex>
           )}
+          {valueMode && (
+            <Flex align="center" gap="2">
+              <Text size="2" style={{ minWidth: 80 }}>
+                {tAny("quantize_unit")}
+              </Text>
+              <TextField.Root
+                size="2"
+                type="number"
+                value={quantizeUnit}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setQuantizeUnit(e.target.value)
+                }
+                style={{ flex: 1 }}
+              />
+            </Flex>
+          )}
           <Flex align="center" gap="2">
             <Text size="2" style={{ minWidth: 80 }}>
-              {tAny("pitch_snap_tolerance")}
+              {valueMode ? tAny("quantize_tolerance") : tAny("pitch_snap_tolerance")}
             </Text>
             <TextField.Root
               size="2"
@@ -747,7 +800,13 @@ export function QuantizeDialog({
           <Button
             onClick={() => {
               const parsed = Math.abs(Math.round(Number(toleranceCents) || 0));
-              onConfirm?.(unit, scaleValue, parsed);
+              const parsedUnit = Math.abs(Number(quantizeUnit) || 0);
+              onConfirm?.(
+                valueMode ? "value" : unit,
+                scaleValue,
+                parsed,
+                valueMode ? parsedUnit : undefined,
+              );
               onOpenChange(false);
             }}
           >
@@ -762,20 +821,27 @@ export function QuantizeDialog({
 interface MeanQuantizeProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  valueMode?: boolean;
+  defaultQuantizeUnit?: number;
+  defaultTolerance?: number;
   defaultScale?: ScaleKey;
   defaultUseProjectScale?: boolean;
   projectScaleLabel?: string;
   defaultToleranceCents?: number;
   onConfirm?: (
-    unit: "semitone" | "scale",
+    unit: "semitone" | "scale" | "value",
     scaleValue: string,
     toleranceCents: number,
+    quantizeUnit?: number,
   ) => void;
 }
 
 export function MeanQuantizeDialog({
   open,
   onOpenChange,
+  valueMode = false,
+  defaultQuantizeUnit = 1,
+  defaultTolerance = 0,
   defaultScale = "C",
   defaultUseProjectScale = true,
   projectScaleLabel,
@@ -784,20 +850,25 @@ export function MeanQuantizeDialog({
 }: MeanQuantizeProps) {
   const { t } = useI18n();
   const tAny = t as (key: string) => string;
+  const toleranceDefault = defaultTolerance ?? defaultToleranceCents;
   const [unit, setUnit] = useState<"semitone" | "scale">("semitone");
   const [scaleValue, setScaleValue] = useState<string>(
     defaultUseProjectScale ? "__project__" : defaultScale,
   );
   const [toleranceCents, setToleranceCents] = useState<string>(
-    String(defaultToleranceCents),
+    String(toleranceDefault),
+  );
+  const [quantizeUnit, setQuantizeUnit] = useState<string>(
+    String(defaultQuantizeUnit),
   );
 
   useEffect(() => {
     if (open) {
       setScaleValue(defaultUseProjectScale ? "__project__" : defaultScale);
-      setToleranceCents(String(defaultToleranceCents));
+      setToleranceCents(String(toleranceDefault));
+      setQuantizeUnit(String(defaultQuantizeUnit));
     }
-  }, [open, defaultScale, defaultToleranceCents, defaultUseProjectScale]);
+  }, [open, defaultScale, toleranceDefault, defaultUseProjectScale, defaultQuantizeUnit]);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -807,27 +878,29 @@ export function MeanQuantizeDialog({
       >
         <Dialog.Title>{tAny("mean_quantize_title")}</Dialog.Title>
         <Flex direction="column" gap="3" mt="3">
-          <Flex align="center" gap="2">
-            <Text size="2" style={{ minWidth: 80 }}>
-              {tAny("quantize_unit")}
-            </Text>
-            <Select.Root
-              value={unit}
-              size="2"
-              onValueChange={(v) => setUnit(v as "semitone" | "scale")}
-            >
-              <Select.Trigger style={{ flex: 1 }} />
-              <Select.Content>
-                <Select.Item value="semitone">
-                  {tAny("quantize_semitone")}
-                </Select.Item>
-                <Select.Item value="scale">
-                  {tAny("quantize_scale")}
-                </Select.Item>
-              </Select.Content>
-            </Select.Root>
-          </Flex>
-          {unit === "scale" && (
+          {!valueMode && (
+            <Flex align="center" gap="2">
+              <Text size="2" style={{ minWidth: 80 }}>
+                {tAny("quantize_unit")}
+              </Text>
+              <Select.Root
+                value={unit}
+                size="2"
+                onValueChange={(v) => setUnit(v as "semitone" | "scale")}
+              >
+                <Select.Trigger style={{ flex: 1 }} />
+                <Select.Content>
+                  <Select.Item value="semitone">
+                    {tAny("quantize_semitone")}
+                  </Select.Item>
+                  <Select.Item value="scale">
+                    {tAny("quantize_scale")}
+                  </Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </Flex>
+          )}
+          {!valueMode && unit === "scale" && (
             <Flex align="center" gap="2">
               <Text size="2" style={{ minWidth: 80 }}>
                 {tAny("base_scale")}
@@ -852,9 +925,25 @@ export function MeanQuantizeDialog({
               </Select.Root>
             </Flex>
           )}
+          {valueMode && (
+            <Flex align="center" gap="2">
+              <Text size="2" style={{ minWidth: 80 }}>
+                {tAny("quantize_unit")}
+              </Text>
+              <TextField.Root
+                size="2"
+                type="number"
+                value={quantizeUnit}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setQuantizeUnit(e.target.value)
+                }
+                style={{ flex: 1 }}
+              />
+            </Flex>
+          )}
           <Flex align="center" gap="2">
             <Text size="2" style={{ minWidth: 80 }}>
-              {tAny("pitch_snap_tolerance")}
+              {valueMode ? tAny("quantize_tolerance") : tAny("pitch_snap_tolerance")}
             </Text>
             <TextField.Root
               size="2"
@@ -876,7 +965,13 @@ export function MeanQuantizeDialog({
           <Button
             onClick={() => {
               const parsed = Math.abs(Math.round(Number(toleranceCents) || 0));
-              onConfirm?.(unit, scaleValue, parsed);
+              const parsedUnit = Math.abs(Number(quantizeUnit) || 0);
+              onConfirm?.(
+                valueMode ? "value" : unit,
+                scaleValue,
+                parsed,
+                valueMode ? parsedUnit : undefined,
+              );
               onOpenChange(false);
             }}
           >

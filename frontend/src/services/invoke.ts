@@ -186,11 +186,8 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 volume: args[3],
                 composeEnabled: args[4],
                 pitchAnalysisAlgo: args[5],
-                childPitchOffsetMode: args[6],
-                childPitchOffsetCents: args[7],
-                childPitchOffsetDegrees: args[8],
-                color: args[9],
-                name: args[10],
+                color: args[6],
+                name: args[7],
             };
 
         case "select_track":
@@ -289,6 +286,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
 
         case "save_separated":
             return { outputDir: args[0] };
+
+        case "export_audio_advanced":
+            return { request: args[0] };
+
+        case "preview_export_audio_plan":
+            return { request: args[0] };
 
         case "play_original":
             return { startSec: args[0] };

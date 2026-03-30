@@ -64,7 +64,7 @@ export function extractLocalFilePath(
 export function isProjectFilePath(path: string | null | undefined): boolean {
     const normalized = String(path ?? "").trim();
     if (!normalized) return false;
-    return /\.(hshp|hsp)$/i.test(normalized);
+    return /\.(hshp|hsp|json)$/i.test(normalized);
 }
 
 export function isReaperProjectFilePath(path: string | null | undefined): boolean {

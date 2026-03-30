@@ -54,7 +54,7 @@ mod waveform;
 // mod pitch_refresh_async;
 
 use crate::state::AppState;
-use tauri::{State, Window};
+use tauri::{Manager, State, Window};
 
 // This is used by the window close handler (crate-internal), not a tauri command.
 // pub(crate) use project::save_project_to_path_inner;
@@ -335,9 +335,6 @@ pub fn set_track_state(
     volume: Option<f32>,
     compose_enabled: Option<bool>,
     pitch_analysis_algo: Option<String>,
-    child_pitch_offset_mode: Option<String>,
-    child_pitch_offset_cents: Option<f32>,
-    child_pitch_offset_degrees: Option<i32>,
     color: Option<String>,
     name: Option<String>,
 ) -> crate::models::TimelineStatePayload {
@@ -349,9 +346,6 @@ pub fn set_track_state(
         volume,
         compose_enabled,
         pitch_analysis_algo,
-        child_pitch_offset_mode,
-        child_pitch_offset_cents,
-        child_pitch_offset_degrees,
         color,
         name,
     )
@@ -613,6 +607,41 @@ pub fn save_synthesized(state: State<'_, AppState>, output_path: String) -> serd
 #[tauri::command(rename_all = "camelCase")]
 pub fn save_separated(state: State<'_, AppState>, output_dir: String) -> serde_json::Value {
     synth::save_separated(state, output_dir)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn export_audio_advanced(
+    app: tauri::AppHandle,
+    request: synth::ExportAudioRequest,
+) -> serde_json::Value {
+    match tauri::async_runtime::spawn_blocking(move || {
+        let state: State<'_, AppState> = app.state();
+        synth::export_audio_advanced(state, request)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => serde_json::json!({
+            "ok": false,
+            "mode": "unknown",
+            "error": format!("Failed to join export task: {error}"),
+        }),
+    }
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_export_audio_defaults(
+    state: State<'_, AppState>,
+) -> synth::ExportAudioDefaultsPayload {
+    synth::get_export_audio_defaults(state)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn preview_export_audio_plan(
+    state: State<'_, AppState>,
+    request: synth::ExportAudioRequest,
+) -> synth::ExportAudioPlanPayload {
+    synth::preview_export_audio_plan(state, request)
 }
 
 // ===================== playback =====================

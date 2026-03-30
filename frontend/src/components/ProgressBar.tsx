@@ -11,6 +11,7 @@ import { useI18n } from "../i18n/I18nProvider";
 export interface ProgressBarProps {
     percentage: number; // 0-100
     label?: string;
+    completed?: boolean;
     showCancel?: boolean;
     onCancel?: () => void;
     estimatedRemaining?: number | null; // seconds
@@ -20,6 +21,7 @@ export interface ProgressBarProps {
 export const ProgressBar: React.FC<ProgressBarProps> = ({
     percentage,
     label,
+    completed = false,
     showCancel = false,
     onCancel,
     estimatedRemaining,
@@ -40,7 +42,16 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
         <div className={`flex flex-col gap-2 ${className}`}>
             <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
-                    <LoadingSpinner size="sm" />
+                    {completed ? (
+                        <span
+                            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-emerald-400/80 text-emerald-300"
+                            aria-hidden
+                        >
+                            √
+                        </span>
+                    ) : (
+                        <LoadingSpinner size="sm" />
+                    )}
                     {label && <span className="text-gray-300">{label}</span>}
                     <span className="text-gray-400">
                         {clampedPercentage.toFixed(0)}%

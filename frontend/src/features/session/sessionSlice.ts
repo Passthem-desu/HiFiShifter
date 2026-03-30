@@ -79,6 +79,7 @@ import { loadDefaultModel, loadModel } from "./thunks/modelThunks";
 import {
     applyPitchShift,
     exportAudio,
+    exportAudioAdvanced,
     exportSeparated,
     pasteVocalShifterClipboard,
     pasteReaperClipboard,
@@ -455,11 +456,6 @@ function applyTimelineState(
         pitchAnalysisAlgo: String(
             track.pitch_analysis_algo ?? "nsf_hifigan_onnx",
         ),
-        childPitchOffsetMode:
-            track.child_pitch_offset_mode === "degrees" ? "degrees" : "cents",
-        childPitchOffsetCents: Number(track.child_pitch_offset_cents ?? 0) || 0,
-        childPitchOffsetDegrees:
-            Math.trunc(Number(track.child_pitch_offset_degrees ?? 3)) || 3,
         color: track.color || undefined,
     }));
 
@@ -644,9 +640,6 @@ function upsertImportedClip(
 
             composeEnabled: false,
             pitchAnalysisAlgo: "nsf_hifigan_onnx",
-            childPitchOffsetMode: "cents",
-            childPitchOffsetCents: 0,
-            childPitchOffsetDegrees: 3,
         });
     }
 
@@ -734,9 +727,6 @@ const initialState: SessionState = {
 
             composeEnabled: false,
             pitchAnalysisAlgo: "nsf_hifigan_onnx",
-            childPitchOffsetMode: "cents",
-            childPitchOffsetCents: 0,
-            childPitchOffsetDegrees: 3,
         },
     ],
     trackMeters: {},
@@ -864,6 +854,7 @@ export {
     applyPitchShift,
     synthesizeAudio,
     exportAudio,
+    exportAudioAdvanced,
     exportSeparated,
     pasteVocalShifterClipboard,
     pasteReaperClipboard,
@@ -1855,6 +1846,38 @@ const sessionSlice = createSlice({
                 }
             })
             .addCase(exportSeparated.rejected, setRejected)
+
+            .addCase(exportAudioAdvanced.pending, (state) =>
+                setPending(state, "Exporting audio..."),
+            )
+            .addCase(exportAudioAdvanced.fulfilled, (state, action) => {
+                state.busy = false;
+                state.lastResult = action.payload;
+                const payload = action.payload as {
+                    ok?: boolean;
+                    mode?: "project" | "separated";
+                    path?: string;
+                    output_dir?: string;
+                    count?: number;
+                };
+                if (!payload.ok) {
+                    state.status =
+                        payload.mode === "separated"
+                            ? "Export separated failed"
+                            : "Export failed";
+                    return;
+                }
+                if (payload.mode === "separated") {
+                    const suffix = payload.output_dir
+                        ? ` — ${payload.output_dir} (${payload.count ?? 0} tracks)`
+                        : "";
+                    state.status = `Export separated done${suffix}`;
+                    return;
+                }
+                const suffix = payload.path ? ` — ${payload.path}` : "";
+                state.status = `Export done${suffix}`;
+            })
+            .addCase(exportAudioAdvanced.rejected, setRejected)
 
             .addCase(pasteVocalShifterClipboard.pending, (state) =>
                 setPending(state, "Pasting VocalShifter clipboard data..."),

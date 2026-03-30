@@ -1,4 +1,4 @@
-use crate::state::{ChildPitchOffsetMode, PitchAnalysisAlgo, SynthPipelineKind, TimelineState};
+use crate::state::{PitchAnalysisAlgo, SynthPipelineKind, TimelineState};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -264,18 +264,33 @@ fn semitone_ratio(semitones: f64) -> f64 {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ChildPitchOffsetConfig {
-    mode: ChildPitchOffsetMode,
-    cents: f64,
-    degree_steps: i32,
+enum ChildPitchOffsetParamMode {
+    Cents,
+    Degrees,
 }
 
-fn degree_input_to_scale_steps(input_degrees: i32) -> i32 {
-    let ad = input_degrees.abs();
-    if ad <= 1 {
-        return 0;
+#[derive(Debug, Clone, Copy)]
+struct ChildPitchOffsetConfig<'a> {
+    cents: f64,
+    degree_steps: f64,
+    cents_curve: Option<&'a Vec<f32>>,
+    degree_steps_curve: Option<&'a Vec<f32>>,
+}
+
+const CHILD_PITCH_OFFSET_CENTS_PREFIX: &str = "child_pitch_offset_cents@";
+const CHILD_PITCH_OFFSET_DEGREES_PREFIX: &str = "child_pitch_offset_degrees@";
+const CHILD_PITCH_OFFSET_CENTS_DEFAULT: f64 = 0.0;
+const CHILD_PITCH_OFFSET_DEGREES_DEFAULT: f64 = 0.0;
+
+fn child_pitch_offset_curve_key(mode: ChildPitchOffsetParamMode, track_id: &str) -> String {
+    match mode {
+        ChildPitchOffsetParamMode::Cents => {
+            format!("{CHILD_PITCH_OFFSET_CENTS_PREFIX}{track_id}")
+        }
+        ChildPitchOffsetParamMode::Degrees => {
+            format!("{CHILD_PITCH_OFFSET_DEGREES_PREFIX}{track_id}")
+        }
     }
-    input_degrees.signum() * (ad - 1)
 }
 
 fn ordered_scale_semitone_offsets(scale_notes: &[u8]) -> Vec<i32> {
@@ -301,7 +316,7 @@ fn ordered_scale_semitone_offsets(scale_notes: &[u8]) -> Vec<i32> {
     out
 }
 
-fn scale_degree_to_midi(abs_degree: i32, offsets: &[i32]) -> f64 {
+fn scale_degree_to_midi_integer(abs_degree: i32, offsets: &[i32]) -> f64 {
     let degree_count = offsets.len() as i32;
     if degree_count <= 0 {
         return 0.0;
@@ -311,8 +326,22 @@ fn scale_degree_to_midi(abs_degree: i32, offsets: &[i32]) -> f64 {
     (oct * 12 + offsets[idx]) as f64
 }
 
-fn transpose_midi_by_scale_steps(midi: f64, degree_steps: i32, scale_notes: &[u8]) -> f64 {
-    if !midi.is_finite() || degree_steps == 0 {
+fn scale_degree_to_midi(abs_degree: f64, offsets: &[i32]) -> f64 {
+    if !abs_degree.is_finite() {
+        return 0.0;
+    }
+    let lower_degree = abs_degree.floor() as i32;
+    let frac = abs_degree - lower_degree as f64;
+    let lower = scale_degree_to_midi_integer(lower_degree, offsets);
+    if frac <= 1e-9 {
+        return lower;
+    }
+    let upper = scale_degree_to_midi_integer(lower_degree + 1, offsets);
+    lower + (upper - lower) * frac
+}
+
+fn transpose_midi_by_scale_steps(midi: f64, degree_steps: f64, scale_notes: &[u8]) -> f64 {
+    if !midi.is_finite() || degree_steps.abs() <= 1e-9 {
         return midi;
     }
     let offsets = ordered_scale_semitone_offsets(scale_notes);
@@ -351,61 +380,116 @@ fn transpose_midi_by_scale_steps(midi: f64, degree_steps: i32, scale_notes: &[u8
         ((midi - lower_midi) / span).clamp(0.0, 1.0)
     };
 
-    let target_lower = scale_degree_to_midi(lower_degree + degree_steps, &offsets);
-    let target_upper = scale_degree_to_midi(upper_degree + degree_steps, &offsets);
+    let target_lower = scale_degree_to_midi(lower_degree as f64 + degree_steps, &offsets);
+    let target_upper = scale_degree_to_midi(upper_degree as f64 + degree_steps, &offsets);
     target_lower + (target_upper - target_lower) * ratio
 }
 
-fn active_child_pitch_offset_config(
-    timeline: &TimelineState,
+fn active_child_pitch_offset_config<'a>(
+    timeline: &'a TimelineState,
     clip_track_id: &str,
-) -> Option<ChildPitchOffsetConfig> {
+) -> Option<ChildPitchOffsetConfig<'a>> {
     let track = timeline.tracks.iter().find(|track| track.id == clip_track_id)?;
     if track.parent_id.is_none() {
         return None;
     }
 
-    match track.child_pitch_offset_mode {
-        ChildPitchOffsetMode::Cents => {
-            let cents = track.child_pitch_offset_cents as f64;
-            if cents.abs() <= 1e-9 {
-                None
-            } else {
-                Some(ChildPitchOffsetConfig {
-                    mode: ChildPitchOffsetMode::Cents,
-                    cents,
-                    degree_steps: 0,
-                })
-            }
-        }
-        ChildPitchOffsetMode::Degrees => {
-            let degree_steps = degree_input_to_scale_steps(track.child_pitch_offset_degrees);
-            if degree_steps == 0 {
-                None
-            } else {
-                Some(ChildPitchOffsetConfig {
-                    mode: ChildPitchOffsetMode::Degrees,
-                    cents: 0.0,
-                    degree_steps,
-                })
-            }
-        }
+    let root_track_id = timeline.resolve_root_track_id(clip_track_id)?;
+    let entry = timeline.params_by_root_track.get(&root_track_id);
+
+    let cents_curve = entry.and_then(|state| {
+        state
+            .extra_curves
+            .get(&child_pitch_offset_curve_key(
+                ChildPitchOffsetParamMode::Cents,
+                clip_track_id,
+            ))
+    });
+    let degree_steps_curve = entry.and_then(|state| {
+        state
+            .extra_curves
+            .get(&child_pitch_offset_curve_key(
+                ChildPitchOffsetParamMode::Degrees,
+                clip_track_id,
+            ))
+    });
+
+    let static_cents = CHILD_PITCH_OFFSET_CENTS_DEFAULT;
+    let static_degree_steps = CHILD_PITCH_OFFSET_DEGREES_DEFAULT;
+
+    let has_cents_curve = curve_differs_from_default_in_range(
+        cents_curve,
+        entry.map(|state| state.frame_period_ms).unwrap_or(5.0),
+        0.0,
+        f64::MAX,
+        static_cents as f32,
+    );
+    let has_degree_curve = curve_differs_from_default_in_range(
+        degree_steps_curve,
+        entry.map(|state| state.frame_period_ms).unwrap_or(5.0),
+        0.0,
+        f64::MAX,
+        static_degree_steps as f32,
+    );
+
+    let has_effective = has_cents_curve || has_degree_curve;
+    if !has_effective {
+        return None;
     }
+
+    Some(ChildPitchOffsetConfig {
+        cents: static_cents,
+        degree_steps: static_degree_steps,
+        cents_curve,
+        degree_steps_curve,
+    })
+}
+
+fn sample_child_offset_cents(cfg: &ChildPitchOffsetConfig<'_>, frame_idx: usize) -> f64 {
+    cfg.cents_curve
+        .and_then(|curve| curve.get(frame_idx).copied())
+        .filter(|value| value.is_finite())
+        .map(|value| value as f64)
+        .unwrap_or(cfg.cents)
+}
+
+fn sample_child_offset_degree_steps(cfg: &ChildPitchOffsetConfig<'_>, frame_idx: usize) -> f64 {
+    cfg.degree_steps_curve
+        .and_then(|curve| curve.get(frame_idx).copied())
+        .filter(|value| value.is_finite())
+        .map(|value| value as f64)
+        .unwrap_or(cfg.degree_steps)
 }
 
 fn apply_child_pitch_offset_to_midi(
     midi: f64,
-    cfg: ChildPitchOffsetConfig,
+    cfg: &ChildPitchOffsetConfig<'_>,
+    frame_idx: usize,
     scale_notes: &[u8],
 ) -> f64 {
     if !(midi.is_finite() && midi > 0.0) {
         return 0.0;
     }
-    match cfg.mode {
-        ChildPitchOffsetMode::Cents => midi + cfg.cents / 100.0,
-        ChildPitchOffsetMode::Degrees => {
-            transpose_midi_by_scale_steps(midi, cfg.degree_steps, scale_notes)
-        }
+    let steps = sample_child_offset_degree_steps(cfg, frame_idx);
+    let cents = sample_child_offset_cents(cfg, frame_idx);
+
+    let shifted = if steps.abs() > 1e-9 {
+        transpose_midi_by_scale_steps(midi, steps, scale_notes)
+    } else {
+        midi
+    };
+
+    if cents.abs() > 1e-9 {
+        shifted + cents / 100.0
+    } else {
+        shifted
+    }
+}
+
+fn hash_child_offset_curve(curve: &Vec<f32>, hasher: &mut std::collections::hash_map::DefaultHasher) {
+    curve.len().hash(hasher);
+    for value in curve {
+        value.to_bits().hash(hasher);
     }
 }
 
@@ -418,17 +502,15 @@ pub(crate) fn child_pitch_offset_hash_salt(
     };
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     clip.track_id.hash(&mut hasher);
-    match cfg.mode {
-        ChildPitchOffsetMode::Cents => {
-            "cents".hash(&mut hasher);
-            cfg.cents.to_bits().hash(&mut hasher);
-        }
-        ChildPitchOffsetMode::Degrees => {
-            "degrees".hash(&mut hasher);
-            cfg.degree_steps.hash(&mut hasher);
-            for note in &timeline.project_scale_notes {
-                note.hash(&mut hasher);
-            }
+    cfg.cents.to_bits().hash(&mut hasher);
+    cfg.degree_steps.to_bits().hash(&mut hasher);
+    if let Some(curve) = cfg.cents_curve {
+        hash_child_offset_curve(curve, &mut hasher);
+    }
+    if let Some(curve) = cfg.degree_steps_curve {
+        hash_child_offset_curve(curve, &mut hasher);
+        for note in &timeline.project_scale_notes {
+            note.hash(&mut hasher);
         }
     }
     hasher.finish()
@@ -862,22 +944,34 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         tm
     };
 
-    let timeline_midi: Vec<f32> = if let Some(cfg) = child_offset_cfg {
+    let timeline_midi: Vec<f32> = if let Some(ref cfg) = child_offset_cfg {
+        let fp = frame_period_ms.max(0.1);
+        let start_idx = ((clip_start_sec.max(0.0) * 1000.0) / fp).floor().max(0.0) as usize;
         timeline_midi_raw
             .iter()
-            .map(|&midi| apply_child_pitch_offset_to_midi(midi as f64, cfg, &timeline.project_scale_notes) as f32)
+            .enumerate()
+            .map(|(local_idx, &midi)| {
+                let frame_idx = start_idx.saturating_add(local_idx);
+                apply_child_pitch_offset_to_midi(
+                    midi as f64,
+                    cfg,
+                    frame_idx,
+                    &timeline.project_scale_notes,
+                ) as f32
+            })
             .collect()
     } else {
         timeline_midi_raw
     };
 
     let mut effective_pitch_edit: Vec<f32> = pitch_edit.to_vec();
-    if let Some(cfg) = child_offset_cfg {
-        for value in &mut effective_pitch_edit {
+    if let Some(ref cfg) = child_offset_cfg {
+        for (frame_idx, value) in effective_pitch_edit.iter_mut().enumerate() {
             if *value > 0.0 {
                 *value = apply_child_pitch_offset_to_midi(
                     *value as f64,
                     cfg,
+                    frame_idx,
                     &timeline.project_scale_notes,
                 ) as f32;
             }

@@ -92,9 +92,6 @@ export const timelineApi = {
         volume?: number;
         composeEnabled?: boolean;
         pitchAnalysisAlgo?: string;
-        childPitchOffsetMode?: "cents" | "degrees";
-        childPitchOffsetCents?: number;
-        childPitchOffsetDegrees?: number;
         color?: string;
         name?: string;
     }) =>
@@ -106,9 +103,6 @@ export const timelineApi = {
             payload.volume,
             payload.composeEnabled,
             payload.pitchAnalysisAlgo,
-            payload.childPitchOffsetMode,
-            payload.childPitchOffsetCents,
-            payload.childPitchOffsetDegrees,
             payload.color,
             payload.name,
         ),

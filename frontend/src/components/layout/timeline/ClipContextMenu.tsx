@@ -304,24 +304,35 @@ export const ClipContextMenu: React.FC<{
                 </>
             )}
 
-            {isSingle &&
-                onFadeCurveChange &&
+            {onFadeCurveChange &&
                 (() => {
-                    const fadedClips = sortAndFilterFadedClips({
-                        clip,
-                        overlappingClips,
-                    });
+                    const fadedClips = isSingle
+                        ? sortAndFilterFadedClips({
+                              clip,
+                              overlappingClips,
+                          })
+                        : sortAndFilterFadedClips({
+                              clip: selectedClips[0] ?? clip,
+                              overlappingClips: selectedClips.slice(1),
+                          });
                     if (fadedClips.length === 0) return null;
-                    const showHeader = fadedClips.length > 1;
+
+                    const showHeader = isMulti || fadedClips.length > 1;
+
                     return (
                         <>
                             <Divider />
                             {showHeader && (
                                 <div className="px-3 py-1 text-[11px] text-qt-text/50 select-none">
-                                    {t("overlapping_clips_header").replace(
-                                        "{n}",
-                                        String(fadedClips.length),
-                                    )}
+                                    {isMulti
+                                        ? t("ctx_selected_n").replace(
+                                              "{n}",
+                                              String(fadedClips.length),
+                                          )
+                                        : t("overlapping_clips_header").replace(
+                                              "{n}",
+                                              String(fadedClips.length),
+                                          )}
                                 </div>
                             )}
                             {fadedClips.map((fc) => (

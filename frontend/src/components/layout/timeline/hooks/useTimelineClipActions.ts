@@ -32,6 +32,9 @@ import { webApi } from "../../../../services/webviewApi";
 import { dbToGain } from "../math";
 import { computeAutoCrossfadeFromPayload } from "./autoCrossfade";
 import { useTimelineSelectionRect } from "../";
+import {
+    readSystemClipboardObject,
+} from "../../../../utils/systemClipboard";
 
 // ── Args / Result 类型 ────────────────────────────────────────
 
@@ -455,25 +458,34 @@ export function useTimelineClipActions(
 
     // ── pasteClipsAtPlayhead ─────────────────────────────────
     const pasteClipsAtPlayhead = React.useCallback(() => {
-        const tpl = clipClipboardRef.current;
-        if (!tpl || tpl.length === 0) return;
-
-        const playhead = sessionRef.current.playheadSec ?? 0;
-        const minStart = tpl
-            .map((c) => c.startSec)
-            .reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY);
-        const delta =
-            Number.isFinite(minStart) &&
-            minStart !== Number.POSITIVE_INFINITY
-                ? playhead - minStart
-                : 0;
-        const templates = tpl.map((c) => ({
-            ...c,
-            startSec: Math.max(0, c.startSec + delta),
-        }));
-
-        dispatch(checkpointHistory());
         void (async () => {
+            let tpl = clipClipboardRef.current;
+            try {
+                const fromSystem = await readSystemClipboardObject("clip");
+                if (fromSystem?.kind === "clip" && Array.isArray(fromSystem.templates)) {
+                    tpl = fromSystem.templates;
+                    clipClipboardRef.current = fromSystem.templates;
+                }
+            } catch {
+                // ignore and fallback to internal clipboard
+            }
+            if (!tpl || tpl.length === 0) return;
+
+            const playhead = sessionRef.current.playheadSec ?? 0;
+            const minStart = tpl
+                .map((c) => c.startSec)
+                .reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY);
+            const delta =
+                Number.isFinite(minStart) &&
+                minStart !== Number.POSITIVE_INFINITY
+                    ? playhead - minStart
+                    : 0;
+            const templates = tpl.map((c) => ({
+                ...c,
+                startSec: Math.max(0, c.startSec + delta),
+            }));
+
+            dispatch(checkpointHistory());
             await webApi.beginUndoGroup();
             try {
                 const payload = await dispatch(

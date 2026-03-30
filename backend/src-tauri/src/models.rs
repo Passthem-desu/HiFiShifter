@@ -37,9 +37,6 @@ pub struct TimelineTrack {
 
     pub compose_enabled: bool,
     pub pitch_analysis_algo: String,
-    pub child_pitch_offset_mode: String,
-    pub child_pitch_offset_cents: f32,
-    pub child_pitch_offset_degrees: i32,
 
     /// 轨道主题色，hex 字符串，如 "#4f8ef7"
     #[serde(default)]

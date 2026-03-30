@@ -24,8 +24,6 @@ import {
     importAudioFromPath,
     saveProjectRemote,
     saveProjectAsRemote,
-    exportAudio,
-    pickOutputPath,
     setTrackMeters,
     setToolMode,
     checkpointHistory,
@@ -105,7 +103,7 @@ function detectExternalActionKindFromPath(
 ): ExternalFileActionKind | null {
     const normalized = String(path ?? "").trim();
     if (!normalized) return null;
-    if (/\.(hshp|hsp)$/i.test(normalized)) return "openProject";
+    if (/\.(hshp|hsp|json)$/i.test(normalized)) return "openProject";
     if (/\.rpp$/i.test(normalized)) return "importReaper";
     if (/\.(vshp|vsp)$/i.test(normalized)) return "importVocalShifter";
     if (/\.(wav|flac|mp3|ogg|m4a|aac|aif|aiff|wma|opus)$/i.test(normalized)) {
@@ -134,7 +132,6 @@ function AppInner() {
     );
     const toolMode = useAppSelector((state) => state.session.toolMode);
     const drawToolMode = useAppSelector((state) => state.session.drawToolMode);
-    const outputPath = useAppSelector((state) => state.session.outputPath);
     const projectDirty = useAppSelector((state) => state.session.project.dirty);
     // 使用 ref 桥接最新的工程修改状态
     const projectDirtyRef = useRef(projectDirty);
@@ -637,7 +634,6 @@ function AppInner() {
         drawToolMode:
             "draw" as import("./features/session/sessionTypes").DrawToolMode,
     });
-    const outputPathRef = useRef(outputPath);
 
     const playbackSyncInFlightRef = useRef(false);
     const renderingWasActiveRef = useRef(false);
@@ -829,10 +825,6 @@ function AppInner() {
     }, [runtimeIsPlaying, runtimeHasSynthesized, toolMode, drawToolMode]);
 
     useEffect(() => {
-        outputPathRef.current = outputPath;
-    }, [outputPath]);
-
-    useEffect(() => {
         const handler = (event: Event) => {
             const detail = (
                 event as CustomEvent<{
@@ -984,18 +976,11 @@ function AppInner() {
                     void dispatch(saveProjectAsRemote());
                     break;
                 case "project.export":
-                    void (async () => {
-                        const curPath = outputPathRef.current?.trim();
-                        if (!curPath) {
-                            const picked =
-                                await dispatch(pickOutputPath()).unwrap();
-                            if (picked.ok && !picked.canceled && picked.path) {
-                                await dispatch(exportAudio(picked.path));
-                            }
-                            return;
-                        }
-                        await dispatch(exportAudio(curPath));
-                    })();
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:openEditDialog", {
+                            detail: { dialog: "exportAudio" },
+                        }),
+                    );
                     break;
                 case "mode.toggle": {
                     const cur = runtimeRef.current.toolMode;

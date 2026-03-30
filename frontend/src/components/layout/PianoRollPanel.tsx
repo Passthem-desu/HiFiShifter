@@ -80,6 +80,20 @@ import { useClipsPeaksForPianoRoll } from "./pianoRoll/useClipsPeaksForPianoRoll
 import { usePianoRollInteractions } from "./pianoRoll/usePianoRollInteractions";
 import { useLiveParamEditing } from "./pianoRoll/useLiveParamEditing";
 import { getParamShiftStep } from "./pianoRoll/paramShiftStep";
+import {
+    buildChildPitchOffsetCentsParam,
+    buildChildPitchOffsetDegreesParam,
+    childPitchOffsetValueToDisplay,
+    CHILD_PITCH_OFFSET_CENTS_RANGE,
+    CHILD_PITCH_OFFSET_DEGREES_RANGE,
+    isChildPitchOffsetCentsParam,
+    isChildPitchOffsetDegreesParam,
+    isChildPitchOffsetParam,
+} from "./pianoRoll/childPitchOffsetParams";
+import {
+    readSystemClipboardObject,
+    writeSystemClipboardObject,
+} from "../../utils/systemClipboard";
 import { getParamEditorWheelAction } from "./pianoRoll/wheelGesture";
 import type { Keybinding } from "../../features/keybindings/types";
 import { pianoKeySound } from "../../utils/PianoKeySound";
@@ -248,6 +262,7 @@ export const PianoRollPanel: React.FC = () => {
         clientX: number;
         clientY: number;
         value: number;
+        displayText?: string;
     } | null>(null);
 
     const formatParamValuePreview = useCallback(
@@ -261,6 +276,12 @@ export const PianoRollPanel: React.FC = () => {
                 const cents = Math.round((value - rounded) * 100);
                 const signedCents = cents >= 0 ? `+${cents}` : `${cents}`;
                 return `${noteName}${signedCents}`;
+            }
+            if (isChildPitchOffsetDegreesParam(editParam)) {
+                const display = childPitchOffsetValueToDisplay(editParam, value);
+                if (Math.abs(display) >= 100) return display.toFixed(1);
+                if (Math.abs(display) >= 10) return display.toFixed(2);
+                return display.toFixed(3);
             }
             if (Math.abs(value) >= 100) return value.toFixed(1);
             if (Math.abs(value) >= 10) return value.toFixed(2);
@@ -331,6 +352,23 @@ export const PianoRollPanel: React.FC = () => {
         return clip?.trackId ?? null;
     }, [s.selectedTrackId, s.selectedClipId, s.clips]);
 
+    const selectedTrack = useMemo(() => {
+        if (!effectiveSelectedTrackId) return null;
+        return s.tracks.find((track) => track.id === effectiveSelectedTrackId) ?? null;
+    }, [effectiveSelectedTrackId, s.tracks]);
+
+    const selectedIsChildTrack = Boolean(selectedTrack?.parentId);
+
+    const childPitchOffsetCentsParam = useMemo(() => {
+        if (!effectiveSelectedTrackId || !selectedIsChildTrack) return null;
+        return buildChildPitchOffsetCentsParam(effectiveSelectedTrackId);
+    }, [effectiveSelectedTrackId, selectedIsChildTrack]);
+
+    const childPitchOffsetDegreesParam = useMemo(() => {
+        if (!effectiveSelectedTrackId || !selectedIsChildTrack) return null;
+        return buildChildPitchOffsetDegreesParam(effectiveSelectedTrackId);
+    }, [effectiveSelectedTrackId, selectedIsChildTrack]);
+
     const [scrollLeft, setScrollLeft] = useState(0);
     const [pxPerSec, setPxPerSec] = useState(() => {
         const stored = Number(
@@ -340,7 +378,7 @@ export const PianoRollPanel: React.FC = () => {
             ? Math.min(MAX_PX_PER_SEC, Math.max(MIN_PX_PER_SEC, stored))
             : DEFAULT_PX_PER_SEC;
     });
-    // 渲染时根�?BPM 换算 pxPerBeat：pxPerBeat = pxPerSec × (60 / bpm)
+    // 渲染时根 ?BPM 换算 pxPerBeat：pxPerBeat = pxPerSec × (60 / bpm)
     const pxPerBeat = pxPerSec * (60 / Math.max(1e-6, s.bpm));
     const scrollLeftRef = useRef(scrollLeft);
     const pxPerBeatRef = useRef(pxPerBeat);
@@ -350,7 +388,7 @@ export const PianoRollPanel: React.FC = () => {
         nextScrollLeft: number;
     } | null>(null);
 
-    // BPM 变化时，按比例调�?scrollLeft，保持视口中心点的秒数不�?
+    // BPM 变化时，按比例调 ?scrollLeft，保持视口中心点的秒数不 ?
     // scrollLeft_new = scrollLeft_old × (bpm_old / bpm_new)
     const prevBpmRef = useRef(s.bpm);
     useEffect(() => {
@@ -514,6 +552,18 @@ export const PianoRollPanel: React.FC = () => {
         if (editParam === "pitch") {
             return { min: 24, max: 108 };
         }
+        if (isChildPitchOffsetCentsParam(editParam)) {
+            return {
+                min: CHILD_PITCH_OFFSET_CENTS_RANGE.min,
+                max: CHILD_PITCH_OFFSET_CENTS_RANGE.max,
+            };
+        }
+        if (isChildPitchOffsetDegreesParam(editParam)) {
+            return {
+                min: CHILD_PITCH_OFFSET_DEGREES_RANGE.min,
+                max: CHILD_PITCH_OFFSET_DEGREES_RANGE.max,
+            };
+        }
         const desc = processorParamsRef.current.find((d) => d.id === editParam);
         if (desc?.kind.type === "automation_curve") {
             return {
@@ -523,6 +573,55 @@ export const PianoRollPanel: React.FC = () => {
         }
         return undefined;
     }, [editParam, processorParams]);
+
+    const currentParamDefaultValue = useMemo(() => {
+        if (editParam === "pitch") return 60;
+        if (
+            isChildPitchOffsetCentsParam(editParam) ||
+            isChildPitchOffsetDegreesParam(editParam)
+        ) {
+            return 0;
+        }
+        const desc = processorParamsRef.current.find((d) => d.id === editParam);
+        if (desc?.kind.type === "automation_curve") {
+            return Number(desc.kind.default_value) || 0;
+        }
+        if (editParam === "volume" || editParam === "dyn_edit") {
+            return 1;
+        }
+        return 0;
+    }, [editParam, processorParams]);
+
+    const currentParamQuantizeUnit = useMemo(() => {
+        if (isChildPitchOffsetCentsParam(editParam)) return 100;
+        if (isChildPitchOffsetDegreesParam(editParam)) return 0.5;
+        if (editParam === "volume" || editParam === "dyn_edit") return 0.05;
+        if (editParam === "formant_shift_cents") return 50;
+        if (editParam === "breath_gain" || editParam === "hifigan_tension") {
+            return 0.05;
+        }
+        if (editParam === "pan") return 0.1;
+        if (editParam === "breathiness") return 250;
+        const span = Math.abs((currentParamRange?.max ?? 1) - (currentParamRange?.min ?? 0));
+        if (span <= 0) return 0.01;
+        return Math.max(0.01, span / 20);
+    }, [editParam, currentParamRange]);
+
+    useEffect(() => {
+        if (!isChildPitchOffsetParam(editParam)) return;
+        if (paramViewsRef.current[editParam]) return;
+        const range = isChildPitchOffsetCentsParam(editParam)
+            ? CHILD_PITCH_OFFSET_CENTS_RANGE
+            : CHILD_PITCH_OFFSET_DEGREES_RANGE;
+        paramViewsRef.current = {
+            ...paramViewsRef.current,
+            [editParam]: {
+                center: (range.min + range.max) / 2,
+                span: range.max - range.min,
+            },
+        };
+        invalidate();
+    }, [editParam, invalidate]);
 
     // 当 algo 变化时，重新抓取参数描述符
     useEffect(() => {
@@ -636,6 +735,14 @@ export const PianoRollPanel: React.FC = () => {
                     return t("formant_shift_label");
                 case "hifigan_volume":
                     return t("hifigan_volume_label");
+                case "volume":
+                    return t("vslib_volume_label");
+                case "synth_mode":
+                    return t("vslib_synth_mode_label");
+                case "pan":
+                    return t("vslib_pan_label");
+                case "breathiness":
+                    return t("vslib_breathiness_label");
                 default:
                     return param.display_name;
             }
@@ -649,6 +756,11 @@ export const PianoRollPanel: React.FC = () => {
                 if (value === 0) return t("switch_off");
                 if (value === 1) return t("switch_on");
             }
+            if (paramId === "synth_mode") {
+                if (value === 0) return t("vslib_synth_mode_mono");
+                if (value === 1) return t("vslib_synth_mode_mono_formant");
+                if (value === 2) return t("vslib_synth_mode_chorus");
+            }
             return label;
         },
         [t],
@@ -659,11 +771,46 @@ export const PianoRollPanel: React.FC = () => {
         const available = new Set([
             "pitch",
             ...processorParams.map((p) => p.id),
+            ...(childPitchOffsetCentsParam ? [childPitchOffsetCentsParam] : []),
+            ...(childPitchOffsetDegreesParam ? [childPitchOffsetDegreesParam] : []),
         ]);
+        if (isChildPitchOffsetParam(editParam)) {
+            if (!selectedIsChildTrack || !effectiveSelectedTrackId) {
+                dispatch(setEditParam("pitch"));
+                return;
+            }
+            if (isChildPitchOffsetCentsParam(editParam)) {
+                const expected = buildChildPitchOffsetCentsParam(
+                    effectiveSelectedTrackId,
+                );
+                if (editParam !== expected) {
+                    dispatch(setEditParam(expected));
+                    return;
+                }
+            }
+            if (isChildPitchOffsetDegreesParam(editParam)) {
+                const expected = buildChildPitchOffsetDegreesParam(
+                    effectiveSelectedTrackId,
+                );
+                if (editParam !== expected) {
+                    dispatch(setEditParam(expected));
+                    return;
+                }
+            }
+        }
+
         if (!available.has(editParam)) {
             dispatch(setEditParam("pitch"));
         }
-    }, [processorParams, editParam, dispatch]);
+    }, [
+        processorParams,
+        editParam,
+        dispatch,
+        childPitchOffsetCentsParam,
+        childPitchOffsetDegreesParam,
+        effectiveSelectedTrackId,
+        selectedIsChildTrack,
+    ]);
 
     // 收集轨道组内所有 trackId（root + 递归所有子轨道）
     const groupTrackIds = useMemo(() => {
@@ -696,8 +843,19 @@ export const PianoRollPanel: React.FC = () => {
         return null;
     }, [editParam, rootTrack, t]);
 
+    const childPitchHardDisableReason = useMemo(() => {
+        if (!isChildPitchOffsetParam(editParam)) return null;
+        if (!rootTrack) return null;
+        if (!rootTrack.composeEnabled) return t("pitch_requires_compose");
+        return null;
+    }, [editParam, rootTrack, t]);
+
     const pitchEnabled =
-        editParam !== "pitch" || pitchHardDisableReason == null;
+        editParam === "pitch"
+            ? pitchHardDisableReason == null
+            : isChildPitchOffsetParam(editParam)
+              ? childPitchHardDisableReason == null
+              : true;
 
     const visibleSecondaryParamIds = useMemo(() => {
         return getVisibleSecondaryParamIds({
@@ -733,6 +891,44 @@ export const PianoRollPanel: React.FC = () => {
             return 0;
         const r = value % mod;
         return (r + mod) % mod;
+    }
+
+    function pitchDeltaToDegreeSteps(
+        basePitch: number,
+        targetPitch: number,
+        scale: ScaleLike,
+    ): number {
+        if (!Number.isFinite(basePitch) || !Number.isFinite(targetPitch)) {
+            return 0;
+        }
+        if (Math.abs(targetPitch - basePitch) <= 1e-9) return 0;
+
+        const minStep: number = CHILD_PITCH_OFFSET_DEGREES_RANGE.min;
+        const maxStep: number = CHILD_PITCH_OFFSET_DEGREES_RANGE.max;
+        const minPitch = transposePitchByScaleSteps(basePitch, minStep, scale);
+        const maxPitch = transposePitchByScaleSteps(basePitch, maxStep, scale);
+        const lowPitch = Math.min(minPitch, maxPitch);
+        const highPitch = Math.max(minPitch, maxPitch);
+        if (targetPitch <= lowPitch) {
+            return minPitch <= maxPitch ? minStep : maxStep;
+        }
+        if (targetPitch >= highPitch) {
+            return minPitch <= maxPitch ? maxStep : minStep;
+        }
+
+        let left = minStep;
+        let right = maxStep;
+        const ascending = minPitch <= maxPitch;
+        for (let i = 0; i < 24; i += 1) {
+            const mid = (left + right) / 2;
+            const midPitch = transposePitchByScaleSteps(basePitch, mid, scale);
+            if ((midPitch < targetPitch) === ascending) {
+                left = mid;
+            } else {
+                right = mid;
+            }
+        }
+        return (left + right) / 2;
     }
 
     const viewSizeRef = useRef({ w: 1, h: 1 });
@@ -866,6 +1062,32 @@ export const PianoRollPanel: React.FC = () => {
                 return (1 - t) * H;
             }
 
+            if (isChildPitchOffsetCentsParam(param)) {
+                const absMin = CHILD_PITCH_OFFSET_CENTS_RANGE.min;
+                const absMax = CHILD_PITCH_OFFSET_CENTS_RANGE.max;
+                const view = paramViewsRef.current[param] ?? {
+                    center: (absMin + absMax) / 2,
+                    span: absMax - absMin,
+                };
+                const span = clamp(view.span, 1e-6, absMax - absMin);
+                const min = clamp(view.center - span / 2, absMin, absMax - span);
+                const t = (clamp(v, absMin, absMax) - min) / Math.max(1e-9, span);
+                return (1 - t) * H;
+            }
+
+            if (isChildPitchOffsetDegreesParam(param)) {
+                const absMin = CHILD_PITCH_OFFSET_DEGREES_RANGE.min;
+                const absMax = CHILD_PITCH_OFFSET_DEGREES_RANGE.max;
+                const view = paramViewsRef.current[param] ?? {
+                    center: (absMin + absMax) / 2,
+                    span: absMax - absMin,
+                };
+                const span = clamp(view.span, 1e-6, absMax - absMin);
+                const min = clamp(view.center - span / 2, absMin, absMax - span);
+                const t = (clamp(v, absMin, absMax) - min) / Math.max(1e-9, span);
+                return (1 - t) * H;
+            }
+
             const desc = processorParamsRef.current.find((d) => d.id === param);
             const absMin =
                 desc?.kind.type === "automation_curve"
@@ -908,6 +1130,31 @@ export const PianoRollPanel: React.FC = () => {
                 );
                 return clamp(min + t * span, absMin, absMax);
             }
+
+            if (isChildPitchOffsetCentsParam(param)) {
+                const absMin = CHILD_PITCH_OFFSET_CENTS_RANGE.min;
+                const absMax = CHILD_PITCH_OFFSET_CENTS_RANGE.max;
+                const view = paramViewsRef.current[param] ?? {
+                    center: (absMin + absMax) / 2,
+                    span: absMax - absMin,
+                };
+                const span = clamp(view.span, 1e-6, absMax - absMin);
+                const min = clamp(view.center - span / 2, absMin, absMax - span);
+                return clamp(min + t * span, absMin, absMax);
+            }
+
+            if (isChildPitchOffsetDegreesParam(param)) {
+                const absMin = CHILD_PITCH_OFFSET_DEGREES_RANGE.min;
+                const absMax = CHILD_PITCH_OFFSET_DEGREES_RANGE.max;
+                const view = paramViewsRef.current[param] ?? {
+                    center: (absMin + absMax) / 2,
+                    span: absMax - absMin,
+                };
+                const span = clamp(view.span, 1e-6, absMax - absMin);
+                const min = clamp(view.center - span / 2, absMin, absMax - span);
+                return clamp(min + t * span, absMin, absMax);
+            }
+
             const desc = processorParamsRef.current.find((d) => d.id === param);
             const absMin =
                 desc?.kind.type === "automation_curve"
@@ -938,6 +1185,20 @@ export const PianoRollPanel: React.FC = () => {
                 absMin + span / 2,
                 absMax - span / 2,
             );
+            return { center, span };
+        }
+        if (isChildPitchOffsetCentsParam(param)) {
+            const absMin = CHILD_PITCH_OFFSET_CENTS_RANGE.min;
+            const absMax = CHILD_PITCH_OFFSET_CENTS_RANGE.max;
+            const span = clamp(v.span, 100, absMax - absMin);
+            const center = clamp(v.center, absMin + span / 2, absMax - span / 2);
+            return { center, span };
+        }
+        if (isChildPitchOffsetDegreesParam(param)) {
+            const absMin = CHILD_PITCH_OFFSET_DEGREES_RANGE.min;
+            const absMax = CHILD_PITCH_OFFSET_DEGREES_RANGE.max;
+            const span = clamp(v.span, 1, absMax - absMin);
+            const center = clamp(v.center, absMin + span / 2, absMax - span / 2);
             return { center, span };
         }
         const desc = processorParamsRef.current.find((d) => d.id === param);
@@ -987,8 +1248,8 @@ export const PianoRollPanel: React.FC = () => {
     // 将 PianoRoll 加载状态同步到全局 Context（供 status bar 使用）
     const updatePianoRollStatus = usePianoRollStatusUpdate();
 
-    // 用于通知 usePianoRollData 当前是否处于 live 编辑状态（pointer down 期间�?true）�?
-    // pitch_orig_updated 事件到达时若�?true，则延迟曲线刷新�?pointer-up 后执行�?
+    // 用于通知 usePianoRollData 当前是否处于 live 编辑状态（pointer down 期间 ?true） ?
+    // pitch_orig_updated 事件到达时若 ?true，则延迟曲线刷新 ?pointer-up 后执行 ?
     const liveEditActiveRef = useRef(false);
 
     const {
@@ -1061,7 +1322,7 @@ export const PianoRollPanel: React.FC = () => {
         return { selectionStartFrame: sf, selectionMaxFrames: fc };
     }, [midiDialogSelection, paramView?.framePeriodMs, secPerBeat]);
 
-    // 获取当前 track 下的所�?clips，用�?per-clip 波形叠加绘制
+    // 获取当前 track 下的所 ?clips，用 ?per-clip 波形叠加绘制
     // 获取轨道组内所有 clips（包含 root 轨道及所有子轨道的 clip）
     const trackClips = useMemo(
         () => s.clips.filter((c) => groupTrackIds.has(c.trackId)),
@@ -1100,8 +1361,8 @@ export const PianoRollPanel: React.FC = () => {
         invalidate();
     }, [editParam, visibleSecondaryParamIds, themeMode, invalidate]);
 
-    // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后�?
-    // useEffect 已移�?detectedPitchCurves useMemo 定义之后，见下方�?
+    // 检测音高曲线更新时触发重绘（必须在 detectedPitchCurves 声明之后 ?
+    // useEffect 已移 ?detectedPitchCurves useMemo 定义之后，见下方 ?
 
     const paramViewRef = useRef<
         import("./pianoRoll/types").ParamViewSegment | null
@@ -1126,7 +1387,7 @@ export const PianoRollPanel: React.FC = () => {
     });
 
     // 包装 commitStroke：在 pointer-up 提交笔画后，清除 liveEditActive 状态，
-    // 并触发可能被延迟�?pitch_orig_updated 曲线刷新�?
+    // 并触发可能被延迟 ?pitch_orig_updated 曲线刷新 ?
     const commitStroke: typeof commitStrokeBase = useCallback(
         async (points, mode) => {
             await commitStrokeBase(points, mode);
@@ -1187,13 +1448,16 @@ export const PianoRollPanel: React.FC = () => {
             paramViews: paramViewsRef.current,
             valueToY,
             clipPeaks,
-            paramView,
-            secondaryParamViews,
-            secondaryParamIds: visibleSecondaryParamIds,
-            showSecondaryParam: visibleSecondaryParamIds.length > 0,
+            paramView: pitchEnabled ? paramView : null,
+            secondaryParamViews: pitchEnabled ? secondaryParamViews : {},
+            secondaryParamIds: pitchEnabled ? visibleSecondaryParamIds : [],
+            showSecondaryParam:
+                pitchEnabled && visibleSecondaryParamIds.length > 0,
             overlayText:
-                editParam === "pitch" && !pitchEnabled
-                    ? pitchHardDisableReason
+                !pitchEnabled
+                    ? (editParam === "pitch"
+                        ? pitchHardDisableReason
+                        : childPitchHardDisableReason)
                     : null,
             liveEditOverride: liveEditOverrideRef.current,
             selection: selectionRef.current,
@@ -1308,6 +1572,7 @@ export const PianoRollPanel: React.FC = () => {
                     clientX: number;
                     clientY: number;
                     value: number;
+                    displayText?: string;
                 } | null,
             ) => {
                 setParamValuePreview(next);
@@ -1704,6 +1969,7 @@ export const PianoRollPanel: React.FC = () => {
 
             const sel = selectionRef.current;
             if (!sel) return;
+            if (!pitchEnabled) return;
 
             const aBeat = Math.min(sel.aBeat, sel.bBeat);
             const bBeat = Math.max(sel.aBeat, sel.bBeat);
@@ -1923,6 +2189,18 @@ export const PianoRollPanel: React.FC = () => {
                             Number(payload.frame_period_ms ?? fp) || fp,
                         values: (payload.edit ?? []).map((v) => Number(v) || 0),
                     };
+                    try {
+                        await writeSystemClipboardObject({
+                            version: 1,
+                            kind: "param",
+                            param: editParam,
+                            framePeriodMs:
+                                Number(payload.frame_period_ms ?? fp) || fp,
+                            values: (payload.edit ?? []).map((v) => Number(v) || 0),
+                        });
+                    } catch {
+                        // ignore clipboard write failures
+                    }
                     // 刷新剪贴板预览
                     invalidate();
                     break;
@@ -1943,6 +2221,18 @@ export const PianoRollPanel: React.FC = () => {
                             Number(payload.frame_period_ms ?? fp) || fp,
                         values: (payload.edit ?? []).map((v) => Number(v) || 0),
                     };
+                    try {
+                        await writeSystemClipboardObject({
+                            version: 1,
+                            kind: "param",
+                            param: editParam,
+                            framePeriodMs:
+                                Number(payload.frame_period_ms ?? fp) || fp,
+                            values: (payload.edit ?? []).map((v) => Number(v) || 0),
+                        });
+                    } catch {
+                        // ignore clipboard write failures
+                    }
                     invalidate();
                     // 初始化（恢复原始值）
                     await paramsApi.restoreParamFrames(
@@ -1956,13 +2246,78 @@ export const PianoRollPanel: React.FC = () => {
                     break;
                 }
                 case "paste": {
-                    const clip = clipboardRef.current;
-                    if (!clip || clip.param !== editParam) return;
-                    // 将剪贴板数据截断到选区帧数范围内
-                    const pasteValues =
-                        clip.values.length > frameCount
-                            ? clip.values.slice(0, frameCount)
-                            : clip.values;
+                    let clip = clipboardRef.current;
+                    try {
+                        const fromSystem = await readSystemClipboardObject("param");
+                        if (fromSystem?.kind === "param") {
+                            clip = {
+                                param: fromSystem.param,
+                                framePeriodMs: Number(fromSystem.framePeriodMs) || fp,
+                                values: Array.isArray(fromSystem.values)
+                                    ? fromSystem.values.map((v) => Number(v) || 0)
+                                    : [],
+                            };
+                            clipboardRef.current = clip;
+                        }
+                    } catch {
+                        // ignore and fallback to internal clipboard
+                    }
+                    if (!clip) return;
+
+                    let pasteValues: number[];
+                    if (clip.param === editParam) {
+                        pasteValues =
+                            clip.values.length > frameCount
+                                ? clip.values.slice(0, frameCount)
+                                : clip.values;
+                    } else if (
+                        clip.param === "pitch" &&
+                        (isChildPitchOffsetCentsParam(editParam) || isChildPitchOffsetDegreesParam(editParam))
+                    ) {
+                        const pitchRes = await paramsApi.getParamFrames(
+                            rootTrackId,
+                            "pitch",
+                            startFrame,
+                            frameCount,
+                            1,
+                        );
+                        if (!pitchRes?.ok) return;
+                        const pitchPayload = pitchRes as ParamFramesPayload;
+                        const currentPitch = (pitchPayload.edit ?? []).map((v) => Number(v) || 0);
+                        const sourcePitch =
+                            clip.values.length > frameCount
+                                ? clip.values.slice(0, frameCount)
+                                : clip.values;
+                        pasteValues = sourcePitch.map((targetPitch, idx) => {
+                            const basePitch = currentPitch[idx] ?? 0;
+                            if (targetPitch === 0 || basePitch === 0) return 0;
+                            if (isChildPitchOffsetCentsParam(editParam)) {
+                                const deltaSemitone = targetPitch - basePitch;
+                                return Math.max(
+                                    CHILD_PITCH_OFFSET_CENTS_RANGE.min,
+                                    Math.min(
+                                        CHILD_PITCH_OFFSET_CENTS_RANGE.max,
+                                        deltaSemitone * 100,
+                                    ),
+                                );
+                            }
+                            const internalDegrees = pitchDeltaToDegreeSteps(
+                                basePitch,
+                                targetPitch,
+                                effectiveProjectScale,
+                            );
+                            return Math.max(
+                                CHILD_PITCH_OFFSET_DEGREES_RANGE.min,
+                                Math.min(
+                                    CHILD_PITCH_OFFSET_DEGREES_RANGE.max,
+                                    internalDegrees,
+                                ),
+                            );
+                        });
+                    } else {
+                        return;
+                    }
+
                     await paramsApi.setParamFrames(
                         rootTrackId,
                         editParam,
@@ -2067,7 +2422,8 @@ export const PianoRollPanel: React.FC = () => {
                     break;
                 }
                 case "setPitch": {
-                    const midiNote = Number(data?.midiNote ?? 60);
+                    const parsed = Number(data?.value ?? data?.midiNote);
+                    const midiNote = Number.isFinite(parsed) ? parsed : 60;
                     await applySelectionEditWithEdgeSmoothing(
                         (vals) =>
                             editParam === "pitch"
@@ -2173,6 +2529,43 @@ export const PianoRollPanel: React.FC = () => {
                     break;
                 }
                 case "quantize": {
+                    if (editParam !== "pitch") {
+                        const fallbackUnit = currentParamQuantizeUnit;
+                        const quantizeUnit = Math.abs(
+                            Number(data?.quantizeUnit ?? fallbackUnit) || fallbackUnit,
+                        );
+                        if (!Number.isFinite(quantizeUnit) || quantizeUnit <= 0) return;
+                        const tolerance = Math.abs(
+                            Number(data?.tolerance ?? data?.toleranceCents ?? 0) || 0,
+                        );
+                        const defaultValue = currentParamDefaultValue;
+                        const res = await paramsApi.getParamFrames(
+                            rootTrackId,
+                            editParam,
+                            startFrame,
+                            frameCount,
+                            1,
+                        );
+                        if (!res?.ok) return;
+                        const payload = res as ParamFramesPayload;
+                        const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                        const quantized = vals.map((v) => {
+                            const stepCount = Math.round((v - defaultValue) / quantizeUnit);
+                            const snapped = defaultValue + stepCount * quantizeUnit;
+                            if (Math.abs(v - snapped) <= tolerance) return v;
+                            return snapped + (v > snapped ? 1 : -1) * tolerance;
+                        });
+                        await paramsApi.setParamFrames(
+                            rootTrackId,
+                            editParam,
+                            startFrame,
+                            quantized,
+                            true,
+                        );
+                        bumpRefreshToken();
+                        break;
+                    }
+
                     const unit = (data?.unit as string) ?? "semitone";
                     const scaleToken = String(data?.scale ?? "__project__");
                     const scale: ScaleLike =
@@ -2244,6 +2637,47 @@ export const PianoRollPanel: React.FC = () => {
                     break;
                 }
                 case "meanQuantize": {
+                    if (editParam !== "pitch") {
+                        const fallbackUnit = currentParamQuantizeUnit;
+                        const quantizeUnit = Math.abs(
+                            Number(data?.quantizeUnit ?? fallbackUnit) || fallbackUnit,
+                        );
+                        if (!Number.isFinite(quantizeUnit) || quantizeUnit <= 0) return;
+                        const tolerance = Math.abs(
+                            Number(data?.tolerance ?? data?.toleranceCents ?? 0) || 0,
+                        );
+                        const defaultValue = currentParamDefaultValue;
+                        const res = await paramsApi.getParamFrames(
+                            rootTrackId,
+                            editParam,
+                            startFrame,
+                            frameCount,
+                            1,
+                        );
+                        if (!res?.ok) return;
+                        const payload = res as ParamFramesPayload;
+                        const vals = (payload.edit ?? []).map((v) => Number(v) || 0);
+                        if (vals.length === 0) return;
+                        const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                        const stepCount = Math.round((avg - defaultValue) / quantizeUnit);
+                        const quantizedAvg = defaultValue + stepCount * quantizeUnit;
+                        const delta = quantizedAvg - avg;
+                        const result = vals.map((v) => {
+                            const moved = v + delta;
+                            if (Math.abs(moved - v) <= tolerance) return v;
+                            return moved + (v > moved ? 1 : -1) * tolerance;
+                        });
+                        await paramsApi.setParamFrames(
+                            rootTrackId,
+                            editParam,
+                            startFrame,
+                            result,
+                            true,
+                        );
+                        bumpRefreshToken();
+                        break;
+                    }
+
                     const unit = (data?.unit as string) ?? "semitone";
                     const scaleToken = String(data?.scale ?? "__project__");
                     const scale: ScaleLike =
@@ -2323,6 +2757,11 @@ export const PianoRollPanel: React.FC = () => {
             dynamicProjectSec,
             s.edgeSmoothnessPercent,
             effectiveProjectScale,
+            currentParamRange,
+            currentParamDefaultValue,
+            currentParamQuantizeUnit,
+            pitchEnabled,
+            pitchDeltaToDegreeSteps,
             bumpRefreshToken,
             invalidate,
         ],
@@ -3013,6 +3452,54 @@ export const PianoRollPanel: React.FC = () => {
 
                 <Flex gap="2" align="center">
                     <Flex gap="1" align="center">
+                        {selectedIsChildTrack && childPitchOffsetCentsParam ? (
+                            <Button
+                                size="1"
+                                variant={
+                                    editParam === childPitchOffsetCentsParam
+                                        ? "solid"
+                                        : "soft"
+                                }
+                                color={
+                                    editParam === childPitchOffsetCentsParam
+                                        ? "cyan"
+                                        : "gray"
+                                }
+                                onClick={() =>
+                                    dispatch(
+                                        setEditParam(childPitchOffsetCentsParam),
+                                    )
+                                }
+                                style={{ cursor: "pointer" }}
+                            >
+                                {t("child_pitch_mode_cents")}
+                            </Button>
+                        ) : null}
+                        {selectedIsChildTrack && childPitchOffsetDegreesParam ? (
+                            <Button
+                                size="1"
+                                variant={
+                                    editParam === childPitchOffsetDegreesParam
+                                        ? "solid"
+                                        : "soft"
+                                }
+                                color={
+                                    editParam === childPitchOffsetDegreesParam
+                                        ? "cyan"
+                                        : "gray"
+                                }
+                                onClick={() =>
+                                    dispatch(
+                                        setEditParam(
+                                            childPitchOffsetDegreesParam,
+                                        ),
+                                    )
+                                }
+                                style={{ cursor: "pointer" }}
+                            >
+                                {t("child_pitch_mode_degrees")}
+                            </Button>
+                        ) : null}
                         <Button
                             size="1"
                             variant={editParam === "pitch" ? "solid" : "soft"}
@@ -3022,7 +3509,7 @@ export const PianoRollPanel: React.FC = () => {
                         >
                             {t("pitch")}
                         </Button>
-                        {/* �?editParam 不是 pitch 时，显示 pitch 副参数开�?*/}
+                        {/*  ?editParam 不是 pitch 时，显示 pitch 副参数开 ?*/}
                         {editParam !== "pitch" && pitchEnabled ? (
                             <IconButton
                                 size="1"
@@ -3210,7 +3697,7 @@ export const PianoRollPanel: React.FC = () => {
                 </Flex>
             </Flex>
 
-            {/* Task 6.5: 参数面板顶部添加进度条区�?*/}
+            {/* Task 6.5: 参数面板顶部添加进度条区 ?*/}
             {asyncRefresh.isLoading && (
                 <Flex className="px-3 py-2 bg-qt-base border-b border-qt-border">
                     <ProgressBar
@@ -3221,7 +3708,7 @@ export const PianoRollPanel: React.FC = () => {
                         }
                         showCancel={true}
                         onCancel={async () => {
-                            // Task 6.6: 取消按钮点击时调�?cancelRefresh()
+                            // Task 6.6: 取消按钮点击时调 ?cancelRefresh()
                             await asyncRefresh.cancelRefresh();
                         }}
                         estimatedRemaining={asyncRefresh.estimatedRemaining}
@@ -3229,7 +3716,7 @@ export const PianoRollPanel: React.FC = () => {
                 </Flex>
             )}
 
-            {/* Task 6.7: 任务完成后显示成功提�?*/}
+            {/* Task 6.7: 任务完成后显示成功提 ?*/}
             {showSuccessMessage && (
                 <Flex
                     align="center"
@@ -3392,9 +3879,10 @@ export const PianoRollPanel: React.FC = () => {
                                                     whiteSpace: "nowrap",
                                                 }}
                                             >
-                                                {formatParamValuePreview(
-                                                    paramValuePreview.value,
-                                                )}
+                                                {paramValuePreview.displayText ??
+                                                    formatParamValuePreview(
+                                                        paramValuePreview.value,
+                                                    )}
                                             </div>
                                         );
                                     })()

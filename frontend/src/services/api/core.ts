@@ -12,6 +12,50 @@ import type {
 
 import { invoke } from "../invoke";
 
+export interface AdvancedSeparatedTarget {
+    kind: "main" | "sub";
+    trackId: string;
+}
+
+export interface AdvancedExportRequest {
+    mode: "project" | "separated";
+    range: {
+        kind: "all" | "custom";
+        startSec?: number;
+        endSec?: number;
+    };
+    projectOutputDir?: string;
+    projectFileName?: string;
+    projectOutputPath?: string;
+    separatedOutputDir?: string;
+    separatedNamePattern?: string;
+    separatedTargets?: AdvancedSeparatedTarget[];
+    overwriteExistingPaths?: string[];
+    skipExistingPaths?: string[];
+}
+
+export interface ExportAudioPlanItem {
+    trackId?: string | null;
+    path: string;
+}
+
+export interface ExportAudioPlan {
+    ok: boolean;
+    mode: "project" | "separated";
+    targets: ExportAudioPlanItem[];
+    existingPaths: string[];
+}
+
+export interface ExportAudioDefaults {
+    ok: boolean;
+    projectName: string;
+    documentsDir: string;
+    projectOutputDir: string;
+    projectFileName: string;
+    separatedOutputDir: string;
+    separatedFileName: string;
+}
+
 export const coreApi = {
     ping: () => invoke<{ ok: boolean; message: string }>("ping"),
     getRuntimeInfo: () => invoke<RuntimeInfo>("get_runtime_info"),
@@ -86,6 +130,22 @@ export const coreApi = {
                 error?: string;
             }>;
         }>("save_separated", outputDir),
+
+    exportAudioAdvanced: (request: AdvancedExportRequest) =>
+        invoke<{
+            ok: boolean;
+            mode?: "project" | "separated";
+            path?: string;
+            output_dir?: string;
+            count?: number;
+            error?: string;
+        }>("export_audio_advanced", request),
+
+    getExportAudioDefaults: () =>
+        invoke<ExportAudioDefaults>("get_export_audio_defaults"),
+
+    previewExportAudioPlan: (request: AdvancedExportRequest) =>
+        invoke<ExportAudioPlan>("preview_export_audio_plan", request),
 
     playOriginal: (startSec = 0) =>
         invoke<{ ok: boolean; playing?: string; start_sec?: number }>(

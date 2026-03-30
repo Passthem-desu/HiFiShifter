@@ -41,6 +41,7 @@ export const webApi = {
     synthesize: coreApi.synthesize,
     saveSynthesized: coreApi.saveSynthesized,
     saveSeparated: coreApi.saveSeparated,
+    exportAudioAdvanced: coreApi.exportAudioAdvanced,
     playOriginal: coreApi.playOriginal,
     stopAudio: coreApi.stopAudio,
 

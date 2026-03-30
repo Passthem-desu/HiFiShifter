@@ -1,6 +1,6 @@
 use crate::project::{
     load_project_file, make_paths_relative, project_name_from_path, resolve_paths_relative,
-    CustomScale, ProjectFile,
+    serialize_project_file_for_path, CustomScale, ProjectFile,
 };
 use crate::state::AppState;
 use crate::synth_clip_cache;
@@ -80,6 +80,14 @@ fn update_window_title(window: &Window, name: &str, dirty: bool) {
     let _ = window.set_title(&title);
 }
 
+fn latest_clip_end_sec(timeline: &crate::state::TimelineState) -> f64 {
+    timeline
+        .clips
+        .iter()
+        .map(|clip| (clip.start_sec + clip.length_sec).max(0.0))
+        .fold(0.0_f64, f64::max)
+}
+
 pub(crate) fn save_project_to_path_inner(
     state: &AppState,
     window: &Window,
@@ -88,11 +96,12 @@ pub(crate) fn save_project_to_path_inner(
     let path = PathBuf::from(&project_path);
     let name = project_name_from_path(&path);
 
-    let tl = state
+    let mut tl = state
         .timeline
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
+    tl.project_sec = latest_clip_end_sec(&tl).max(4.0).ceil();
     let (base_scale, use_custom_scale, custom_scale, beats_per_bar, grid_size) = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         (
@@ -107,8 +116,7 @@ pub(crate) fn save_project_to_path_inner(
     let mut pf = ProjectFile::new(name.clone(), tl_rel, base_scale, beats_per_bar, grid_size);
     pf.use_custom_scale = use_custom_scale && custom_scale.is_some();
     pf.custom_scale = custom_scale;
-    // 使用 MessagePack 格式保存（v2），体积更小、解析更快。
-    let bytes = rmp_serde::to_vec_named(&pf).map_err(|e| e.to_string())?;
+    let bytes = serialize_project_file_for_path(&pf, &path)?;
     // 使用原子保存，防止程序崩溃或断电导致工程文件损坏
     let tmp_path = path.with_extension("tmp_save");
     fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
@@ -178,7 +186,8 @@ pub(super) fn new_project(
 
 pub(super) fn open_project_dialog() -> serde_json::Value {
     let picked = rfd::FileDialog::new()
-        .add_filter("HiFiShifter Project", &["hshp", "hsp", "json"])
+        .add_filter("HiFiShifter Project", &["hshp", "hsp"])
+        .add_filter("JSON Project", &["json"])
         .pick_file();
     match picked {
         None => serde_json::json!({"ok": true, "canceled": true}),
@@ -300,7 +309,8 @@ pub(super) fn save_project_as(state: State<'_, AppState>, window: Window) -> ser
         }
     };
     let picked = rfd::FileDialog::new()
-        .add_filter("HiFiShifter Project", &["hshp", "hsp", "json"])
+        .add_filter("HiFiShifter Project", &["hshp", "hsp"])
+        .add_filter("JSON Project", &["json"])
         .set_file_name(format!("{}.hshp", default_name))
         .save_file();
     match picked {
