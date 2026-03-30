@@ -71,6 +71,7 @@ pub(crate) struct EngineClip {
     // For file playback we do not repeat and treat src_end_frame as a hard end.
     pub(crate) src_start_frame: u64,
     pub(crate) src_end_frame: u64,
+    pub(crate) reversed: bool,
     pub(crate) playback_rate: f64,
 
     // Local (timeline) frame offset applied before sampling the source.

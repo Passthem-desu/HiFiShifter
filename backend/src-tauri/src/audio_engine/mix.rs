@@ -96,14 +96,31 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
     // 无需合成：直接回退到源 PCM（支持 playback_rate 采样）
     let src_frame_f = local_adj * clip.playback_rate;
     let src_frame = src_frame_f.round() as u64;
-    let src_abs = src_frame.saturating_add(clip.src_start_frame);
+    let range = clip.src_end_frame.saturating_sub(clip.src_start_frame);
+    if range == 0 {
+        return None;
+    }
+    let src_abs = if clip.reversed {
+        if src_frame >= range {
+            clip.src_end_frame
+        } else {
+            clip.src_end_frame
+                .saturating_sub(1)
+                .saturating_sub(src_frame)
+        }
+    } else {
+        src_frame.saturating_add(clip.src_start_frame)
+    };
     if src_abs >= clip.src_end_frame {
         if clip.repeat {
-            let range = clip.src_end_frame.saturating_sub(clip.src_start_frame);
-            if range == 0 {
-                return None;
-            }
-            let looped = clip.src_start_frame + ((src_abs - clip.src_start_frame) % range);
+            let src_off = src_frame % range;
+            let looped = if clip.reversed {
+                clip.src_end_frame
+                    .saturating_sub(1)
+                    .saturating_sub(src_off)
+            } else {
+                clip.src_start_frame + src_off
+            };
             let idx = (looped as usize) * 2;
             if idx + 1 < clip.src.pcm.len() {
                 return Some((clip.src.pcm[idx], clip.src.pcm[idx + 1]));

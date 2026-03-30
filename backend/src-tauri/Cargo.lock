@@ -10,6 +10,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "cc",
+ "chrono",
  "clipboard-win",
  "cpal",
  "encoding_rs",

@@ -79,6 +79,7 @@ import { loadDefaultModel, loadModel } from "./thunks/modelThunks";
 import {
     applyPitchShift,
     exportAudio,
+    exportAudioAdvanced,
     exportSeparated,
     pasteVocalShifterClipboard,
     pasteReaperClipboard,
@@ -486,6 +487,7 @@ function applyTimelineState(
                 return raw;
             })(),
             playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
+            reversed: Boolean(clip.reversed),
             fadeInSec: Math.max(0, Number(clip.fade_in_sec ?? 0)),
             fadeOutSec: Math.max(0, Number(clip.fade_out_sec ?? 0)),
             fadeInCurve: (clip.fade_in_curve ?? "sine") as FadeCurveType,
@@ -662,6 +664,7 @@ function upsertImportedClip(
         sourceStartSec: 0,
         sourceEndSec: meta?.durationSec ?? lengthSec,
         playbackRate: 1,
+        reversed: false,
         fadeInSec: 0,
         fadeOutSec: 0,
         fadeInCurve: "sine" as FadeCurveType,
@@ -851,6 +854,7 @@ export {
     applyPitchShift,
     synthesizeAudio,
     exportAudio,
+    exportAudioAdvanced,
     exportSeparated,
     pasteVocalShifterClipboard,
     pasteReaperClipboard,
@@ -1233,6 +1237,7 @@ const sessionSlice = createSlice({
                 sourceStartSec: 0,
                 sourceEndSec: 2,
                 playbackRate: 1,
+                reversed: false,
                 fadeInSec: 0,
                 fadeOutSec: 0,
                 fadeInCurve: "sine" as FadeCurveType,
@@ -1841,6 +1846,38 @@ const sessionSlice = createSlice({
                 }
             })
             .addCase(exportSeparated.rejected, setRejected)
+
+            .addCase(exportAudioAdvanced.pending, (state) =>
+                setPending(state, "Exporting audio..."),
+            )
+            .addCase(exportAudioAdvanced.fulfilled, (state, action) => {
+                state.busy = false;
+                state.lastResult = action.payload;
+                const payload = action.payload as {
+                    ok?: boolean;
+                    mode?: "project" | "separated";
+                    path?: string;
+                    output_dir?: string;
+                    count?: number;
+                };
+                if (!payload.ok) {
+                    state.status =
+                        payload.mode === "separated"
+                            ? "Export separated failed"
+                            : "Export failed";
+                    return;
+                }
+                if (payload.mode === "separated") {
+                    const suffix = payload.output_dir
+                        ? ` — ${payload.output_dir} (${payload.count ?? 0} tracks)`
+                        : "";
+                    state.status = `Export separated done${suffix}`;
+                    return;
+                }
+                const suffix = payload.path ? ` — ${payload.path}` : "";
+                state.status = `Export done${suffix}`;
+            })
+            .addCase(exportAudioAdvanced.rejected, setRejected)
 
             .addCase(pasteVocalShifterClipboard.pending, (state) =>
                 setPending(state, "Pasting VocalShifter clipboard data..."),

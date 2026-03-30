@@ -1,4 +1,5 @@
 import type { ProcessorParamDescriptor } from "../../../types/api.js";
+import { childPitchOffsetShiftStep } from "./childPitchOffsetParams.js";
 
 function normalizeStep(step: number): number {
     if (!Number.isFinite(step) || step <= 0) {
@@ -17,6 +18,11 @@ export function getParamShiftStep(
     paramId: string,
     descriptor?: ProcessorParamDescriptor,
 ): number {
+    const childStep = childPitchOffsetShiftStep(paramId);
+    if (childStep != null) {
+        return childStep;
+    }
+
     if (paramId === "pitch") {
         return 1;
     }

@@ -40,8 +40,23 @@ import {
     transposePitchByScaleSteps,
 } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
+import {
+    isChildPitchOffsetCentsParam,
+    isChildPitchOffsetDegreesParam,
+    snapChildPitchOffsetValue,
+} from "./childPitchOffsetParams";
+import { computeAnchoredHorizontalZoom } from "../../../utils/horizontalZoom";
 import { getParamEditorWheelAction } from "./wheelGesture";
 import { transformSelectionByRightDrag } from "./selectionTransforms";
+import {
+    formatRightDragMorphPercent,
+    getDrawPreviewValue,
+    getSelectDragPreviewValue,
+} from "./paramValuePreviewLogic";
+import {
+    readSystemClipboardObject,
+    writeSystemClipboardObject,
+} from "../../../utils/systemClipboard";
 
 type CanvasCursor =
     | "default"
@@ -166,6 +181,7 @@ export function usePianoRollInteractions(args: {
         clientX: number;
         clientY: number;
         value: number;
+        displayText?: string;
     } | null) => void;
     /** 是否启用绘制时音高吸附 */
     pitchSnapEnabled?: boolean;
@@ -276,6 +292,35 @@ export function usePianoRollInteractions(args: {
             },
         ) => (isModifierActive(paramFineAdjustKb, ev as any) ? 0.1 : 1),
         [paramFineAdjustKb],
+    );
+
+    const isSnapToggleModifierHeld = useCallback(
+        (ev: {
+            ctrlKey: boolean;
+            shiftKey: boolean;
+            altKey: boolean;
+            metaKey?: boolean;
+        }) => {
+            const noSnapKb = keybindingMap?.["modifier.clipNoSnap" as ActionId];
+            if (noSnapKb) {
+                return Boolean(isModifierActive(noSnapKb, ev as any));
+            }
+            return Boolean(ev.shiftKey);
+        },
+        [keybindingMap],
+    );
+
+    const isEffectivePitchSnapActive = useCallback(
+        (ev: {
+            ctrlKey: boolean;
+            shiftKey: boolean;
+            altKey: boolean;
+            metaKey?: boolean;
+        }) => {
+            const snapToggled = isSnapToggleModifierHeld(ev);
+            return Boolean(snapToggled ? !pitchSnapEnabled : pitchSnapEnabled);
+        },
+        [isSnapToggleModifierHeld, pitchSnapEnabled],
     );
 
     const computeSelectionChangeFactor = useCallback(
@@ -645,11 +690,17 @@ export function usePianoRollInteractions(args: {
     );
 
     /** Apply pitch snap to a drawn value when editParam is "pitch" and snap is enabled.
-     *  When shiftHeld=true, the snap state is toggled (XOR with pitchSnapEnabled). */
+     *  When snapToggleHeld=true, the snap state is toggled (XOR with pitchSnapEnabled). */
     const snapDrawValue = useCallback(
-        (v: number, shiftHeld = false): number => {
-            const effective = shiftHeld ? !pitchSnapEnabled : pitchSnapEnabled;
-            if (!effective || editParam !== "pitch") return v;
+        (v: number, snapToggleHeld = false): number => {
+            const effective = snapToggleHeld ? !pitchSnapEnabled : pitchSnapEnabled;
+            if (!effective) return v;
+
+            if (isChildPitchOffsetCentsParam(editParam) || isChildPitchOffsetDegreesParam(editParam)) {
+                return snapChildPitchOffsetValue(editParam, v);
+            }
+
+            if (editParam !== "pitch") return v;
             const snapped =
                 pitchSnapUnit === "scale" && projectScale
                     ? snapToScale(v, projectScale)
@@ -1010,6 +1061,20 @@ export function usePianoRollInteractions(args: {
                                 (v) => Number(v) || 0,
                             ),
                         };
+                        try {
+                            await writeSystemClipboardObject({
+                                version: 1,
+                                kind: "param",
+                                param: editParam,
+                                framePeriodMs:
+                                    Number(payload.frame_period_ms ?? fp) || fp,
+                                values: (payload.edit ?? []).map(
+                                    (v) => Number(v) || 0,
+                                ),
+                            });
+                        } catch {
+                            // ignore clipboard write failures
+                        }
                         // 刷新剪贴板预览
                         invalidate();
                     })();
@@ -1040,14 +1105,29 @@ export function usePianoRollInteractions(args: {
                 }
                 if (keyMatch) {
                     e.preventDefault();
-                    const clip = clipboardRef.current;
-                    if (!clip) return;
-                    if (clip.param !== editParam) return;
-                    // 将剪贴板数据截断到选区帧数范围内
-                    const pasteValues = clip.values.length > frameCount
-                        ? clip.values.slice(0, frameCount)
-                        : clip.values;
                     void (async () => {
+                        let clip = clipboardRef.current;
+                        try {
+                            const fromSystem = await readSystemClipboardObject("param");
+                            if (fromSystem?.kind === "param") {
+                                clip = {
+                                    param: fromSystem.param,
+                                    framePeriodMs:
+                                        Number(fromSystem.framePeriodMs) || fp,
+                                    values: Array.isArray(fromSystem.values)
+                                        ? fromSystem.values.map((v) => Number(v) || 0)
+                                        : [],
+                                };
+                                clipboardRef.current = clip;
+                            }
+                        } catch {
+                            // ignore and fallback to internal clipboard
+                        }
+                        if (!clip) return;
+                        if (clip.param !== editParam) return;
+                        const pasteValues = clip.values.length > frameCount
+                            ? clip.values.slice(0, frameCount)
+                            : clip.values;
                         await paramsApi.setParamFrames(
                             rootTrackId,
                             editParam,
@@ -1198,7 +1278,11 @@ export function usePianoRollInteractions(args: {
                     });
                     setPitchView(next);
                 } else {
-                    const cur = paramViewsRef.current[editParam] ?? { center: 0.5, span: 1 };
+                    const fallbackRange = currentParamRange ?? { min: 0, max: 1 };
+                    const cur = paramViewsRef.current[editParam] ?? {
+                        center: (fallbackRange.min + fallbackRange.max) / 2,
+                        span: Math.max(1e-6, fallbackRange.max - fallbackRange.min),
+                    };
                     const next = clampViewport(editParam, {
                         span: cur.span,
                         center: cur.center + delta * cur.span,
@@ -1244,9 +1328,10 @@ export function usePianoRollInteractions(args: {
                     });
                     setPitchView(next);
                 } else {
+                    const fallbackRange = currentParamRange ?? { min: 0, max: 1 };
                     const cur = paramViewsRef.current[editParam] ?? {
-                        center: 0.5,
-                        span: 1,
+                        center: (fallbackRange.min + fallbackRange.max) / 2,
+                        span: Math.max(1e-6, fallbackRange.max - fallbackRange.min),
                     };
                     const nextSpan = cur.span * factor;
                     const next = clampViewport(editParam, {
@@ -1269,41 +1354,49 @@ export function usePianoRollInteractions(args: {
 
             // Playhead-based zoom: use playhead position as anchor instead of pointer
             const secPerBeatLocal = 60 / Math.max(1, bpm);
+            const totalBeats = Math.max(
+                0,
+                dynamicProjectSec / Math.max(1e-9, secPerBeatLocal),
+            );
             let anchorX: number;
             let anchorBeat: number;
             if (playheadZoomEnabled && playheadSec != null) {
-                anchorBeat = playheadSec / secPerBeatLocal;
+                anchorBeat = clamp(
+                    playheadSec / secPerBeatLocal,
+                    0,
+                    totalBeats,
+                );
                 anchorX = anchorBeat * curPxPerBeat - el.scrollLeft;
-                // 如果 playhead 在可视区域外，先将其居中，再以其为锚点缩放
                 if (anchorX < 0 || anchorX > bounds.width) {
-                    const centeredScrollLeft = anchorBeat * curPxPerBeat - bounds.width / 2;
-                    el.scrollLeft = Math.max(0, centeredScrollLeft);
-                    syncScrollLeft(el);
-                    anchorX = anchorBeat * curPxPerBeat - el.scrollLeft;
+                    anchorX = bounds.width / 2;
                 }
                 anchorX = clamp(anchorX, 0, Math.max(1, bounds.width));
             } else {
                 anchorX = clamp(pointerXRaw, 0, Math.max(1, bounds.width));
-                anchorBeat =
-                    (anchorX + el.scrollLeft) / Math.max(1e-9, curPxPerBeat);
+                anchorBeat = clamp(
+                    (anchorX + el.scrollLeft) / Math.max(1e-9, curPxPerBeat),
+                    0,
+                    totalBeats,
+                );
             }
 
             const minPxPerBeat = MIN_PX_PER_SEC * secPerBeatLocal;
             const maxPxPerBeat = MAX_PX_PER_SEC * secPerBeatLocal;
 
-            const next = clamp(
-                curPxPerBeat * factor,
-                minPxPerBeat,
-                maxPxPerBeat,
-            );
-            if (Math.abs(next - curPxPerBeat) < 1e-9) return;
+            const zoomResult = computeAnchoredHorizontalZoom({
+                currentScale: curPxPerBeat,
+                factor,
+                minScale: minPxPerBeat,
+                maxScale: maxPxPerBeat,
+                scrollLeft: el.scrollLeft,
+                viewportWidth: Math.max(1, bounds.width),
+                anchorSec: anchorBeat,
+                contentSec: totalBeats,
+            });
+            if (!zoomResult) return;
 
-            setPxPerBeat(next);
-            const nextScrollLeft = anchorBeat * next - anchorX;
-            // 使用 dynamicProjectSec 计算正确的 maxScroll，避免缩放时波形偏移
-            const totalBeats = dynamicProjectSec / secPerBeatLocal;
-            const maxScroll = Math.max(0, totalBeats * next - el.clientWidth);
-            el.scrollLeft = clamp(nextScrollLeft, 0, maxScroll);
+            setPxPerBeat(zoomResult.nextScale);
+            el.scrollLeft = zoomResult.nextScrollLeft;
             syncScrollLeft(el);
         },
         [
@@ -1442,10 +1535,22 @@ export function usePianoRollInteractions(args: {
                 const draggingLeft =
                     Boolean(strokeRef.current) && (e.buttons & 1) === 1;
                 if (draggingLeft) {
+                    const rawPreviewValue = pointerValue(e.clientY);
+                    const dragPreviewValue =
+                        toolMode === "draw"
+                            ? getDrawPreviewValue({
+                                  editParam,
+                                  rawValue: rawPreviewValue,
+                                  effectiveSnap: isEffectivePitchSnapActive(e.nativeEvent),
+                                  pitchSnapUnit,
+                                  projectScale,
+                                  pitchSnapToleranceCents,
+                              })
+                            : rawPreviewValue;
                     onParamValuePreviewChange?.({
                         clientX: e.clientX,
                         clientY: e.clientY,
-                        value: pointerValue(e.clientY),
+                        value: dragPreviewValue,
                     });
                 } else {
                     const nearCurveValue = getCurveValueNearPointer(
@@ -1479,6 +1584,12 @@ export function usePianoRollInteractions(args: {
             paramValuePopupEnabled,
             onParamValuePreviewChange,
             pointerValue,
+            toolMode,
+            editParam,
+            isEffectivePitchSnapActive,
+            pitchSnapUnit,
+            projectScale,
+            pitchSnapToleranceCents,
             getCurveValueNearPointer,
             panRef,
             strokeRef,
@@ -1515,10 +1626,22 @@ export function usePianoRollInteractions(args: {
                 paramValuePopupEnabled &&
                 (toolMode === "select" || toolMode === "draw" || toolMode === "line")
             ) {
+                const rawPreviewValue = pointerValue(e.clientY);
+                const downPreviewValue =
+                    toolMode === "draw"
+                        ? getDrawPreviewValue({
+                              editParam,
+                              rawValue: rawPreviewValue,
+                              effectiveSnap: isEffectivePitchSnapActive(e.nativeEvent),
+                              pitchSnapUnit,
+                              projectScale,
+                              pitchSnapToleranceCents,
+                          })
+                        : rawPreviewValue;
                 onParamValuePreviewChange?.({
                     clientX: e.clientX,
                     clientY: e.clientY,
-                    value: pointerValue(e.clientY),
+                    value: downPreviewValue,
                 });
             }
 
@@ -1624,6 +1747,14 @@ export function usePianoRollInteractions(args: {
                         if (liveEditActiveRef) liveEditActiveRef.current = true;
                         (e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId);
 
+                        if (paramValuePopupEnabled) {
+                            onParamValuePreviewChange?.({
+                                clientX: e.clientX,
+                                clientY: e.clientY,
+                                value: hit.value,
+                            });
+                        }
+
                         const onMove = (ev: globalThis.PointerEvent) => {
                             const drag = morphDragRef.current;
                             const overlayNow = morphOverlayRef.current;
@@ -1664,6 +1795,17 @@ export function usePianoRollInteractions(args: {
                             };
                             setMorphOverlay(nextOverlay);
                             applyMorphOverlayPreview(nextOverlay);
+
+                            if (paramValuePopupEnabled) {
+                                const movedPoint = nextPoints.find(
+                                    (pt) => pt.kind === drag.pointKind,
+                                );
+                                onParamValuePreviewChange?.({
+                                    clientX: ev.clientX,
+                                    clientY: ev.clientY,
+                                    value: movedPoint?.value ?? pointerValue(ev.clientY),
+                                });
+                            }
                         };
 
                         const onUp = () => {
@@ -2097,6 +2239,14 @@ export function usePianoRollInteractions(args: {
                                     ).setPointerCapture(pid);
 
                                     setCanvasCursor("grabbing");
+                                    if (paramValuePopupEnabled) {
+                                        onParamValuePreviewChange?.({
+                                            clientX: e.clientX,
+                                            clientY: e.clientY,
+                                            value: 0,
+                                            displayText: formatRightDragMorphPercent(0),
+                                        });
+                                    }
 
                                     const selStartSec = aBeat * secPerBeat;
                                     const selEndSec = bBeat * secPerBeat;
@@ -2235,6 +2385,14 @@ export function usePianoRollInteractions(args: {
                                             nextApplied.denseEndFrame,
                                             "draw",
                                         );
+                                        if (paramValuePopupEnabled) {
+                                            onParamValuePreviewChange?.({
+                                                clientX: ev.clientX,
+                                                clientY: ev.clientY,
+                                                value: dy,
+                                                displayText: formatRightDragMorphPercent(dy),
+                                            });
+                                        }
                                         invalidate();
                                     };
 
@@ -2381,7 +2539,11 @@ export function usePianoRollInteractions(args: {
                                 ensureLiveEditBase(pv);
                                 if (liveEditActiveRef)
                                     liveEditActiveRef.current = true;
-                                if (editParam === "pitch") {
+                                if (
+                                    editParam === "pitch" ||
+                                    isChildPitchOffsetCentsParam(editParam) ||
+                                    isChildPitchOffsetDegreesParam(editParam)
+                                ) {
                                     onPitchSnapGestureActiveChange?.(true);
                                 }
 
@@ -2402,9 +2564,7 @@ export function usePianoRollInteractions(args: {
                                         (currentVal - startMouseVal) * fineScale;
 
                                     // 音高吸附：Toggle snap modifier (XOR with pitchSnapEnabled)
-                                    const noSnapKb = keybindingMap?.["modifier.clipNoSnap" as ActionId];
-                                    const snapToggled = noSnapKb ? isModifierActive(noSnapKb, ev) : false;
-                                    const effectiveSnap = snapToggled ? !pitchSnapEnabled : pitchSnapEnabled;
+                                    const effectiveSnap = isEffectivePitchSnapActive(ev);
                                     const yDragEnabled = currentDragDir !== "x-only";
                                     if (effectiveSnap && editParam === "pitch" && yDragEnabled) {
                                         if (pitchSnapUnit === "scale" && projectScale) {
@@ -2419,6 +2579,21 @@ export function usePianoRollInteractions(args: {
                                             useScaleDegreeTranspose = false;
                                             rawValueDelta = Math.round(rawValueDelta);
                                         }
+                                    } else if (
+                                        effectiveSnap &&
+                                        isChildPitchOffsetCentsParam(editParam) &&
+                                        yDragEnabled
+                                    ) {
+                                        useScaleDegreeTranspose = false;
+                                        rawValueDelta =
+                                            Math.round(rawValueDelta / 100) * 100;
+                                    } else if (
+                                        effectiveSnap &&
+                                        isChildPitchOffsetDegreesParam(editParam) &&
+                                        yDragEnabled
+                                    ) {
+                                        useScaleDegreeTranspose = false;
+                                        rawValueDelta = Math.round(rawValueDelta);
                                     } else {
                                         useScaleDegreeTranspose = false;
                                         if (!yDragEnabled) {
@@ -2574,10 +2749,21 @@ export function usePianoRollInteractions(args: {
                                     updateSelectionUi(selectionRef.current);
 
                                     if (paramValuePopupEnabled) {
+                                        const previewCurrentVal = yDragEnabled
+                                            ? currentVal
+                                            : startMouseVal;
                                         onParamValuePreviewChange?.({
                                             clientX: ev.clientX,
                                             clientY: ev.clientY,
-                                            value: pointerValue(ev.clientY),
+                                            value: getSelectDragPreviewValue({
+                                                editParam,
+                                                startValue: startMouseVal,
+                                                currentValue: previewCurrentVal,
+                                                fineScale,
+                                                effectiveSnap,
+                                                pitchSnapUnit,
+                                                projectScale,
+                                            }),
                                         });
                                     }
 
@@ -2771,7 +2957,11 @@ export function usePianoRollInteractions(args: {
                                         onParamValuePreviewChange?.(null);
                                     }
 
-                                    if (editParam === "pitch") {
+                                    if (
+                                        editParam === "pitch" ||
+                                        isChildPitchOffsetCentsParam(editParam) ||
+                                        isChildPitchOffsetDegreesParam(editParam)
+                                    ) {
                                         onPitchSnapGestureActiveChange?.(false);
                                     }
                                     setCanvasCursor("grab");
@@ -2811,13 +3001,81 @@ export function usePianoRollInteractions(args: {
 
                 // 默认行为：仅左键创建新选区；右键不应在 pointerdown 时清除选区
                 if (e.button === 0) {
-                    selectionRef.current = { aBeat: b, bBeat: b };
+                    const maxSelectableBeat = Math.max(
+                        0,
+                        dynamicProjectSec / Math.max(1e-9, secPerBeat),
+                    );
+                    const clampSelectionBeat = (beat: number) =>
+                        clamp(beat, 0, maxSelectableBeat);
+
+                    const selectionBeatFromClientX = (
+                        clientX: number,
+                        allowAutoScroll: boolean,
+                    ) => {
+                        const scroller = scrollerRef.current;
+                        if (!scroller) {
+                            return clampSelectionBeat(pointerBeat(clientX));
+                        }
+
+                        const bounds = scroller.getBoundingClientRect();
+                        const edgePx = 32;
+                        const maxStepPx = 18;
+
+                        if (allowAutoScroll) {
+                            let deltaPx = 0;
+                            if (clientX < bounds.left + edgePx) {
+                                const ratio =
+                                    (bounds.left + edgePx - clientX) / edgePx;
+                                deltaPx = -clamp(ratio, 0, 1.5) * maxStepPx;
+                            } else if (clientX > bounds.right - edgePx) {
+                                const ratio =
+                                    (clientX - (bounds.right - edgePx)) /
+                                    edgePx;
+                                deltaPx = clamp(ratio, 0, 1.5) * maxStepPx;
+                            }
+
+                            if (Math.abs(deltaPx) > 0.01) {
+                                const maxScrollLeft = Math.max(
+                                    0,
+                                    maxSelectableBeat *
+                                        Math.max(1e-9, pxPerBeatRef.current) -
+                                        scroller.clientWidth,
+                                );
+                                const nextScrollLeft = clamp(
+                                    scroller.scrollLeft + deltaPx,
+                                    0,
+                                    maxScrollLeft,
+                                );
+                                if (
+                                    Math.abs(nextScrollLeft - scroller.scrollLeft) >
+                                    0.01
+                                ) {
+                                    scroller.scrollLeft = nextScrollLeft;
+                                    syncScrollLeft(scroller);
+                                }
+                            }
+                        }
+
+                        const clampedClientX = clamp(
+                            clientX,
+                            bounds.left,
+                            bounds.right,
+                        );
+                        const beat =
+                            (scroller.scrollLeft +
+                                (clampedClientX - bounds.left)) /
+                            Math.max(1e-9, pxPerBeatRef.current);
+                        return clampSelectionBeat(beat);
+                    };
+
+                    const startBeat = selectionBeatFromClientX(e.clientX, false);
+                    selectionRef.current = { aBeat: startBeat, bBeat: startBeat };
                     updateSelectionUi(selectionRef.current);
                     const pid = e.pointerId;
                     (e.currentTarget as HTMLCanvasElement).setPointerCapture(pid);
                     const onMove = (ev: globalThis.PointerEvent) => {
                         if (selectionRef.current == null) return;
-                        const bb = pointerBeat(ev.clientX);
+                        const bb = selectionBeatFromClientX(ev.clientX, true);
                         selectionRef.current = {
                             aBeat: selectionRef.current.aBeat,
                             bBeat: bb,
@@ -2845,7 +3103,11 @@ export function usePianoRollInteractions(args: {
             const mode: StrokeMode = e.button === 2 ? "restore" : "draw";
             if (e.button !== 0 && e.button !== 2) return;
             setCanvasCursor(getDefaultCanvasCursor());
-            if (editParam === "pitch") {
+            if (
+                editParam === "pitch" ||
+                isChildPitchOffsetCentsParam(editParam) ||
+                isChildPitchOffsetDegreesParam(editParam)
+            ) {
                 onPitchSnapGestureActiveChange?.(true);
             }
             const pv = paramViewRef.current;
@@ -2856,7 +3118,8 @@ export function usePianoRollInteractions(args: {
             const frame = Math.max(0, Math.floor((sec * 1000) / fp));
             const rawValue = pointerValue(e.clientY);
             const isDrawMode = mode === "draw";
-            const value = isDrawMode ? snapDrawValue(rawValue, e.shiftKey) : rawValue;
+            const snapToggleHeld = isSnapToggleModifierHeld(e.nativeEvent);
+            const value = isDrawMode ? snapDrawValue(rawValue, snapToggleHeld) : rawValue;
 
             const isLineTool = toolMode === "line";
             const isVibratoTool = toolMode === "vibrato";
@@ -2908,7 +3171,7 @@ export function usePianoRollInteractions(args: {
                         mode,
                         amplitude: 0,
                         frequency: 3,
-                        shiftHeld: e.shiftKey,
+                        shiftHeld: snapToggleHeld,
                     };
                 }
 
@@ -2923,7 +3186,8 @@ export function usePianoRollInteractions(args: {
                     const yDragEnabled = currentDragDir !== "x-only";
                     const rawV2Abs = yDragEnabled ? pointerValue(ev.clientY) : value;
                     const rawV2 = value + (rawV2Abs - value) * fineScale;
-                    const v2 = isDrawMode ? snapDrawValue(rawV2, ev.shiftKey) : rawV2;
+                    const moveSnapToggleHeld = isSnapToggleModifierHeld(ev);
+                    const v2 = isDrawMode ? snapDrawValue(rawV2, moveSnapToggleHeld) : rawV2;
 
                     // Update stroke to only have start and current end
                     st.points = [{ frame: startFrame, value: startValue }, { frame: f2, value: v2 }];
@@ -2943,7 +3207,7 @@ export function usePianoRollInteractions(args: {
                                 if (vib) {
                                     vib.currentFrame = f2;
                                     vib.currentValue = v2;
-                                    vib.shiftHeld = ev.shiftKey;
+                                    vib.shiftHeld = moveSnapToggleHeld;
                                     const built = buildVibratoDense(
                                         startFrame,
                                         startValue,
@@ -2951,7 +3215,7 @@ export function usePianoRollInteractions(args: {
                                         v2,
                                         vib.amplitude,
                                         vib.frequency,
-                                        ev.shiftKey,
+                                        moveSnapToggleHeld,
                                     );
                                     applyDenseToLiveEdit(
                                         pv2,
@@ -2969,7 +3233,9 @@ export function usePianoRollInteractions(args: {
                                 for (let f = minF; f <= maxF; f++) {
                                     const t = denom === 0 ? 1 : (f - startFrame) / denom;
                                     const raw = startValue + (v2 - startValue) * t;
-                                    dense[f - minF] = isDrawMode ? snapDrawValue(raw, ev.shiftKey) : raw;
+                                    dense[f - minF] = isDrawMode
+                                        ? snapDrawValue(raw, moveSnapToggleHeld)
+                                        : raw;
                                 }
                                 applyDenseToLiveEdit(pv2, minF, dense, minF, maxF, mode);
                             }
@@ -2989,7 +3255,11 @@ export function usePianoRollInteractions(args: {
                     window.removeEventListener("contextmenu", onContextMenuDuringDraw, true);
                     window.removeEventListener("mousedown", onMouseDownDuringDraw, true);
                     invalidate();
-                    if (editParam === "pitch") {
+                    if (
+                        editParam === "pitch" ||
+                        isChildPitchOffsetCentsParam(editParam) ||
+                        isChildPitchOffsetDegreesParam(editParam)
+                    ) {
                         onPitchSnapGestureActiveChange?.(false);
                     }
                     void (async () => {
@@ -3060,7 +3330,8 @@ export function usePianoRollInteractions(args: {
                     const rawV2Abs = yDragEnabled ? pointerValue(ev.clientY) : (last?.value ?? value);
                     const baseV = last?.value ?? rawV2Abs;
                     const rawV2 = baseV + (rawV2Abs - baseV) * fineScale;
-                    const v2 = isDrawMode ? snapDrawValue(rawV2, ev.shiftKey) : rawV2;
+                    const moveSnapToggleHeld = isSnapToggleModifierHeld(ev);
+                    const v2 = isDrawMode ? snapDrawValue(rawV2, moveSnapToggleHeld) : rawV2;
 
                     const pv2 = paramViewRef.current;
                     if (last && last.frame === f2) {
@@ -3119,7 +3390,11 @@ export function usePianoRollInteractions(args: {
                     window.removeEventListener("contextmenu", onContextMenuDuringDraw, true);
                     window.removeEventListener("mousedown", onMouseDownDuringDraw, true);
                     invalidate();
-                    if (editParam === "pitch") {
+                    if (
+                        editParam === "pitch" ||
+                        isChildPitchOffsetCentsParam(editParam) ||
+                        isChildPitchOffsetDegreesParam(editParam)
+                    ) {
                         onPitchSnapGestureActiveChange?.(false);
                     }
                     void (async () => {
@@ -3193,6 +3468,9 @@ export function usePianoRollInteractions(args: {
             pitchSnapEnabled,
             pitchSnapUnit,
             projectScale,
+            pitchSnapToleranceCents,
+            isSnapToggleModifierHeld,
+            isEffectivePitchSnapActive,
             paramFineAdjustKb,
             pxPerBeatRef,
             scrollLeftRef,

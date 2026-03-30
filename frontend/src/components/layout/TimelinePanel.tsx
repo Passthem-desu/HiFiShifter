@@ -64,6 +64,7 @@ import { useTimelineClipActions } from "./timeline/hooks/useTimelineClipActions"
 import { useTimelineEventHandlers } from "./timeline/hooks/useTimelineEventHandlers";
 import { useVisualPlayhead } from "../../hooks/useVisualPlayhead";
 import { computeAutoFollowScrollLeft } from "../../utils/autoFollowScroll";
+import { writeSystemClipboardObject } from "../../utils/systemClipboard";
 
 export const TimelinePanel: React.FC = () => {
     const { t } = useI18n();
@@ -110,6 +111,7 @@ export const TimelinePanel: React.FC = () => {
         scrollHorizontalKb,
         scrollVerticalKb,
         horizontalZoomKb,
+        verticalZoomKb,
         slipEditKb,
         noSnapKb,
         copyDragKb,
@@ -372,6 +374,8 @@ export const TimelinePanel: React.FC = () => {
                 trackMeters={s.trackMeters}
                 selectedTrackId={s.selectedTrackId}
                 rowHeight={rowHeight}
+                setRowHeight={setRowHeight}
+                verticalZoomKb={verticalZoomKb}
                 trackVolumeUi={trackVolumeUi}
                 listScrollRef={trackListScrollRef}
                 onSelectTrack={(trackId) => {
@@ -528,6 +532,7 @@ export const TimelinePanel: React.FC = () => {
                     scrollHorizontalKb={scrollHorizontalKb}
                     scrollVerticalKb={scrollVerticalKb}
                     horizontalZoomKb={horizontalZoomKb}
+                    verticalZoomKb={verticalZoomKb}
                     playheadSec={s.playheadSec}
                     playheadZoomEnabled={s.playheadZoomEnabled}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"
@@ -827,16 +832,6 @@ export const TimelinePanel: React.FC = () => {
                             )
                         ) {
                             return;
-                        }
-                        if (e.button === 0 || e.button === 2) {
-                            const trackId = trackIdFromClientY(e.clientY);
-                            if (
-                                trackId &&
-                                trackId !==
-                                    sessionRef.current.selectedTrackId
-                            ) {
-                                void dispatch(selectTrackRemote(trackId));
-                            }
                         }
                         if (e.button !== 1) return;
                         if (isEditableTarget(e.target)) return;
@@ -1289,196 +1284,224 @@ export const TimelinePanel: React.FC = () => {
 
                 {contextMenu
                     ? (() => {
-                          const ctxClip =
-                              sessionRef.current.clips.find(
-                                  (c) => c.id === contextMenu.clipId,
-                              );
-                          if (!ctxClip) return null;
+                        const ctxClip =
+                            sessionRef.current.clips.find(
+                                (c) => c.id === contextMenu.clipId,
+                            );
+                        if (!ctxClip) return null;
 
-                          const selectedIds =
-                              multiSelectedClipIds.length >= 2
-                                  ? multiSelectedClipIds
-                                  : [contextMenu.clipId];
-                          const selectedClips =
-                              sessionRef.current.clips.filter((c) =>
-                                  selectedIds.includes(c.id),
-                              );
+                        const selectedIds =
+                            multiSelectedClipIds.length >= 2
+                                ? multiSelectedClipIds
+                                : [contextMenu.clipId];
+                        const selectedClips =
+                            sessionRef.current.clips.filter((c) =>
+                                selectedIds.includes(c.id),
+                            );
 
-                          const _ctxScroller = scrollRef.current;
-                          const _ctxBounds =
-                              _ctxScroller?.getBoundingClientRect();
-                          const contextTimeSec =
-                              _ctxBounds && _ctxScroller
-                                  ? beatFromClientX(
-                                        contextMenu.x,
-                                        _ctxBounds,
-                                        _ctxScroller.scrollLeft,
-                                    )
-                                  : ctxClip.startSec;
+                        const _ctxScroller = scrollRef.current;
+                        const _ctxBounds =
+                            _ctxScroller?.getBoundingClientRect();
+                        const contextTimeSec =
+                            _ctxBounds && _ctxScroller
+                                ? beatFromClientX(
+                                    contextMenu.x,
+                                    _ctxBounds,
+                                    _ctxScroller.scrollLeft,
+                                )
+                                : ctxClip.startSec;
 
-                          const overlappingFadeClips =
-                              collectFadeContextClips({
-                                  allClips: sessionRef.current.clips,
-                                  contextClip: ctxClip,
-                                  contextTimeSec,
-                                  explicitOverlappingClipIds:
-                                      contextMenu.overlappingClipIds,
-                              });
+                        const overlappingFadeClips =
+                            collectFadeContextClips({
+                                allClips: sessionRef.current.clips,
+                                contextClip: ctxClip,
+                                contextTimeSec,
+                                explicitOverlappingClipIds:
+                                    contextMenu.overlappingClipIds,
+                            });
 
-                          const currentPlayheadSec =
-                              sessionRef.current.playheadSec;
-                          const playheadInClip =
-                              currentPlayheadSec >=
-                                  ctxClip.startSec &&
-                              currentPlayheadSec <=
-                                  ctxClip.startSec +
-                                      ctxClip.lengthSec;
+                        const currentPlayheadSec =
+                            sessionRef.current.playheadSec;
+                        const playheadInClip =
+                            currentPlayheadSec >=
+                                ctxClip.startSec &&
+                            currentPlayheadSec <=
+                                ctxClip.startSec +
+                                    ctxClip.lengthSec;
 
-                          return (
-                              <ClipContextMenu
-                                  x={contextMenu.x}
-                                  y={contextMenu.y}
-                                  clip={ctxClip}
-                                  selectedClips={selectedClips}
-                                  overlappingClips={
-                                      overlappingFadeClips
-                                  }
-                                  playheadInClip={playheadInClip}
-                                  canSplitSelected={selectedClips.some(
-                                      (c) => {
-                                          const splitSec = Math.max(
-                                              0,
-                                              Number(
-                                                  sessionRef.current
-                                                      .playheadSec ??
-                                                      0,
-                                              ) || 0,
-                                          );
-                                          return (
-                                              splitSec >=
-                                                  c.startSec &&
-                                              splitSec <=
-                                                  c.startSec +
-                                                      c.lengthSec
-                                          );
-                                      },
-                                  )}
-                                  onClose={() =>
-                                      setContextMenu(null)
-                                  }
-                                  onDelete={(ids) => {
-                                      setContextMenu(null);
-                                      setMultiSelectedClipIds([]);
-                                      void dispatch(removeClipsRemote(ids));
-                                  }}
-                                  onMute={(ids, muted) => {
-                                      for (const id of ids) {
-                                          dispatch(
-                                              setClipMuted({
-                                                  clipId: id,
-                                                  muted,
-                                              }),
-                                          );
-                                          void dispatch(
-                                              setClipStateRemote({
-                                                  clipId: id,
-                                                  muted,
-                                              }),
-                                          );
-                                      }
-                                  }}
-                                  onRename={(clipId) => {
-                                      setContextMenu(null);
-                                      clipActions.setRenamingClipId(
-                                          clipId,
-                                      );
-                                  }}
-                                  onCopy={(ids) => {
-                                      void (async () => {
-                                          const templates =
-                                              await buildClipClipboardTemplates(
-                                                  ids,
-                                              );
-                                          if (templates.length > 0) {
-                                              clipClipboardRef.current =
-                                                  templates;
-                                          }
-                                      })();
-                                  }}
-                                  onCut={(ids) => {
-                                      void (async () => {
-                                          const templates =
-                                              await buildClipClipboardTemplates(
-                                                  ids,
-                                              );
-                                          if (
-                                              templates.length === 0
-                                          )
-                                              return;
-                                          clipClipboardRef.current =
-                                              templates;
-                                          setContextMenu(null);
-                                          setMultiSelectedClipIds(
-                                              [],
-                                          );
-                                          void dispatch(removeClipsRemote(ids));
-                                      })();
-                                  }}
-                                  onReplace={(ids) => {
-                                      void replaceClipSources(ids);
-                                  }}
-                                  onSplit={(clipIds) => {
-                                      setContextMenu(null);
-                                      splitClipIdsAtPlayhead(clipIds);
-                                  }}
-                                  onGlue={(ids) => {
-                                      setContextMenu(null);
-                                      if (ids.length >= 2) {
-                                          void dispatch(
-                                              glueClipsRemote(ids),
-                                          );
-                                          setMultiSelectedClipIds(
-                                              [],
-                                          );
-                                      }
-                                  }}
-                                  onFadeCurveChange={(
-                                      clipId,
-                                      target,
-                                      curve,
-                                  ) => {
-                                      dispatch(
-                                          setClipFades({
-                                              clipId,
-                                              ...(target === "in"
-                                                  ? {
-                                                        fadeInCurve:
-                                                            curve,
-                                                    }
-                                                  : {
-                                                        fadeOutCurve:
-                                                            curve,
-                                                    }),
-                                          }),
-                                      );
-                                      void dispatch(
-                                          setClipStateRemote({
-                                              clipId,
-                                              ...(target === "in"
-                                                  ? {
-                                                        fadeInCurve:
-                                                            curve,
-                                                    }
-                                                  : {
-                                                        fadeOutCurve:
-                                                            curve,
-                                                    }),
-                                          }),
-                                      );
-                                  }}
-                                  onNormalize={normalizeClips}
-                              />
-                          );
+                        return (
+                            <ClipContextMenu
+                                x={contextMenu.x}
+                                y={contextMenu.y}
+                                clip={ctxClip}
+                                selectedClips={selectedClips}
+                                overlappingClips={
+                                    overlappingFadeClips
+                                }
+                                playheadInClip={playheadInClip}
+                                canSplitSelected={selectedClips.some(
+                                    (c) => {
+                                        const splitSec = Math.max(
+                                            0,
+                                            Number(
+                                                sessionRef.current
+                                                    .playheadSec ??
+                                                    0,
+                                            ) || 0,
+                                        );
+                                        return (
+                                            splitSec >=
+                                                c.startSec &&
+                                            splitSec <=
+                                                c.startSec +
+                                                    c.lengthSec
+                                        );
+                                    },
+                                )}
+                                onClose={() =>
+                                    setContextMenu(null)
+                                }
+                                onDelete={(ids) => {
+                                    setContextMenu(null);
+                                    setMultiSelectedClipIds([]);
+                                    void dispatch(removeClipsRemote(ids));
+                                }}
+                                onMute={(ids, muted) => {
+                                    for (const id of ids) {
+                                        dispatch(
+                                            setClipMuted({
+                                                clipId: id,
+                                                muted,
+                                            }),
+                                        );
+                                        void dispatch(
+                                            setClipStateRemote({
+                                                clipId: id,
+                                                muted,
+                                            }),
+                                        );
+                                    }
+                                }}
+                                onRename={(clipId) => {
+                                    setContextMenu(null);
+                                    clipActions.setRenamingClipId(
+                                        clipId,
+                                    );
+                                }}
+                                onCopy={(ids) => {
+                                    void (async () => {
+                                        const templates =
+                                            await buildClipClipboardTemplates(
+                                                ids,
+                                            );
+                                        if (templates.length > 0) {
+                                            clipClipboardRef.current =
+                                                templates;
+                                            try {
+                                                await writeSystemClipboardObject({
+                                                    version: 1,
+                                                    kind: "clip",
+                                                    templates,
+                                                });
+                                            } catch {
+                                                // ignore clipboard write errors
+                                            }
+                                        }
+                                    })();
+                                }}
+                                onCut={(ids) => {
+                                    void (async () => {
+                                        const templates =
+                                            await buildClipClipboardTemplates(
+                                                ids,
+                                            );
+                                        if (
+                                            templates.length === 0
+                                        )
+                                            return;
+                                        clipClipboardRef.current =
+                                            templates;
+                                        try {
+                                            await writeSystemClipboardObject({
+                                                version: 1,
+                                                kind: "clip",
+                                                templates,
+                                            });
+                                        } catch {
+                                            // ignore clipboard write errors
+                                        }
+                                        setContextMenu(null);
+                                        setMultiSelectedClipIds(
+                                            [],
+                                        );
+                                        void dispatch(removeClipsRemote(ids));
+                                    })();
+                                }}
+                                onReplace={(ids) => {
+                                    void replaceClipSources(ids);
+                                }}
+                                onSplit={(clipIds) => {
+                                    setContextMenu(null);
+                                    splitClipIdsAtPlayhead(clipIds);
+                                }}
+                                onGlue={(ids) => {
+                                    setContextMenu(null);
+                                    if (ids.length >= 2) {
+                                        void dispatch(
+                                            glueClipsRemote(ids),
+                                        );
+                                        setMultiSelectedClipIds(
+                                            [],
+                                        );
+                                    }
+                                }}
+                                onFadeCurveChange={(
+                                    clipId,
+                                    target,
+                                    curve,
+                                ) => {
+                                    dispatch(
+                                        setClipFades({
+                                            clipId,
+                                            ...(target === "in"
+                                                ? {
+                                                    fadeInCurve:
+                                                        curve,
+                                                }
+                                                : {
+                                                    fadeOutCurve:
+                                                        curve,
+                                                }),
+                                        }),
+                                    );
+                                    void dispatch(
+                                        setClipStateRemote({
+                                            clipId,
+                                            ...(target === "in"
+                                                ? {
+                                                    fadeInCurve:
+                                                        curve,
+                                                }
+                                                : {
+                                                    fadeOutCurve:
+                                                        curve,
+                                                }),
+                                        }),
+                                    );
+                                }}
+                                onNormalize={normalizeClips}
+                                onToggleReverse={(ids, reversed) => {
+                                    for (const id of ids) {
+                                        void dispatch(
+                                            setClipStateRemote({
+                                                clipId: id,
+                                                reversed,
+                                            }),
+                                        );
+                                    }
+                                }}
+                            />
+                        );
                       })()
                     : null}
 

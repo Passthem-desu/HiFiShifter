@@ -12,6 +12,7 @@ import type {
     Keybinding,
     KeybindingMap,
 } from "../../../../features/keybindings/types";
+import { writeSystemClipboardObject } from "../../../../utils/systemClipboard";
 
 /**
  * 判断 KeyboardEvent 是否匹配某个 Keybinding
@@ -166,12 +167,11 @@ export function useKeyboardShortcuts(deps: {
                             >
                         ).current = templates;
                         try {
-                            void navigator.clipboard?.writeText(
-                                JSON.stringify({
-                                    type: "hifishifter.clipTemplates.v1",
-                                    templates,
-                                }),
-                            );
+                            await writeSystemClipboardObject({
+                                version: 1,
+                                kind: "clip",
+                                templates,
+                            });
                         } catch {
                             // ignore
                         }
@@ -194,12 +194,11 @@ export function useKeyboardShortcuts(deps: {
                             >
                         ).current = templates;
                         try {
-                            void navigator.clipboard?.writeText(
-                                JSON.stringify({
-                                    type: "hifishifter.clipTemplates.v1",
-                                    templates,
-                                }),
-                            );
+                            await writeSystemClipboardObject({
+                                version: 1,
+                                kind: "clip",
+                                templates,
+                            });
                         } catch {
                             // ignore
                         }

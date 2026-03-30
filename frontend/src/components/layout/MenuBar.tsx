@@ -4,11 +4,8 @@ import { useI18n } from "../../i18n/I18nProvider";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import {
-    exportAudio,
-    exportSeparated,
     openReaperFromDialog,
     openVocalShifterFromDialog,
-    pickOutputPath,
     addTrackRemote,
     removeTrackRemote,
     refreshRuntime,
@@ -22,7 +19,6 @@ import {
     importAudioFromDialog,
     importMultipleAudioAtPosition,
 } from "../../features/session/thunks/importThunks";
-import { fileBrowserApi } from "../../services/api/fileBrowser";
 import { useAppTheme } from "../../theme/AppThemeProvider";
 import { GlobeIcon } from "@radix-ui/react-icons";
 import {
@@ -44,6 +40,11 @@ import {
     MeanQuantizeDialog,
 } from "../editDialogs/EditDialogs";
 import { SCALE_LABELS } from "../../utils/musicalScales";
+import { ExportAudioDialog } from "./ExportAudioDialog";
+import {
+    isChildPitchOffsetCentsParam,
+    isChildPitchOffsetDegreesParam,
+} from "./pianoRoll/childPitchOffsetParams";
 // import type { VibratoParams } from "../editDialogs/EditDialogs"; // 已移除无效导入
 
 interface MenuBarProps {
@@ -67,6 +68,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const keybindings = useAppSelector(selectMergedKeybindings);
     const [kbDialogOpen, setKbDialogOpen] = useState(false);
     const [appearanceDialogOpen, setAppearanceDialogOpen] = useState(false);
+    const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
     // Edit dialog states
     const [transposeCentsOpen, setTransposeCentsOpen] = useState(false);
@@ -85,6 +87,38 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     } | null>(null);
 
     const isPitchParam = s.editParam === "pitch";
+    const isChildCentsParam = isChildPitchOffsetCentsParam(s.editParam);
+    const isChildDegreesParam = isChildPitchOffsetDegreesParam(s.editParam);
+    const setToDefaultValue =
+        s.editParam === "pitch"
+            ? 60
+            : isChildCentsParam || isChildDegreesParam
+              ? 0
+              : s.editParam === "volume" || s.editParam === "dyn_edit"
+                ? 1
+                : 0;
+    const setToValueLabel =
+        s.editParam === "pitch" ? tAny("dlg_midi_note") : tAny("dlg_value");
+    const quantizeDefaultUnit = (() => {
+        if (isChildCentsParam) return 100;
+        if (isChildDegreesParam) return 1;
+        switch (s.editParam) {
+            case "volume":
+            case "dyn_edit":
+                return 0.05;
+            case "formant_shift_cents":
+                return 100;
+            case "breath_gain":
+            case "hifigan_tension":
+                return 0.05;
+            case "pan":
+                return 0.1;
+            case "breathiness":
+                return 250;
+            default:
+                return 1;
+        }
+    })();
     const projectScaleLabel =
         s.project.useCustomScale && s.project.customScale
             ? `${tAny("project_scale_prefix")} (${tAny("custom_scale_short")})`
@@ -106,6 +140,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 case "addVibrato": setVibratoParamRange((e as CustomEvent).detail?.paramRange); setVibratoOpen(true); break;
                 case "quantize": setQuantizeOpen(true); break;
                 case "meanQuantize": setMeanQuantizeOpen(true); break;
+                case "exportAudio": setExportDialogOpen(true); break;
             }
         };
         window.addEventListener("hifi:openEditDialog", handler);
@@ -150,24 +185,6 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             // Error state is already handled by session thunk reducers.
         }
     }, [dispatch, s.playheadSec, s.selectedTrackId]);
-
-    async function handleExport() {
-        // 每次导出必定弹窗询问路径
-        const picked = await dispatch(pickOutputPath()).unwrap();
-        // 如果用户取消了选择，直接返回
-        if (!picked.ok || picked.canceled || !picked.path) {
-            return;
-        }
-        // 拿到最新路径后，派发导出命令
-        await dispatch(exportAudio(picked.path));
-    }
-
-    async function handleExportSeparated() {
-        // 弹出文件夹选择对话框
-        const result = await fileBrowserApi.pickDirectory();
-        if (!result.ok || result.canceled || !result.path) return;
-        await dispatch(exportSeparated(result.path));
-    }
 
     return (
         <Flex
@@ -257,20 +274,11 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     >
                         {t("menu_import_vocalshifter")}
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={handleExport}>
+                    <DropdownMenu.Item onSelect={() => setExportDialogOpen(true)}>
                         {t("menu_export_audio")}{" "}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("project.export")}
                         </div>
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item onSelect={handleExportSeparated}>
-                        {t("menu_export_separated")}
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Separator />
-                    <DropdownMenu.Item
-                        onSelect={() => dispatch(pickOutputPath())}
-                    >
-                        {t("menu_pick_output")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item onSelect={onExit} color="red">
@@ -356,14 +364,14 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                     {shortcutLabel("edit.transposeDegrees")}
                                 </div>
                             </DropdownMenu.Item>
-                            <DropdownMenu.Item onSelect={() => setSetPitchOpen(true)}>
-                                {tAny("menu_set_pitch")}
-                                <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                                    {shortcutLabel("edit.setPitch")}
-                                </div>
-                            </DropdownMenu.Item>
                         </>
                     )}
+                    <DropdownMenu.Item onSelect={() => setSetPitchOpen(true)}>
+                        {isPitchParam ? tAny("menu_set_pitch") : tAny("menu_set_value")}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.setPitch")}
+                        </div>
+                    </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item onSelect={() => setAverageOpen(true)}>
                         {tAny("menu_average")}
@@ -383,22 +391,18 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                             {shortcutLabel("edit.addVibrato")}
                         </div>
                     </DropdownMenu.Item>
-                    {isPitchParam && (
-                        <>
-                            <DropdownMenu.Item onSelect={() => setQuantizeOpen(true)}>
-                                {tAny("menu_quantize")}
-                                <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                                    {shortcutLabel("edit.quantize")}
-                                </div>
-                            </DropdownMenu.Item>
-                            <DropdownMenu.Item onSelect={() => setMeanQuantizeOpen(true)}>
-                                {tAny("menu_mean_quantize")}
-                                <div className="ml-auto pl-4 text-xs text-qt-text-muted">
-                                    {shortcutLabel("edit.meanQuantize")}
-                                </div>
-                            </DropdownMenu.Item>
-                        </>
-                    )}
+                    <DropdownMenu.Item onSelect={() => setQuantizeOpen(true)}>
+                        {tAny("menu_quantize")}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.quantize")}
+                        </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={() => setMeanQuantizeOpen(true)}>
+                        {tAny("menu_mean_quantize")}
+                        <div className="ml-auto pl-4 text-xs text-qt-text-muted">
+                            {shortcutLabel("edit.meanQuantize")}
+                        </div>
+                    </DropdownMenu.Item>
 
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item
@@ -538,6 +542,11 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 onOpenChange={setAppearanceDialogOpen}
             />
 
+            <ExportAudioDialog
+                open={exportDialogOpen}
+                onOpenChange={setExportDialogOpen}
+            />
+
             {/* 菜单导入模式选择（多文件） */}
             {menuImportMode && (
                 <div
@@ -632,10 +641,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <SetPitchDialog
                 open={setPitchOpen}
                 onOpenChange={setSetPitchOpen}
+                titleText={isPitchParam ? tAny("menu_set_pitch") : tAny("menu_set_value")}
+                valueLabelText={setToValueLabel}
+                defaultValue={setToDefaultValue}
                 defaultSmoothness={s.edgeSmoothnessPercent}
-                onConfirm={(midiNote, edgeSmoothnessPercent) =>
+                onConfirm={(value, edgeSmoothnessPercent) =>
                     dispatchEditOp("setPitch", {
-                        midiNote,
+                        value,
                         edgeSmoothnessPercent,
                     })
                 }
@@ -663,30 +675,40 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             <QuantizeDialog
                 open={quantizeOpen}
                 onOpenChange={setQuantizeOpen}
+                valueMode={!isPitchParam}
+                defaultQuantizeUnit={quantizeDefaultUnit}
+                defaultTolerance={0}
                 defaultScale={s.project.baseScale}
                 defaultUseProjectScale={true}
                 projectScaleLabel={projectScaleLabel}
                 defaultToleranceCents={s.pitchSnapToleranceCents}
-                onConfirm={(unit, scaleValue, toleranceCents) =>
+                onConfirm={(unit, scaleValue, toleranceCents, quantizeUnit) =>
                     dispatchEditOp("quantize", {
                         unit,
                         scale: resolveScaleToken(scaleValue),
                         toleranceCents,
+                        tolerance: toleranceCents,
+                        quantizeUnit,
                     })
                 }
             />
             <MeanQuantizeDialog
                 open={meanQuantizeOpen}
                 onOpenChange={setMeanQuantizeOpen}
+                valueMode={!isPitchParam}
+                defaultQuantizeUnit={quantizeDefaultUnit}
+                defaultTolerance={0}
                 defaultScale={s.project.baseScale}
                 defaultUseProjectScale={true}
                 projectScaleLabel={projectScaleLabel}
                 defaultToleranceCents={s.pitchSnapToleranceCents}
-                onConfirm={(unit, scaleValue, toleranceCents) =>
+                onConfirm={(unit, scaleValue, toleranceCents, quantizeUnit) =>
                     dispatchEditOp("meanQuantize", {
                         unit,
                         scale: resolveScaleToken(scaleValue),
                         toleranceCents,
+                        tolerance: toleranceCents,
+                        quantizeUnit,
                     })
                 }
             />

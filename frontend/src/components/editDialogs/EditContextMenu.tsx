@@ -117,11 +117,11 @@ export function EditContextMenu({
                     <div className={itemClass} onClick={() => { onTransposeDegrees?.(); onClose(); }}>
                         {tAny("menu_transpose_degrees")}
                     </div>
-                    <div className={itemClass} onClick={() => { onSetPitch?.(); onClose(); }}>
-                        {tAny("menu_set_pitch")}
-                    </div>
                 </>
             )}
+            <div className={itemClass} onClick={() => { onSetPitch?.(); onClose(); }}>
+                {isPitchParam ? tAny("menu_set_pitch") : tAny("menu_set_value")}
+            </div>
             <div className={sepClass} />
             <div className={itemClass} onClick={() => { onAverage?.(); onClose(); }}>
                 {tAny("menu_average")}
@@ -132,16 +132,12 @@ export function EditContextMenu({
             <div className={itemClass} onClick={() => { onAddVibrato?.(); onClose(); }}>
                 {tAny("menu_add_vibrato")}
             </div>
-            {isPitchParam && (
-                <>
-                    <div className={itemClass} onClick={() => { onQuantize?.(); onClose(); }}>
-                        {tAny("menu_quantize")}
-                    </div>
-                    <div className={itemClass} onClick={() => { onMeanQuantize?.(); onClose(); }}>
-                        {tAny("menu_mean_quantize")}
-                    </div>
-                </>
-            )}
+            <div className={itemClass} onClick={() => { onQuantize?.(); onClose(); }}>
+                {tAny("menu_quantize")}
+            </div>
+            <div className={itemClass} onClick={() => { onMeanQuantize?.(); onClose(); }}>
+                {tAny("menu_mean_quantize")}
+            </div>
         </div>
     );
 }
