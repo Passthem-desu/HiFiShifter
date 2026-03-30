@@ -35,7 +35,7 @@ pub(crate) struct ExportTimeRange {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SeparatedExportTargetKind {
-    Main,
+    Root,
     Sub,
 }
 
@@ -578,7 +578,7 @@ pub(super) fn preview_export_audio_plan(
 
             for (target_index, target) in resolved_targets.into_iter().enumerate() {
                 let track_type = match target.kind {
-                    SeparatedExportTargetKind::Main => "Main",
+                    SeparatedExportTargetKind::Root => "Root",
                     SeparatedExportTargetKind::Sub => "Sub",
                 };
                 let relative = build_unique_export_file_name(
@@ -867,7 +867,7 @@ pub(super) fn export_audio_advanced(
 
             for (target_index, target) in resolved_targets.into_iter().enumerate() {
                 let track_type = match target.kind {
-                    SeparatedExportTargetKind::Main => "Main",
+                    SeparatedExportTargetKind::Root => "Root",
                     SeparatedExportTargetKind::Sub => "Sub",
                 };
                 let relative_path = build_unique_export_file_name(
@@ -1167,7 +1167,7 @@ fn resolve_separated_targets(
         };
 
         let normalized_track = match target.kind {
-            SeparatedExportTargetKind::Main => {
+            SeparatedExportTargetKind::Root => {
                 let mut cursor = selected_track;
                 let mut safety = 0usize;
                 while let Some(parent_id) = cursor.parent_id.as_deref() {
@@ -1196,7 +1196,7 @@ fn resolve_separated_targets(
             .unwrap_or(1);
 
         let included_track_ids = match target.kind {
-            SeparatedExportTargetKind::Main => {
+            SeparatedExportTargetKind::Root => {
                 let mut collected: HashSet<String> = HashSet::new();
                 let mut queue = vec![normalized_track.id.as_str()];
                 while let Some(current_id) = queue.pop() {
@@ -1245,10 +1245,10 @@ fn resolve_separated_targets(
         a.track_index
             .cmp(&b.track_index)
             .then_with(|| match (&a.kind, &b.kind) {
-                (SeparatedExportTargetKind::Main, SeparatedExportTargetKind::Sub) => {
+                (SeparatedExportTargetKind::Root, SeparatedExportTargetKind::Sub) => {
                     std::cmp::Ordering::Less
                 }
-                (SeparatedExportTargetKind::Sub, SeparatedExportTargetKind::Main) => {
+                (SeparatedExportTargetKind::Sub, SeparatedExportTargetKind::Root) => {
                     std::cmp::Ordering::Greater
                 }
                 _ => std::cmp::Ordering::Equal,
