@@ -143,7 +143,8 @@ $Resources = @(
     @{ Src = Join-Path $TauriDir "resources\models\nsf_hifigan\pc_nsf_hifigan.onnx"; Dst = "models\nsf_hifigan\pc_nsf_hifigan.onnx" },
     @{ Src = Join-Path $TauriDir "resources\models\nsf_hifigan\config.json";          Dst = "models\nsf_hifigan\config.json" },
     @{ Src = Join-Path $TauriDir "resources\models\hnsep\hnsep.onnx";                 Dst = "models\hnsep\hnsep.onnx" },
-    @{ Src = Join-Path $TauriDir "resources\models\hnsep\config.yaml";                Dst = "models\hnsep\config.yaml" }
+    @{ Src = Join-Path $TauriDir "resources\models\hnsep\config.yaml";                Dst = "models\hnsep\config.yaml" },
+    @{ Src = Join-Path $TauriDir "resources\models\fcpe\fcpe.onnx";                   Dst = "models\fcpe\fcpe.onnx" }
 )
 
 # Only include vslib_x64.dll for x86_64 builds

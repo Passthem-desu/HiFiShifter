@@ -93,15 +93,15 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
         PitchAnalysisAlgo::Unknown => b"unknown",
     });
 
-    // If WORLD is selected, include its availability so we can cache the
-    // unavailable state but still recompute when the DLL becomes available.
+    // Include detector availability so unavailable states can be cached and
+    // recomputed when the detector becomes available.
     if matches!(
         algo,
         PitchAnalysisAlgo::WorldDll
             | PitchAnalysisAlgo::NsfHifiganOnnx
             | PitchAnalysisAlgo::Unknown
     ) {
-        hasher.update(&[if crate::world::is_available() { 1 } else { 0 }]);
+        hasher.update(&[if crate::fcpe_onnx::is_available() { 1 } else { 0 }]);
     }
 
     // Include each clip mapped to this root track.

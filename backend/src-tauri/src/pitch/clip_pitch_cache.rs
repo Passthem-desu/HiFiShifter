@@ -14,7 +14,7 @@ use std::time::SystemTime;
 
 /// Version number for cache format. Increment this when the cache key format
 /// or analysis algorithm changes to invalidate old cache entries.
-pub const CACHE_FORMAT_VERSION: u32 = 1;
+pub const CACHE_FORMAT_VERSION: u32 = 2;
 
 /// Default maximum number of cached clip pitch curves
 pub const DEFAULT_CACHE_CAPACITY: usize = 100;
