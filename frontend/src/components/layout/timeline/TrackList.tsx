@@ -35,6 +35,7 @@ const TRACK_METER_MIN_DB = -48;
 const TRACK_METER_MAX_DB = 3;
 const TRACK_GAIN_MIN_DB = -60;
 const TRACK_GAIN_MAX_DB = 12;
+const TRACK_GAIN_WHEEL_STEP_DB = 0.5;
 
 function gainToDb(gain: number): number {
   if (!Number.isFinite(gain) || gain <= 1e-4) return TRACK_GAIN_MIN_DB;
@@ -80,7 +81,10 @@ function meterHeightPercent(linear: number): number {
 }
 
 function formatPeakLabel(maxPeakLinear: number, clipped: boolean): string {
-  if (clipped || maxPeakLinear >= 1) return "CLIP";
+  if (clipped || maxPeakLinear >= 1) {
+    const overDb = linearToDb(Math.max(1, maxPeakLinear));
+    return Number.isFinite(overDb) ? `+${Math.max(0, overDb).toFixed(1)}` : "+0.0";
+  }
   const db = linearToDb(maxPeakLinear);
   if (!Number.isFinite(db)) return "-inf";
   return db.toFixed(1);
@@ -256,6 +260,111 @@ export const TrackList: React.FC<{
     [tracks],
   );
 
+  const backendTrackVolumeById = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const tr of tracks) {
+      out[tr.id] = Math.max(0, Math.min(4, Number(tr.volume ?? 1)));
+    }
+    return out;
+  }, [tracks]);
+
+  const currentTrackVolumeById = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const tr of tracks) {
+      const backendVolume = Math.max(0, Math.min(4, Number(tr.volume ?? 1)));
+      const uiOverride = trackVolumeUi[tr.id];
+      out[tr.id] = Number.isFinite(uiOverride) ? uiOverride : backendVolume;
+    }
+    return out;
+  }, [tracks, trackVolumeUi]);
+
+  const aggregatedTrackMeters = useMemo(() => {
+    const childrenByParent = new Map<string | null, string[]>();
+    for (const tr of tracks) {
+      const parentId = tr.parentId ?? null;
+      const list = childrenByParent.get(parentId);
+      if (list) {
+        list.push(tr.id);
+      } else {
+        childrenByParent.set(parentId, [tr.id]);
+      }
+    }
+
+    const cache = new Map<string, TrackMeterInfo>();
+    const visiting = new Set<string>();
+
+    const visit = (trackId: string): TrackMeterInfo => {
+      const cached = cache.get(trackId);
+      if (cached) return cached;
+
+      if (visiting.has(trackId)) {
+        return { peakLinear: 0, maxPeakLinear: 0, clipped: false };
+      }
+      visiting.add(trackId);
+
+      const own = trackMeters[trackId] ?? {
+        peakLinear: 0,
+        maxPeakLinear: 0,
+        clipped: false,
+      };
+      const merged: TrackMeterInfo = {
+        peakLinear: own.peakLinear,
+        maxPeakLinear: own.maxPeakLinear,
+        clipped: own.clipped,
+      };
+
+      for (const childId of childrenByParent.get(trackId) ?? []) {
+        const child = visit(childId);
+        if (child.peakLinear > merged.peakLinear) merged.peakLinear = child.peakLinear;
+        if (child.maxPeakLinear > merged.maxPeakLinear) merged.maxPeakLinear = child.maxPeakLinear;
+        if (child.clipped) merged.clipped = true;
+      }
+
+      visiting.delete(trackId);
+      cache.set(trackId, merged);
+      return merged;
+    };
+
+    const out: Record<string, TrackMeterInfo> = {};
+    for (const tr of tracks) {
+      out[tr.id] = visit(tr.id);
+    }
+    return out;
+  }, [tracks, trackMeters]);
+
+  const meterDisplayByTrackId = useMemo(() => {
+    const out: Record<string, TrackMeterInfo> = {};
+    for (const tr of tracks) {
+      const postGroup = aggregatedTrackMeters[tr.id] ?? {
+        peakLinear: 0,
+        maxPeakLinear: 0,
+        clipped: false,
+      };
+
+      let ancestorGain = 1;
+      let cur = tr.parentId ?? null;
+      let guard = 0;
+      while (cur && guard++ < 2048) {
+        ancestorGain *= backendTrackVolumeById[cur] ?? 1;
+        cur = parentById.get(cur) ?? null;
+      }
+
+      if ((tr.parentId ?? null) == null || ancestorGain <= 1e-6) {
+        out[tr.id] = postGroup;
+        continue;
+      }
+
+      const peakLinear = Math.max(0, postGroup.peakLinear / ancestorGain);
+      const maxPeakLinear = Math.max(0, postGroup.maxPeakLinear / ancestorGain);
+      out[tr.id] = {
+        peakLinear,
+        maxPeakLinear,
+        clipped: peakLinear >= 1 || maxPeakLinear >= 1,
+      };
+    }
+    return out;
+  }, [aggregatedTrackMeters, backendTrackVolumeById, parentById, tracks]);
+
   /**
    * 判断是否不允许删除该轨道�?
    * 当该轨道是根轨道且只剩最后一个根轨道时，禁止删除（否则会导致零轨道）�?
@@ -361,6 +470,37 @@ export const TrackList: React.FC<{
 
     const handler: EventListener = (evt) => {
       const e = evt as WheelEvent;
+      const volumeControlEl = (e.target as HTMLElement | null)?.closest(
+        "[data-track-volume-control]",
+      ) as HTMLElement | null;
+      if (volumeControlEl) {
+        const trackId = volumeControlEl.dataset.trackId;
+        if (trackId) {
+          const currentVolume = currentTrackVolumeById[trackId];
+          if (Number.isFinite(currentVolume)) {
+            const rawDelta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+            if (Number.isFinite(rawDelta) && Math.abs(rawDelta) >= 0.01) {
+              const direction = rawDelta < 0 ? 1 : -1;
+              const notches = Math.max(1, Math.round(Math.abs(rawDelta) / 100));
+              const currentDb = gainToDb(currentVolume);
+              const nextDb = Math.max(
+                TRACK_GAIN_MIN_DB,
+                Math.min(
+                  TRACK_GAIN_MAX_DB,
+                  currentDb + direction * TRACK_GAIN_WHEEL_STEP_DB * notches,
+                ),
+              );
+              const nextVolume = dbToGain(nextDb);
+              onVolumeUiChange(trackId, nextVolume);
+              onVolumeCommit(trackId, nextVolume);
+              e.preventDefault();
+              e.stopPropagation();
+              return;
+            }
+          }
+        }
+      }
+
       const noModifierPressed =
         !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
       const verticalZoomRequested = (() => {
@@ -423,7 +563,14 @@ export const TrackList: React.FC<{
     return () => {
       el.removeEventListener("wheel", handler);
     };
-  }, [onScrollTopChange, setRowHeight, verticalZoomKb]);
+  }, [
+    currentTrackVolumeById,
+    onScrollTopChange,
+    onVolumeCommit,
+    onVolumeUiChange,
+    setRowHeight,
+    verticalZoomKb,
+  ]);
 
   function wouldCreateCycle(trackId: string, parentTrackId: string | null) {
     let cur = parentTrackId;
@@ -604,15 +751,8 @@ export const TrackList: React.FC<{
           const solo = Boolean(track.solo);
           const isRoot = (track.parentId ?? null) == null;
           const composeEnabled = Boolean(track.composeEnabled);
-          const backendVolume = Math.max(
-            0,
-            Math.min(4, Number(track.volume ?? 1)),
-          );
-          const uiOverride = trackVolumeUi[track.id];
-          const volume = Number.isFinite(uiOverride)
-            ? uiOverride
-            : backendVolume;
-          const meter = trackMeters[track.id];
+          const volume = currentTrackVolumeById[track.id] ?? 1;
+          const meter = meterDisplayByTrackId[track.id];
           const peakLinear = meter?.peakLinear ?? 0;
           const maxPeakLinear = meter?.maxPeakLinear ?? 0;
           const clipped = Boolean(meter?.clipped);
@@ -1035,6 +1175,7 @@ export const TrackList: React.FC<{
                     <div
                       className="min-w-0 pt-1"
                       data-track-volume-control
+                      data-track-id={track.id}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                       onDoubleClick={(e) => {
