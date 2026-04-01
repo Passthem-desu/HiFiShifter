@@ -186,7 +186,7 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
     const [projectFileName, setProjectFileName] = useState("<ProjectName>.wav");
     const [separatedOutputDir, setSeparatedOutputDir] = useState("");
     const [separatedNamePattern, setSeparatedNamePattern] = useState("<ExportIndex>_<TrackName>.wav");
-    const [sampleRate, setSampleRate] = useState("44100");
+    const [sampleRate, setSampleRate] = useState("48000");
     const [bitDepth, setBitDepth] = useState<ExportBitDepth>(32);
     const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
     const [errorText, setErrorText] = useState("");
@@ -276,7 +276,7 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                 setProjectFileName(defaults.projectFileName ?? "<ProjectName>.wav");
                 setSeparatedOutputDir(defaults.separatedOutputDir ?? "");
                 setSeparatedNamePattern(defaults.separatedFileName ?? "<ExportIndex>_<TrackName>.wav");
-                setSampleRate(String(defaults.sampleRate ?? 44100));
+                setSampleRate(String(defaults.sampleRate ?? 48000));
                 setBitDepth((defaults.bitDepth === 16 || defaults.bitDepth === 24 || defaults.bitDepth === 32)
                     ? defaults.bitDepth
                     : 32);
