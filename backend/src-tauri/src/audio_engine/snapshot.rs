@@ -279,7 +279,8 @@ pub(crate) fn build_snapshot(
         };
 
         let (mut src_start, mut src_end) = clip_source_bounds_frames(clip, src.frames, out_rate);
-        if src_end.saturating_sub(src_start) <= 1 {
+        // Keep 1-frame slices audible; only drop truly empty source ranges.
+        if src_end.saturating_sub(src_start) == 0 {
             continue;
         }
 

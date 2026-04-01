@@ -187,7 +187,8 @@ pub(crate) fn mix_snapshot_clips_into_scratch(
 
             let mut g = clip.gain;
             if clip.fade_in_frames > 0 && local < clip.fade_in_frames {
-                g *= (local as f32 / clip.fade_in_frames as f32).clamp(0.0, 1.0);
+                // Use frame-centered fade-in so the first frame is not hard-zeroed.
+                g *= ((local + 1) as f32 / clip.fade_in_frames as f32).clamp(0.0, 1.0);
             }
             if clip.fade_out_frames > 0 && local + clip.fade_out_frames > clip.length_frames {
                 let remain = clip.length_frames.saturating_sub(local);
@@ -321,7 +322,8 @@ fn collect_track_meter_block(
 
             let mut g = clip.gain;
             if clip.fade_in_frames > 0 && local < clip.fade_in_frames {
-                g *= (local as f32 / clip.fade_in_frames as f32).clamp(0.0, 1.0);
+                // Keep meter path consistent with audio callback fade behavior.
+                g *= ((local + 1) as f32 / clip.fade_in_frames as f32).clamp(0.0, 1.0);
             }
             if clip.fade_out_frames > 0 && local + clip.fade_out_frames > clip.length_frames {
                 let remain = clip.length_frames.saturating_sub(local);
