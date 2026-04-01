@@ -297,6 +297,11 @@ export const jaJP = {
     child_pitch_offset_cents_short: "セント",
     child_pitch_offset_degrees_short: "度数",
     aria_loading: "読み込み中",
+    export_dialog_sample_rate: "サンプリングレート",
+    export_dialog_bit_depth: "ビット深度",
+    export_dialog_error_invalid_sample_rate: "サンプリングレートが無効です。",
+    export_dialog_error_invalid_time_format:
+        "出力パスに無効な時刻フォーマットがあります。無効な '%' は '%%' に置き換えてください。",
 
     // ショートカットキー管理
     kb_dialog_title: "キーボードショートカット",

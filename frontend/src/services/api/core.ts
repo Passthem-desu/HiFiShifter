@@ -13,7 +13,7 @@ import type {
 import { invoke } from "../invoke";
 
 export interface AdvancedSeparatedTarget {
-    kind: "main" | "sub";
+    kind: "root" | "sub";
     trackId: string;
 }
 
@@ -32,6 +32,8 @@ export interface AdvancedExportRequest {
     separatedTargets?: AdvancedSeparatedTarget[];
     overwriteExistingPaths?: string[];
     skipExistingPaths?: string[];
+    sampleRate?: number;
+    bitDepth?: 16 | 24 | 32;
 }
 
 export interface ExportAudioPlanItem {
@@ -54,6 +56,8 @@ export interface ExportAudioDefaults {
     projectFileName: string;
     separatedOutputDir: string;
     separatedFileName: string;
+    sampleRate: number;
+    bitDepth: 16 | 24 | 32;
 }
 
 export const coreApi = {
@@ -138,8 +142,12 @@ export const coreApi = {
             path?: string;
             output_dir?: string;
             count?: number;
+            cancelled?: boolean;
             error?: string;
         }>("export_audio_advanced", request),
+
+    cancelExportAudio: () =>
+        invoke<{ ok: boolean; active?: boolean }>("cancel_export_audio"),
 
     getExportAudioDefaults: () =>
         invoke<ExportAudioDefaults>("get_export_audio_defaults"),

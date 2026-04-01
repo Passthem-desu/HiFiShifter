@@ -31,6 +31,7 @@ import { resolveScaleNotes } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
 import {
     childPitchOffsetValueToDisplay,
+    isChildPitchOffsetCentsParam,
     isChildPitchOffsetDegreesParam,
 } from "./childPitchOffsetParams";
 
@@ -535,36 +536,87 @@ export function drawPianoRoll(args: {
                     ctx.lineWidth = 1;
                 }
             } else {
-                // 非音高参数轴标签：根据当前视口动态计算刷分标记
+                // 非音高参数轴标签：对 child-pitch-offset 做特殊处理以配合横线（音分/度数）
                 const view = paramViews[editParam] ?? { center: 0.5, span: 1 };
                 const span = Math.max(1e-6, view.span);
                 const vMin = view.center - span / 2;
                 const vMax = view.center + span / 2;
-                // 若干标尺刻度：选择让屏内展示 3–5 个标记
-                const niceStep = niceAxisStep(span, 4);
-                const firstMark = Math.ceil(vMin / niceStep) * niceStep;
                 ctx.fillStyle = colors.tensionLabel;
                 ctx.font = "10px sans-serif";
                 ctx.textBaseline = "middle";
-                for (
-                    let m = firstMark;
-                    m <= vMax + niceStep * 0.01;
-                    m += niceStep
-                ) {
-                    const y = valueToY(editParam, m, h);
-                    ctx.fillText(formatAxisMark(m, editParam), 6, y);
-                    ctx.strokeStyle = colors.tensionLine;
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.moveTo(0, y + 0.5);
-                    ctx.lineTo(w, y + 0.5);
-                    ctx.stroke();
-                }
 
-                // Ensure degree-offset axis explicitly shows the 0 line label.
-                if (isChildPitchOffsetDegreesParam(editParam)) {
+                if (isChildPitchOffsetCentsParam(editParam)) {
+                    // 候选步长（以音分为单位），从大到小
+                    const range = vMax - vMin;
+                    const candidates = [1200, 600, 300, 200, 100, 50, 25, 10, 5, 1];
+                    let chosen = candidates[candidates.length - 1];
+                    for (const c of candidates) {
+                        const count = Math.ceil(range / c) + 1;
+                        if (count >= 5 && count <= 12) {
+                            chosen = c;
+                            break;
+                        }
+                    }
+                    // 退化：若跨度相对较大，回退到更粗的步长以避免过多刻度
+                    const approxCount = range / chosen;
+                    if (approxCount > 12) {
+                        const fallbackStep = Math.max(candidates[0], niceAxisStep(range, 8));
+                        chosen = fallbackStep;
+                    }
+
+                    const firstMark = Math.ceil(vMin / chosen) * chosen;
+                    for (let m = firstMark; m <= vMax + chosen * 0.01; m += chosen) {
+                        const y = valueToY(editParam, m, h);
+                        const isStrong = Math.round(m) % 1200 === 0;
+                        ctx.fillText(formatAxisMark(m, editParam), 6, y);
+                        ctx.strokeStyle = isStrong ? colors.tensionLine : colors.tensionLine;
+                        ctx.lineWidth = isStrong ? 1.25 : 1;
+                        ctx.beginPath();
+                        ctx.moveTo(0, y + 0.5);
+                        ctx.lineTo(w, y + 0.5);
+                        ctx.stroke();
+                    }
+                } else if (isChildPitchOffsetDegreesParam(editParam)) {
+                    // 度数使用内部 degree-step 单位，强线每 7 个单位
+                    const candidates = [14, 7, 3, 1];
+                    let chosen = candidates[candidates.length - 1];
+                    for (const c of candidates) {
+                        const count = Math.ceil((vMax - vMin) / c) + 1;
+                        if (count >= 5 && count <= 12) {
+                            chosen = c;
+                            break;
+                        }
+                    }
+                    const firstMark = Math.ceil(vMin / chosen) * chosen;
+                    for (let m = firstMark; m <= vMax + chosen * 0.01; m += chosen) {
+                        const y = valueToY(editParam, m, h);
+                        const rounded = Math.round(m);
+                        const isStrong = rounded % 7 === 0;
+                        ctx.fillText(formatAxisMark(m, editParam), 6, y);
+                        ctx.strokeStyle = isStrong ? colors.tensionLine : colors.tensionLine;
+                        ctx.lineWidth = isStrong ? 1.25 : 1;
+                        ctx.beginPath();
+                        ctx.moveTo(0, y + 0.5);
+                        ctx.lineTo(w, y + 0.5);
+                        ctx.stroke();
+                    }
+                    // 确保 0 的刻度一定显示
                     const y0 = valueToY(editParam, 0, h);
                     ctx.fillText(formatAxisMark(0, editParam), 6, y0);
+                } else {
+                    // 回退：使用常规的“nice”步长
+                    const niceStep = niceAxisStep(span, 4);
+                    const firstMark = Math.ceil(vMin / niceStep) * niceStep;
+                    for (let m = firstMark; m <= vMax + niceStep * 0.01; m += niceStep) {
+                        const y = valueToY(editParam, m, h);
+                        ctx.fillText(formatAxisMark(m, editParam), 6, y);
+                        ctx.strokeStyle = colors.tensionLine;
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.moveTo(0, y + 0.5);
+                        ctx.lineTo(w, y + 0.5);
+                        ctx.stroke();
+                    }
                 }
             }
         }
@@ -594,7 +646,7 @@ export function drawPianoRoll(args: {
     // beat 坐标系辅助（仅用于 selection 等仍以 beat 为单位的数据）
     const pxPerBeat = pxPerSec * secPerBeat;
 
-    // Horizontal pitch grid
+    // Horizontal grid lines
     if (editParam === "pitch") {
         const absMin = PITCH_MIN_MIDI;
         const absMax = PITCH_MAX_MIDI;
@@ -631,6 +683,55 @@ export function drawPianoRoll(args: {
                     pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
                 ctx.lineWidth = 1;
             }
+            ctx.beginPath();
+            ctx.moveTo(0, y + 0.5);
+            ctx.lineTo(w, y + 0.5);
+            ctx.stroke();
+        }
+    } else if (isChildPitchOffsetCentsParam(editParam)) {
+        const view = paramViews[editParam] ?? { center: 0, span: 1 };
+        const span = Math.max(1e-6, view.span);
+        const vMin = view.center - span / 2;
+        const vMax = view.center + span / 2;
+        const step = 100;
+        const start = Math.ceil(vMin / step) * step;
+
+        for (let v = start; v <= vMax + step * 0.01; v += step) {
+            const y = valueToY(editParam, v, h);
+            const isStrong = Math.round(v) % 1200 === 0;
+            ctx.strokeStyle = isStrong
+                ? isDark
+                    ? "rgba(255,255,255,0.14)"
+                    : "rgba(0,0,0,0.16)"
+                : isDark
+                  ? "rgba(255,255,255,0.07)"
+                  : "rgba(0,0,0,0.08)";
+            ctx.lineWidth = isStrong ? 1.25 : 1;
+            ctx.beginPath();
+            ctx.moveTo(0, y + 0.5);
+            ctx.lineTo(w, y + 0.5);
+            ctx.stroke();
+        }
+    } else if (isChildPitchOffsetDegreesParam(editParam)) {
+        const view = paramViews[editParam] ?? { center: 0, span: 1 };
+        const span = Math.max(1e-6, view.span);
+        const vMin = view.center - span / 2;
+        const vMax = view.center + span / 2;
+        const step = 1;
+        const start = Math.ceil(vMin / step) * step;
+
+        for (let v = start; v <= vMax + step * 0.01; v += step) {
+            const y = valueToY(editParam, v, h);
+            const rounded = Math.round(v);
+            const isStrong = rounded % 7 === 0;
+            ctx.strokeStyle = isStrong
+                ? isDark
+                    ? "rgba(255,255,255,0.14)"
+                    : "rgba(0,0,0,0.16)"
+                : isDark
+                  ? "rgba(255,255,255,0.07)"
+                  : "rgba(0,0,0,0.08)";
+            ctx.lineWidth = isStrong ? 1.25 : 1;
             ctx.beginPath();
             ctx.moveTo(0, y + 0.5);
             ctx.lineTo(w, y + 0.5);

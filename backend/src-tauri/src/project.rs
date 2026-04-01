@@ -160,31 +160,100 @@ pub fn project_name_from_path(path: &Path) -> String {
         .to_string()
 }
 
-pub fn make_paths_relative(mut tl: TimelineState, project_path: &Path) -> TimelineState {
+fn compute_relative_source_path(source_path: &Path, project_path: &Path) -> Option<String> {
     let dir = project_path.parent().unwrap_or_else(|| Path::new("."));
+    let stripped = source_path.strip_prefix(dir).ok()?;
+    if stripped.as_os_str().is_empty() {
+        return None;
+    }
+    Some(stripped.to_string_lossy().to_string())
+}
+
+pub fn prepare_source_paths_for_save(mut tl: TimelineState, project_path: &Path) -> TimelineState {
     for c in tl.clips.iter_mut() {
         if let Some(sp) = c.source_path.clone() {
             let p = PathBuf::from(&sp);
             if p.is_absolute() {
-                if let Ok(stripped) = p.strip_prefix(dir) {
-                    c.source_path = Some(stripped.to_string_lossy().to_string());
-                }
+                c.source_path_relative = compute_relative_source_path(&p, project_path);
+            } else {
+                c.source_path_relative = None;
             }
+        } else {
+            c.source_path_relative = None;
         }
     }
     tl
 }
 
-pub fn resolve_paths_relative(mut tl: TimelineState, project_path: &Path) -> TimelineState {
+pub fn resolve_source_paths_on_open(mut tl: TimelineState, project_path: &Path) -> (TimelineState, Vec<String>) {
     let dir = project_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut missing_files = std::collections::BTreeSet::new();
+
     for c in tl.clips.iter_mut() {
-        if let Some(sp) = c.source_path.clone() {
-            let p = PathBuf::from(&sp);
-            if !p.is_absolute() {
-                let joined = dir.join(p);
-                c.source_path = Some(joined.to_string_lossy().to_string());
+        let source_path_raw = c
+            .source_path
+            .as_ref()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let source_path_relative_raw = c
+            .source_path_relative
+            .as_ref()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+
+        let mut resolved_absolute: Option<String> = None;
+        let mut missing_display_abs: Option<String> = None;
+
+        if let Some(sp) = source_path_raw.as_ref() {
+            let p = PathBuf::from(sp);
+            if p.is_absolute() {
+                if p.exists() {
+                    resolved_absolute = Some(p.to_string_lossy().to_string());
+                } else {
+                    missing_display_abs = Some(p.to_string_lossy().to_string());
+                }
             }
         }
+
+        if resolved_absolute.is_none() {
+            if let Some(rel) = source_path_relative_raw.as_ref() {
+                let joined = dir.join(rel);
+                if joined.exists() {
+                    resolved_absolute = Some(joined.to_string_lossy().to_string());
+                } else if missing_display_abs.is_none() {
+                    missing_display_abs = Some(joined.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        if resolved_absolute.is_none() {
+            if let Some(sp) = source_path_raw.as_ref() {
+                let p = PathBuf::from(sp);
+                if !p.is_absolute() {
+                    let joined = dir.join(p);
+                    if joined.exists() {
+                        resolved_absolute = Some(joined.to_string_lossy().to_string());
+                        c.source_path_relative = Some(sp.clone());
+                    } else if missing_display_abs.is_none() {
+                        missing_display_abs = Some(joined.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+
+        if let Some(found) = resolved_absolute {
+            c.source_path = Some(found);
+            if c.source_path_relative.is_none() {
+                c.source_path_relative = source_path_relative_raw;
+            }
+        } else if let Some(missing_abs) = missing_display_abs {
+            c.source_path = Some(missing_abs.clone());
+            if c.source_path_relative.is_none() {
+                c.source_path_relative = source_path_relative_raw;
+            }
+            missing_files.insert(missing_abs);
+        }
     }
-    tl
+
+    (tl, missing_files.into_iter().collect())
 }
