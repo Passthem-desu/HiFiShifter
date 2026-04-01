@@ -519,6 +519,7 @@ pub fn compute_rendered_clip_hash(
     playback_rate: f64,
     extra_curves: &std::collections::HashMap<String, Vec<f32>>,
     extra_params: &std::collections::HashMap<String, f64>,
+    input_pitch_curve: Option<&[f32]>,
 ) -> u64 {
     let mut h: u64 = 14695981039346656037u64;
 
@@ -558,6 +559,15 @@ pub fn compute_rendered_clip_hash(
     let hi = end_idx.min(pitch_edit.len());
     for &v in &pitch_edit[lo..hi] {
         mix_bytes!(&v.to_bits().to_le_bytes());
+    }
+
+    // 混入“渲染输入 pitch curve”（clip 局部时间轴），
+    // 以便缓存键直接跟随渲染输入变化，而不依赖额外 offset salt。
+    if let Some(curve) = input_pitch_curve {
+        mix_bytes!(b"input_pitch_curve");
+        for &v in curve {
+            mix_bytes!(&v.to_bits().to_le_bytes());
+        }
     }
 
     // 混入 extra_curves，并且【只 Hash 当前时间切片的片段】，避免性能问题与错误缓存失效
@@ -614,6 +624,7 @@ pub fn compute_breath_noise_hash(
         playback_rate,
         &filtered_curves,
         extra_params,
+        None,
     )
 }
 

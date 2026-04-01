@@ -1,7 +1,6 @@
 use crate::state::{PitchAnalysisAlgo, SynthPipelineKind, TimelineState};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 
 thread_local! {
     static MONO_SCRATCH: RefCell<Vec<f32>> = RefCell::new(Vec::new());
@@ -486,34 +485,62 @@ fn apply_child_pitch_offset_to_midi(
     }
 }
 
-fn hash_child_offset_curve(curve: &Vec<f32>, hasher: &mut std::collections::hash_map::DefaultHasher) {
-    curve.len().hash(hasher);
-    for value in curve {
-        value.to_bits().hash(hasher);
-    }
-}
-
-pub(crate) fn child_pitch_offset_hash_salt(
+pub(crate) fn build_clip_input_pitch_curve(
     timeline: &TimelineState,
     clip: &crate::state::Clip,
-) -> u64 {
-    let Some(cfg) = active_child_pitch_offset_config(timeline, &clip.track_id) else {
-        return 0;
-    };
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    clip.track_id.hash(&mut hasher);
-    cfg.cents.to_bits().hash(&mut hasher);
-    cfg.degree_steps.to_bits().hash(&mut hasher);
-    if let Some(curve) = cfg.cents_curve {
-        hash_child_offset_curve(curve, &mut hasher);
-    }
-    if let Some(curve) = cfg.degree_steps_curve {
-        hash_child_offset_curve(curve, &mut hasher);
-        for note in &timeline.project_scale_notes {
-            note.hash(&mut hasher);
+    clip_start_sec: f64,
+    frame_period_ms: f64,
+    clip_playback_rate: f64,
+    is_vslib: bool,
+) -> Option<Vec<f32>> {
+    let child_offset_cfg = active_child_pitch_offset_config(timeline, &clip.track_id);
+
+    let timeline_midi_raw: Vec<f32> = if is_vslib {
+        Vec::new()
+    } else {
+        let clip_root = clip_root_track_id(timeline, clip)?;
+        let clip_pitch = crate::pitch_clip::get_or_compute_clip_pitch_midi_global(
+            timeline,
+            clip,
+            &clip_root,
+            frame_period_ms,
+        )?;
+
+        let tm = crate::pitch_clip::trim_and_resample_midi(
+            &clip_pitch.midi,
+            frame_period_ms,
+            clip.source_start_sec,
+            clip.source_end_sec,
+            clip_playback_rate,
+            clip.length_sec.max(0.0),
+        );
+        if tm.is_empty() {
+            return None;
         }
-    }
-    hasher.finish()
+        tm
+    };
+
+    let timeline_midi = if let Some(ref cfg) = child_offset_cfg {
+        let fp = frame_period_ms.max(0.1);
+        let start_idx = ((clip_start_sec.max(0.0) * 1000.0) / fp).floor().max(0.0) as usize;
+        timeline_midi_raw
+            .iter()
+            .enumerate()
+            .map(|(local_idx, &midi)| {
+                let frame_idx = start_idx.saturating_add(local_idx);
+                apply_child_pitch_offset_to_midi(
+                    midi as f64,
+                    cfg,
+                    frame_idx,
+                    &timeline.project_scale_notes,
+                ) as f32
+            })
+            .collect()
+    } else {
+        timeline_midi_raw
+    };
+
+    Some(timeline_midi)
 }
 
 fn root_pitch_edit_state<'a>(
@@ -883,86 +910,34 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     #[cfg(not(feature = "vslib"))]
     let is_vslib = false;
 
-    // Get per-clip original MIDI curve (full source, source-time indexed).
-    // HiFi-GAN 始终需要 clip_midi 才能合成（即使没有音高编辑）：
-    //   clip_midi 提供原始音高，使 HiFi-GAN 能以相同音高重合成并应用 formant/tension 效果。
-    // vslib 例外：使用内部分析，忽略 clip_midi 字段。
-    let timeline_midi_raw: Vec<f32> = if is_vslib {
-        // vslib 不需要原始音高轮廓，传空切片，VslibProcessor 会忽略 clip_midi 字段。
-        Vec::new()
-    } else {
-        let Some(clip_root) = clip_root_track_id(timeline, clip) else {
-            return Ok(false);
-        };
-        let clip_pitch = crate::pitch_clip::get_or_compute_clip_pitch_midi_global(
-            timeline,
-            clip,
-            &clip_root,
-            frame_period_ms,
-        );
-        let Some(clip_pitch) = clip_pitch else {
-            return Ok(false);
-        };
-
-        // 将源时间索引的 MIDI 曲线 trim+resample 为时间轴对齐的曲线：
-        // timeline_midi[0] 对应 clip_start_sec，每帧 frame_period_ms，按 playback_rate 拉伸后的时间轴坐标。
-        // 这与前端显示所用的曲线变换完全一致（见 emit_clip_pitch_data_for_clip）。
-        let tm = crate::pitch_clip::trim_and_resample_midi(
-            &clip_pitch.midi,
-            frame_period_ms,
-            clip.source_start_sec,
-            clip.source_end_sec,
-            clip_playback_rate,
-            clip.length_sec.max(0.0),
-        );
-        if tm.is_empty() {
-            return Ok(false);
-        }
-
-        if has_pitch_user_edit && !has_child_pitch_offset {
-            // 若音高编辑值与原始音高完全一致（无实际变化），且不需要其他效果处理，则跳过。
-            let has_effective_pitch_change = any_effective_pitch_change_in_range(
-                frame_period_ms,
-                pitch_edit,
-                clip_start_sec,
-                &tm,
-                seg_start_sec,
-                seg_end_sec,
-            );
-            if !has_effective_pitch_change
-                && !(extra_processing
-                    || tension_processing
-                    || formant_processing
-                    || needs_processor_stretch)
-            {
-                return Ok(false);
-            }
-        }
-        // !has_pitch_user_edit 时：早期退出已确保 extra/tension/formant 至少一个为 true。
-        // 始终传递原始 MIDI 曲线；pitch_edit 全零时 edit_midi_at_time_or_none 返回 None，
-        // HiFi-GAN fallback 到原始音高，在原始音高基础上应用 formant/tension 效果。
-        tm
+    // 在渲染前统一构建 clip 输入 pitch 曲线（根轨对应曲线 + 子轨偏移变换）。
+    let Some(timeline_midi) = build_clip_input_pitch_curve(
+        timeline,
+        clip,
+        clip_start_sec,
+        frame_period_ms,
+        clip_playback_rate,
+        is_vslib,
+    ) else {
+        return Ok(false);
     };
 
-    let timeline_midi: Vec<f32> = if let Some(ref cfg) = child_offset_cfg {
-        let fp = frame_period_ms.max(0.1);
-        let start_idx = ((clip_start_sec.max(0.0) * 1000.0) / fp).floor().max(0.0) as usize;
-        timeline_midi_raw
-            .iter()
-            .enumerate()
-            .map(|(local_idx, &midi)| {
-                let frame_idx = start_idx.saturating_add(local_idx);
-                apply_child_pitch_offset_to_midi(
-                    midi as f64,
-                    cfg,
-                    frame_idx,
-                    &timeline.project_scale_notes,
-                ) as f32
-            })
-            .collect()
-    } else {
-        timeline_midi_raw
-    };
+    if has_pitch_user_edit && !has_child_pitch_offset && !is_vslib {
+        // 若音高编辑值与原始音高完全一致（无实际变化），且不需要其他效果处理，则跳过。
+        let has_effective_pitch_change = any_effective_pitch_change_in_range(
+            frame_period_ms,
+            pitch_edit,
+            clip_start_sec,
+            &timeline_midi,
+            seg_start_sec,
+            seg_end_sec,
+        );
+        if !has_effective_pitch_change
+            && !(extra_processing || tension_processing || formant_processing || needs_processor_stretch)
+        {
+            return Ok(false);
+        }
+    }
 
     let mut effective_pitch_edit: Vec<f32> = pitch_edit.to_vec();
     if let Some(ref cfg) = child_offset_cfg {

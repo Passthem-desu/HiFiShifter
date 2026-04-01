@@ -142,7 +142,7 @@ export const koKR = {
     vslib_volume_label: "볼륨",
     vslib_synth_mode_label: "합성 모드",
     vslib_pan_label: "팬",
-    vslib_breathiness_label: "브레시니스",
+    vslib_breathiness_label: "브레스",
     vslib_synth_mode_mono: "모노",
     vslib_synth_mode_mono_formant: "모노 (포먼트)",
     vslib_synth_mode_chorus: "코러스",

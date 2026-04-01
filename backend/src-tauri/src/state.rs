@@ -712,6 +712,7 @@ pub struct TimelineSnapshot {
 
 pub struct AppState {
     pub timeline: std::sync::Mutex<TimelineState>,
+    pub timeline_version: std::sync::atomic::AtomicU64,
     pub timeline_history: std::sync::Mutex<TimelineHistory>,
     pub project: std::sync::Mutex<ProjectState>,
     pub runtime: std::sync::Mutex<RuntimeState>,
@@ -768,6 +769,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             timeline: std::sync::Mutex::new(TimelineState::default()),
+            timeline_version: std::sync::atomic::AtomicU64::new(0),
             timeline_history: std::sync::Mutex::new(TimelineHistory::default()),
             project: std::sync::Mutex::new(ProjectState::default()),
             runtime: std::sync::Mutex::new(RuntimeState {
@@ -802,6 +804,12 @@ impl Default for AppState {
 }
 
 impl AppState {
+    pub fn bump_timeline_version(&self) -> u64 {
+        self.timeline_version
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            .saturating_add(1)
+    }
+
     pub fn set_pending_startup_project_path(&self, path: Option<String>) {
         let mut guard = self
             .pending_startup_project_path
@@ -1097,6 +1105,8 @@ impl AppState {
         h.redo.clear();
         drop(h);
 
+        self.bump_timeline_version();
+
         let (name, was_clean) = {
             let mut p = self.project.lock().unwrap_or_else(|e| e.into_inner());
             let was_clean = !p.dirty;
@@ -1160,6 +1170,7 @@ impl AppState {
         h.redo.push(tl.clone());
         *tl = prev;
         drop(h);
+        self.bump_timeline_version();
         self.audio_engine.update_timeline(tl.clone());
         let mut payload = tl.to_payload();
         payload.project = Some(self.project_meta_payload());
@@ -1180,6 +1191,7 @@ impl AppState {
         h.undo.push(tl.clone());
         *tl = next;
         drop(h);
+        self.bump_timeline_version();
         self.audio_engine.update_timeline(tl.clone());
         let mut payload = tl.to_payload();
         payload.project = Some(self.project_meta_payload());

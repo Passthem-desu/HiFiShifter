@@ -56,6 +56,50 @@ fn resolve_child_pitch_offset_curve_default_value(
     }
 }
 
+fn invalidate_rendered_clip_caches_for_child_track(
+    timeline: &crate::state::TimelineState,
+    child_track_id: &str,
+) {
+    let clip_ids: Vec<String> = timeline
+        .clips
+        .iter()
+        .filter(|clip| clip.track_id == child_track_id)
+        .map(|clip| clip.id.clone())
+        .collect();
+
+    if clip_ids.is_empty() {
+        return;
+    }
+
+    {
+        let mut cache = crate::synth_clip_cache::global_rendered_clip_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for clip_id in &clip_ids {
+            cache.invalidate(clip_id);
+        }
+    }
+    {
+        let mut tension_cache = crate::synth_clip_cache::global_tension_rendered_clip_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for clip_id in &clip_ids {
+            tension_cache.invalidate(clip_id);
+        }
+    }
+    {
+        let mut noise_cache = crate::synth_clip_cache::global_breath_noise_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        for clip_id in &clip_ids {
+            noise_cache.invalidate(clip_id);
+        }
+    }
+    for clip_id in &clip_ids {
+        crate::synth_clip_cache::remove_pending_rendered_key(clip_id);
+    }
+}
+
 pub(super) fn resolve_extra_curve_default_value(
     kind: crate::state::SynthPipelineKind,
     param: &str,
@@ -407,6 +451,10 @@ pub(super) fn set_param_frames(
         entry.pitch_edit_user_modified = true;
     }
 
+    if let Some(spec) = parse_child_pitch_offset_param(&param) {
+        invalidate_rendered_clip_caches_for_child_track(&tl, spec.track_id);
+    }
+
     // Ensure realtime playback reflects edits immediately.
     state.audio_engine.update_timeline(tl.clone());
 
@@ -492,6 +540,10 @@ pub(super) fn restore_param_frames(
                 }
             }
         }
+    }
+
+    if let Some(spec) = parse_child_pitch_offset_param(&param) {
+        invalidate_rendered_clip_caches_for_child_track(&tl, spec.track_id);
     }
 
     // Ensure realtime playback reflects edits immediately.
