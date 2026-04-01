@@ -5,7 +5,7 @@ import React, {
     useRef,
     useState,
 } from "react";
-import { Flex, Box, Text, IconButton, Slider, Select } from "@radix-ui/themes";
+import { Flex, Box, Text, IconButton, Select } from "@radix-ui/themes";
 import { Cross2Icon, PlusIcon } from "@radix-ui/react-icons";
 import type {
     TrackInfo,
@@ -51,21 +51,6 @@ function dbToGain(db: number): number {
     return Math.pow(10, db / 20);
 }
 
-function gainToSliderValue(gain: number): number {
-    const db = Math.min(
-        TRACK_GAIN_MAX_DB,
-        Math.max(TRACK_GAIN_MIN_DB, gainToDb(gain)),
-    );
-    return db - TRACK_GAIN_MIN_DB;
-}
-
-function sliderValueToGain(value: number): number {
-    const db =
-        TRACK_GAIN_MIN_DB +
-        Math.max(0, Math.min(TRACK_GAIN_MAX_DB - TRACK_GAIN_MIN_DB, value));
-    return dbToGain(db);
-}
-
 function formatGainLabel(gain: number): string {
     const db = gainToDb(gain);
     if (!Number.isFinite(db) || db <= TRACK_GAIN_MIN_DB + 0.05)
@@ -76,6 +61,11 @@ function formatGainLabel(gain: number): string {
     );
     if (Math.abs(clampedDb) < 0.05) return "0.0 dB";
     return `${clampedDb > 0 ? "+" : ""}${clampedDb.toFixed(1)} dB`;
+}
+
+function clampGainDb(db: number): number {
+    if (!Number.isFinite(db)) return TRACK_GAIN_MIN_DB;
+    return Math.min(TRACK_GAIN_MAX_DB, Math.max(TRACK_GAIN_MIN_DB, db));
 }
 
 function linearToDb(linear: number): number {
@@ -500,11 +490,11 @@ export const TrackList: React.FC<{
 
         const handler: EventListener = (evt) => {
             const e = evt as WheelEvent;
-            const volumeControlEl = (e.target as HTMLElement | null)?.closest(
-                "[data-track-volume-control]",
+            const volumeKnobEl = (e.target as HTMLElement | null)?.closest(
+                "[data-track-volume-knob]",
             ) as HTMLElement | null;
-            if (volumeControlEl) {
-                const trackId = volumeControlEl.dataset.trackId;
+            if (volumeKnobEl) {
+                const trackId = volumeKnobEl.dataset.trackId;
                 if (trackId) {
                     const currentVolume = currentTrackVolumeById[trackId];
                     if (Number.isFinite(currentVolume)) {
@@ -657,6 +647,38 @@ export const TrackList: React.FC<{
         if (rawIdx >= tracks.length)
             return { track: null, yInRow, index: rawIdx };
         return { track: tracks[rawIdx] ?? null, yInRow, index: rawIdx };
+    }
+
+    function beginVolumeKnobDrag(
+        e: React.PointerEvent<HTMLButtonElement>,
+        trackId: string,
+        volume: number,
+    ) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const startY = e.clientY;
+        const startDb = clampGainDb(gainToDb(volume));
+        let lastDb = startDb;
+
+        const onMove = (ev: PointerEvent) => {
+            const deltaY = startY - ev.clientY;
+            const nextDb = clampGainDb(startDb + deltaY * 0.2);
+            if (Math.abs(nextDb - lastDb) < 0.01) return;
+            lastDb = nextDb;
+            onVolumeUiChange(trackId, dbToGain(nextDb));
+        };
+
+        const onEnd = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onEnd);
+            window.removeEventListener("pointercancel", onEnd);
+            onVolumeCommit(trackId, dbToGain(lastDb));
+        };
+
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onEnd);
+        window.addEventListener("pointercancel", onEnd);
     }
 
     function computeDropSpec(
@@ -821,6 +843,10 @@ export const TrackList: React.FC<{
                     const peakLinear = meter?.peakLinear ?? 0;
                     const maxPeakLinear = meter?.maxPeakLinear ?? 0;
                     const clipped = Boolean(meter?.clipped);
+                    const volumeDb = clampGainDb(gainToDb(volume));
+                    const knobDeg = volumeDb >= 0
+                        ? (volumeDb / TRACK_GAIN_MAX_DB) * 135
+                        : (volumeDb / Math.abs(TRACK_GAIN_MIN_DB)) * 135;
 
                     const guideLines =
                         depth > 0 ? Array.from({ length: depth }) : [];
@@ -1073,7 +1099,7 @@ export const TrackList: React.FC<{
                                         justify="center"
                                         className="min-w-0 flex-1"
                                     >
-                                        <Flex justify="between" align="center">
+                                        <Flex justify="between" align="center" gap="2">
                                             <Flex
                                                 align="center"
                                                 gap="1"
@@ -1218,121 +1244,11 @@ export const TrackList: React.FC<{
                                                     </Text>
                                                 )}
                                             </Flex>
-                                            <IconButton
-                                                size="1"
-                                                variant="ghost"
-                                                color="gray"
-                                                className="opacity-0 group-hover:opacity-100"
-                                                disabled={isLastRootTrack(
-                                                    track.id,
-                                                )}
-                                                onPointerDown={(e) =>
-                                                    e.stopPropagation()
-                                                }
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onRemoveTrack(track.id);
-                                                }}
-                                            >
-                                                <Cross2Icon />
-                                            </IconButton>
-                                        </Flex>
-
-                                        <Flex gap="2" align="center">
-                                            {isRoot ? (
-                                                <IconButton
-                                                    size="1"
-                                                    variant={
-                                                        composeEnabled
-                                                            ? "solid"
-                                                            : "ghost"
-                                                    }
-                                                    color={
-                                                        composeEnabled
-                                                            ? "blue"
-                                                            : "gray"
-                                                    }
-                                                    title={t("compose")}
-                                                    onPointerDown={(e) =>
-                                                        e.stopPropagation()
-                                                    }
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onToggleCompose(
-                                                            track.id,
-                                                            !composeEnabled,
-                                                        );
-                                                    }}
-                                                    style={{
-                                                        fontWeight: 700,
-                                                        fontSize: 11,
-                                                        width: 20,
-                                                        height: 20,
-                                                    }}
-                                                >
-                                                    C
-                                                </IconButton>
-                                            ) : null}
-                                            <IconButton
-                                                size="1"
-                                                variant={
-                                                    muted ? "solid" : "ghost"
-                                                }
-                                                color={muted ? "red" : "gray"}
-                                                title={
-                                                    muted
-                                                        ? t("clip_unmute")
-                                                        : t("clip_mute")
-                                                }
-                                                onPointerDown={(e) =>
-                                                    e.stopPropagation()
-                                                }
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onToggleMute(
-                                                        track.id,
-                                                        !muted,
-                                                    );
-                                                }}
-                                                style={{
-                                                    fontWeight: 700,
-                                                    fontSize: 11,
-                                                    width: 20,
-                                                    height: 20,
-                                                }}
-                                            >
-                                                M
-                                            </IconButton>
-                                            <IconButton
-                                                size="1"
-                                                variant={
-                                                    solo ? "solid" : "ghost"
-                                                }
-                                                color={solo ? "amber" : "gray"}
-                                                title={t("solo")}
-                                                onPointerDown={(e) =>
-                                                    e.stopPropagation()
-                                                }
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onToggleSolo(
-                                                        track.id,
-                                                        !solo,
-                                                    );
-                                                }}
-                                                style={{
-                                                    fontWeight: 700,
-                                                    fontSize: 11,
-                                                    width: 20,
-                                                    height: 20,
-                                                }}
-                                            >
-                                                S
-                                            </IconButton>
                                             {isRoot &&
                                             composeEnabled &&
                                             onAlgoChange ? (
                                                 <div
+                                                    className="shrink-0"
                                                     onPointerDown={(e) =>
                                                         e.stopPropagation()
                                                     }
@@ -1380,7 +1296,24 @@ export const TrackList: React.FC<{
                                                     </Select.Root>
                                                 </div>
                                             ) : null}
-                                            <Box flexGrow="1" />
+                                            <IconButton
+                                                size="1"
+                                                variant="ghost"
+                                                color="gray"
+                                                className="opacity-0 group-hover:opacity-100"
+                                                disabled={isLastRootTrack(
+                                                    track.id,
+                                                )}
+                                                onPointerDown={(e) =>
+                                                    e.stopPropagation()
+                                                }
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onRemoveTrack(track.id);
+                                                }}
+                                            >
+                                                <Cross2Icon />
+                                            </IconButton>
                                         </Flex>
 
                                         <div
@@ -1397,11 +1330,30 @@ export const TrackList: React.FC<{
                                                 onVolumeCommit(track.id, 1);
                                             }}
                                         >
-                                            <Flex
-                                                justify="end"
-                                                align="center"
-                                                className="mb-1"
-                                            >
+                                            <Flex align="center" gap="2">
+                                                <button
+                                                    type="button"
+                                                    className="relative w-8 h-8 rounded-full border border-qt-border bg-qt-window hover:bg-qt-surface transition-colors shrink-0"
+                                                    title={formatGainLabel(volume)}
+                                                    data-track-volume-knob
+                                                    data-track-id={track.id}
+                                                    onPointerDown={(e) =>
+                                                        beginVolumeKnobDrag(
+                                                            e,
+                                                            track.id,
+                                                            volume,
+                                                        )
+                                                    }
+                                                >
+                                                    <span
+                                                        className="absolute left-1/2 top-1/2 w-[2px] h-3 -translate-x-1/2 -translate-y-full rounded-full bg-qt-highlight"
+                                                        style={{
+                                                            transform: `translate(-50%, -100%) rotate(${knobDeg}deg)`,
+                                                            transformOrigin:
+                                                                "50% 100%",
+                                                        }}
+                                                    />
+                                                </button>
                                                 <Text
                                                     size="1"
                                                     color={
@@ -1416,40 +1368,98 @@ export const TrackList: React.FC<{
                                                     {formatGainLabel(volume)}
                                                 </Text>
                                             </Flex>
-                                            <Slider
-                                                min={0}
-                                                max={
-                                                    TRACK_GAIN_MAX_DB -
-                                                    TRACK_GAIN_MIN_DB
-                                                }
-                                                step={0.1}
-                                                value={[
-                                                    gainToSliderValue(volume),
-                                                ]}
-                                                size="1"
-                                                className="w-full"
-                                                onValueChange={(v) => {
-                                                    const next =
-                                                        sliderValueToGain(
-                                                            Number(v[0] ?? 0),
-                                                        );
-                                                    onVolumeUiChange(
-                                                        track.id,
-                                                        next,
-                                                    );
-                                                }}
-                                                onValueCommit={(v) => {
-                                                    const next =
-                                                        sliderValueToGain(
-                                                            Number(v[0] ?? 0),
-                                                        );
-                                                    onVolumeCommit(
-                                                        track.id,
-                                                        next,
-                                                    );
-                                                }}
-                                            />
                                         </div>
+                                    </Flex>
+
+                                    <Flex
+                                        direction="column"
+                                        gap="1"
+                                        align="center"
+                                        justify="center"
+                                        className="w-[22px] shrink-0"
+                                    >
+                                        {isRoot ? (
+                                            <IconButton
+                                                size="1"
+                                                variant={
+                                                    composeEnabled
+                                                        ? "solid"
+                                                        : "ghost"
+                                                }
+                                                color={
+                                                    composeEnabled
+                                                        ? "blue"
+                                                        : "gray"
+                                                }
+                                                title={t("compose")}
+                                                onPointerDown={(e) =>
+                                                    e.stopPropagation()
+                                                }
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onToggleCompose(
+                                                        track.id,
+                                                        !composeEnabled,
+                                                    );
+                                                }}
+                                                style={{
+                                                    fontWeight: 700,
+                                                    fontSize: 11,
+                                                    width: 20,
+                                                    height: 20,
+                                                }}
+                                            >
+                                                C
+                                            </IconButton>
+                                        ) : (
+                                            <div className="w-5 h-5" />
+                                        )}
+                                        <IconButton
+                                            size="1"
+                                            variant={muted ? "solid" : "ghost"}
+                                            color={muted ? "red" : "gray"}
+                                            title={
+                                                muted
+                                                    ? t("clip_unmute")
+                                                    : t("clip_mute")
+                                            }
+                                            onPointerDown={(e) =>
+                                                e.stopPropagation()
+                                            }
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onToggleMute(track.id, !muted);
+                                            }}
+                                            style={{
+                                                fontWeight: 700,
+                                                fontSize: 11,
+                                                width: 20,
+                                                height: 20,
+                                            }}
+                                        >
+                                            M
+                                        </IconButton>
+                                        <IconButton
+                                            size="1"
+                                            variant={solo ? "solid" : "ghost"}
+                                            color={solo ? "amber" : "gray"}
+                                            title={t("solo")}
+                                            onPointerDown={(e) =>
+                                                e.stopPropagation()
+                                            }
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onToggleSolo(track.id, !solo);
+                                            }}
+                                            style={{
+                                                fontWeight: 700,
+                                                fontSize: 11,
+                                                width: 20,
+                                                height: 20,
+                                            }}
+                                        >
+                                            S
+                                        </IconButton>
                                     </Flex>
 
                                     <div

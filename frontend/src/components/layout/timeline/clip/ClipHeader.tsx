@@ -4,6 +4,8 @@ import { CLIP_HEADER_HEIGHT } from "../constants";
 import { gainToDb } from "../math";
 import { useI18n } from "../../../../i18n/I18nProvider";
 
+const CLIP_GAIN_WHEEL_STEP_DB = 0.5;
+
 export const ClipHeader: React.FC<{
     clip: ClipInfo;
     clipWidthPx: number;
@@ -38,6 +40,9 @@ export const ClipHeader: React.FC<{
     onGainCommit,
 }) => {
     const { t } = useI18n();
+    const gainDb = gainToDb(clip.gain);
+    const clampedGainDb = Math.min(12, Math.max(-12, gainDb));
+    const gainKnobDeg = (clampedGainDb / 12) * 135;
 
     // 根据 clip 像素宽度决定显示哪些元素（从右往左依次隐藏）
     // >= 120px: 全显示 | 80-120px: 隐藏名称 | 52-80px: 隐藏名称+增益值 | 32-52px: 只留M | < 32px: 全隐藏
@@ -129,6 +134,7 @@ export const ClipHeader: React.FC<{
                 <div
                     title={t("clip_gain_drag_hint")}
                     style={{ cursor: "ns-resize" }}
+                    data-clip-gain-knob
                     onPointerDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
@@ -143,8 +149,43 @@ export const ClipHeader: React.FC<{
                         e.stopPropagation();
                         onGainCommit?.(clip.id, 0);
                     }}
+                    onWheel={(e) => {
+                        if (!onGainCommit) return;
+                        const rawDelta =
+                            Math.abs(e.deltaY) >= Math.abs(e.deltaX)
+                                ? e.deltaY
+                                : e.deltaX;
+                        if (!Number.isFinite(rawDelta) || Math.abs(rawDelta) < 0.01) {
+                            return;
+                        }
+
+                        const direction = rawDelta < 0 ? 1 : -1;
+                        const notches = Math.max(
+                            1,
+                            Math.round(Math.abs(rawDelta) / 100),
+                        );
+                        const nextDb = Math.min(
+                            12,
+                            Math.max(
+                                -12,
+                                clampedGainDb + direction * CLIP_GAIN_WHEEL_STEP_DB * notches,
+                            ),
+                        );
+
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onGainCommit(clip.id, nextDb);
+                    }}
                 >
-                    <div className="w-4 h-4 rounded-full border border-white/60 bg-white/10" />
+                    <div className="relative w-4 h-4 rounded-full border border-white/60 bg-black/15">
+                        <span
+                            className="absolute left-1/2 top-1/2 w-[2px] h-1.5 -translate-x-1/2 -translate-y-full rounded-full bg-white/90"
+                            style={{
+                                transform: `translate(-50%, -100%) rotate(${gainKnobDeg}deg)`,
+                                transformOrigin: "50% 100%",
+                            }}
+                        />
+                    </div>
                 </div>
             )}
 
