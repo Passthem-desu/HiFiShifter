@@ -41,10 +41,12 @@ import {
 } from "../../../utils/musicalScales";
 import type { ScaleLike } from "../../../utils/musicalScales";
 import {
+    CHILD_PITCH_OFFSET_DEGREES_RANGE,
     isChildPitchOffsetCentsParam,
     isChildPitchOffsetDegreesParam,
     snapChildPitchOffsetValue,
 } from "./childPitchOffsetParams";
+import { buildChildOffsetPasteValues as buildChildOffsetPasteValuesHelper } from "./childPitchOffsetPaste";
 import { computeAnchoredHorizontalZoom } from "../../../utils/horizontalZoom";
 import { getParamEditorWheelAction } from "./wheelGesture";
 import { transformSelectionByRightDrag } from "./selectionTransforms";
@@ -68,6 +70,8 @@ type CanvasCursor =
 export function usePianoRollInteractions(args: {
     dispatch: AppDispatch;
     rootTrackId: string | null;
+    selectedTrackId: string | null;
+    tracks: Array<{ id: string; parentId?: string | null }>;
     editParam: ParamName;
     pitchEnabled: boolean;
     toolMode: string;
@@ -211,6 +215,8 @@ export function usePianoRollInteractions(args: {
     const {
         dispatch,
         rootTrackId,
+        selectedTrackId,
+        tracks,
         editParam,
         pitchEnabled,
         toolMode,
@@ -723,6 +729,69 @@ export function usePianoRollInteractions(args: {
         ],
     );
 
+    
+
+    const pitchDeltaToDegreeSteps = useCallback(
+        (basePitch: number, targetPitch: number, scale: ScaleLike): number => {
+            if (!Number.isFinite(basePitch) || !Number.isFinite(targetPitch)) {
+                return 0;
+            }
+            if (Math.abs(targetPitch - basePitch) <= 1e-9) return 0;
+
+            const minStep = Number(CHILD_PITCH_OFFSET_DEGREES_RANGE.min);
+            const maxStep = Number(CHILD_PITCH_OFFSET_DEGREES_RANGE.max);
+            const minPitch = transposePitchByScaleSteps(basePitch, minStep, scale);
+            const maxPitch = transposePitchByScaleSteps(basePitch, maxStep, scale);
+            const lowPitch = Math.min(minPitch, maxPitch);
+            const highPitch = Math.max(minPitch, maxPitch);
+            if (targetPitch <= lowPitch) {
+                return minPitch <= maxPitch ? minStep : maxStep;
+            }
+            if (targetPitch >= highPitch) {
+                return minPitch <= maxPitch ? maxStep : minStep;
+            }
+
+            let left = minStep;
+            let right = maxStep;
+            const ascending = minPitch <= maxPitch;
+            for (let i = 0; i < 24; i += 1) {
+                const mid = (left + right) / 2;
+                const midPitch = transposePitchByScaleSteps(basePitch, mid, scale);
+                if ((midPitch < targetPitch) === ascending) {
+                    left = mid;
+                } else {
+                    right = mid;
+                }
+            }
+            return (left + right) / 2;
+        },
+        [],
+    );
+
+    const buildChildOffsetPasteValues = useCallback(
+        async (
+            targetTrackId: string,
+            startFrame: number,
+            frameCount: number,
+            clipboardPitch: number[],
+            mode: "cents" | "degrees",
+        ): Promise<number[] | null> => {
+            return buildChildOffsetPasteValuesHelper({
+                tracks,
+                rootTrackId,
+                targetTrackId,
+                startFrame,
+                frameCount,
+                clipboardPitch,
+                mode,
+                paramsApi,
+                pitchDeltaToDegreeSteps,
+                projectScale,
+            });
+        },
+        [tracks, pitchDeltaToDegreeSteps, projectScale, rootTrackId],
+    );
+
     const updateSelectionUi = useCallback(
         (next: { aBeat: number; bBeat: number } | null) => {
             setSelectionUi(next);
@@ -1124,10 +1193,35 @@ export function usePianoRollInteractions(args: {
                             // ignore and fallback to internal clipboard
                         }
                         if (!clip) return;
-                        if (clip.param !== editParam) return;
-                        const pasteValues = clip.values.length > frameCount
-                            ? clip.values.slice(0, frameCount)
-                            : clip.values;
+                        const targetIsChildCents = isChildPitchOffsetCentsParam(editParam);
+                        const targetIsChildDegrees = isChildPitchOffsetDegreesParam(editParam);
+                        const canConvertPitchToChildOffset =
+                            (targetIsChildCents || targetIsChildDegrees) &&
+                            clip.param === "pitch" &&
+                            selectedTrackId != null;
+
+                        let pasteValues: number[];
+                        if (clip.param === editParam) {
+                            pasteValues =
+                                clip.values.length > frameCount
+                                    ? clip.values.slice(0, frameCount)
+                                    : clip.values;
+                        } else if (canConvertPitchToChildOffset) {
+                            const converted = await buildChildOffsetPasteValues(
+                                selectedTrackId!,
+                                startFrame,
+                                frameCount,
+                                clip.values.length > frameCount
+                                    ? clip.values.slice(0, frameCount)
+                                    : clip.values,
+                                targetIsChildCents ? "cents" : "degrees",
+                            );
+                            if (!converted) return;
+                            pasteValues = converted;
+                        } else {
+                            return;
+                        }
+
                         await paramsApi.setParamFrames(
                             rootTrackId,
                             editParam,
@@ -1154,6 +1248,8 @@ export function usePianoRollInteractions(args: {
             keybindingMap,
             onEditAction,
             toolMode,
+            selectedTrackId,
+            buildChildOffsetPasteValues,
         ],
     );
 

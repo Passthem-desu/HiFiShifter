@@ -39,6 +39,7 @@ export interface TimelineClip {
     length_sec: number;
     color: string;
     source_path?: string;
+    source_path_relative?: string;
     duration_sec?: number;
     duration_frames?: number; // 精确frame总数
     source_sample_rate?: number; // 源文件采样率

@@ -146,6 +146,8 @@ pub struct Clip {
     pub color: String,
 
     pub source_path: Option<String>,
+    #[serde(default)]
+    pub source_path_relative: Option<String>,
     pub duration_sec: Option<f64>,       // 兼容性保留
     pub duration_frames: Option<u64>,    // 精确的frame总数
     pub source_sample_rate: Option<u32>, // 源文件采样率
@@ -1237,6 +1239,7 @@ impl TimelineState {
                 length_sec: c.length_sec,
                 color: c.color.clone(),
                 source_path: c.source_path.clone(),
+                source_path_relative: c.source_path_relative.clone(),
                 duration_sec: c.duration_sec,
                 duration_frames: c.duration_frames,
                 source_sample_rate: c.source_sample_rate,
@@ -1664,6 +1667,7 @@ impl TimelineState {
             length_sec: ls,
             color: default_clip_color(),
             source_path,
+            source_path_relative: None,
             duration_sec: computed_duration_sec,
             duration_frames: computed_duration_frames,
             source_sample_rate: computed_source_sr,
@@ -2096,6 +2100,7 @@ impl TimelineState {
                     apply_pitch_edit: true,
                     export_format: crate::mixdown::ExportFormat::Wav32f,
                     quality_preset: crate::mixdown::QualityPreset::Export,
+                    cancel_flag: None,
                 },
             );
 
@@ -2139,8 +2144,14 @@ impl TimelineState {
         match clip_id {
             None => self.selected_clip_id = None,
             Some(id) => {
-                if self.clips.iter().any(|c| c.id == id) {
+                if let Some(track_id) = self
+                    .clips
+                    .iter()
+                    .find(|c| c.id == id)
+                    .map(|c| c.track_id.clone())
+                {
                     self.selected_clip_id = Some(id);
+                    self.selected_track_id = Some(track_id);
                 }
             }
         }
@@ -2280,6 +2291,7 @@ impl TimelineState {
             }
 
             clip.source_path = Some(new_source_path.to_string());
+            clip.source_path_relative = None;
             clip.duration_sec = duration_sec;
             clip.duration_frames = duration_frames;
             clip.source_sample_rate = source_sample_rate;

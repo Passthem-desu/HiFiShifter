@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Emitter, Manager, State};
 
 use super::common::{new_temp_wav_path, render_timeline_to_wav};
@@ -35,6 +37,7 @@ pub(crate) struct ExportTimeRange {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SeparatedExportTargetKind {
+    #[serde(alias = "main")]
     Root,
     Sub,
 }
@@ -62,6 +65,8 @@ pub(crate) struct ExportAudioRequest {
     pub overwrite_existing_paths: Vec<String>,
     #[serde(default)]
     pub skip_existing_paths: Vec<String>,
+    pub sample_rate: Option<u32>,
+    pub bit_depth: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,6 +89,8 @@ pub(crate) struct ExportAudioDefaultsPayload {
     pub project_file_name: String,
     pub separated_output_dir: String,
     pub separated_file_name: String,
+    pub sample_rate: u32,
+    pub bit_depth: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,6 +116,51 @@ struct ResolvedSeparatedTarget {
     track_name: String,
     track_index: usize,
     included_track_ids: HashSet<String>,
+}
+
+fn export_cancel_slot() -> &'static Mutex<Vec<Arc<AtomicBool>>> {
+    static SLOT: OnceLock<Mutex<Vec<Arc<AtomicBool>>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+struct ExportCancelGuard {
+    flag: Arc<AtomicBool>,
+}
+
+fn install_export_cancel_flag(flag: Arc<AtomicBool>) -> ExportCancelGuard {
+    let mut slot = export_cancel_slot()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    slot.push(flag.clone());
+    ExportCancelGuard { flag }
+}
+
+impl Drop for ExportCancelGuard {
+    fn drop(&mut self) {
+        let mut slot = export_cancel_slot()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        slot.retain(|f| !Arc::ptr_eq(f, &self.flag));
+    }
+}
+
+pub(super) fn cancel_export_audio() -> serde_json::Value {
+    let flags = {
+        export_cancel_slot()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    };
+
+    let active = !flags.is_empty();
+    for flag in flags.iter() {
+        flag.store(true, Ordering::Relaxed);
+    }
+
+    serde_json::json!({
+        "ok": true,
+        "active": active,
+    })
 }
 
 // ===================== model / processing / synthesis =====================
@@ -249,6 +301,7 @@ pub(super) fn save_synthesized(
         apply_pitch_edit: true,
         export_format: crate::mixdown::ExportFormat::Wav32f,
         quality_preset: crate::mixdown::QualityPreset::Export,
+        cancel_flag: None,
     };
 
     // 3. 直接调用 mixdown 模块进行高质量重新渲染并写入目标路径
@@ -386,6 +439,7 @@ pub(super) fn save_separated(state: State<'_, AppState>, output_dir: String) -> 
             apply_pitch_edit: true,
             export_format: crate::mixdown::ExportFormat::Wav32f,
             quality_preset: crate::mixdown::QualityPreset::Export,
+            cancel_flag: None,
         };
 
         match crate::mixdown::render_mixdown_wav(&sub_tl, &out_path, opts) {
@@ -473,6 +527,9 @@ pub(super) fn get_export_audio_defaults(state: State<'_, AppState>) -> ExportAud
         .map(str::to_string)
         .unwrap_or(defaults_separated_file_name);
 
+    let sample_rate = normalize_export_sample_rate(export_settings.sample_rate);
+    let bit_depth = normalize_export_bit_depth(export_settings.bit_depth);
+
     ExportAudioDefaultsPayload {
         ok: true,
         project_name,
@@ -481,6 +538,8 @@ pub(super) fn get_export_audio_defaults(state: State<'_, AppState>) -> ExportAud
         project_file_name,
         separated_output_dir,
         separated_file_name,
+        sample_rate,
+        bit_depth,
     }
 }
 
@@ -544,12 +603,22 @@ pub(super) fn preview_export_audio_plan(
                 };
             }
 
-            let output_dir = resolve_output_dir_template(
+            let output_dir = match resolve_output_dir_template(
                 output_dir_template,
                 &project_name,
                 &project_folder,
                 export_start_time,
-            );
+            ) {
+                Ok(value) => value,
+                Err(_) => {
+                    return ExportAudioPlanPayload {
+                        ok: false,
+                        mode: ExportAudioMode::Separated,
+                        targets: vec![],
+                        existing_paths: vec![],
+                    };
+                }
+            };
             let out_dir = PathBuf::from(output_dir);
             let display_tracks = build_display_track_order(&timeline.tracks);
             let Ok(resolved_targets) = resolve_separated_targets(
@@ -581,7 +650,7 @@ pub(super) fn preview_export_audio_plan(
                     SeparatedExportTargetKind::Root => "Root",
                     SeparatedExportTargetKind::Sub => "Sub",
                 };
-                let relative = build_unique_export_file_name(
+                let relative = match build_unique_export_file_name(
                     pattern,
                     target.track_index,
                     target_index,
@@ -592,7 +661,17 @@ pub(super) fn preview_export_audio_plan(
                     &project_name,
                     Local::now(),
                     &mut used_names,
-                );
+                ) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        return ExportAudioPlanPayload {
+                            ok: false,
+                            mode: ExportAudioMode::Separated,
+                            targets: vec![],
+                            existing_paths: vec![],
+                        };
+                    }
+                };
                 let path = out_dir.join(relative);
                 let path_text = path.display().to_string();
                 if path.exists() {
@@ -618,6 +697,13 @@ pub(super) fn export_audio_advanced(
     state: State<'_, AppState>,
     request: ExportAudioRequest,
 ) -> serde_json::Value {
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let _cancel_guard = install_export_cancel_flag(cancel_flag.clone());
+
+    let requested_sample_rate = normalize_export_sample_rate(request.sample_rate.unwrap_or(44_100));
+    let requested_bit_depth = normalize_export_bit_depth(request.bit_depth.unwrap_or(32));
+    let requested_export_format = export_format_from_bit_depth(requested_bit_depth);
+
     let overwrite_path_keys: HashSet<String> = request
         .overwrite_existing_paths
         .iter()
@@ -714,13 +800,14 @@ pub(super) fn export_audio_advanced(
             );
 
             let opts = crate::mixdown::MixdownOptions {
-                sample_rate: 44100,
+                sample_rate: requested_sample_rate,
                 start_sec,
                 end_sec,
                 stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
                 apply_pitch_edit: true,
-                export_format: crate::mixdown::ExportFormat::Wav32f,
+                export_format: requested_export_format,
                 quality_preset: crate::mixdown::QualityPreset::Export,
+                cancel_flag: Some(cancel_flag.clone()),
             };
 
             match crate::mixdown::render_mixdown_wav(&timeline, &out_path, opts) {
@@ -735,6 +822,8 @@ pub(super) fn export_audio_advanced(
                         Some(file_name_value),
                         None,
                         None,
+                        Some(requested_sample_rate),
+                        Some(requested_bit_depth),
                     );
 
                     emit_export_audio_progress(
@@ -757,6 +846,27 @@ pub(super) fn export_audio_advanced(
                     })
                 }
                 Err(e) => {
+                    if e == "export_cancelled" {
+                        emit_export_audio_progress(
+                            &state,
+                            ExportAudioProgressEvent {
+                                active: false,
+                                mode: Some(ExportAudioMode::Project),
+                                progress: Some(1.0),
+                                current: Some(1),
+                                total: Some(1),
+                            },
+                        );
+
+                        return serde_json::json!({
+                            "ok": false,
+                            "mode": "project",
+                            "path": out_path.display().to_string(),
+                            "cancelled": true,
+                            "error": "export_cancelled",
+                        });
+                    }
+
                     emit_export_audio_progress(
                         &state,
                         ExportAudioProgressEvent {
@@ -797,12 +907,20 @@ pub(super) fn export_audio_advanced(
                 }
             };
 
-            let output_dir = resolve_output_dir_template(
+            let output_dir = match resolve_output_dir_template(
                 output_dir_template,
                 &project_name,
                 &project_folder,
                 export_start_time,
-            );
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    return serde_json::json!({
+                        "ok": false,
+                        "error": error,
+                    });
+                }
+            };
             if output_dir.trim().is_empty() {
                 return serde_json::json!({
                     "ok": false,
@@ -866,11 +984,23 @@ pub(super) fn export_audio_advanced(
             let mut results = Vec::with_capacity(resolved_targets.len());
 
             for (target_index, target) in resolved_targets.into_iter().enumerate() {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    results.push(serde_json::json!({
+                        "track_id": target.track_id,
+                        "track_index": target.track_index,
+                        "name": target.track_name,
+                        "ok": false,
+                        "cancelled": true,
+                        "error": "export_cancelled",
+                    }));
+                    break;
+                }
+
                 let track_type = match target.kind {
                     SeparatedExportTargetKind::Root => "Root",
                     SeparatedExportTargetKind::Sub => "Sub",
                 };
-                let relative_path = build_unique_export_file_name(
+                let relative_path = match build_unique_export_file_name(
                     pattern,
                     target.track_index,
                     target_index,
@@ -881,7 +1011,37 @@ pub(super) fn export_audio_advanced(
                     &project_name,
                     Local::now(),
                     &mut used_names,
-                );
+                ) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        results.push(serde_json::json!({
+                            "track_id": target.track_id,
+                            "track_index": target.track_index,
+                            "track_type": track_type,
+                            "name": target.track_name,
+                            "ok": false,
+                            "error": error,
+                        }));
+
+                        let current = target_index + 1;
+                        let progress = if total_targets == 0 {
+                            1.0
+                        } else {
+                            current as f64 / total_targets as f64
+                        };
+                        emit_export_audio_progress(
+                            &state,
+                            ExportAudioProgressEvent {
+                                active: true,
+                                mode: Some(ExportAudioMode::Separated),
+                                progress: Some(progress),
+                                current: Some(current),
+                                total: Some(total_targets),
+                            },
+                        );
+                        continue;
+                    }
+                };
                 let out_path = out_dir.join(&relative_path);
                 if let Some(parent) = out_path.parent() {
                     if let Err(error) = fs::create_dir_all(parent) {
@@ -971,13 +1131,14 @@ pub(super) fn export_audio_advanced(
                     .retain(|clip| active_track_ids.contains(clip.track_id.as_str()));
 
                 let opts = crate::mixdown::MixdownOptions {
-                    sample_rate: 44100,
+                    sample_rate: requested_sample_rate,
                     start_sec,
                     end_sec,
                     stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
                     apply_pitch_edit: true,
-                    export_format: crate::mixdown::ExportFormat::Wav32f,
+                    export_format: requested_export_format,
                     quality_preset: crate::mixdown::QualityPreset::Export,
+                    cancel_flag: Some(cancel_flag.clone()),
                 };
 
                 match crate::mixdown::render_mixdown_wav(&sub_timeline, &out_path, opts) {
@@ -997,6 +1158,7 @@ pub(super) fn export_audio_advanced(
                         }));
                     }
                     Err(e) => {
+                        let cancelled = e == "export_cancelled";
                         results.push(serde_json::json!({
                             "track_id": target.track_id,
                             "track_index": target.track_index,
@@ -1004,8 +1166,13 @@ pub(super) fn export_audio_advanced(
                             "name": target.track_name,
                             "path": out_path.display().to_string(),
                             "ok": false,
+                            "cancelled": cancelled,
                             "error": e,
                         }));
+
+                        if cancelled {
+                            break;
+                        }
                     }
                 }
 
@@ -1028,6 +1195,9 @@ pub(super) fn export_audio_advanced(
             }
 
             let all_ok = results.iter().all(|r| r["ok"].as_bool().unwrap_or(false));
+            let cancelled = results
+                .iter()
+                .any(|r| r["cancelled"].as_bool().unwrap_or(false));
 
             if all_ok {
                 persist_successful_export_settings(
@@ -1036,6 +1206,8 @@ pub(super) fn export_audio_advanced(
                     None,
                     Some(output_dir_template.to_string()),
                     Some(pattern.to_string()),
+                    Some(requested_sample_rate),
+                    Some(requested_bit_depth),
                 );
             }
 
@@ -1053,6 +1225,7 @@ pub(super) fn export_audio_advanced(
             serde_json::json!({
                 "ok": all_ok,
                 "mode": "separated",
+                "cancelled": cancelled,
                 "count": results.len(),
                 "tracks": results,
                 "output_dir": output_dir,
@@ -1304,6 +1477,44 @@ fn latest_clip_end_sec(timeline: &crate::state::TimelineState) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
+fn normalize_export_sample_rate(sample_rate: u32) -> u32 {
+    match sample_rate {
+        8_000 | 11_025 | 12_000 | 16_000 | 22_050 | 24_000 | 32_000 | 44_100 | 48_000
+        | 88_200 | 96_000 | 176_400 | 192_000 => sample_rate,
+        _ => 44_100,
+    }
+}
+
+fn normalize_export_bit_depth(bit_depth: u32) -> u32 {
+    match bit_depth {
+        16 | 24 | 32 => bit_depth,
+        _ => 32,
+    }
+}
+
+fn export_format_from_bit_depth(bit_depth: u32) -> crate::mixdown::ExportFormat {
+    match normalize_export_bit_depth(bit_depth) {
+        16 => crate::mixdown::ExportFormat::Wav16,
+        24 => crate::mixdown::ExportFormat::Wav24,
+        _ => crate::mixdown::ExportFormat::Wav32f,
+    }
+}
+
+fn try_apply_time_format(template: &str, time: chrono::DateTime<Local>) -> Result<String, String> {
+    let direct = std::panic::catch_unwind(|| time.format(template).to_string());
+    if let Ok(value) = direct {
+        return Ok(value);
+    }
+
+    let escaped = template.replace('%', "%%");
+    let escaped_try = std::panic::catch_unwind(|| time.format(&escaped).to_string());
+    if let Ok(value) = escaped_try {
+        return Ok(value);
+    }
+
+    Err("export_invalid_time_format".to_string())
+}
+
 fn resolve_project_folder(state: &AppState) -> PathBuf {
     let project = state.project.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(path) = project.path.as_deref() {
@@ -1313,10 +1524,6 @@ fn resolve_project_folder(state: &AppState) -> PathBuf {
         }
     }
     resolve_documents_dir(state).unwrap_or_else(|| PathBuf::from("."))
-}
-
-fn apply_time_format(template: &str, time: chrono::DateTime<Local>) -> String {
-    time.format(template).to_string()
 }
 
 fn resolve_documents_dir(state: &AppState) -> Option<PathBuf> {
@@ -1361,17 +1568,17 @@ fn resolve_project_output_path(
             project_name,
             &project_folder,
             export_start_time,
-        );
+        )?;
         if output_dir.trim().is_empty() {
             return Err("project_output_dir resolves to empty path".to_string());
         }
 
-        let mut file_name = project_file_name_pattern
+        let file_name_template = project_file_name_pattern
             .replace("<ProjectName>", project_name)
             .replace("<ProjectFolder>", &project_folder)
             .trim()
             .to_string();
-        file_name = apply_time_format(&file_name, Local::now());
+        let mut file_name = try_apply_time_format(&file_name_template, Local::now())?;
 
         file_name = sanitize_file_name_segment(&file_name);
         if file_name.is_empty() {
@@ -1415,13 +1622,13 @@ fn resolve_output_dir_template(
     project_name: &str,
     project_folder: &str,
     export_start_time: chrono::DateTime<Local>,
-) -> String {
+) -> Result<String, String> {
     let replaced = output_dir_template
         .replace("<ProjectName>", project_name)
         .replace("<ProjectFolder>", project_folder)
         .trim()
         .to_string();
-    apply_time_format(&replaced, export_start_time)
+    try_apply_time_format(&replaced, export_start_time)
 }
 
 fn normalize_export_relative_path(path: &str) -> PathBuf {
@@ -1451,6 +1658,8 @@ fn persist_successful_export_settings(
     project_file_name: Option<String>,
     separated_output_dir: Option<String>,
     separated_file_name_pattern: Option<String>,
+    sample_rate: Option<u32>,
+    bit_depth: Option<u32>,
 ) {
     let Some(config_dir) = state.config_dir.get() else {
         return;
@@ -1470,6 +1679,12 @@ fn persist_successful_export_settings(
     if let Some(value) = separated_file_name_pattern {
         settings.separated_file_name_pattern = Some(value);
     }
+    if let Some(value) = sample_rate {
+        settings.sample_rate = normalize_export_sample_rate(value);
+    }
+    if let Some(value) = bit_depth {
+        settings.bit_depth = normalize_export_bit_depth(value);
+    }
 
     crate::config::save_export_settings(config_dir, &settings);
 }
@@ -1485,7 +1700,7 @@ fn build_unique_export_file_name(
     project_name: &str,
     export_time: chrono::DateTime<Local>,
     used_names: &mut HashSet<String>,
-) -> PathBuf {
+) -> Result<PathBuf, String> {
     let mut rendered = pattern.to_string();
     let index_token = format!("{:0width$}", track_index, width = index_width);
     let export_index_token = format!("{:0width$}", export_index, width = index_width);
@@ -1495,7 +1710,7 @@ fn build_unique_export_file_name(
     rendered = rendered.replace("<TrackType>", track_type);
     rendered = rendered.replace("<TrackId>", track_id);
     rendered = rendered.replace("<ProjectName>", project_name);
-    rendered = apply_time_format(&rendered, export_time);
+    rendered = try_apply_time_format(&rendered, export_time)?;
 
     let mut relative = normalize_export_relative_path(&rendered);
     if relative.as_os_str().is_empty() {
@@ -1522,7 +1737,7 @@ fn build_unique_export_file_name(
 
     let candidate = relative.to_string_lossy().to_string();
     if used_names.insert(candidate.clone()) {
-        return PathBuf::from(candidate);
+        return Ok(PathBuf::from(candidate));
     }
 
     let parent = PathBuf::from(&candidate)
@@ -1550,7 +1765,7 @@ fn build_unique_export_file_name(
             parent.join(file).to_string_lossy().to_string()
         };
         if used_names.insert(next.clone()) {
-            return PathBuf::from(next);
+            return Ok(PathBuf::from(next));
         }
         seq += 1;
     }

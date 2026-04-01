@@ -89,7 +89,9 @@ import {
     isChildPitchOffsetCentsParam,
     isChildPitchOffsetDegreesParam,
     isChildPitchOffsetParam,
+    parseChildPitchOffsetParam,
 } from "./pianoRoll/childPitchOffsetParams";
+import { buildChildOffsetPasteValues as buildChildOffsetPasteValuesHelper } from "./pianoRoll/childPitchOffsetPaste";
 import {
     readSystemClipboardObject,
     writeSystemClipboardObject,
@@ -1490,6 +1492,8 @@ export const PianoRollPanel: React.FC = () => {
     const interactions = usePianoRollInteractions({
         dispatch,
         rootTrackId,
+        selectedTrackId: effectiveSelectedTrackId,
+        tracks: s.tracks,
         editParam,
         pitchEnabled,
         toolMode: s.toolMode,
@@ -2274,46 +2278,31 @@ export const PianoRollPanel: React.FC = () => {
                         clip.param === "pitch" &&
                         (isChildPitchOffsetCentsParam(editParam) || isChildPitchOffsetDegreesParam(editParam))
                     ) {
-                        const pitchRes = await paramsApi.getParamFrames(
+                        const targetParam = parseChildPitchOffsetParam(editParam);
+                        if (!targetParam) return;
+                        const resolvedRootTrackId = resolveRootTrackId(
+                            s.tracks,
+                            targetParam.trackId,
+                        );
+                        if (!resolvedRootTrackId || resolvedRootTrackId !== rootTrackId) {
+                            return;
+                        }
+
+                        const converted = await buildChildOffsetPasteValuesHelper({
+                            tracks: s.tracks,
                             rootTrackId,
-                            "pitch",
+                            targetTrackId: targetParam.trackId,
                             startFrame,
                             frameCount,
-                            1,
-                        );
-                        if (!pitchRes?.ok) return;
-                        const pitchPayload = pitchRes as ParamFramesPayload;
-                        const currentPitch = (pitchPayload.edit ?? []).map((v) => Number(v) || 0);
-                        const sourcePitch =
-                            clip.values.length > frameCount
-                                ? clip.values.slice(0, frameCount)
-                                : clip.values;
-                        pasteValues = sourcePitch.map((targetPitch, idx) => {
-                            const basePitch = currentPitch[idx] ?? 0;
-                            if (targetPitch === 0 || basePitch === 0) return 0;
-                            if (isChildPitchOffsetCentsParam(editParam)) {
-                                const deltaSemitone = targetPitch - basePitch;
-                                return Math.max(
-                                    CHILD_PITCH_OFFSET_CENTS_RANGE.min,
-                                    Math.min(
-                                        CHILD_PITCH_OFFSET_CENTS_RANGE.max,
-                                        deltaSemitone * 100,
-                                    ),
-                                );
-                            }
-                            const internalDegrees = pitchDeltaToDegreeSteps(
-                                basePitch,
-                                targetPitch,
-                                effectiveProjectScale,
-                            );
-                            return Math.max(
-                                CHILD_PITCH_OFFSET_DEGREES_RANGE.min,
-                                Math.min(
-                                    CHILD_PITCH_OFFSET_DEGREES_RANGE.max,
-                                    internalDegrees,
-                                ),
-                            );
+                            clipboardPitch: clip.values,
+                            mode: targetParam.mode,
+                            paramsApi,
+                            pitchDeltaToDegreeSteps: pitchDeltaToDegreeSteps,
+                            projectScale: effectiveProjectScale,
                         });
+                        if (!converted) return;
+
+                        pasteValues = converted.slice(0, frameCount);
                     } else {
                         return;
                     }
@@ -2752,6 +2741,7 @@ export const PianoRollPanel: React.FC = () => {
         [
             rootTrackId,
             editParam,
+            s.tracks,
             paramView?.framePeriodMs,
             secPerBeat,
             dynamicProjectSec,

@@ -2578,7 +2578,9 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
+                const currentPlayheadSec = state.playheadSec;
                 applyTimelineState(state, payload);
+                state.playheadSec = currentPlayheadSec;
             })
 
             .addCase(setTrackStateRemote.fulfilled, (state, action) => {
@@ -2681,7 +2683,9 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
+                const currentPlayheadSec = state.playheadSec;
                 applyTimelineState(state, payload);
+                state.playheadSec = currentPlayheadSec;
             })
 
             .addCase(setProjectLengthRemote.fulfilled, (state, action) => {
