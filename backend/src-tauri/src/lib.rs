@@ -41,6 +41,15 @@ mod hnsep_onnx_stub;
 #[cfg(not(feature = "onnx"))]
 use hnsep_onnx_stub as hnsep_onnx;
 
+#[cfg(feature = "onnx")]
+#[path = "vocoder/fcpe_onnx.rs"]
+mod fcpe_onnx;
+#[cfg(not(feature = "onnx"))]
+#[path = "vocoder/fcpe_onnx_stub.rs"]
+mod fcpe_onnx_stub;
+#[cfg(not(feature = "onnx"))]
+use fcpe_onnx_stub as fcpe_onnx;
+
 mod config;
 #[path = "audio/hfspeaks_v2.rs"]
 mod hfspeaks_v2;
@@ -66,8 +75,6 @@ mod vocalshifter_import;
 #[cfg(feature = "vslib")]
 #[path = "vocoder/vslib.rs"]
 mod vslib;
-#[path = "vocoder/world.rs"]
-mod world;
 #[path = "vocoder/world_vocoder.rs"]
 mod world_vocoder;
 
@@ -106,6 +113,15 @@ pub fn run() {
                     let p = res_dir.join("models").join("hnsep");
                     if p.join("hnsep.onnx").exists() {
                         std::env::set_var("HIFISHIFTER_HNSEP_MODEL_DIR", &p);
+                    }
+                }
+            }
+
+            if std::env::var_os("HIFISHIFTER_FCPE_ONNX").is_none() {
+                if let Ok(res_dir) = app.path().resource_dir() {
+                    let p = res_dir.join("models").join("fcpe").join("fcpe.onnx");
+                    if p.exists() {
+                        std::env::set_var("HIFISHIFTER_FCPE_ONNX", &p);
                     }
                 }
             }
