@@ -91,6 +91,7 @@ import {
     isChildPitchOffsetParam,
     parseChildPitchOffsetParam,
 } from "./pianoRoll/childPitchOffsetParams";
+import { buildChildOffsetPasteValues as buildChildOffsetPasteValuesHelper } from "./pianoRoll/childPitchOffsetPaste";
 import {
     readSystemClipboardObject,
     writeSystemClipboardObject,
@@ -2287,145 +2288,21 @@ export const PianoRollPanel: React.FC = () => {
                             return;
                         }
 
-                        const pitchRes = await paramsApi.getParamFrames(
+                        const converted = await buildChildOffsetPasteValuesHelper({
+                            tracks: s.tracks,
                             rootTrackId,
-                            "pitch",
+                            targetTrackId: targetParam.trackId,
                             startFrame,
                             frameCount,
-                            1,
-                        );
-                        if (!pitchRes?.ok) return;
-                        const pitchPayload = pitchRes as ParamFramesPayload;
-                        const rootPitch = (pitchPayload.edit ?? []).map((v) => Number(v) || 0);
-
-                        const trackById = new Map(s.tracks.map((track) => [track.id, track] as const));
-                        const lineageFromRootToTarget: string[] = [];
-                        let cursorId: string | null = targetParam.trackId;
-                        let safety = 0;
-                        while (cursorId && safety < s.tracks.length + 2) {
-                            const node = trackById.get(cursorId);
-                            if (!node) break;
-                            if (!node.parentId) break;
-                            lineageFromRootToTarget.push(node.id);
-                            cursorId = node.parentId;
-                            safety += 1;
-                        }
-                        lineageFromRootToTarget.reverse();
-
-                        const centsCurves = new Map<string, number[]>();
-                        const degreeCurves = new Map<string, number[]>();
-                        for (const layerTrackId of lineageFromRootToTarget) {
-                            const [centsRes, degreeRes] = await Promise.all([
-                                paramsApi.getParamFrames(
-                                    rootTrackId,
-                                    buildChildPitchOffsetCentsParam(layerTrackId),
-                                    startFrame,
-                                    frameCount,
-                                    1,
-                                ),
-                                paramsApi.getParamFrames(
-                                    rootTrackId,
-                                    buildChildPitchOffsetDegreesParam(layerTrackId),
-                                    startFrame,
-                                    frameCount,
-                                    1,
-                                ),
-                            ]);
-
-                            if (centsRes?.ok) {
-                                centsCurves.set(
-                                    layerTrackId,
-                                    ((centsRes as ParamFramesPayload).edit ?? []).map(
-                                        (v) => Number(v) || 0,
-                                    ),
-                                );
-                            }
-                            if (degreeRes?.ok) {
-                                degreeCurves.set(
-                                    layerTrackId,
-                                    ((degreeRes as ParamFramesPayload).edit ?? []).map(
-                                        (v) => Number(v) || 0,
-                                    ),
-                                );
-                            }
-                        }
-
-                        const sourcePitch =
-                            clip.values.length > frameCount
-                                ? clip.values.slice(0, frameCount)
-                                : clip.values;
-
-                        const applyNestedOffset = (
-                            baseMidi: number,
-                            degreeSteps: number,
-                            cents: number,
-                        ): number => {
-                            if (!Number.isFinite(baseMidi) || baseMidi <= 0) return 0;
-                            let current = baseMidi;
-                            if (Number.isFinite(degreeSteps) && Math.abs(degreeSteps) > 1e-9) {
-                                current = transposePitchByScaleSteps(
-                                    current,
-                                    degreeSteps,
-                                    effectiveProjectScale,
-                                );
-                            }
-                            if (Number.isFinite(cents) && Math.abs(cents) > 1e-9) {
-                                current += cents / 100;
-                            }
-                            if (!Number.isFinite(current) || current <= 0) return 0;
-                            return current;
-                        };
-
-                        pasteValues = sourcePitch.map((targetPitch, idx) => {
-                            const basePitch = rootPitch[idx] ?? 0;
-                            if (targetPitch === 0 || basePitch === 0) return 0;
-
-                            let temporaryPitch = basePitch;
-                            for (const layerTrackId of lineageFromRootToTarget) {
-                                let layerCents = centsCurves.get(layerTrackId)?.[idx] ?? 0;
-                                let layerDegrees = degreeCurves.get(layerTrackId)?.[idx] ?? 0;
-
-                                if (layerTrackId === targetParam.trackId) {
-                                    if (targetParam.mode === "cents") {
-                                        layerCents = 0;
-                                    } else {
-                                        layerDegrees = 0;
-                                    }
-                                }
-
-                                temporaryPitch = applyNestedOffset(
-                                    temporaryPitch,
-                                    layerDegrees,
-                                    layerCents,
-                                );
-                                if (temporaryPitch === 0) {
-                                    return 0;
-                                }
-                            }
-
-                            if (targetParam.mode === "cents") {
-                                const deltaSemitone = targetPitch - temporaryPitch;
-                                return Math.max(
-                                    CHILD_PITCH_OFFSET_CENTS_RANGE.min,
-                                    Math.min(
-                                        CHILD_PITCH_OFFSET_CENTS_RANGE.max,
-                                        deltaSemitone * 100,
-                                    ),
-                                );
-                            }
-                            const internalDegrees = pitchDeltaToDegreeSteps(
-                                temporaryPitch,
-                                targetPitch,
-                                effectiveProjectScale,
-                            );
-                            return Math.max(
-                                CHILD_PITCH_OFFSET_DEGREES_RANGE.min,
-                                Math.min(
-                                    CHILD_PITCH_OFFSET_DEGREES_RANGE.max,
-                                    internalDegrees,
-                                ),
-                            );
+                            clipboardPitch: clip.values,
+                            mode: targetParam.mode,
+                            paramsApi,
+                            pitchDeltaToDegreeSteps: pitchDeltaToDegreeSteps,
+                            projectScale: effectiveProjectScale,
                         });
+                        if (!converted) return;
+
+                        pasteValues = converted.slice(0, frameCount);
                     } else {
                         return;
                     }

@@ -280,10 +280,10 @@ fn save_project_archive_to_zip_inner(
         if !written_entries.insert(zip_entry.clone()) {
             continue;
         }
-        let data = fs::read(source_path).map_err(|e| e.to_string())?;
-        zip.start_file(zip_entry, options)
-            .map_err(|e| e.to_string())?;
-        zip.write_all(&data).map_err(|e| e.to_string())?;
+        // 使用流式写入，避免将整个文件读入内存。
+        let mut src_file = fs::File::open(source_path).map_err(|e| e.to_string())?;
+        zip.start_file(zip_entry, options).map_err(|e| e.to_string())?;
+        std::io::copy(&mut src_file, &mut zip).map_err(|e| e.to_string())?;
     }
 
     let log_name = format!(

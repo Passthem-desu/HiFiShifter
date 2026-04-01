@@ -65,14 +65,26 @@ function buildTargetGroups(
         .filter((track) => (track.parentId ?? null) === null)
         .map((track) => track.id);
 
+    // 预计算每个轨道是否包含片段以及是否包含未静音片段，以避免在 isTrackExcludedByRule 中反复遍历 clips。
+    const trackClipStats = new Map<string, { hasAnyClip: boolean; hasAnyUnmutedClip: boolean }>();
+    clips.forEach((clip) => {
+        const existing = trackClipStats.get(clip.trackId) ?? { hasAnyClip: false, hasAnyUnmutedClip: false };
+        const updated = {
+            hasAnyClip: true,
+            hasAnyUnmutedClip: existing.hasAnyUnmutedClip || !clip.muted,
+        };
+        trackClipStats.set(clip.trackId, updated);
+    });
+
     function isTrackExcludedByRule(trackId: string): boolean {
         const track = trackMap.get(trackId);
         if (!track) return true;
         if (Boolean(track.muted)) return true;
 
-        const ownClips = clips.filter((clip) => clip.trackId === trackId);
-        if (ownClips.length === 0) return true;
-        if (ownClips.every((clip) => Boolean(clip.muted))) return true;
+        const stats = trackClipStats.get(trackId);
+        if (!stats) return true;
+        if (!stats.hasAnyClip) return true;
+        if (!stats.hasAnyUnmutedClip) return true;
 
         return false;
     }
@@ -232,7 +244,7 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
         setProjectFileName("<ProjectName>.wav");
         setSeparatedOutputDir("");
         setSeparatedNamePattern("<ExportIndex>_<TrackName>.wav");
-        setSampleRate("44100");
+        setSampleRate("48000");
         setBitDepth(32);
         setSubmitting(false);
         setExportProgress({ active: false, mode: null, progress: null, current: null, total: null });

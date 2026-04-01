@@ -547,17 +547,22 @@ export function drawPianoRoll(args: {
 
                 if (isChildPitchOffsetCentsParam(editParam)) {
                     // 候选步长（以音分为单位），从大到小
+                    const range = vMax - vMin;
                     const candidates = [1200, 600, 300, 200, 100, 50, 25, 10, 5, 1];
                     let chosen = candidates[candidates.length - 1];
                     for (const c of candidates) {
-                        const count = Math.ceil((vMax - vMin) / c) + 1;
+                        const count = Math.ceil(range / c) + 1;
                         if (count >= 5 && count <= 12) {
                             chosen = c;
                             break;
                         }
                     }
-                    // 退化：若跨度相对较大，允许更粗或默认最小步
-                    if ((vMax - vMin) / chosen > 12) chosen = 1;
+                    // 退化：若跨度相对较大，回退到更粗的步长以避免过多刻度
+                    const approxCount = range / chosen;
+                    if (approxCount > 12) {
+                        const fallbackStep = Math.max(candidates[0], niceAxisStep(range, 8));
+                        chosen = fallbackStep;
+                    }
 
                     const firstMark = Math.ceil(vMin / chosen) * chosen;
                     for (let m = firstMark; m <= vMax + chosen * 0.01; m += chosen) {

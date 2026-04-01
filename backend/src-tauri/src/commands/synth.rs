@@ -118,47 +118,44 @@ struct ResolvedSeparatedTarget {
     included_track_ids: HashSet<String>,
 }
 
-fn export_cancel_slot() -> &'static Mutex<Option<Arc<AtomicBool>>> {
-    static SLOT: OnceLock<Mutex<Option<Arc<AtomicBool>>>> = OnceLock::new();
-    SLOT.get_or_init(|| Mutex::new(None))
+fn export_cancel_slot() -> &'static Mutex<Vec<Arc<AtomicBool>>> {
+    static SLOT: OnceLock<Mutex<Vec<Arc<AtomicBool>>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn install_export_cancel_flag(flag: Arc<AtomicBool>) {
+struct ExportCancelGuard {
+    flag: Arc<AtomicBool>,
+}
+
+fn install_export_cancel_flag(flag: Arc<AtomicBool>) -> ExportCancelGuard {
     let mut slot = export_cancel_slot()
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    *slot = Some(flag);
+    slot.push(flag.clone());
+    ExportCancelGuard { flag }
 }
-
-fn clear_export_cancel_flag() {
-    let mut slot = export_cancel_slot()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    *slot = None;
-}
-
-struct ExportCancelGuard;
 
 impl Drop for ExportCancelGuard {
     fn drop(&mut self) {
-        clear_export_cancel_flag();
+        let mut slot = export_cancel_slot()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        slot.retain(|f| !Arc::ptr_eq(f, &self.flag));
     }
 }
 
 pub(super) fn cancel_export_audio() -> serde_json::Value {
-    let maybe_flag = {
+    let flags = {
         export_cancel_slot()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
     };
 
-    let active = if let Some(flag) = maybe_flag {
+    let active = !flags.is_empty();
+    for flag in flags.iter() {
         flag.store(true, Ordering::Relaxed);
-        true
-    } else {
-        false
-    };
+    }
 
     serde_json::json!({
         "ok": true,
@@ -701,8 +698,7 @@ pub(super) fn export_audio_advanced(
     request: ExportAudioRequest,
 ) -> serde_json::Value {
     let cancel_flag = Arc::new(AtomicBool::new(false));
-    install_export_cancel_flag(cancel_flag.clone());
-    let _cancel_guard = ExportCancelGuard;
+    let _cancel_guard = install_export_cancel_flag(cancel_flag.clone());
 
     let requested_sample_rate = normalize_export_sample_rate(request.sample_rate.unwrap_or(44_100));
     let requested_bit_depth = normalize_export_bit_depth(request.bit_depth.unwrap_or(32));
