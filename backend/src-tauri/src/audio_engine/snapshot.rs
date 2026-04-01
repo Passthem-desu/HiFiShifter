@@ -416,7 +416,7 @@ pub(crate) fn build_snapshot(
                     )) = processor_params
                     {
                         let end_frame = start_frame.saturating_add(length_frames);
-                        let mut param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
+                        let param_hash = crate::synth_clip_cache::compute_rendered_clip_hash(
                             &clip.id,
                             source_path,
                             start_frame,
@@ -428,15 +428,8 @@ pub(crate) fn build_snapshot(
                             playback_rate,
                             extra_curves,
                             extra_params,
+                            None,
                         );
-                        let child_hash_salt =
-                            crate::pitch_editing::child_pitch_offset_hash_salt(timeline, clip);
-                        if child_hash_salt != 0 {
-                            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                            std::hash::Hash::hash(&param_hash, &mut hasher);
-                            std::hash::Hash::hash(&child_hash_salt, &mut hasher);
-                            param_hash = std::hash::Hasher::finish(&hasher);
-                        }
                         if debug {
                             eprintln!(
                                 "[snapshot] clip_id={} fallback self-computed hash={:#018x} (no pending key)",
