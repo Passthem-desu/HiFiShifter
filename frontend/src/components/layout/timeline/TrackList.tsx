@@ -844,9 +844,10 @@ export const TrackList: React.FC<{
                     const maxPeakLinear = meter?.maxPeakLinear ?? 0;
                     const clipped = Boolean(meter?.clipped);
                     const volumeDb = clampGainDb(gainToDb(volume));
-                    const knobDeg = volumeDb >= 0
-                        ? (volumeDb / TRACK_GAIN_MAX_DB) * 135
-                        : (volumeDb / Math.abs(TRACK_GAIN_MIN_DB)) * 135;
+                    const knobDeg =
+                        volumeDb >= 0
+                            ? (volumeDb / TRACK_GAIN_MAX_DB) * 135
+                            : (volumeDb / Math.abs(TRACK_GAIN_MIN_DB)) * 135;
 
                     const guideLines =
                         depth > 0 ? Array.from({ length: depth }) : [];
@@ -1099,7 +1100,11 @@ export const TrackList: React.FC<{
                                         justify="center"
                                         className="min-w-0 flex-1"
                                     >
-                                        <Flex justify="between" align="center" gap="2">
+                                        <Flex
+                                            justify="between"
+                                            align="center"
+                                            gap="2"
+                                        >
                                             <Flex
                                                 align="center"
                                                 gap="1"
@@ -1334,7 +1339,9 @@ export const TrackList: React.FC<{
                                                 <button
                                                     type="button"
                                                     className="relative w-8 h-8 rounded-full border border-qt-border bg-qt-window hover:bg-qt-surface transition-colors shrink-0"
-                                                    title={formatGainLabel(volume)}
+                                                    title={formatGainLabel(
+                                                        volume,
+                                                    )}
                                                     data-track-volume-knob
                                                     data-track-id={track.id}
                                                     onPointerDown={(e) =>

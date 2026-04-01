@@ -155,7 +155,10 @@ export const ClipHeader: React.FC<{
                             Math.abs(e.deltaY) >= Math.abs(e.deltaX)
                                 ? e.deltaY
                                 : e.deltaX;
-                        if (!Number.isFinite(rawDelta) || Math.abs(rawDelta) < 0.01) {
+                        if (
+                            !Number.isFinite(rawDelta) ||
+                            Math.abs(rawDelta) < 0.01
+                        ) {
                             return;
                         }
 
@@ -168,7 +171,10 @@ export const ClipHeader: React.FC<{
                             12,
                             Math.max(
                                 -12,
-                                clampedGainDb + direction * CLIP_GAIN_WHEEL_STEP_DB * notches,
+                                clampedGainDb +
+                                    direction *
+                                        CLIP_GAIN_WHEEL_STEP_DB *
+                                        notches,
                             ),
                         );
 
