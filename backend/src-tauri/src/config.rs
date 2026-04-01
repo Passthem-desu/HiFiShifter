@@ -52,7 +52,7 @@ pub struct UiSettings {
 /// 导出音频设置（持久化到 app_config.json）
 ///
 /// 用于记住导出窗口中不同导出类型的输出目录与文件名设置。
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportSettings {
     #[serde(default)]
@@ -63,6 +63,31 @@ pub struct ExportSettings {
     pub separated_output_dir: Option<String>,
     #[serde(default)]
     pub separated_file_name_pattern: Option<String>,
+    #[serde(default = "default_export_sample_rate")]
+    pub sample_rate: u32,
+    #[serde(default = "default_export_bit_depth")]
+    pub bit_depth: u32,
+}
+
+fn default_export_sample_rate() -> u32 {
+    48_000
+}
+
+fn default_export_bit_depth() -> u32 {
+    32
+}
+
+impl Default for ExportSettings {
+    fn default() -> Self {
+        Self {
+            project_output_dir: None,
+            project_file_name: None,
+            separated_output_dir: None,
+            separated_file_name_pattern: None,
+            sample_rate: default_export_sample_rate(),
+            bit_depth: default_export_bit_depth(),
+        }
+    }
 }
 
 fn default_true() -> bool {

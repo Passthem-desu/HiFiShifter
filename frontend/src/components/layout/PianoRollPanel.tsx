@@ -89,6 +89,7 @@ import {
     isChildPitchOffsetCentsParam,
     isChildPitchOffsetDegreesParam,
     isChildPitchOffsetParam,
+    parseChildPitchOffsetParam,
 } from "./pianoRoll/childPitchOffsetParams";
 import {
     readSystemClipboardObject,
@@ -1490,6 +1491,8 @@ export const PianoRollPanel: React.FC = () => {
     const interactions = usePianoRollInteractions({
         dispatch,
         rootTrackId,
+        selectedTrackId: effectiveSelectedTrackId,
+        tracks: s.tracks,
         editParam,
         pitchEnabled,
         toolMode: s.toolMode,
@@ -2274,6 +2277,16 @@ export const PianoRollPanel: React.FC = () => {
                         clip.param === "pitch" &&
                         (isChildPitchOffsetCentsParam(editParam) || isChildPitchOffsetDegreesParam(editParam))
                     ) {
+                        const targetParam = parseChildPitchOffsetParam(editParam);
+                        if (!targetParam) return;
+                        const resolvedRootTrackId = resolveRootTrackId(
+                            s.tracks,
+                            targetParam.trackId,
+                        );
+                        if (!resolvedRootTrackId || resolvedRootTrackId !== rootTrackId) {
+                            return;
+                        }
+
                         const pitchRes = await paramsApi.getParamFrames(
                             rootTrackId,
                             "pitch",
@@ -2283,16 +2296,115 @@ export const PianoRollPanel: React.FC = () => {
                         );
                         if (!pitchRes?.ok) return;
                         const pitchPayload = pitchRes as ParamFramesPayload;
-                        const currentPitch = (pitchPayload.edit ?? []).map((v) => Number(v) || 0);
+                        const rootPitch = (pitchPayload.edit ?? []).map((v) => Number(v) || 0);
+
+                        const trackById = new Map(s.tracks.map((track) => [track.id, track] as const));
+                        const lineageFromRootToTarget: string[] = [];
+                        let cursorId: string | null = targetParam.trackId;
+                        let safety = 0;
+                        while (cursorId && safety < s.tracks.length + 2) {
+                            const node = trackById.get(cursorId);
+                            if (!node) break;
+                            if (!node.parentId) break;
+                            lineageFromRootToTarget.push(node.id);
+                            cursorId = node.parentId;
+                            safety += 1;
+                        }
+                        lineageFromRootToTarget.reverse();
+
+                        const centsCurves = new Map<string, number[]>();
+                        const degreeCurves = new Map<string, number[]>();
+                        for (const layerTrackId of lineageFromRootToTarget) {
+                            const [centsRes, degreeRes] = await Promise.all([
+                                paramsApi.getParamFrames(
+                                    rootTrackId,
+                                    buildChildPitchOffsetCentsParam(layerTrackId),
+                                    startFrame,
+                                    frameCount,
+                                    1,
+                                ),
+                                paramsApi.getParamFrames(
+                                    rootTrackId,
+                                    buildChildPitchOffsetDegreesParam(layerTrackId),
+                                    startFrame,
+                                    frameCount,
+                                    1,
+                                ),
+                            ]);
+
+                            if (centsRes?.ok) {
+                                centsCurves.set(
+                                    layerTrackId,
+                                    ((centsRes as ParamFramesPayload).edit ?? []).map(
+                                        (v) => Number(v) || 0,
+                                    ),
+                                );
+                            }
+                            if (degreeRes?.ok) {
+                                degreeCurves.set(
+                                    layerTrackId,
+                                    ((degreeRes as ParamFramesPayload).edit ?? []).map(
+                                        (v) => Number(v) || 0,
+                                    ),
+                                );
+                            }
+                        }
+
                         const sourcePitch =
                             clip.values.length > frameCount
                                 ? clip.values.slice(0, frameCount)
                                 : clip.values;
+
+                        const applyNestedOffset = (
+                            baseMidi: number,
+                            degreeSteps: number,
+                            cents: number,
+                        ): number => {
+                            if (!Number.isFinite(baseMidi) || baseMidi <= 0) return 0;
+                            let current = baseMidi;
+                            if (Number.isFinite(degreeSteps) && Math.abs(degreeSteps) > 1e-9) {
+                                current = transposePitchByScaleSteps(
+                                    current,
+                                    degreeSteps,
+                                    effectiveProjectScale,
+                                );
+                            }
+                            if (Number.isFinite(cents) && Math.abs(cents) > 1e-9) {
+                                current += cents / 100;
+                            }
+                            if (!Number.isFinite(current) || current <= 0) return 0;
+                            return current;
+                        };
+
                         pasteValues = sourcePitch.map((targetPitch, idx) => {
-                            const basePitch = currentPitch[idx] ?? 0;
+                            const basePitch = rootPitch[idx] ?? 0;
                             if (targetPitch === 0 || basePitch === 0) return 0;
-                            if (isChildPitchOffsetCentsParam(editParam)) {
-                                const deltaSemitone = targetPitch - basePitch;
+
+                            let temporaryPitch = basePitch;
+                            for (const layerTrackId of lineageFromRootToTarget) {
+                                let layerCents = centsCurves.get(layerTrackId)?.[idx] ?? 0;
+                                let layerDegrees = degreeCurves.get(layerTrackId)?.[idx] ?? 0;
+
+                                if (layerTrackId === targetParam.trackId) {
+                                    if (targetParam.mode === "cents") {
+                                        layerCents = 0;
+                                    } else {
+                                        layerDegrees = 0;
+                                    }
+                                }
+
+                                temporaryPitch = applyNestedOffset(
+                                    temporaryPitch,
+                                    layerDegrees,
+                                    layerCents,
+                                );
+                                if (temporaryPitch === 0) {
+                                    return 0;
+                                }
+                            }
+
+                            if (targetParam.mode === "cents") {
+                                const deltaSemitone = targetPitch - temporaryPitch;
                                 return Math.max(
                                     CHILD_PITCH_OFFSET_CENTS_RANGE.min,
                                     Math.min(
@@ -2302,7 +2414,7 @@ export const PianoRollPanel: React.FC = () => {
                                 );
                             }
                             const internalDegrees = pitchDeltaToDegreeSteps(
-                                basePitch,
+                                temporaryPitch,
                                 targetPitch,
                                 effectiveProjectScale,
                             );
@@ -2752,6 +2864,7 @@ export const PianoRollPanel: React.FC = () => {
         [
             rootTrackId,
             editParam,
+            s.tracks,
             paramView?.framePeriodMs,
             secPerBeat,
             dynamicProjectSec,

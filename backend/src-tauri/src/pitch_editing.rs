@@ -269,11 +269,16 @@ enum ChildPitchOffsetParamMode {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ChildPitchOffsetConfig<'a> {
+struct ChildPitchOffsetLayer<'a> {
     cents: f64,
     degree_steps: f64,
     cents_curve: Option<&'a Vec<f32>>,
     degree_steps_curve: Option<&'a Vec<f32>>,
+}
+
+#[derive(Debug, Clone)]
+struct ChildPitchOffsetConfig<'a> {
+    layers: Vec<ChildPitchOffsetLayer<'a>>,
 }
 
 const CHILD_PITCH_OFFSET_CENTS_PREFIX: &str = "child_pitch_offset_cents@";
@@ -396,68 +401,102 @@ fn active_child_pitch_offset_config<'a>(
     let root_track_id = timeline.resolve_root_track_id(clip_track_id)?;
     let entry = timeline.params_by_root_track.get(&root_track_id);
 
-    let cents_curve = entry.and_then(|state| {
-        state
-            .extra_curves
-            .get(&child_pitch_offset_curve_key(
-                ChildPitchOffsetParamMode::Cents,
-                clip_track_id,
-            ))
-    });
-    let degree_steps_curve = entry.and_then(|state| {
-        state
-            .extra_curves
-            .get(&child_pitch_offset_curve_key(
-                ChildPitchOffsetParamMode::Degrees,
-                clip_track_id,
-            ))
-    });
+    let mut lineage_child_ids: Vec<&str> = Vec::new();
+    let mut cursor = Some(clip_track_id);
+    let mut safety = 0usize;
+    while let Some(track_id) = cursor {
+        let Some(node) = timeline.tracks.iter().find(|track| track.id == track_id) else {
+            break;
+        };
+        if node.parent_id.is_none() {
+            break;
+        }
+        lineage_child_ids.push(track_id);
+        cursor = node.parent_id.as_deref();
+        safety += 1;
+        if safety > timeline.tracks.len() + 2 {
+            break;
+        }
+    }
 
-    let static_cents = CHILD_PITCH_OFFSET_CENTS_DEFAULT;
-    let static_degree_steps = CHILD_PITCH_OFFSET_DEGREES_DEFAULT;
+    if lineage_child_ids.is_empty() {
+        return None;
+    }
 
-    let has_cents_curve = curve_differs_from_default_in_range(
-        cents_curve,
-        entry.map(|state| state.frame_period_ms).unwrap_or(5.0),
-        0.0,
-        f64::MAX,
-        static_cents as f32,
-    );
-    let has_degree_curve = curve_differs_from_default_in_range(
-        degree_steps_curve,
-        entry.map(|state| state.frame_period_ms).unwrap_or(5.0),
-        0.0,
-        f64::MAX,
-        static_degree_steps as f32,
-    );
+    lineage_child_ids.reverse();
 
-    let has_effective = has_cents_curve || has_degree_curve;
+    let frame_period_ms = entry.map(|state| state.frame_period_ms).unwrap_or(5.0);
+    let mut has_effective = false;
+    let mut layers: Vec<ChildPitchOffsetLayer<'a>> = Vec::with_capacity(lineage_child_ids.len());
+
+    for track_id in lineage_child_ids {
+        let cents_curve = entry.and_then(|state| {
+            state
+                .extra_curves
+                .get(&child_pitch_offset_curve_key(
+                    ChildPitchOffsetParamMode::Cents,
+                    track_id,
+                ))
+        });
+        let degree_steps_curve = entry.and_then(|state| {
+            state
+                .extra_curves
+                .get(&child_pitch_offset_curve_key(
+                    ChildPitchOffsetParamMode::Degrees,
+                    track_id,
+                ))
+        });
+
+        let static_cents = CHILD_PITCH_OFFSET_CENTS_DEFAULT;
+        let static_degree_steps = CHILD_PITCH_OFFSET_DEGREES_DEFAULT;
+
+        let has_cents_curve = curve_differs_from_default_in_range(
+            cents_curve,
+            frame_period_ms,
+            0.0,
+            f64::MAX,
+            static_cents as f32,
+        );
+        let has_degree_curve = curve_differs_from_default_in_range(
+            degree_steps_curve,
+            frame_period_ms,
+            0.0,
+            f64::MAX,
+            static_degree_steps as f32,
+        );
+        has_effective = has_effective || has_cents_curve || has_degree_curve;
+
+        layers.push(ChildPitchOffsetLayer {
+            cents: static_cents,
+            degree_steps: static_degree_steps,
+            cents_curve,
+            degree_steps_curve,
+        });
+    }
+
     if !has_effective {
         return None;
     }
 
-    Some(ChildPitchOffsetConfig {
-        cents: static_cents,
-        degree_steps: static_degree_steps,
-        cents_curve,
-        degree_steps_curve,
-    })
+    Some(ChildPitchOffsetConfig { layers })
 }
 
-fn sample_child_offset_cents(cfg: &ChildPitchOffsetConfig<'_>, frame_idx: usize) -> f64 {
-    cfg.cents_curve
+fn sample_child_offset_cents(layer: &ChildPitchOffsetLayer<'_>, frame_idx: usize) -> f64 {
+    layer
+        .cents_curve
         .and_then(|curve| curve.get(frame_idx).copied())
         .filter(|value| value.is_finite())
         .map(|value| value as f64)
-        .unwrap_or(cfg.cents)
+        .unwrap_or(layer.cents)
 }
 
-fn sample_child_offset_degree_steps(cfg: &ChildPitchOffsetConfig<'_>, frame_idx: usize) -> f64 {
-    cfg.degree_steps_curve
+fn sample_child_offset_degree_steps(layer: &ChildPitchOffsetLayer<'_>, frame_idx: usize) -> f64 {
+    layer
+        .degree_steps_curve
         .and_then(|curve| curve.get(frame_idx).copied())
         .filter(|value| value.is_finite())
         .map(|value| value as f64)
-        .unwrap_or(cfg.degree_steps)
+        .unwrap_or(layer.degree_steps)
 }
 
 fn apply_child_pitch_offset_to_midi(
@@ -469,20 +508,25 @@ fn apply_child_pitch_offset_to_midi(
     if !(midi.is_finite() && midi > 0.0) {
         return 0.0;
     }
-    let steps = sample_child_offset_degree_steps(cfg, frame_idx);
-    let cents = sample_child_offset_cents(cfg, frame_idx);
 
-    let shifted = if steps.abs() > 1e-9 {
-        transpose_midi_by_scale_steps(midi, steps, scale_notes)
-    } else {
-        midi
-    };
+    let mut current = midi;
+    for layer in &cfg.layers {
+        let steps = sample_child_offset_degree_steps(layer, frame_idx);
+        let cents = sample_child_offset_cents(layer, frame_idx);
 
-    if cents.abs() > 1e-9 {
-        shifted + cents / 100.0
-    } else {
-        shifted
+        if steps.abs() > 1e-9 {
+            current = transpose_midi_by_scale_steps(current, steps, scale_notes);
+        }
+        if cents.abs() > 1e-9 {
+            current += cents / 100.0;
+        }
+
+        if !(current.is_finite() && current > 0.0) {
+            return 0.0;
+        }
     }
+
+    current
 }
 
 pub(crate) fn build_clip_input_pitch_curve(

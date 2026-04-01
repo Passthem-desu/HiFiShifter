@@ -54,6 +54,7 @@ pub struct TimelineClip {
     pub color: String,
 
     pub source_path: Option<String>,
+    pub source_path_relative: Option<String>,
     pub duration_sec: Option<f64>,
     pub duration_frames: Option<u64>,
     pub source_sample_rate: Option<u32>,

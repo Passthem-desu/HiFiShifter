@@ -20,8 +20,9 @@ interface ExportAudioDialogProps {
 
 type ExportMode = "project" | "separated";
 type ExportRangeKind = "all" | "custom";
+type ExportBitDepth = 16 | 24 | 32;
 
-type TargetKind = "main" | "sub";
+type TargetKind = "root" | "sub";
 
 interface TargetOption {
     id: string;
@@ -29,7 +30,7 @@ interface TargetOption {
     trackId: string;
     trackName: string;
     trackIndex: number;
-    muted: boolean;
+    excludedByRule: boolean;
     label: string;
 }
 
@@ -42,6 +43,7 @@ interface TargetGroup {
 
 function buildTargetGroups(
     tracks: TrackInfo[],
+    clips: { trackId: string; muted: boolean }[],
     mainSuffix: string,
     subSuffix: string,
 ): TargetGroup[] {
@@ -62,6 +64,18 @@ function buildTargetGroups(
     const rootTrackIds = tracks
         .filter((track) => (track.parentId ?? null) === null)
         .map((track) => track.id);
+
+    function isTrackExcludedByRule(trackId: string): boolean {
+        const track = trackMap.get(trackId);
+        if (!track) return true;
+        if (Boolean(track.muted)) return true;
+
+        const ownClips = clips.filter((clip) => clip.trackId === trackId);
+        if (ownClips.length === 0) return true;
+        if (ownClips.every((clip) => Boolean(clip.muted))) return true;
+
+        return false;
+    }
 
     function resolveRootTrackId(trackId: string): string {
         let current = trackId;
@@ -91,19 +105,36 @@ function buildTargetGroups(
                 return resolveRootTrackId(track.id) === rootTrackId;
             });
             const isGroup = childTracks.length > 0;
+            const branchTracks = [rootTrack, ...childTracks];
+            const rootSelfExcluded = isTrackExcludedByRule(rootTrack.id);
+            const rootBranchExcluded = branchTracks.every((track) =>
+                isTrackExcludedByRule(track.id),
+            );
 
             const options: TargetOption[] = [];
             options.push({
-                id: `main:${rootTrackId}`,
-                kind: "main",
+                id: `root:${rootTrackId}`,
+                kind: "root",
                 trackId: rootTrackId,
                 trackName: rootTrack.name,
                 trackIndex: rootIndex,
-                muted: Boolean(rootTrack.muted),
+                excludedByRule: isGroup ? rootBranchExcluded : rootSelfExcluded,
                 label: isGroup
                     ? formatTrackLabel(rootIndex, rootTrack.name, mainSuffix)
                     : `[${String(rootIndex).padStart(indexWidth, "0")}] ${rootTrack.name}`,
             });
+
+            if (isGroup) {
+                options.push({
+                    id: `sub:${rootTrackId}`,
+                    kind: "sub",
+                    trackId: rootTrackId,
+                    trackName: rootTrack.name,
+                    trackIndex: rootIndex,
+                    excludedByRule: rootSelfExcluded,
+                    label: formatTrackLabel(rootIndex, rootTrack.name, subSuffix),
+                });
+            }
 
             for (const track of childTracks) {
                 const currentIndex = indexMap.get(track.id) ?? 1;
@@ -113,7 +144,7 @@ function buildTargetGroups(
                     trackId: track.id,
                     trackName: track.name,
                     trackIndex: currentIndex,
-                    muted: Boolean(track.muted),
+                    excludedByRule: isTrackExcludedByRule(track.id),
                     label: formatTrackLabel(currentIndex, track.name, subSuffix),
                 });
             }
@@ -143,6 +174,8 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
     const [projectFileName, setProjectFileName] = useState("<ProjectName>.wav");
     const [separatedOutputDir, setSeparatedOutputDir] = useState("");
     const [separatedNamePattern, setSeparatedNamePattern] = useState("<ExportIndex>_<TrackName>.wav");
+    const [sampleRate, setSampleRate] = useState("44100");
+    const [bitDepth, setBitDepth] = useState<ExportBitDepth>(32);
     const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
     const [errorText, setErrorText] = useState("");
     const [submitting, setSubmitting] = useState(false);
@@ -173,10 +206,14 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
         () =>
             buildTargetGroups(
                 session.tracks,
+                session.clips.map((clip) => ({
+                    trackId: clip.trackId,
+                    muted: Boolean(clip.muted),
+                })),
                 tAny("export_track_label_root_suffix"),
                 tAny("export_track_label_sub_suffix"),
             ),
-        [session.tracks, tAny],
+        [session.tracks, session.clips, tAny],
     );
 
     const allTargets = useMemo(
@@ -195,6 +232,8 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
         setProjectFileName("<ProjectName>.wav");
         setSeparatedOutputDir("");
         setSeparatedNamePattern("<ExportIndex>_<TrackName>.wav");
+        setSampleRate("44100");
+        setBitDepth(32);
         setSubmitting(false);
         setExportProgress({ active: false, mode: null, progress: null, current: null, total: null });
         setDisplayProgress(0);
@@ -202,12 +241,12 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
         setAwaitingConflictDecision(false);
 
         const defaultSelected = targetGroups.flatMap((group) => {
-            if (group.isGroup) {
-                const main = group.options.find((option) => option.kind === "main");
-                return main ? [main.id] : [];
-            }
-            const single = group.options[0];
-            return single ? [single.id] : [];
+            return group.options
+                .filter(
+                    (option) =>
+                        option.kind === "root" && !option.excludedByRule,
+                )
+                .map((option) => option.id);
         });
         setSelectedTargetIds(defaultSelected);
         setErrorText("");
@@ -225,6 +264,10 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                 setProjectFileName(defaults.projectFileName ?? "<ProjectName>.wav");
                 setSeparatedOutputDir(defaults.separatedOutputDir ?? "");
                 setSeparatedNamePattern(defaults.separatedFileName ?? "<ExportIndex>_<TrackName>.wav");
+                setSampleRate(String(defaults.sampleRate ?? 44100));
+                setBitDepth((defaults.bitDepth === 16 || defaults.bitDepth === 24 || defaults.bitDepth === 32)
+                    ? defaults.bitDepth
+                    : 32);
             } catch {
                 // 保持回退默认值。
             }
@@ -338,10 +381,12 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
     }
 
     function selectExcludeMutedTargets() {
-        setSelectedTargetIds(
-            allTargets
-                .filter((target) => !target.muted)
-                .map((target) => target.id),
+        setSelectedTargetIds((prev) =>
+            prev.filter((id) => {
+                const target = allTargets.find((item) => item.id === id);
+                if (!target) return false;
+                return !target.excludedByRule;
+            }),
         );
     }
 
@@ -350,11 +395,16 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
     }
 
     function selectAllSubTargets() {
-        setSelectedTargetIds(
-            allTargets
-                .filter((target) => target.kind === "sub")
-                .map((target) => target.id),
-        );
+        setSelectedTargetIds((prev) => {
+            const next = new Set(prev);
+            for (const target of allTargets) {
+                if (target.kind !== "sub") continue;
+                if (next.has(target.id)) continue;
+                if (target.excludedByRule) continue;
+                next.add(target.id);
+            }
+            return Array.from(next);
+        });
     }
 
     async function browseProjectOutputDir() {
@@ -464,6 +514,37 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
         };
     }
 
+    function parseSampleRate(): number | null {
+        const value = Number(sampleRate);
+        if (!Number.isFinite(value) || value <= 0) {
+            setErrorText(tAny("export_dialog_error_invalid_sample_rate"));
+            return null;
+        }
+        return Math.round(value);
+    }
+
+    function mapExportError(error: unknown): string {
+        const code = String(error ?? "").trim();
+        if (code === "export_cancelled") {
+            return "";
+        }
+        if (code === "export_invalid_time_format") {
+            return tAny("export_dialog_error_invalid_time_format");
+        }
+        return code || tAny("status_export_failed");
+    }
+
+    async function handleCancel() {
+        if (submitting || exportProgress.active) {
+            try {
+                await coreApi.cancelExportAudio();
+            } catch {
+                // ignore cancellation command failures
+            }
+        }
+        onOpenChange(false);
+    }
+
     async function submitExport() {
         setErrorText("");
         setSubmitting(true);
@@ -490,6 +571,12 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
             return;
         }
 
+        const resolvedSampleRate = parseSampleRate();
+        if (!resolvedSampleRate) {
+            setSubmitting(false);
+            return;
+        }
+
         if (mode === "project") {
             const outputDir = projectOutputDir.trim();
             const fileName = projectFileName.trim();
@@ -510,6 +597,8 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                     range,
                     projectOutputDir: outputDir,
                     projectFileName: fileName,
+                    sampleRate: resolvedSampleRate,
+                    bitDepth,
                 });
                 if (conflicts.canceled) {
                     setSubmitting(false);
@@ -521,12 +610,18 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                         range,
                         projectOutputDir: outputDir,
                         projectFileName: fileName,
+                        sampleRate: resolvedSampleRate,
+                        bitDepth,
                         overwriteExistingPaths: conflicts.overwriteExistingPaths,
                         skipExistingPaths: conflicts.skipExistingPaths,
                     }),
                 ).unwrap();
                 if (!result?.ok) {
-                    setErrorText(String(result?.error ?? tAny("status_export_failed")));
+                    if (result?.cancelled || result?.error === "export_cancelled") {
+                        setSubmitting(false);
+                        return;
+                    }
+                    setErrorText(mapExportError(result?.error));
                     setSubmitting(false);
                     return;
                 }
@@ -566,6 +661,8 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                 separatedNamePattern:
                     separatedNamePattern.trim() || "<ExportIndex>_<TrackName>.wav",
                 separatedTargets: selectedTargets,
+                sampleRate: resolvedSampleRate,
+                bitDepth,
             });
             if (conflicts.canceled) {
                 setSubmitting(false);
@@ -580,13 +677,19 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                     separatedNamePattern:
                         separatedNamePattern.trim() || "<ExportIndex>_<TrackName>.wav",
                     separatedTargets: selectedTargets,
+                    sampleRate: resolvedSampleRate,
+                    bitDepth,
                     overwriteExistingPaths: conflicts.overwriteExistingPaths,
                     skipExistingPaths: conflicts.skipExistingPaths,
                 }),
             ).unwrap();
 
             if (!result?.ok) {
-                setErrorText(String(result?.error ?? tAny("status_export_separated_failed")));
+                if (result?.cancelled || result?.error === "export_cancelled") {
+                    setSubmitting(false);
+                    return;
+                }
+                setErrorText(mapExportError(result?.error));
                 setSubmitting(false);
                 return;
             }
@@ -689,6 +792,48 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                             </Text>
                         </Flex>
                     )}
+
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 132 }}>
+                            {tAny("export_dialog_sample_rate")}
+                        </Text>
+                        <Select.Root
+                            value={sampleRate}
+                            onValueChange={(value) => setSampleRate(value)}
+                        >
+                            <Select.Trigger style={{ flex: 1 }} />
+                            <Select.Content>
+                                <Select.Item value="22050">22050 Hz</Select.Item>
+                                <Select.Item value="32000">32000 Hz</Select.Item>
+                                <Select.Item value="44100">44100 Hz</Select.Item>
+                                <Select.Item value="48000">48000 Hz</Select.Item>
+                                <Select.Item value="88200">88200 Hz</Select.Item>
+                                <Select.Item value="96000">96000 Hz</Select.Item>
+                            </Select.Content>
+                        </Select.Root>
+                    </Flex>
+
+                    <Flex align="center" gap="2">
+                        <Text size="2" style={{ minWidth: 132 }}>
+                            {tAny("export_dialog_bit_depth")}
+                        </Text>
+                        <Select.Root
+                            value={String(bitDepth)}
+                            onValueChange={(value) => {
+                                const parsed = Number(value);
+                                if (parsed === 16 || parsed === 24 || parsed === 32) {
+                                    setBitDepth(parsed);
+                                }
+                            }}
+                        >
+                            <Select.Trigger style={{ flex: 1 }} />
+                            <Select.Content>
+                                <Select.Item value="16">16-bit</Select.Item>
+                                <Select.Item value="24">24-bit</Select.Item>
+                                <Select.Item value="32">32-bit</Select.Item>
+                            </Select.Content>
+                        </Select.Root>
+                    </Flex>
 
                     {mode === "project" ? (
                         <>
@@ -888,11 +1033,9 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                 </Flex>
 
                 <Flex justify="end" gap="2" mt="4">
-                    <Dialog.Close>
-                        <Button variant="soft" color="gray">
-                            {tAny("cancel")}
-                        </Button>
-                    </Dialog.Close>
+                    <Button variant="soft" color="gray" onClick={() => void handleCancel()}>
+                        {tAny("cancel")}
+                    </Button>
                     <Button
                         onClick={() => {
                             void submitExport();

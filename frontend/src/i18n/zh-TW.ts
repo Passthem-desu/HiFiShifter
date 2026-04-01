@@ -286,6 +286,11 @@ export const zhTW = {
     child_pitch_offset_cents_short: "音分",
     child_pitch_offset_degrees_short: "度數",
     aria_loading: "載入中",
+    export_dialog_sample_rate: "取樣率",
+    export_dialog_bit_depth: "位元深度",
+    export_dialog_error_invalid_sample_rate: "取樣率無效。",
+    export_dialog_error_invalid_time_format:
+        "輸出路徑包含無效的時間格式。請將無效的 '%' 改為 '%%'。",
 
     // 快速鍵管理
     kb_dialog_title: "鍵盤快速鍵",
