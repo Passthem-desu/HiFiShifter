@@ -313,7 +313,7 @@ fn build_clip_pitch_key(
     // clip_id、root_track_id、bpm 均不参与 hash——相同源文件的多个 clip 共享同一缓存条目，
     // trim/rate 变化在推送/组装阶段按需截取+resample，无需重新分析。
     let mut hasher = blake3::Hasher::new();
-    hasher.update(b"clip_pitch_v3_source_midi");
+    hasher.update(b"clip_pitch_v4_fcpe_source_midi");
     hasher.update(source_path.as_bytes());
     let (len, mtime) = file_sig(Path::new(source_path));
     hasher.update(&len.to_le_bytes());
@@ -394,8 +394,8 @@ pub fn schedule_clip_pitch_jobs(
         app_handle.is_some()
     );
 
-    if !crate::world::is_available() {
-        eprintln!("[pitch_clip] WORLD not available, skipping");
+    if !crate::fcpe_onnx::is_available() {
+        eprintln!("[pitch_clip] FCPE not available, skipping");
         return;
     }
 
@@ -667,7 +667,7 @@ pub fn compute_clip_pitch_midi(
     root_track_id: &str,
     frame_period_ms: f64,
 ) -> Option<Vec<f32>> {
-    if !crate::world::is_available() {
+    if !crate::fcpe_onnx::is_available() {
         return None;
     }
 
@@ -737,44 +737,25 @@ pub fn compute_clip_pitch_midi(
     }
 
     // f0
-    let prefer = std::env::var("HIFISHIFTER_WORLD_F0")
-        .ok()
-        .as_deref()
-        .map(|s| s.trim().to_ascii_lowercase())
-        .unwrap_or_else(|| "harvest".to_string());
-
     let frame_period_tl_ms = ck.frame_period_ms.max(0.1);
     let f0_floor = 40.0;
     let f0_ceil = 1600.0;
 
-    let fs_i32 = analysis_rate as i32;
-    let f0_hz: Vec<f64> = {
-        let try_harvest = || {
-            crate::world::compute_f0_hz_harvest(
-                &mono,
-                fs_i32,
-                frame_period_tl_ms,
-                f0_floor,
-                f0_ceil,
-            )
-        };
-        let try_dio = || {
-            crate::world::compute_f0_hz_dio_stonemask(
-                &mono,
-                fs_i32,
-                frame_period_tl_ms,
-                f0_floor,
-                f0_ceil,
-            )
-        };
-
-        let res = if prefer == "dio" {
-            try_dio().or_else(|_| try_harvest())
-        } else {
-            try_harvest().or_else(|_| try_dio())
-        };
-
-        res.unwrap_or_default()
+    let f0_hz = match crate::fcpe_onnx::infer_f0_hz(
+        &mono,
+        analysis_rate,
+        frame_period_tl_ms,
+        f0_floor,
+        f0_ceil,
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "[pitch_clip] FCPE inference failed for clip '{}' ({}): {}",
+                clip.name, clip.id, e
+            );
+            return None;
+        }
     };
 
     if f0_hz.len() < 2 {
@@ -792,7 +773,7 @@ pub fn compute_clip_pitch_midi(
     // 和组装（assemble_pitch_orig_from_cache）阶段按需执行。
 
     // Small gap fill.
-    let gap_ms = std::env::var("HIFISHIFTER_WORLD_F0_GAP_MS")
+    let gap_ms = std::env::var("HIFISHIFTER_FCPE_F0_GAP_MS")
         .ok()
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0)
@@ -820,7 +801,7 @@ pub fn compute_clip_pitch_midi(
 /// 从全量 MIDI 曲线中截取 source range 区间并按 playback_rate 重采样。
 /// 返回对应 clip 在时间线上可见区间的 MIDI 曲线。
 ///
-/// - `full_midi`：全量源音频的 MIDI 曲线（WORLD 输出，每帧间隔 `frame_period_ms`）
+/// - `full_midi`：全量源音频的 MIDI 曲线（FCPE 输出，每帧间隔 `frame_period_ms`）
 /// - `source_start_sec`：clip 的 source_start_sec（源音频有效区间起点）
 /// - `source_end_sec`：clip 的 source_end_sec（源音频有效区间终点）
 /// - `playback_rate`：clip 的 playback_rate（>1 加速，<1 减速）
