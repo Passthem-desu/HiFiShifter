@@ -531,7 +531,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 // height 交给 style 控制比较稳定
                 height: waveformHeight,
                 pointerEvents: "none",
-                zIndex: 0,
+                zIndex: 1,
                 // 移除 left 和 width
                 // 它们属于高频变化属性，已完全交由内部 drawRef 直接操作 DOM 更新。
             }}

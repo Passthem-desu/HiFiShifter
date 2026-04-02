@@ -8,7 +8,8 @@
   - Light derives from Radix Theme tokens to avoid inventing a new palette.
 */
 
-.qt-theme.dark {
+.qt-theme.dark,
+:root[data-theme='dark'] {
   --qt-window: #353535;
   --qt-base: #2d2d2d;
   --qt-panel: #2a2a2a;
@@ -20,6 +21,7 @@
   --qt-button: #3d3d3d;
   --qt-button-hover: #484848;
   --qt-border: #505050;
+  --qt-hover: #484848;
   --qt-danger-bg: #4a1a1a;
   --qt-danger-text: #fca5a5;
   --qt-danger-border: #ef4444;
@@ -31,51 +33,54 @@
   --qt-graph-grid-weak: #373737;
   --qt-scrollbar-thumb: #555555;
   --qt-scrollbar-thumb-hover: #707070;
-  --qt-meter-rail: #2a2a2a;
-  --qt-meter-well: #1d1d1d;
-  /* 面板内层�?�?微弱色差（深色下叠白、浅色下叠黑�?*/
+  --qt-overlay: rgba(0, 0, 0, 0.35);
+  --qt-divider: rgba(255,255,255,0.04);
   --qt-subtle-1: rgba(255,255,255,0.025);
   --qt-subtle-2: rgba(255,255,255,0.045);
   --qt-subtle-3: rgba(255,255,255,0.07);
   --qt-subtle-hover: rgba(255,255,255,0.04);
-  --qt-divider: rgba(255,255,255,0.04);
+  --qt-meter-rail: #2a2a2a;
+  --qt-meter-well: #1d1d1d;
 }
 
-.qt-theme.light {
-  --qt-window: var(--gray-2);
-  --qt-base: var(--gray-3);
-  --qt-panel: var(--gray-1);
-  --qt-surface: var(--gray-4);
-  --qt-text: var(--gray-12);
-  --qt-text-muted: var(--gray-11);
-  --qt-highlight: var(--accent-9);
-  --qt-playhead: var(--red-9);
-  --qt-button: var(--gray-3);
-  --qt-button-hover: var(--gray-4);
-  --qt-border: var(--gray-6);
-  --qt-danger-bg: var(--red-3);
-  --qt-danger-text: var(--red-11);
-  --qt-danger-border: var(--red-9);
-  --qt-warning-bg: var(--amber-3);
-  --qt-warning-text: var(--amber-11);
-  --qt-warning-border: var(--amber-9);
-  --qt-graph-bg: var(--gray-1);
-  --qt-graph-grid-strong: var(--gray-8);
-  --qt-graph-grid-weak: var(--gray-6);
-  --qt-scrollbar-thumb: var(--gray-8);
-  --qt-scrollbar-thumb-hover: var(--gray-9);
-  --qt-meter-rail: color-mix(in oklab, var(--qt-panel) 92%, var(--qt-text) 8%);
-  --qt-meter-well: color-mix(in oklab, var(--qt-base) 88%, var(--qt-text) 12%);
-  /* 面板内层�?�?微弱色差（浅色下叠黑�?*/
-  --qt-subtle-1: rgba(0,0,0,0.03);
-  --qt-subtle-2: rgba(0,0,0,0.05);
-  --qt-subtle-3: rgba(0,0,0,0.08);
-  --qt-subtle-hover: rgba(0,0,0,0.04);
-  --qt-divider: rgba(0,0,0,0.06);
+.qt-theme.light,
+:root[data-theme='light'] {
+  --qt-window: #f2f3f6;
+  --qt-base: #ebedf1;
+  --qt-panel: #f8f9fb;
+  --qt-surface: #e1e4ea;
+  --qt-text: #1f232b;
+  --qt-text-muted: #666d79;
+  --qt-highlight: #4b68d1;
+  --qt-playhead: #de4f5d;
+  --qt-button: #e3e6ec;
+  --qt-button-hover: #d7dbe4;
+  --qt-border: #b8bdc9;
+  --qt-hover: #dde1e8;
+  --qt-danger-bg: #ffe6ea;
+  --qt-danger-text: #b53a49;
+  --qt-danger-border: #df6674;
+  --qt-warning-bg: #fff1dc;
+  --qt-warning-text: #9b5f13;
+  --qt-warning-border: #d59140;
+  --qt-graph-bg: #f6f7fa;
+  --qt-graph-grid-strong: #aab1bf;
+  --qt-graph-grid-weak: #cfd4df;
+  --qt-scrollbar-thumb: #b4bac7;
+  --qt-scrollbar-thumb-hover: #969ead;
+  --qt-overlay: rgba(20, 24, 32, 0.22);
+  --qt-divider: rgba(32,38,52,0.1);
+  --qt-subtle-1: rgba(28,36,52,0.025);
+  --qt-subtle-2: rgba(28,36,52,0.04);
+  --qt-subtle-3: rgba(28,36,52,0.06);
+  --qt-subtle-hover: rgba(28,36,52,0.04);
+  --qt-meter-rail: #d6dbe5;
+  --qt-meter-well: #c8ceda;
 }
 
 :root {
   --qt-font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --default-font-family: var(--qt-font-family);
   font-family: var(--qt-font-family);
 }
 
@@ -99,6 +104,7 @@ body,
 body {
   background: var(--qt-window, #353535);
   color: var(--qt-text, #cccccc);
+  font-family: var(--qt-font-family);
 }
 
 * {
@@ -112,14 +118,15 @@ textarea {
   font-family: inherit;
 }
 
-button:focus,
-button:focus-visible,
-[role="button"]:focus,
-[role="button"]:focus-visible,
-.rt-BaseButton:focus,
-.rt-BaseButton:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
+:where(button, [role="button"], .rt-BaseButton):focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--qt-highlight) 72%, white 28%);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--qt-highlight) 24%, transparent);
+}
+
+:where(input, textarea, select, .rt-TextFieldInput, .rt-SelectTrigger):focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 /* Qt/DAW-style scrollbars */
@@ -129,8 +136,8 @@ button:focus-visible,
 }
 
 .qt-overlay {
-  background: rgba(0, 0, 0, 0.35);
-  background: color-mix(in srgb, var(--qt-base) 70%, transparent);
+  background: var(--qt-overlay);
+  backdrop-filter: blur(2px);
 }
 
 ::-webkit-scrollbar-corner {
@@ -184,6 +191,57 @@ button:focus-visible,
 .hide-v-scrollbar::-webkit-scrollbar {
   width: 0;
   height: 0;
+}
+
+/* Unified popup/menu/dialog surfaces for Radix and custom panels */
+.rt-DialogOverlay {
+  background: var(--qt-overlay) !important;
+  backdrop-filter: blur(2px);
+}
+
+.rt-DialogContent,
+.rt-DropdownMenuContent,
+.rt-SelectContent,
+.rt-ContextMenuContent,
+.rt-PopoverContent {
+  background: var(--qt-panel) !important;
+  color: var(--qt-text) !important;
+  border: 1px solid var(--qt-border) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 20px 44px rgba(0, 0, 0, 0.28) !important;
+}
+
+/* Ensure Radix controls follow custom font everywhere */
+.rt-Theme,
+.rt-BaseButton,
+.rt-SelectTrigger,
+.rt-TextFieldInput,
+.rt-TextArea,
+.rt-DialogContent,
+.rt-DropdownMenuContent,
+.rt-ContextMenuContent,
+.rt-PopoverContent,
+.rt-TooltipContent {
+  font-family: var(--qt-font-family) !important;
+}
+
+.rt-DropdownMenuItem,
+.rt-SelectItem,
+.rt-ContextMenuItem {
+  border-radius: 7px !important;
+}
+
+.rt-DropdownMenuItem[data-highlighted],
+.rt-SelectItem[data-highlighted],
+.rt-ContextMenuItem[data-highlighted] {
+  background: color-mix(in oklab, var(--qt-highlight) 24%, transparent) !important;
+  color: var(--qt-text) !important;
+}
+
+.rt-DropdownMenuSeparator,
+.rt-SelectSeparator,
+.rt-ContextMenuSeparator {
+  background: var(--qt-divider) !important;
 }
 
 

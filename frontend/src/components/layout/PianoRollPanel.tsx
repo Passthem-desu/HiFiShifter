@@ -230,7 +230,7 @@ export const PianoRollPanel: React.FC = () => {
     }, [mergedKeybindings]);
     const { mode: themeMode } = useAppTheme();
     const waveformColors = useMemo(
-        () => getWaveformColors(themeMode),
+        () => getWaveformColors(themeMode, "piano-roll"),
         [themeMode],
     );
 

@@ -509,18 +509,18 @@ function GridSnapContextMenu({
         minWidth: 180,
         maxHeight: "70vh",
         overflowY: "auto",
-        background: "var(--color-panel-solid)",
-        border: "1px solid var(--gray-6)",
-        borderRadius: 6,
+        background: "var(--qt-panel)",
+        border: "1px solid var(--qt-border)",
+        borderRadius: 10,
         padding: "4px 0",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+        boxShadow: "0 20px 44px rgba(0,0,0,0.28)",
     };
 
     return (
         <div ref={menuRef} style={style}>
             {GRID_SNAP_ITEMS.map((item, i) => {
                 if (item === "separator") {
-                    return <div key={`sep-${i}`} style={{ height: 1, background: "var(--gray-6)", margin: "4px 0" }} />;
+                    return <div key={`sep-${i}`} style={{ height: 1, background: "var(--qt-divider)", margin: "4px 0" }} />;
                 }
                 const isActive = item.value === currentGrid;
                 return (
@@ -534,14 +534,16 @@ function GridSnapContextMenu({
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "space-between",
-                            background: isActive ? "var(--accent-3)" : "transparent",
-                            color: isActive ? "var(--accent-11)" : "inherit",
+                            background: isActive ? "color-mix(in oklab, var(--qt-highlight) 22%, transparent)" : "transparent",
+                            color: isActive ? "var(--qt-text)" : "inherit",
                         }}
                         onMouseEnter={(e) => {
-                            if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "var(--gray-3)";
+                            if (!isActive) (e.currentTarget as HTMLDivElement).style.background = "var(--qt-hover)";
                         }}
                         onMouseLeave={(e) => {
-                            (e.currentTarget as HTMLDivElement).style.background = isActive ? "var(--accent-3)" : "transparent";
+                            (e.currentTarget as HTMLDivElement).style.background = isActive
+                                ? "color-mix(in oklab, var(--qt-highlight) 22%, transparent)"
+                                : "transparent";
                         }}
                     >
                         <span>{t(item.labelKey)}</span>

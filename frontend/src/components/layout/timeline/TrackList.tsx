@@ -25,14 +25,14 @@ import {
 
 /** ??????????? add_track ????? */
 const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
-    { value: "#4f8ef7", key: "color_blue" },
-    { value: "#a78bfa", key: "color_purple" },
-    { value: "#34d399", key: "color_green" },
-    { value: "#fb923c", key: "color_orange" },
-    { value: "#f472b6", key: "color_pink" },
-    { value: "#38bdf8", key: "color_sky_blue" },
-    { value: "#facc15", key: "color_yellow" },
-    { value: "#f87171", key: "color_red" },
+    { value: "#5a7fa5", key: "color_blue" },
+    { value: "#7b6ca0", key: "color_purple" },
+    { value: "#5f9a78", key: "color_green" },
+    { value: "#b18256", key: "color_orange" },
+    { value: "#a56b88", key: "color_pink" },
+    { value: "#5a90a0", key: "color_sky_blue" },
+    { value: "#a89b62", key: "color_yellow" },
+    { value: "#a46866", key: "color_red" },
 ];
 
 const TRACK_METER_MIN_DB = -48;

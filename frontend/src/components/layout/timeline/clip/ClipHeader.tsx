@@ -3,6 +3,7 @@ import type { ClipInfo } from "../../../../features/session/sessionTypes";
 import { CLIP_HEADER_HEIGHT } from "../constants";
 import { gainToDb } from "../math";
 import { useI18n } from "../../../../i18n/I18nProvider";
+import { useAppTheme } from "../../../../theme/AppThemeProvider";
 
 const CLIP_GAIN_WHEEL_STEP_DB = 0.5;
 
@@ -40,6 +41,8 @@ export const ClipHeader: React.FC<{
     onGainCommit,
 }) => {
     const { t } = useI18n();
+    const { mode } = useAppTheme();
+    const isDark = mode === "dark";
     const gainDb = gainToDb(clip.gain);
     const clampedGainDb = Math.min(12, Math.max(-12, gainDb));
     const gainKnobDeg = (clampedGainDb / 12) * 135;
@@ -183,10 +186,17 @@ export const ClipHeader: React.FC<{
                         onGainCommit(clip.id, nextDb);
                     }}
                 >
-                    <div className="relative w-4 h-4 rounded-full border border-white/60 bg-black/15">
+                    <div
+                        className="relative w-4 h-4 rounded-full border"
+                        style={{
+                            borderColor: isDark ? "rgba(255,255,255,0.65)" : "rgba(0,0,0,0.45)",
+                            backgroundColor: isDark ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.28)",
+                        }}
+                    >
                         <span
-                            className="absolute left-1/2 top-1/2 w-[2px] h-1.5 -translate-x-1/2 -translate-y-full rounded-full bg-white/90"
+                            className="absolute left-1/2 top-1/2 w-[2px] h-1.5 -translate-x-1/2 -translate-y-full rounded-full"
                             style={{
+                                backgroundColor: isDark ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.72)",
                                 transform: `translate(-50%, -100%) rotate(${gainKnobDeg}deg)`,
                                 transformOrigin: "50% 100%",
                             }}
@@ -201,7 +211,12 @@ export const ClipHeader: React.FC<{
                     {nameEditing ? (
                         <input
                             ref={nameInputRef}
-                            className="w-full text-xs text-white font-medium bg-black/50 border border-white/40 rounded px-1 outline-none"
+                            className="w-full text-xs font-medium rounded px-1 outline-none"
+                            style={{
+                                color: isDark ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.88)",
+                                backgroundColor: isDark ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.70)",
+                                border: `1px solid ${isDark ? "rgba(255,255,255,0.40)" : "rgba(0,0,0,0.35)"}`,
+                            }}
                             value={nameInputVal}
                             onChange={(e) => setNameInputVal(e.target.value)}
                             onKeyDown={(e) => {
@@ -215,7 +230,8 @@ export const ClipHeader: React.FC<{
                         />
                     ) : (
                         <div
-                            className="text-xs text-white font-medium drop-shadow-md truncate cursor-text"
+                            className="text-xs font-medium drop-shadow-md truncate cursor-text"
+                            style={{ color: isDark ? "rgba(255,255,255,0.94)" : "rgba(0,0,0,0.86)" }}
                             onDoubleClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -237,7 +253,12 @@ export const ClipHeader: React.FC<{
             {showGainVal && gainEditing ? (
                 <input
                     ref={gainInputRef}
-                    className="w-14 text-xs text-white bg-black/50 border border-white/40 rounded px-1 outline-none text-right"
+                    className="w-14 text-xs rounded px-1 outline-none text-right"
+                    style={{
+                        color: isDark ? "rgba(255,255,255,0.94)" : "rgba(0,0,0,0.88)",
+                        backgroundColor: isDark ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.70)",
+                        border: `1px solid ${isDark ? "rgba(255,255,255,0.40)" : "rgba(0,0,0,0.35)"}`,
+                    }}
                     value={gainInputVal}
                     onChange={(e) => setGainInputVal(e.target.value)}
                     onKeyDown={(e) => {
@@ -250,7 +271,8 @@ export const ClipHeader: React.FC<{
                 />
             ) : showGainVal ? (
                 <div
-                    className="text-xs text-white/80 drop-shadow-md cursor-ns-resize"
+                    className="text-xs drop-shadow-md cursor-ns-resize"
+                    style={{ color: isDark ? "rgba(255,255,255,0.82)" : "rgba(0,0,0,0.72)" }}
                     title={t("clip_gain_drag_hint")}
                     onDoubleClick={(e) => {
                         e.preventDefault();

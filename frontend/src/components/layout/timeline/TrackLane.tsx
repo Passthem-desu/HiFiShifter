@@ -113,7 +113,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
     // 获取波形颜色配置
     const { mode: themeMode } = useAppTheme();
     const waveformColors = React.useMemo(
-        () => getWaveformColors(themeMode),
+        () => getWaveformColors(themeMode, "timeline"),
         [themeMode],
     );
 
@@ -199,7 +199,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                 viewportStartSec={viewportStartSec}
                 viewportEndSec={viewportEndSec}
                 strokeColor={waveformColors.stroke}
-                strokeWidth={1}
+                strokeWidth={1.2}
             />
             {visibleTrackClips.map((clip) => {
                 const selected =
@@ -254,22 +254,22 @@ export const TrackLane = React.memo(function TrackLane(props: {
                     >
                         {/* Ghost header 条 */}
                         <div
-                            className="absolute left-0 right-0 top-0 rounded-t-sm"
+                            className="absolute left-0 right-0 top-0"
                             style={{
                                 height: CLIP_HEADER_HEIGHT,
                                 backgroundColor: trackColor
-                                    ? `color-mix(in oklab, ${trackColor} 50%, transparent)`
-                                    : "color-mix(in oklab, var(--qt-highlight) 50%, transparent)",
+                                    ? `color-mix(in oklab, ${trackColor} 64%, var(--qt-base) 36%)`
+                                    : "color-mix(in oklab, var(--qt-highlight) 60%, var(--qt-base) 40%)",
                             }}
                         />
                         {/* Ghost body 区域 */}
                         <div
-                            className="absolute left-0 right-0 bottom-0 rounded-sm border border-dashed border-white/60"
+                            className="absolute left-0 right-0 bottom-0 border border-dashed border-white/60"
                             style={{
                                 top: CLIP_HEADER_HEIGHT,
                                 backgroundColor: trackColor
-                                    ? `color-mix(in oklab, ${trackColor} 20%, transparent)`
-                                    : "color-mix(in oklab, var(--qt-highlight) 20%, transparent)",
+                                    ? `color-mix(in oklab, ${trackColor} 56%, var(--qt-base) 44%)`
+                                    : "color-mix(in oklab, var(--qt-highlight) 54%, var(--qt-base) 46%)",
                             }}
                         />
                     </div>

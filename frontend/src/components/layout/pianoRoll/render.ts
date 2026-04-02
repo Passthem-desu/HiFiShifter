@@ -420,9 +420,9 @@ export function drawPianoRoll(args: {
               pitchGridC: "rgba(0,0,0,0.12)",
               pitchGridOther: "rgba(0,0,0,0.06)",
               // 曲线
-              origCurve: "rgba(100,120,150,0.50)",
-              editCurve: "rgba(50,80,140,0.80)",
-              selectionCurve: "rgba(30,120,200,0.95)",
+              origCurve: "rgba(132,104,26,0.72)",
+              editCurve: "rgba(224,154,0,1)",
+              selectionCurve: "rgba(255,186,0,1)",
               // 叠加文字 & 播放头
               overlayTextColor: "rgba(0,0,0,0.35)",
               playheadLine: "rgba(0,0,0,0.20)",
@@ -760,7 +760,7 @@ export function drawPianoRoll(args: {
         ctx.clip();
 
         // 静音 clip 半透明
-        ctx.globalAlpha = entry.muted ? 0.2 : 0.5;
+        ctx.globalAlpha = entry.muted ? 0.30 : 0.86;
         // 因为 renderWaveform 内部是从 x=0 开始画的，所以我们把画布的原点平移到 Clip 的可视起始点
         ctx.translate(visibleClipStartX, 0);
         renderWaveform(
@@ -805,10 +805,10 @@ export function drawPianoRoll(args: {
     ) {
         // �?clip 时循环颜色，增强区分�?
         const DETECTED_COLORS = [
-            "rgba(80, 220, 180, 0.55)", // 青绿
-            "rgba(255, 180, 60, 0.55)", // 橙黄
-            "rgba(180, 120, 255, 0.55)", // �?
-            "rgba(60, 180, 255, 0.55)", // �?
+            "rgba(80, 220, 180, 0.78)", // 青绿
+            "rgba(255, 180, 60, 0.78)", // 橙黄
+            "rgba(180, 120, 255, 0.78)", // 紫色
+            "rgba(60, 180, 255, 0.78)", // 天蓝
         ];
 
         for (let ci = 0; ci < detectedPitchCurves.length; ci++) {
@@ -823,7 +823,7 @@ export function drawPianoRoll(args: {
 
             ctx.strokeStyle;
             ctx.strokeStyle = DETECTED_COLORS[ci % DETECTED_COLORS.length];
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 2;
             ctx.setLineDash([]);
             ctx.globalAlpha = 1;
 
@@ -870,10 +870,10 @@ export function drawPianoRoll(args: {
         secondaryParamIds.length > 0
     ) {
         const secondaryPalette = [
-            "rgba(100, 200, 255, 0.45)",
-            "rgba(255, 180, 60, 0.45)",
-            "rgba(160, 120, 255, 0.45)",
-            "rgba(90, 220, 160, 0.45)",
+            "rgba(100, 200, 255, 0.62)",
+            "rgba(255, 180, 60, 0.62)",
+            "rgba(160, 120, 255, 0.62)",
+            "rgba(90, 220, 160, 0.62)",
         ];
         secondaryParamIds.forEach((paramId, index) => {
             const secondaryParamView = secondaryParamViews[paramId];
@@ -892,11 +892,11 @@ export function drawPianoRoll(args: {
             });
             const secondaryColor =
                 paramId === "pitch"
-                    ? "rgba(100, 200, 255, 0.45)"
+                    ? "rgba(100, 200, 255, 0.65)"
                     : secondaryPalette[index % secondaryPalette.length];
             ctx.save();
             ctx.strokeStyle = secondaryColor;
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 2;
             ctx.setLineDash([]);
             drawCurveTimed({
                 ctx,
@@ -924,7 +924,7 @@ export function drawPianoRoll(args: {
         // original (dashed)
         ctx.save();
         ctx.strokeStyle = colors.origCurve;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.8;
         ctx.setLineDash([6, 6]);
         drawCurveTimed({
             ctx,
@@ -944,7 +944,7 @@ export function drawPianoRoll(args: {
         // edited (solid)
         ctx.save();
         ctx.strokeStyle = colors.editCurve;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.6;
         ctx.setLineDash([]);
         drawCurveTimed({
             ctx,
@@ -975,7 +975,7 @@ export function drawPianoRoll(args: {
             ctx.clip();
 
             ctx.strokeStyle = colors.selectionCurve;
-            ctx.lineWidth = 3;
+            ctx.lineWidth = 3.6;
             ctx.setLineDash([]);
             drawCurveTimed({
                 ctx,

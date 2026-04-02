@@ -13,6 +13,7 @@ import { useAppTheme } from "../../theme/AppThemeProvider";
 import { loadAppearance, loadCustomThemes } from "../../theme/themeStorage";
 import type { QtColorToken } from "../../theme/themeTypes";
 import { QT_COLOR_TOKENS } from "../../theme/themeTypes";
+import type { RadixAccentColor, RadixGrayColor, RadixRadius } from "../../theme/themeTypes";
 
 /* ═══════════════════════════════════════════════════════════
  * Props
@@ -30,6 +31,47 @@ export const AppearanceSettingsDialog = ({
     const theme = useAppTheme();
     const prevOpenRef = useRef(false);
     const windowCreatedRef = useRef(false);
+
+    const applyPreviewFromStorage = useCallback(() => {
+        try {
+            const settingsRaw = localStorage.getItem("hifishifter.appearance.preview");
+            const colorsRaw = localStorage.getItem("hifishifter.appearance.preview.colors");
+            if (!settingsRaw && !colorsRaw) return;
+
+            if (settingsRaw) {
+                const settings = JSON.parse(settingsRaw) as {
+                    mode: "dark" | "light";
+                    accentColor: RadixAccentColor;
+                    grayColor: RadixGrayColor;
+                    radius: RadixRadius;
+                    fontFamily: string;
+                };
+                theme.applySettings({
+                    mode: settings.mode,
+                    accentColor: settings.accentColor,
+                    grayColor: settings.grayColor,
+                    radius: settings.radius,
+                    fontFamily: settings.fontFamily,
+                    activeCustomThemeId: null,
+                });
+            }
+
+            const root = document.documentElement;
+            const previewColors = colorsRaw
+                ? (JSON.parse(colorsRaw) as Partial<Record<QtColorToken, string>>)
+                : {};
+            for (const token of QT_COLOR_TOKENS) {
+                const val = previewColors[token];
+                if (val) {
+                    root.style.setProperty(`--${token}`, val);
+                } else {
+                    root.style.removeProperty(`--${token}`);
+                }
+            }
+        } catch {
+            // ignore malformed preview payload
+        }
+    }, [theme]);
 
     /* ── open 变化时创建独立窗口 ── */
     useEffect(() => {
@@ -88,6 +130,8 @@ export const AppearanceSettingsDialog = ({
     /* ── 监听独立窗口发来的 "appearance-applied" 事件 ── */
     useEffect(() => {
         let unlisten: (() => void) | undefined;
+        let unlistenPreview: (() => void) | undefined;
+        let unlistenReverted: (() => void) | undefined;
 
         void (async () => {
             try {
@@ -102,6 +146,43 @@ export const AppearanceSettingsDialog = ({
 
                     windowCreatedRef.current = false;
                 });
+
+                unlistenPreview = await listen<{
+                    settings: {
+                        mode: "dark" | "light";
+                        accentColor: RadixAccentColor;
+                        grayColor: RadixGrayColor;
+                        radius: RadixRadius;
+                        fontFamily: string;
+                    };
+                    colors: Partial<Record<QtColorToken, string>>;
+                }>("appearance-preview", (event) => {
+                    const payload = event.payload;
+                    theme.applySettings({
+                        mode: payload.settings.mode,
+                        accentColor: payload.settings.accentColor,
+                        grayColor: payload.settings.grayColor,
+                        radius: payload.settings.radius,
+                        fontFamily: payload.settings.fontFamily,
+                        activeCustomThemeId: null,
+                    });
+
+                    const root = document.documentElement;
+                    for (const token of QT_COLOR_TOKENS) {
+                        const val = payload.colors[token];
+                        if (val) {
+                            root.style.setProperty(`--${token}`, val);
+                        } else {
+                            root.style.removeProperty(`--${token}`);
+                        }
+                    }
+                });
+
+                unlistenReverted = await listen("appearance-reverted", () => {
+                    const settings = loadAppearance();
+                    theme.applySettings(settings);
+                    applyCustomColorsFromStorage(settings.activeCustomThemeId);
+                });
             } catch {
                 // Tauri event API 不可用时忽略
             }
@@ -109,9 +190,24 @@ export const AppearanceSettingsDialog = ({
 
         return () => {
             unlisten?.();
+            unlistenPreview?.();
+            unlistenReverted?.();
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        const onStorage = (e: StorageEvent) => {
+            if (
+                e.key === "hifishifter.appearance.preview" ||
+                e.key === "hifishifter.appearance.preview.colors"
+            ) {
+                applyPreviewFromStorage();
+            }
+        };
+        window.addEventListener("storage", onStorage);
+        return () => window.removeEventListener("storage", onStorage);
+    }, [applyPreviewFromStorage]);
 
     // 不渲染任何 DOM，独立窗口由 Tauri 管理
     return null;
