@@ -836,6 +836,7 @@ export function drawPianoRoll(args: {
             canvasWidth: visibleClipWidthPx,
             canvasHeight: h, // 直接使用主画布高度
             centerY: h / 2,
+            zeroDbHalfHeight: h / 2,
             sourceStartSec,
             clipDuration: entry.lengthSec,
             playbackRate: pr,

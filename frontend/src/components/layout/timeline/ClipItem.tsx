@@ -348,7 +348,7 @@ export const ClipItem = React.memo(function ClipItem({
                             {/* 全区域条带：与可交互区域完全重合，右边缘竖线表示可拖拽边�?*/}
                             <div
                                 className={
-                                    "absolute inset-0 bg-black/10 border-r transition-opacity " +
+                                    "absolute inset-0 border-r transition-opacity " +
                                     (selected
                                         ? "opacity-100"
                                         : "opacity-42 group-hover:opacity-100")
@@ -374,7 +374,7 @@ export const ClipItem = React.memo(function ClipItem({
                             {/* 全区域条带：与可交互区域完全重合，左边缘竖线表示可拖拽边�?*/}
                             <div
                                 className={
-                                    "absolute inset-0 bg-black/10 border-l transition-opacity " +
+                                    "absolute inset-0 border-l transition-opacity " +
                                     (selected
                                         ? "opacity-100"
                                         : "opacity-42 group-hover:opacity-100")

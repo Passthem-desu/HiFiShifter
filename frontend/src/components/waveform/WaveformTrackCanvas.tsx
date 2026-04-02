@@ -338,6 +338,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 canvasWidth: displayW,
                 canvasHeight: displayH,
                 centerY: displayH / 2,
+                zeroDbHalfHeight: displayH / 2,
                 sourceStartSec,
                 clipDuration: clip.lengthSec,
                 playbackRate: Number(clip.playbackRate ?? 1) || 1,

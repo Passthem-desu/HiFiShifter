@@ -53,6 +53,8 @@ export interface WaveformRenderParams {
     sourceDurationSec: number;
     /** clip 音量增益（线性值，0~2） */
     volumeGain: number;
+    /** 0dB 对应的半高（像素），未传时默认使用 canvasHeight / 2 */
+    zeroDbHalfHeight?: number;
     /** 淡入时长（秒） */
     fadeInSec: number;
     /** 淡出时长（秒） */
@@ -275,8 +277,8 @@ export function renderWaveform(
     // ========================================
     const clipTotalW = clipTotalWidthPx ?? canvasWidth;
 
-    // 振幅比例：0 电平在中心（静音），±1 电平占满整个高度
-    const amplitudeScale = canvasHeight / 2;
+    // 振幅比例：0 电平在中心（静音），±1 电平顶到底边界（0dB）
+    const amplitudeScale = params.zeroDbHalfHeight ?? (canvasHeight / 2);
 
     // 计算数据的时间范围（源文件坐标系）
     const effectiveDataStartSec = dataStartSec ?? sourceStartSec;
