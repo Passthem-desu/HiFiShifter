@@ -98,8 +98,8 @@ export const ClipItem = React.memo(function ClipItem({
 }) {
     const { t } = useI18n();
 
-    const left = Math.max(0, clip.startSec * pxPerSec);
-    const width = Math.max(1, clip.lengthSec * pxPerSec);
+    const left = Math.max(0, Math.round(clip.startSec * pxPerSec));
+    const width = Math.max(1, Math.round(clip.lengthSec * pxPerSec));
     const bodyHeight = Math.max(
         1,
         rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT,
@@ -201,6 +201,8 @@ export const ClipItem = React.memo(function ClipItem({
                 width,
                 top: 0,
                 height: rowHeight - CLIP_BODY_PADDING_Y,
+                transform: "translateZ(0)",
+                backfaceVisibility: "hidden",
             }}
             onContextMenu={(e) => {
                 e.preventDefault();
@@ -296,7 +298,7 @@ export const ClipItem = React.memo(function ClipItem({
 
             {/* Body block (does not fill the entire track row; leaves header lane above) */}
             <div
-                className="absolute left-0 right-0 bottom-0 shadow-sm overflow-visible border transition-colors"
+                className="absolute left-0 right-0 bottom-0 shadow-sm overflow-visible border"
                 style={{
                     top: CLIP_HEADER_HEIGHT,
                     backgroundColor: trackColor
