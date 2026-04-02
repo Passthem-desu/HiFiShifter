@@ -27,7 +27,8 @@
 
 param(
     [switch]$SkipBuild,
-    [string]$OutputDir
+    [string]$OutputDir,
+    [string]$Version
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,6 +37,20 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = Resolve-Path "$PSScriptRoot\.."
 $TauriDir = Join-Path $ProjectRoot "backend\src-tauri"
 $TauriTargetRoot = Join-Path $TauriDir "target"
+$SetVersionScript = Join-Path $ProjectRoot "scripts\set-version.ps1"
+
+# 若传入 -Version，则先统一改版本号，后续构建与打包直接使用该版本
+if ($Version) {
+    if (-not (Test-Path $SetVersionScript)) {
+        throw "找不到版本脚本: $SetVersionScript"
+    }
+    Write-Host "[预处理] 应用版本号: $Version" -ForegroundColor Yellow
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $SetVersionScript -Version $Version
+    if ($LASTEXITCODE -ne 0) {
+        throw "版本号更新失败，退出码: $LASTEXITCODE"
+    }
+    Write-Host "[预处理] 版本号更新完成 ✓" -ForegroundColor Green
+}
 
 # Detect target triple: prefer x86_64 but fall back to aarch64 if present.
 $DetectedTriple = $null
