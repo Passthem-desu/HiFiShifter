@@ -199,7 +199,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                 viewportStartSec={viewportStartSec}
                 viewportEndSec={viewportEndSec}
                 strokeColor={waveformColors.stroke}
-                strokeWidth={1.2}
+                strokeWidth={1}
             />
             {visibleTrackClips.map((clip) => {
                 const selected =

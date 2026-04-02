@@ -96,14 +96,9 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
     // refs：高频变化的参数存 ref，避免 React re-render
     // ========================================
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
-    const lastLevelByPathRef = React.useRef<Record<string, 0 | 1 | 2>>({});
+    const lastLevelByClipRef = React.useRef<Record<string, 0 | 1 | 2>>({});
     const rafRef = React.useRef<number | null>(null);
     const offCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
-
-    // 绘制时间戳节流（方案3：避免同帧多次绘制）
-    const lastDrawTimeRef = React.useRef(0);
-    /** 最小绘制间隔（ms），略低于 120fps 以兼容高刷屏 */
-    const DRAW_MIN_INTERVAL = 6;
 
     // 高频参数用 ref 存储，避免依赖数组变化触发 useLayoutEffect
     const pxPerSecRef = React.useRef(props.pxPerSec);
@@ -139,28 +134,19 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         });
     }, []);
 
+    /**
+     * 对齐到整像素，优先保证自动滚屏时波形绝对稳定（可接受轻微锐度损失）。
+     */
+    const snapToDevicePixel = React.useCallback((value: number): number => {
+        return Math.round(value);
+    }, []);
+
     // ========================================
     // 核心绘制函数（存入 drawRef，由 invalidate 调度）
     // ========================================
     drawRef.current = () => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-
-        // ========================================
-        // 方案3：时间戳节流 — 避免同帧多次绘制
-        // 如果距上次绘制 < DRAW_MIN_INTERVAL ms，推迟到下一帧
-        // ========================================
-        const now = performance.now();
-        if (now - lastDrawTimeRef.current < DRAW_MIN_INTERVAL) {
-            if (rafRef.current == null) {
-                rafRef.current = requestAnimationFrame(() => {
-                    rafRef.current = null;
-                    drawRef.current();
-                });
-            }
-            return;
-        }
-        lastDrawTimeRef.current = now;
 
         // ========================================
         // 性能诊断探针（通过 localStorage 开关）
@@ -200,8 +186,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
         ctx.clearRect(0, 0, displayW, displayH);
 
-        // 更新 canvas CSS 位置（直接操作 DOM 避免 re-render）
-        canvas.style.left = `${currentViewportStartSec * currentPxPerSec}px`;
+        // left 由 timelineViewportBus 单一来源更新，避免双来源写入导致的微抖
         canvas.style.width = `${displayW}px`;
         canvas.style.height = `${displayH}px`;
 
@@ -224,23 +209,24 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             const visEndSec = Math.min(clipEndSec, currentViewportEndSec);
             if (visEndSec <= visStartSec) continue;
 
-            // 可见区域在 canvas 上的像素位置
-            const visLeftPx = Math.max(0, (visStartSec - currentViewportStartSec) * currentPxPerSec);
-            const visRightPx = Math.min(displayW, (visEndSec - currentViewportStartSec) * currentPxPerSec);
+            // 使用整像素坐标，避免滚动时子像素裁剪造成前景闪烁/抖动
+            const viewportStartPx = Math.round(currentViewportStartSec * currentPxPerSec);
+            const clipStartPx = Math.round(clipStartSec * currentPxPerSec);
+            const clipEndPx = Math.round(clipEndSec * currentPxPerSec);
+            const visLeftPx = Math.max(0, clipStartPx - viewportStartPx);
+            const visRightPx = Math.min(displayW, clipEndPx - viewportStartPx);
+            if (visRightPx <= visLeftPx) continue;
             const pr = Math.max(1e-6, clip.playbackRate);
-            const clipLen = clip.lengthSec;
             const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
             const visibleWidthPx = Math.max(1, Math.ceil(visRightPx - visLeftPx));
 
             // 计算源文件时间范围
             const sampleRate = clip.sourceSampleRate || 44100;
             const spp = Math.max(1, Math.round(sampleRate / currentPxPerSec));
-            const previousLevel = lastLevelByPathRef.current[clip.sourcePath];
+            const levelKey = `${clip.sourcePath}::${clip.id}`;
+            const previousLevel = lastLevelByClipRef.current[levelKey];
             const stableLevel = waveformMipmapStore.selectLevelStable(spp, previousLevel);
-            lastLevelByPathRef.current[clip.sourcePath] = stableLevel;
-
-            const ratioStart = (visStartSec - clipStartSec) / Math.max(1e-6, clipLen);
-            const ratioEnd = (visEndSec - clipStartSec) / Math.max(1e-6, clipLen);
+            lastLevelByClipRef.current[levelKey] = stableLevel;
 
             const clipSourceEndSec =
                 Number(clip.sourceEndSec ?? clip.durationSec) || clip.durationSec;
@@ -248,26 +234,8 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 0,
                 Math.min(clip.lengthSec * pr, clipSourceEndSec - sourceStartSec),
             );
-            const clipSourceSpanEndSec = sourceStartSec + clipSourceSpanSec;
-            const sourceTimeStart = clip.reversed
-                ? Math.max(
-                    0,
-                    clipSourceSpanEndSec - ratioEnd * clipSourceSpanSec,
-                )
-                : Math.max(
-                    0,
-                    sourceStartSec + ratioStart * clipSourceSpanSec,
-                );
-            const sourceTimeEnd = clip.reversed
-                ? Math.min(
-                    clip.durationSec,
-                    clipSourceSpanEndSec - ratioStart * clipSourceSpanSec,
-                )
-                : Math.min(
-                    clip.durationSec,
-                    sourceStartSec + ratioEnd * clipSourceSpanSec,
-                );
-            const sourceDuration = Math.max(0.001, sourceTimeEnd - sourceTimeStart);
+            const sourceTimeStart = sourceStartSec;
+            const sourceDuration = Math.max(0.001, clipSourceSpanSec);
 
             // ========================================
             // 从 mipmap 缓存获取 interleaved 数据（不 resample，与 PianoRoll 一致）
@@ -293,7 +261,12 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             let renderInterleaved: Float32Array = storeInterleaved;
             let releasedStoreInterleaved = false;
             const rawSampleCount = storeInterleaved.length / 2;
-            const targetSamples = visibleWidthPx * 2;
+            // 使用与 clip 自身宽度绑定的稳定采样目标，避免滚屏时分桶边界漂移导致抖动
+            const stableTargetWidthPx = Math.max(
+                1,
+                Math.ceil(Math.min(clipWidthPx, currentViewportWidthPx * 4)),
+            );
+            const targetSamples = stableTargetWidthPx * 2;
 
             if (rawSampleCount > targetSamples && targetSamples >= 2) {
                 const w = Math.ceil(targetSamples);
@@ -331,7 +304,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             // --- 从这里开始替换 ---
 
             // 偏移量改为相对于主屏幕，而不是裁剪视口
-            const clipPixelOffset = (currentViewportStartSec - clipStartSec) * currentPxPerSec;
+            const clipPixelOffset = viewportStartPx - clipStartPx;
 
             // 构建渲染参数
             const params: WaveformRenderParams = {
@@ -356,7 +329,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             };
 
             // 应用增益（音量 + 淡入淡出）
-            const peaksForRender = result.interleaved;
+            const peaksForRender = renderInterleaved;
 
             const __tDs1 = __perfDebug ? performance.now() : 0;
             const __tGain0 = __perfDebug ? performance.now() : 0;
@@ -482,19 +455,20 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         const unsub = timelineViewportBus.subscribe((scrollLeft, pxPerSec, viewportWidth) => {
             // 直接更新 ref（不触发 React re-render）
             pxPerSecRef.current = pxPerSec;
-            const vpStartSec = scrollLeft / pxPerSec;
+            const snappedScrollLeft = snapToDevicePixel(scrollLeft);
+            const vpStartSec = snappedScrollLeft / pxPerSec;
             const vpEndSec = vpStartSec + viewportWidth / pxPerSec;
             viewportStartSecRef.current = vpStartSec;
             viewportEndSecRef.current = vpEndSec;
             viewportWidthPxRef.current = viewportWidth;
             if (canvasRef.current) {
-                canvasRef.current.style.left = `${scrollLeft}px`;
+                canvasRef.current.style.left = `${snappedScrollLeft}px`;
             }
 
             invalidate();
         });
         return unsub;
-    }, [invalidate]);
+    }, [invalidate, snapToDevicePixel]);
 
     // ========================================
     // 低频 props 变化时 invalidate

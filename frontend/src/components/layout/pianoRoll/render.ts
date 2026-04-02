@@ -23,6 +23,7 @@ import { framesToTime, timeToPixel } from "./utils";
 import { resolveSecondaryOverlayValues } from "./secondaryOverlaySelection";
 import {
     applyGainsToPeaks,
+    releaseGainBuffer,
     renderWaveform,
     type WaveformRenderParams,
 } from "../../../utils/waveformRenderer";
@@ -34,6 +35,15 @@ import {
     isChildPitchOffsetCentsParam,
     isChildPitchOffsetDegreesParam,
 } from "./childPitchOffsetParams";
+
+/**
+ * 返回视觉上固定像素长度的虚线参数，避免随 dpr/缩放产生样式漂移。
+ */
+function getFixedDashPattern(baseDashPx: number, baseGapPx: number): number[] {
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const toAlignedCssPx = (v: number) => Math.max(1, Math.round(v * dpr) / dpr);
+    return [toAlignedCssPx(baseDashPx), toAlignedCssPx(baseGapPx)];
+}
 
 /** 为数值轴选择"好看"的刻度步长 */
 function niceAxisStep(range: number, targetCount: number): number {
@@ -743,22 +753,16 @@ export function drawPianoRoll(args: {
     // 废弃离屏 Canvas，保留 mipmap 级数状态即可
     // ========================================
     const drawPianoRollRef = drawPianoRoll as unknown as {
-        _lastLevelByPath?: Record<string, 0 | 1 | 2>;
+        _lastLevelByClip?: Record<string, 0 | 1 | 2>;
     };
-    if (!drawPianoRollRef._lastLevelByPath) {
-        drawPianoRollRef._lastLevelByPath = {};
+    if (!drawPianoRollRef._lastLevelByClip) {
+        drawPianoRollRef._lastLevelByClip = {};
     }
-    const lastLevelByPath = drawPianoRollRef._lastLevelByPath;
+    const lastLevelByClip = drawPianoRollRef._lastLevelByClip;
 
     // Background waveform: per-clip 叠加绘制
     // 与 WaveformTrackCanvas 保持一致的数据路径：
     // waveformMipmapStore.getInterleavedSlice() → applyGainsToPeaks → renderWaveform
-    console.info(
-        `[PianoRoll] 🎨 波形渲染开始 | clips=${clipPeaks.length} | pxPerSec=${pxPerSec.toFixed(1)} | visible=[${visibleStartSec.toFixed(2)}s, ${(visibleStartSec + visibleDurSec).toFixed(2)}s]`,
-    );
-    let prRenderedCount = 0;
-    let prSkippedCount = 0;
-
     for (const entry of clipPeaks) {
         if (!entry.sourcePath) continue;
 
@@ -777,36 +781,29 @@ export function drawPianoRoll(args: {
         const visEndSec = Math.min(clipEndSec, visibleStartSec + visibleDurSec);
         if (visEndSec <= visStartSec) continue;
 
-        const visibleClipStartX = visStartSec * pxPerSec - scrollLeft;
-        const visibleClipWidthPx = Math.max(
-            1,
-            Math.ceil((visEndSec - visStartSec) * pxPerSec),
-        );
-
-        // 可见部分在 clip 内的比例 → 映射到源文件时间
-        const clipLen = entry.lengthSec;
-        const ratioStart = (visStartSec - clipStartSec) / Math.max(1e-6, clipLen);
-        const ratioEnd = (visEndSec - clipStartSec) / Math.max(1e-6, clipLen);
+        const viewportStartPx = Math.round(scrollLeft);
+        const clipStartPx = Math.round(clipStartSec * pxPerSec);
+        const clipEndPx = Math.round(clipEndSec * pxPerSec);
+        const clipVisLeft = Math.max(0, clipStartPx - viewportStartPx);
+        const clipVisRight = Math.min(w, clipEndPx - viewportStartPx);
+        const visibleClipWidthPx = Math.max(1, clipVisRight - clipVisLeft);
 
         const clipSourceEndSec =
             Number(entry.sourceEndSec ?? sourceDurSec) || sourceDurSec;
         const clipSourceSpanSec = Math.max(
             0,
-            Math.min(clipLen * pr, clipSourceEndSec - sourceStartSec),
+            Math.min(entry.lengthSec * pr, clipSourceEndSec - sourceStartSec),
         );
-        const sourceTimeStart = Math.max(0, sourceStartSec + ratioStart * clipSourceSpanSec);
-        const sourceTimeEnd = Math.min(sourceDurSec, sourceStartSec + ratioEnd * clipSourceSpanSec);
-        const sourceDuration = Math.max(0.001, sourceTimeEnd - sourceTimeStart);
+        const sourceTimeStart = sourceStartSec;
+        const sourceDuration = Math.max(0.001, clipSourceSpanSec);
 
         // 选择 mipmap 级别（与 WaveformTrackCanvas 一致，使用 previousLevel 实现滞后防抖）
         const sampleRate = entry.sourceSampleRate || 44100;
         const spp = Math.max(1, Math.round(sampleRate / pxPerSec));
-        const previousLevel = lastLevelByPath[entry.sourcePath];
+        const levelKey = `${entry.sourcePath}::${entry.clipId}`;
+        const previousLevel = lastLevelByClip[levelKey];
         const stableLevel = waveformMipmapStore.selectLevelStable(spp, previousLevel);
-        lastLevelByPath[entry.sourcePath] = stableLevel;
-
-        const levelLabels = ["L0(div=32)", "L1(div=512)", "L2(div=4096)"];
-        const fileName = entry.sourcePath.split(/[/\\]/).pop() ?? entry.sourcePath;
+        lastLevelByClip[levelKey] = stableLevel;
 
         // 从 mipmap 缓存获取 interleaved 数据
         const result = waveformMipmapStore.getInterleavedSlice(
@@ -816,20 +813,10 @@ export function drawPianoRoll(args: {
             sourceDuration,
         );
         if (!result || result.interleaved.length < 4) {
-            console.warn(
-                `[PianoRoll] ⏭️ clip 跳过: "${fileName}" | level=${levelLabels[stableLevel]} | spp=${spp} | 原因=${!result ? "数据未加载" : "interleaved 太短(" + result.interleaved.length + ")"}`,
-            );
-            prSkippedCount++;
             continue;
         }
-
-        console.debug(
-            `[PianoRoll] ✅ clip 渲染: "${fileName}" | level=${levelLabels[stableLevel]} | spp=${spp} | srcTime=[${sourceTimeStart.toFixed(3)}s, ${sourceTimeEnd.toFixed(3)}s] | interleaved=${result.interleaved.length}`,
-        );
-        prRenderedCount++;
-
-        // clip 内的像素偏移
-        const clipPixelOffset = (visStartSec - clipStartSec) * pxPerSec;
+        // clip 内的像素偏移（整像素稳定路径）
+        const clipPixelOffset = viewportStartPx + clipVisLeft - clipStartPx;
 
         // 构建渲染参数
         const params: WaveformRenderParams = {
@@ -858,13 +845,21 @@ export function drawPianoRoll(args: {
 
         // 严格裁剪在 clip 实际可见范围内，防止溢出
         ctx.beginPath();
-        ctx.rect(visibleClipStartX, 0, visibleClipWidthPx, h);
+        if (clipVisRight <= clipVisLeft) {
+            waveformMipmapStore.releaseInterleaved(result.interleaved);
+            if (withGains !== result.interleaved) {
+                releaseGainBuffer(withGains);
+            }
+            ctx.restore();
+            continue;
+        }
+        ctx.rect(clipVisLeft, 0, clipVisRight - clipVisLeft, h);
         ctx.clip();
 
         // 静音 clip 半透明
         ctx.globalAlpha = entry.muted ? 0.30 : 0.86;
         // 因为 renderWaveform 内部是从 x=0 开始画的，所以我们把画布的原点平移到 Clip 的可视起始点
-        ctx.translate(visibleClipStartX, 0);
+        ctx.translate(clipVisLeft, 0);
         renderWaveform(
             ctx,
             withGains,
@@ -875,11 +870,11 @@ export function drawPianoRoll(args: {
         );
 
         ctx.restore();
+        if (withGains !== result.interleaved) {
+            releaseGainBuffer(withGains);
         }
-
-    console.info(
-        `[PianoRoll] 🎨 波形渲染完成 | 渲染=${prRenderedCount} | 跳过=${prSkippedCount} | 总clips=${clipPeaks.length}`,
-    );
+        waveformMipmapStore.releaseInterleaved(result.interleaved);
+        }
 
     // Selection (time band)
     if (selection) {
@@ -1027,7 +1022,7 @@ export function drawPianoRoll(args: {
         ctx.save();
         ctx.strokeStyle = colors.origCurve;
         ctx.lineWidth = 1.8;
-        ctx.setLineDash([6, 6]);
+        ctx.setLineDash(getFixedDashPattern(6, 6));
         drawCurveTimed({
             ctx,
             values: paramView.orig,
@@ -1123,7 +1118,7 @@ export function drawPianoRoll(args: {
                 ? "rgba(255, 180, 60, 0.65)"
                 : "rgba(220, 140, 20, 0.65)";
             ctx.lineWidth = 2;
-            ctx.setLineDash([4, 4]);
+            ctx.setLineDash(getFixedDashPattern(4, 4));
             ctx.beginPath();
 
             let started = false;
