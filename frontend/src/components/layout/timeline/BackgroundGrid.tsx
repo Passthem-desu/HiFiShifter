@@ -17,6 +17,8 @@ export const BackgroundGrid: React.FC<{
     scrollLeft?: number;
     layerRef?: React.Ref<HTMLDivElement>;
     boundaryRef?: React.Ref<HTMLDivElement>;
+    lineOpacity?: number;
+    showBoundary?: boolean;
 }> = ({
     contentWidth,
     contentHeight,
@@ -27,6 +29,8 @@ export const BackgroundGrid: React.FC<{
     scrollLeft,
     layerRef,
     boundaryRef,
+    lineOpacity = 0.9,
+    showBoundary = true,
 }) => {
     const useViewport =
         viewportWidth != null &&
@@ -59,7 +63,7 @@ export const BackgroundGrid: React.FC<{
         ? contentWidth - 1 - (scrollLeft as number)
         : contentWidth - 1;
 
-    const showBoundary =
+    const boundaryVisible =
         Number.isFinite(boundaryLeft) &&
         boundaryLeft >= -2 &&
         boundaryLeft <= width + 2;
@@ -88,7 +92,7 @@ export const BackgroundGrid: React.FC<{
                                   `${barOffsetPx}px 0px`,
                               ].join(", ")
                         : undefined,
-                    opacity: 0.9,
+                    opacity: lineOpacity,
                 }}
             />
 
@@ -98,7 +102,12 @@ export const BackgroundGrid: React.FC<{
                 style={{
                     left: manualViewportSync ? 0 : boundaryLeft,
                     backgroundColor: "var(--qt-highlight)",
-                    opacity: manualViewportSync ? 0 : showBoundary ? 0.9 : 0,
+                    opacity:
+                        manualViewportSync || !boundaryVisible
+                            ? 0
+                            : showBoundary
+                              ? lineOpacity
+                              : 0,
                 }}
             />
         </>

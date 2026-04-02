@@ -1040,6 +1040,21 @@ export const TimelinePanel: React.FC = () => {
                             );
                         })}
 
+                        <div className="absolute inset-0 pointer-events-none z-[12]">
+                            <BackgroundGrid
+                                contentWidth={contentWidth}
+                                contentHeight={contentHeight}
+                                pxPerBeat={pxPerBeat}
+                                grid={s.grid}
+                                beatsPerBar={Math.max(
+                                    1,
+                                    Math.round(s.beats || 4),
+                                )}
+                                lineOpacity={0.38}
+                                showBoundary={false}
+                            />
+                        </div>
+
                         <div
                             className="absolute left-0 right-0 pointer-events-none z-10"
                             style={{

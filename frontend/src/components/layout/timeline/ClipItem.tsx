@@ -107,6 +107,9 @@ export const ClipItem = React.memo(function ClipItem({
 
     const showRepeatMarker = false;
     const repeatMarkerX = 0;
+    const fadeStrokeColor = selected
+        ? "var(--qt-clip-selected-border)"
+        : "var(--qt-clip-border)";
 
 
 
@@ -293,15 +296,15 @@ export const ClipItem = React.memo(function ClipItem({
 
             {/* Body block (does not fill the entire track row; leaves header lane above) */}
             <div
-                className={`absolute left-0 right-0 bottom-0 shadow-sm overflow-visible border transition-colors ${selected
-                    ? "border-white/90"
-                    : "border-transparent group-hover:border-white/30"
-                    }`}
+                className="absolute left-0 right-0 bottom-0 shadow-sm overflow-visible border transition-colors"
                 style={{
                     top: CLIP_HEADER_HEIGHT,
                     backgroundColor: trackColor
-                        ? `color-mix(in oklab, ${trackColor} 70%, var(--qt-base) 30%)`
-                        : "color-mix(in oklab, var(--qt-highlight) 68%, var(--qt-base) 32%)",
+                        ? `color-mix(in oklab, var(--qt-clip-bg) 60%, ${trackColor} 40%)`
+                        : "var(--qt-clip-bg)",
+                    borderColor: selected
+                        ? "var(--qt-clip-selected-border)"
+                        : "var(--qt-clip-border)",
                 }}
             >
                 <div className="absolute left-0 right-0 top-1/2 h-px bg-black/28 pointer-events-none z-20" />
@@ -347,9 +350,10 @@ export const ClipItem = React.memo(function ClipItem({
                                 className={
                                     "absolute inset-0 bg-black/10 border-r transition-opacity " +
                                     (selected
-                                        ? "opacity-100 border-black/55"
-                                        : "opacity-42 border-black/35 group-hover:opacity-100")
+                                        ? "opacity-100"
+                                        : "opacity-42 group-hover:opacity-100")
                                 }
+                                style={{ borderRightColor: fadeStrokeColor }}
                             />
                         </div>
                     )}
@@ -372,9 +376,10 @@ export const ClipItem = React.memo(function ClipItem({
                                 className={
                                     "absolute inset-0 bg-black/10 border-l transition-opacity " +
                                     (selected
-                                        ? "opacity-100 border-black/55"
-                                        : "opacity-42 border-black/35 group-hover:opacity-100")
+                                        ? "opacity-100"
+                                        : "opacity-42 group-hover:opacity-100")
                                 }
+                                style={{ borderLeftColor: fadeStrokeColor }}
                             />
                         </div>
                     )}
@@ -419,7 +424,7 @@ export const ClipItem = React.memo(function ClipItem({
                                         clip.fadeInCurve ?? "sine",
                                     )}
                                     fill="rgba(0,0,0,0.08)"
-                                    stroke="rgba(0,0,0,0.70)"
+                                    stroke={fadeStrokeColor}
                                     strokeWidth="1"
                                     vectorEffect="non-scaling-stroke"
                                 />
@@ -450,7 +455,7 @@ export const ClipItem = React.memo(function ClipItem({
                                         clip.fadeOutCurve ?? "sine",
                                     )}
                                     fill="rgba(0,0,0,0.08)"
-                                    stroke="rgba(0,0,0,0.70)"
+                                    stroke={fadeStrokeColor}
                                     strokeWidth="1"
                                     vectorEffect="non-scaling-stroke"
                                 />

@@ -258,8 +258,8 @@ export const TrackLane = React.memo(function TrackLane(props: {
                             style={{
                                 height: CLIP_HEADER_HEIGHT,
                                 backgroundColor: trackColor
-                                    ? `color-mix(in oklab, ${trackColor} 64%, var(--qt-base) 36%)`
-                                    : "color-mix(in oklab, var(--qt-highlight) 60%, var(--qt-base) 40%)",
+                                    ? `color-mix(in oklab, var(--qt-clip-bg) 56%, ${trackColor} 44%)`
+                                    : "var(--qt-clip-bg)",
                             }}
                         />
                         {/* Ghost body 区域 */}
@@ -268,8 +268,8 @@ export const TrackLane = React.memo(function TrackLane(props: {
                             style={{
                                 top: CLIP_HEADER_HEIGHT,
                                 backgroundColor: trackColor
-                                    ? `color-mix(in oklab, ${trackColor} 56%, var(--qt-base) 44%)`
-                                    : "color-mix(in oklab, var(--qt-highlight) 54%, var(--qt-base) 46%)",
+                                    ? `color-mix(in oklab, var(--qt-clip-bg) 60%, ${trackColor} 40%)`
+                                    : "var(--qt-clip-bg)",
                             }}
                         />
                     </div>

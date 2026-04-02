@@ -805,7 +805,7 @@ export function drawPianoRoll(args: {
         const stableLevel = waveformMipmapStore.selectLevelStable(spp, previousLevel);
         lastLevelByPath[entry.sourcePath] = stableLevel;
 
-        const levelLabels = ["L0(div=64)", "L1(div=512)", "L2(div=4096)"];
+        const levelLabels = ["L0(div=32)", "L1(div=512)", "L2(div=4096)"];
         const fileName = entry.sourcePath.split(/[/\\]/).pop() ?? entry.sourcePath;
 
         // 从 mipmap 缓存获取 interleaved 数据

@@ -75,7 +75,7 @@ type SettingsTab = "theme" | "font";
 const PALETTE_GROUPS: Array<{ labelKey: string; tokens: QtColorToken[] }> = [
     { labelKey: "appearance_color_group_base", tokens: ["qt-window", "qt-base", "qt-panel", "qt-surface"] },
     { labelKey: "appearance_color_group_text", tokens: ["qt-text", "qt-text-muted"] },
-    { labelKey: "appearance_color_group_ui", tokens: ["qt-highlight", "qt-playhead", "qt-border"] },
+    { labelKey: "appearance_color_group_ui", tokens: ["qt-highlight", "qt-playhead", "qt-border", "qt-clip-bg", "qt-clip-border", "qt-clip-selected-border"] },
 ];
 
 const CARD_CLASS =

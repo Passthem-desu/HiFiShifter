@@ -171,7 +171,7 @@ export interface WaveformPeaksSegmentPayload {
     max: number[];
 }
 
-/** HFSPeaks v2 mipmap 级别（L0=div64, L1=div512, L2=div4096） */
+/** HFSPeaks v2 mipmap 级别（L0=div32, L1=div512, L2=div4096） */
 export type MipmapLevel = 0 | 1 | 2;
 
 /** v2 波形峰值响应 */

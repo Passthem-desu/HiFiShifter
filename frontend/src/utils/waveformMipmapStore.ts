@@ -2,7 +2,7 @@
  * 波形 Mipmap 缓存管理器（整文件级）
  *
  * 每个音频文件缓存三级 Float32Array 数据：
- * - L0 (div=64):   精细级，近距离对轨，spp ≤ 256
+ * - L0 (div=32):   精细级，近距离对轨，spp ≤ 256
  * - L1 (div=512):  中间级，日常编辑，256 < spp ≤ 2048
  * - L2 (div=4096): 全局级，预览/导航，spp > 2048
  *
@@ -20,7 +20,7 @@ import {
 // ============== 常量 ==============
 
 /** 三级 mipmap 的除数因子 */
-const DIV_FACTORS = [64, 512, 4096] as const;
+const DIV_FACTORS = [32, 512, 4096] as const;
 
 /** 级别选择的 spp 阈值 */
 const SPP_THRESHOLDS = [256, 2048] as const;
