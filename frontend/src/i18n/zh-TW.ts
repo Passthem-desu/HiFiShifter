@@ -138,7 +138,7 @@ export const zhTW = {
     hifigan_volume_label: "音量",
     vslib_volume_label: "音量",
     vslib_synth_mode_label: "合成模式",
-    vslib_pan_label: "聲像",
+    vslib_pan_label: "聲相",
     vslib_breathiness_label: "氣聲強度",
     vslib_synth_mode_mono: "單聲道",
     vslib_synth_mode_mono_formant: "單聲道（共振峰）",
@@ -164,7 +164,7 @@ export const zhTW = {
     status_pick_output_canceled: "已取消選擇匯出路徑",
     status_output_path_selected: "已選擇匯出路徑",
     status_clear_waveform_cache_failed: "清除波形快取失敗",
-    status_new_project: "已新建專案",
+    status_new_project: "已建立專案",
     status_opening_project: "正在開啟專案...",
     status_open_canceled: "已取消開啟",
     status_open_failed: "開啟專案失敗",
@@ -286,15 +286,20 @@ export const zhTW = {
     child_pitch_offset_cents_short: "音分",
     child_pitch_offset_degrees_short: "度數",
     aria_loading: "載入中",
+    export_dialog_sample_rate: "取樣率",
+    export_dialog_bit_depth: "位元深度",
+    export_dialog_error_invalid_sample_rate: "取樣率無效。",
+    export_dialog_error_invalid_time_format:
+        "輸出路徑包含無效的時間格式。請將無效的 '%' 改為 '%%'。",
 
     // 快速鍵管理
-    kb_dialog_title: "鍵盤快速鍵",
-    kb_dialog_desc: "點擊快速鍵可重新繫結，按 Esc 取消錄入。",
+    kb_dialog_title: "鍵盤快捷鍵",
+    kb_dialog_desc: "點擊快捷鍵可重新綁定，按 Esc 取消輸入。",
     kb_press_key: "請按鍵…",
     kb_reset_default: "恢復預設",
     kb_reset_all: "全部恢復預設",
     kb_close: "關閉",
-    kb_conflict_msg: "此快速鍵與以下操作衝突：",
+    kb_conflict_msg: "此快捷鍵與以下操作衝突：",
     kb_conflict_override: "覆蓋",
     kb_conflict_cancel: "取消",
     kb_dialog_hint_click: "左鍵點擊設為無，右鍵點擊恢復預設。",
@@ -349,7 +354,7 @@ export const zhTW = {
     kb_modifier_piano_keys_scroll_v: "琴鍵垂直捲動（按住+滾輪）",
     kb_modifier_piano_keys_zoom_v: "琴鍵垂直縮放（按住+滾輪）",
     kb_press_modifier: "請按修飾鍵\u2026",
-    menu_keybindings: "鍵盤快速鍵...",
+    menu_keybindings: "鍵盤快捷鍵...",
     kb_group_quick_search: "快速搜尋",
     kb_quick_search_open: "開啟快速搜尋",
     kb_quick_search_nav_up: "向上切換候選項",
@@ -385,7 +390,7 @@ export const zhTW = {
 
     // 工具列切換按鈕
     auto_crossfade: "自動交叉淡化",
-    grid_snap: "格線吸附",
+    grid_snap: "網格吸附",
     pitch_snap: "音高吸附",
     playhead_zoom: "基於播放游標縮放",
     auto_scroll: "自動捲動",
@@ -453,7 +458,7 @@ export const zhTW = {
 
     // 修飾鍵重新命名
     kb_modifier_toggle_snap: "自由移動（拖動音訊片段時按住）",
-    hint_toggle_snap: "拖動音訊片段時按住 Shift 可自由移動；否則預設吸附至格線",
+    hint_toggle_snap: "拖動音訊片段時按住 Shift 可自由移動；否則預設吸附至網格",
 
     // 檔案瀏覽器增強
     fb_regex: "正規式",

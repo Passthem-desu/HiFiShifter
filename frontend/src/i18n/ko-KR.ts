@@ -366,6 +366,11 @@ export const koKR = {
     child_pitch_offset_cents_short: "센트",
     child_pitch_offset_degrees_short: "도수",
     aria_loading: "로딩 중",
+    export_dialog_sample_rate: "샘플레이트",
+    export_dialog_bit_depth: "비트 심도",
+    export_dialog_error_invalid_sample_rate: "샘플레이트가 올바르지 않습니다.",
+    export_dialog_error_invalid_time_format:
+        "출력 경로에 잘못된 시간 포맷이 있습니다. 잘못된 '%'를 '%%'로 바꿔 주세요.",
 
     // 단축키 관리
     kb_dialog_title: "키보드 단축키",

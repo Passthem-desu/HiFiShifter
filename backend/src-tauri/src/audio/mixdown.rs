@@ -3,6 +3,8 @@ use crate::time_stretch::{time_stretch_interleaved, StretchAlgorithm};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 // ─── 导出格式与质量预设 ────────────────────────────────────────────────────────
 
@@ -41,12 +43,21 @@ pub struct MixdownOptions {
     /// 质量预设，默认 [`QualityPreset::Realtime`]。
     #[allow(dead_code)]
     pub quality_preset: QualityPreset,
+    /// 可选取消标记：为 true 时中断渲染并返回 `export_cancelled`。
+    pub cancel_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MixdownResult {
     pub sample_rate: u32,
     pub duration_sec: f64,
+}
+
+fn mixdown_cancelled(opts: &MixdownOptions) -> bool {
+    opts.cancel_flag
+        .as_ref()
+        .map(|flag| flag.load(Ordering::Relaxed))
+        .unwrap_or(false)
 }
 
 #[allow(dead_code)]
@@ -225,8 +236,16 @@ pub fn render_mixdown_wav(
     output_path: &Path,
     opts: MixdownOptions,
 ) -> Result<MixdownResult, String> {
+    if mixdown_cancelled(&opts) {
+        return Err("export_cancelled".to_string());
+    }
+
     let (out_rate, out_channels, duration_sec, mix) =
         render_mixdown_interleaved(timeline, opts.clone())?;
+
+    if mixdown_cancelled(&opts) {
+        return Err("export_cancelled".to_string());
+    }
 
     // 根据 export_format 选择 WavSpec。
     let spec = match opts.export_format {
@@ -253,7 +272,12 @@ pub fn render_mixdown_wav(
 
     match opts.export_format {
         ExportFormat::Wav16 => {
-            for s in mix {
+            for (idx, s) in mix.into_iter().enumerate() {
+                if idx % 8192 == 0 && mixdown_cancelled(&opts) {
+                    drop(writer);
+                    let _ = std::fs::remove_file(output_path);
+                    return Err("export_cancelled".to_string());
+                }
                 let v = clamp11(s);
                 let i = (v * i16::MAX as f32) as i16;
                 writer.write_sample(i).map_err(|e| e.to_string())?;
@@ -262,14 +286,24 @@ pub fn render_mixdown_wav(
         ExportFormat::Wav24 => {
             // hound 的 24-bit int 写入使用 i32，有效范围 [-8388608, 8388607]。
             const MAX24: f32 = 8_388_607.0;
-            for s in mix {
+            for (idx, s) in mix.into_iter().enumerate() {
+                if idx % 8192 == 0 && mixdown_cancelled(&opts) {
+                    drop(writer);
+                    let _ = std::fs::remove_file(output_path);
+                    return Err("export_cancelled".to_string());
+                }
                 let v = clamp11(s);
                 let i = (v * MAX24) as i32;
                 writer.write_sample(i).map_err(|e| e.to_string())?;
             }
         }
         ExportFormat::Wav32f => {
-            for s in mix {
+            for (idx, s) in mix.into_iter().enumerate() {
+                if idx % 8192 == 0 && mixdown_cancelled(&opts) {
+                    drop(writer);
+                    let _ = std::fs::remove_file(output_path);
+                    return Err("export_cancelled".to_string());
+                }
                 writer.write_sample(s).map_err(|e| e.to_string())?;
             }
         }
@@ -286,6 +320,10 @@ pub fn render_mixdown_interleaved(
     timeline: &TimelineState,
     opts: MixdownOptions,
 ) -> Result<(u32, u16, f64, Vec<f32>), String> {
+    if mixdown_cancelled(&opts) {
+        return Err("export_cancelled".to_string());
+    }
+
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
 
     let mut clips_considered: u32 = 0;
@@ -318,6 +356,10 @@ pub fn render_mixdown_interleaved(
     }
 
     for clip in &timeline.clips {
+        if mixdown_cancelled(&opts) {
+            return Err("export_cancelled".to_string());
+        }
+
         if clip.muted {
             continue;
         }
@@ -561,6 +603,9 @@ pub fn render_mixdown_interleaved(
 
         let has_volume_curve = volume_curve.is_some() && !volume_curve.as_ref().unwrap().is_empty();
         for f in 0..max_frames_to_mix {
+            if f % 4096 == 0 && mixdown_cancelled(&opts) {
+                return Err("export_cancelled".to_string());
+            }
             let oi = (out_offset_frames + f) * 2;
             let si = (seg_offset_frames + f) * 2;
 

@@ -295,6 +295,7 @@ pub fn run() {
             commands::save_synthesized,
             commands::save_separated,
             commands::export_audio_advanced,
+            commands::cancel_export_audio,
             commands::get_export_audio_defaults,
             commands::preview_export_audio_plan,
             commands::play_original,

@@ -285,6 +285,11 @@ export const zhCN = {
     child_pitch_offset_cents_short: "音分",
     child_pitch_offset_degrees_short: "度数",
     aria_loading: "加载中",
+    export_dialog_sample_rate: "采样率",
+    export_dialog_bit_depth: "位深",
+    export_dialog_error_invalid_sample_rate: "采样率无效。",
+    export_dialog_error_invalid_time_format:
+        "输出路径包含无效的时间格式。请将无效的 '%' 改为 '%%'。",
 
     // 快捷键管理
     kb_dialog_title: "快捷键设置",

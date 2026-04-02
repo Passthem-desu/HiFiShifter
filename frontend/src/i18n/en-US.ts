@@ -25,6 +25,8 @@ export const enUS = {
     export_dialog_project_path: "Output File",
     export_dialog_output_dir: "Output Folder",
     export_dialog_project_file_name: "Output File Name",
+    export_dialog_sample_rate: "Sample Rate",
+    export_dialog_bit_depth: "Bit Depth",
     export_dialog_browse: "Browse",
     export_dialog_name_pattern: "Track Name Pattern",
     export_dialog_targets: "Separated Track Targets",
@@ -38,6 +40,9 @@ export const enUS = {
     export_dialog_error_missing_project_file_name: "Please enter an output file name for project export.",
     export_dialog_error_missing_output_dir: "Please choose an output folder.",
     export_dialog_error_missing_targets: "Please select at least one separated target.",
+    export_dialog_error_invalid_sample_rate: "Invalid sample rate.",
+    export_dialog_error_invalid_time_format:
+        "Output path contains an invalid time format. Please replace invalid '%' with '%%'.",
     export_dialog_progress: "Exporting audio...",
     export_track_label_root_suffix: "(Root)",
     export_track_label_sub_suffix: "(Sub)",

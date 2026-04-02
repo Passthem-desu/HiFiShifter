@@ -630,6 +630,11 @@ pub async fn export_audio_advanced(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn cancel_export_audio() -> serde_json::Value {
+    synth::cancel_export_audio()
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn get_export_audio_defaults(
     state: State<'_, AppState>,
 ) -> synth::ExportAudioDefaultsPayload {
