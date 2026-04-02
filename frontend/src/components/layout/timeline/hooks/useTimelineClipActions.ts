@@ -29,6 +29,7 @@ import {
     splitClipRemote,
 } from "../../../../features/session/sessionSlice";
 import { webApi } from "../../../../services/webviewApi";
+import { waveformMipmapStore } from "../../../../utils/waveformMipmapStore";
 import { dbToGain } from "../math";
 import { computeAutoCrossfadeFromPayload } from "./autoCrossfade";
 import { useTimelineSelectionRect } from "../";
@@ -290,13 +291,37 @@ export function useTimelineClipActions(
     const normalizeClips = React.useCallback(
         (ids: string[]) => {
             for (const id of ids) {
-                const waveform = sessionRef.current.clipWaveforms[id];
-                if (!waveform) continue;
-                const samples = Array.isArray(waveform)
-                    ? waveform
-                    : [...waveform.l, ...waveform.r];
-                if (samples.length === 0) continue;
-                const peak = Math.max(...samples.map(Math.abs));
+                const clip = sessionRef.current.clips.find((c) => c.id === id);
+                if (!clip?.sourcePath || !clip.durationSec || clip.durationSec <= 0) {
+                    continue;
+                }
+                const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
+                const sourceEndSec =
+                    Number(clip.sourceEndSec ?? clip.durationSec) || clip.durationSec;
+                const playbackRate = Math.max(
+                    1e-6,
+                    Number(clip.playbackRate ?? 1) || 1,
+                );
+                const clipSourceSpanSec = Math.max(
+                    0,
+                    Math.min(clip.lengthSec * playbackRate, sourceEndSec - sourceStartSec),
+                );
+                if (clipSourceSpanSec <= 0) continue;
+
+                const slice = waveformMipmapStore.getInterleavedSlice(
+                    clip.sourcePath,
+                    0,
+                    sourceStartSec,
+                    clipSourceSpanSec,
+                );
+                if (!slice || slice.interleaved.length < 2) continue;
+                const data = slice.interleaved;
+                let peak = 0;
+                for (let i = 0; i < data.length; i++) {
+                    const v = Math.abs(data[i]);
+                    if (v > peak) peak = v;
+                }
+                waveformMipmapStore.releaseInterleaved(data);
                 if (peak <= 0) continue;
                 const newGain = Math.min(
                     Math.max(1.0 / peak, dbToGain(-12)),

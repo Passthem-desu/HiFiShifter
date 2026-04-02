@@ -1906,7 +1906,7 @@ impl TimelineState {
                 c.length_sec = v.max(0.0);
             }
             if let Some(v) = patch.gain {
-                c.gain = v.clamp(0.0, 2.0);
+                c.gain = v.clamp(0.0, 4.0);
             }
             if let Some(v) = patch.muted {
                 c.muted = v;

@@ -27,9 +27,10 @@ export function fadeInAreaPath(
         const y = height * (1 - g);
         pts.push({ x, y });
     }
-    let d = `M 0 ${height.toFixed(2)}`;
+    // Fill the area above the fade curve so the dark emphasis sits on top.
+    let d = `M 0 0`;
     for (const p of pts) d += ` L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`;
-    d += ` L ${width.toFixed(2)} ${height.toFixed(2)} Z`;
+    d += ` L ${width.toFixed(2)} 0 Z`;
     return d;
 }
 
@@ -49,8 +50,9 @@ export function fadeOutAreaPath(
         const y = height * (1 - g);
         pts.push({ x, y });
     }
-    let d = `M 0 ${height.toFixed(2)}`;
+    // Fill the area above the fade curve so the dark emphasis sits on top.
+    let d = `M 0 0`;
     for (const p of pts) d += ` L ${p.x.toFixed(2)} ${p.y.toFixed(2)}`;
-    d += ` L ${width.toFixed(2)} ${height.toFixed(2)} Z`;
+    d += ` L ${width.toFixed(2)} 0 Z`;
     return d;
 }
