@@ -30,6 +30,8 @@ import { QT_COLOR_TOKENS } from "./themeTypes";
 import { loadAppearance, saveAppearance, loadCustomThemes } from "./themeStorage";
 
 export type ThemeMode = "dark" | "light";
+const PREVIEW_SETTINGS_KEY = "hifishifter.appearance.preview";
+const PREVIEW_COLORS_KEY = "hifishifter.appearance.preview.colors";
 
 interface ThemeContextValue {
     mode: ThemeMode;
@@ -162,7 +164,62 @@ export function AppThemeProvider({ children }: PropsWithChildren) {
 
     useEffect(() => {
         document.documentElement.style.setProperty("--qt-font-family", fontFamily);
+        document.documentElement.style.setProperty("--default-font-family", fontFamily);
+        document.body.style.fontFamily = fontFamily;
     }, [fontFamily]);
+
+    useEffect(() => {
+        const applyPreviewFromStorage = () => {
+            try {
+                const settingsRaw = localStorage.getItem(PREVIEW_SETTINGS_KEY);
+                const colorsRaw = localStorage.getItem(PREVIEW_COLORS_KEY);
+                if (!settingsRaw && !colorsRaw) return;
+
+                if (settingsRaw) {
+                    const settings = JSON.parse(settingsRaw) as Pick<
+                        AppearanceSettings,
+                        "mode" | "accentColor" | "grayColor" | "radius" | "fontFamily"
+                    >;
+                    setAppearance((prev) => ({
+                        ...prev,
+                        mode: settings.mode,
+                        accentColor: settings.accentColor,
+                        grayColor: settings.grayColor,
+                        radius: settings.radius,
+                        fontFamily: settings.fontFamily,
+                        activeCustomThemeId: null,
+                    }));
+                }
+
+                const root = document.documentElement;
+                const colors = colorsRaw
+                    ? (JSON.parse(colorsRaw) as Partial<Record<QtColorToken, string>>)
+                    : {};
+                for (const token of QT_COLOR_TOKENS) {
+                    const val = colors[token];
+                    if (val) {
+                        root.style.setProperty(`--${token}`, val);
+                    } else {
+                        root.style.removeProperty(`--${token}`);
+                    }
+                }
+            } catch {
+                // ignore malformed preview payload
+            }
+        };
+
+        const onStorage = (e: StorageEvent) => {
+            if (
+                e.key === PREVIEW_SETTINGS_KEY ||
+                e.key === PREVIEW_COLORS_KEY
+            ) {
+                applyPreviewFromStorage();
+            }
+        };
+
+        window.addEventListener("storage", onStorage);
+        return () => window.removeEventListener("storage", onStorage);
+    }, []);
 
     /* ── 初始化时保存快照（用于第一次打开设置对话框） ── */
     useEffect(() => {

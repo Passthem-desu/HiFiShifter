@@ -384,10 +384,10 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                     top: position.y,
                     width: QUICK_SEARCH_POPUP_WIDTH,
                     maxHeight: QUICK_SEARCH_POPUP_HEIGHT,
-                    background: "var(--qt-window)",
+                    background: "var(--qt-panel)",
                     border: "1px solid var(--qt-border)",
-                    borderRadius: 6,
-                    boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+                    borderRadius: 10,
+                    boxShadow: "0 20px 44px rgba(0,0,0,0.28)",
                     overflow: "hidden",
                 }}
             >

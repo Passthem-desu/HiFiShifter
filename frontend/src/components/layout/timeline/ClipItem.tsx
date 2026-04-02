@@ -107,6 +107,9 @@ export const ClipItem = React.memo(function ClipItem({
 
     const showRepeatMarker = false;
     const repeatMarkerX = 0;
+    const fadeStrokeColor = selected
+        ? "var(--qt-clip-selected-border)"
+        : "var(--qt-clip-border)";
 
 
 
@@ -198,16 +201,6 @@ export const ClipItem = React.memo(function ClipItem({
                 width,
                 top: 0,
                 height: rowHeight - CLIP_BODY_PADDING_Y,
-                // 选中或 hover 时提升 z-index，确保 fade 手柄不被相邻 clip 遮挡
-                zIndex: selected ? 2 : undefined,
-            }}
-            onMouseEnter={(e) => {
-                (e.currentTarget as HTMLElement).style.zIndex = "2";
-            }}
-            onMouseLeave={(e) => {
-                (e.currentTarget as HTMLElement).style.zIndex = selected
-                    ? "2"
-                    : "";
             }}
             onContextMenu={(e) => {
                 e.preventDefault();
@@ -303,17 +296,18 @@ export const ClipItem = React.memo(function ClipItem({
 
             {/* Body block (does not fill the entire track row; leaves header lane above) */}
             <div
-                className={`absolute left-0 right-0 bottom-0 rounded-sm shadow-sm overflow-visible border transition-colors ${selected
-                    ? "border-white/90"
-                    : "border-transparent group-hover:border-white/30"
-                    }`}
+                className="absolute left-0 right-0 bottom-0 shadow-sm overflow-visible border transition-colors"
                 style={{
                     top: CLIP_HEADER_HEIGHT,
                     backgroundColor: trackColor
-                        ? `color-mix(in oklab, ${trackColor} 30%, transparent)`
-                        : "color-mix(in oklab, var(--qt-highlight) 35%, transparent)",
+                        ? `color-mix(in oklab, var(--qt-clip-bg) 60%, ${trackColor} 40%)`
+                        : "var(--qt-clip-bg)",
+                    borderColor: selected
+                        ? "var(--qt-clip-selected-border)"
+                        : "var(--qt-clip-border)",
                 }}
             >
+                <div className="absolute left-0 right-0 top-1/2 h-px bg-black/28 pointer-events-none z-20" />
                 {/* Body (waveform + edit handles) */}
                 <div className="absolute inset-0">
                     {/* Fade 角落 handle：始终存在，位于 body 左上�?右上角，用于�?0 开始拖拽出渐变 */}
@@ -354,11 +348,12 @@ export const ClipItem = React.memo(function ClipItem({
                             {/* 全区域条带：与可交互区域完全重合，右边缘竖线表示可拖拽边�?*/}
                             <div
                                 className={
-                                    "absolute inset-0 rounded-l-sm bg-white/8 border-r transition-opacity " +
+                                    "absolute inset-0 bg-black/10 border-r transition-opacity " +
                                     (selected
-                                        ? "opacity-100 border-white/70"
-                                        : "opacity-30 border-white/40 group-hover:opacity-100")
+                                        ? "opacity-100"
+                                        : "opacity-42 group-hover:opacity-100")
                                 }
+                                style={{ borderRightColor: fadeStrokeColor }}
                             />
                         </div>
                     )}
@@ -379,11 +374,12 @@ export const ClipItem = React.memo(function ClipItem({
                             {/* 全区域条带：与可交互区域完全重合，左边缘竖线表示可拖拽边�?*/}
                             <div
                                 className={
-                                    "absolute inset-0 rounded-r-sm bg-white/8 border-l transition-opacity " +
+                                    "absolute inset-0 bg-black/10 border-l transition-opacity " +
                                     (selected
-                                        ? "opacity-100 border-white/70"
-                                        : "opacity-30 border-white/40 group-hover:opacity-100")
+                                        ? "opacity-100"
+                                        : "opacity-42 group-hover:opacity-100")
                                 }
+                                style={{ borderLeftColor: fadeStrokeColor }}
                             />
                         </div>
                     )}
@@ -427,8 +423,8 @@ export const ClipItem = React.memo(function ClipItem({
                                         24,
                                         clip.fadeInCurve ?? "sine",
                                     )}
-                                    fill="rgba(255,255,255,0.14)"
-                                    stroke="rgba(255,255,255,0.55)"
+                                    fill="rgba(0,0,0,0.08)"
+                                    stroke={fadeStrokeColor}
                                     strokeWidth="1"
                                     vectorEffect="non-scaling-stroke"
                                 />
@@ -458,8 +454,8 @@ export const ClipItem = React.memo(function ClipItem({
                                         24,
                                         clip.fadeOutCurve ?? "sine",
                                     )}
-                                    fill="rgba(255,255,255,0.14)"
-                                    stroke="rgba(255,255,255,0.55)"
+                                    fill="rgba(0,0,0,0.08)"
+                                    stroke={fadeStrokeColor}
                                     strokeWidth="1"
                                     vectorEffect="non-scaling-stroke"
                                 />

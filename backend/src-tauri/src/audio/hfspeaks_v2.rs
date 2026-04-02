@@ -43,11 +43,11 @@ pub const MAX_MIPMAP_LEVELS: usize = 3;
 
 /// 默认 mipmap 除数因子 (针对 44.1kHz 优化)
 /// 三级 mipmap 缓存方案：
-/// - L0 (div=64):   精细级，近距离对轨，spp ≤ 256
+/// - L0 (div=32):   精细级，近距离对轨，spp ≤ 256
 /// - L1 (div=512):  中间级，日常编辑，256 < spp ≤ 2048
 /// - L2 (div=4096): 全局级，预览/导航，spp > 2048
 pub const DEFAULT_DIVISION_FACTORS: [u32; MAX_MIPMAP_LEVELS] = [
-    64,   // Level 0: ~689 peaks/sec at 44.1kHz (精细级，近距离对轨)
+    32,   // Level 0: ~1378 peaks/sec at 44.1kHz (精细级，近距离对轨)
     512,  // Level 1: ~86 peaks/sec at 44.1kHz (中间级，日常编辑)
     4096, // Level 2: ~11 peaks/sec at 44.1kHz (全局级，预览/导航)
 ];

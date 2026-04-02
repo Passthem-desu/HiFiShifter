@@ -473,7 +473,19 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         {t("menu_clear_waveform_cache")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
-                    <DropdownMenu.Item onSelect={() => theme.toggleMode()}>
+                    <DropdownMenu.Item
+                        onSelect={() => {
+                            const nextMode = theme.mode === "dark" ? "light" : "dark";
+                            theme.applySettings({
+                                mode: nextMode,
+                                accentColor: theme.accentColor,
+                                grayColor: theme.grayColor,
+                                radius: theme.radius,
+                                fontFamily: theme.fontFamily,
+                                activeCustomThemeId: theme.activeCustomThemeId,
+                            });
+                        }}
+                    >
                         {t("theme")}:{" "}
                         {theme.mode === "dark"
                             ? t("theme_dark")
@@ -550,11 +562,11 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             {/* 菜单导入模式选择（多文件） */}
             {menuImportMode && (
                 <div
-                    className="fixed inset-0 z-[9999] bg-black/35 flex items-center justify-center"
+                    className="fixed inset-0 z-[9999] bg-qt-overlay flex items-center justify-center"
                     onClick={() => setMenuImportMode(null)}
                 >
                     <div
-                        className="w-[380px] max-w-[92vw] bg-qt-panel border border-qt-border rounded-md shadow-xl"
+                        className="w-[380px] max-w-[92vw] bg-qt-panel border border-qt-border rounded-xl shadow-[0_20px_44px_rgba(0,0,0,0.28)]"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="px-4 py-3 border-b border-qt-border">
@@ -568,7 +580,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
                         <div className="px-3 py-3 flex flex-col gap-2">
                             <button
-                                className="w-full text-left px-3 py-2 rounded text-sm text-qt-text border border-qt-border hover:bg-qt-hover"
+                                className="w-full text-left px-3 py-2 rounded-lg text-sm text-qt-text border border-qt-border hover:bg-qt-hover"
                                 onClick={() => {
                                     const m = menuImportMode;
                                     setMenuImportMode(null);
@@ -583,7 +595,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                 {t("import_across_time")}
                             </button>
                             <button
-                                className="w-full text-left px-3 py-2 rounded text-sm text-qt-text border border-qt-border hover:bg-qt-hover"
+                                className="w-full text-left px-3 py-2 rounded-lg text-sm text-qt-text border border-qt-border hover:bg-qt-hover"
                                 onClick={() => {
                                     const m = menuImportMode;
                                     setMenuImportMode(null);
@@ -601,7 +613,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
                         <div className="px-3 py-2 border-t border-qt-border flex justify-end">
                             <button
-                                className="px-3 py-1.5 text-xs text-qt-text hover:bg-qt-hover rounded"
+                                className="px-3 py-1.5 text-xs text-qt-text hover:bg-qt-hover rounded-lg"
                                 onClick={() => setMenuImportMode(null)}
                             >
                                 {tAny("cancel") || "Cancel"}

@@ -51,22 +51,30 @@ export const RADIX_RADIUS_OPTIONS: RadixRadius[] = [
 /** 项目中所有 --qt-* CSS 变量 token 名 */
 export type QtColorToken =
     | "qt-window" | "qt-base" | "qt-panel" | "qt-surface"
+    | "qt-clip-bg" | "qt-clip-border" | "qt-clip-selected-border"
     | "qt-text" | "qt-text-muted" | "qt-highlight" | "qt-playhead"
-    | "qt-button" | "qt-button-hover" | "qt-border"
+    | "qt-button" | "qt-button-hover" | "qt-border" | "qt-hover"
     | "qt-danger-bg" | "qt-danger-text" | "qt-danger-border"
     | "qt-warning-bg" | "qt-warning-text" | "qt-warning-border"
     | "qt-graph-bg" | "qt-graph-grid-strong" | "qt-graph-grid-weak"
-    | "qt-scrollbar-thumb" | "qt-scrollbar-thumb-hover";
+    | "qt-scrollbar-thumb" | "qt-scrollbar-thumb-hover"
+    | "qt-overlay" | "qt-divider"
+    | "qt-subtle-1" | "qt-subtle-2" | "qt-subtle-3"
+    | "qt-meter-rail" | "qt-meter-well";
 
 /** 所有 Qt 颜色 token（有序列表，用于 UI 渲染） */
 export const QT_COLOR_TOKENS: QtColorToken[] = [
     "qt-window", "qt-base", "qt-panel", "qt-surface",
+    "qt-clip-bg", "qt-clip-border", "qt-clip-selected-border",
     "qt-text", "qt-text-muted", "qt-highlight", "qt-playhead",
-    "qt-button", "qt-button-hover", "qt-border",
+    "qt-button", "qt-button-hover", "qt-border", "qt-hover",
     "qt-danger-bg", "qt-danger-text", "qt-danger-border",
     "qt-warning-bg", "qt-warning-text", "qt-warning-border",
     "qt-graph-bg", "qt-graph-grid-strong", "qt-graph-grid-weak",
     "qt-scrollbar-thumb", "qt-scrollbar-thumb-hover",
+    "qt-overlay", "qt-divider",
+    "qt-subtle-1", "qt-subtle-2", "qt-subtle-3",
+    "qt-meter-rail", "qt-meter-well",
 ];
 
 /** Qt 颜色 token 的显示名（i18n key） */
@@ -75,6 +83,9 @@ export const QT_COLOR_TOKEN_LABELS: Record<QtColorToken, string> = {
     "qt-base": "appearance_color_base",
     "qt-panel": "appearance_color_panel",
     "qt-surface": "appearance_color_surface",
+    "qt-clip-bg": "appearance_color_clip_bg",
+    "qt-clip-border": "appearance_color_clip_border",
+    "qt-clip-selected-border": "appearance_color_clip_selected_border",
     "qt-text": "appearance_color_text",
     "qt-text-muted": "appearance_color_text_muted",
     "qt-highlight": "appearance_color_highlight",
@@ -82,6 +93,7 @@ export const QT_COLOR_TOKEN_LABELS: Record<QtColorToken, string> = {
     "qt-button": "appearance_color_button",
     "qt-button-hover": "appearance_color_button_hover",
     "qt-border": "appearance_color_border",
+    "qt-hover": "appearance_color_hover",
     "qt-danger-bg": "appearance_color_danger_bg",
     "qt-danger-text": "appearance_color_danger_text",
     "qt-danger-border": "appearance_color_danger_border",
@@ -93,6 +105,13 @@ export const QT_COLOR_TOKEN_LABELS: Record<QtColorToken, string> = {
     "qt-graph-grid-weak": "appearance_color_graph_grid_weak",
     "qt-scrollbar-thumb": "appearance_color_scrollbar_thumb",
     "qt-scrollbar-thumb-hover": "appearance_color_scrollbar_thumb_hover",
+    "qt-overlay": "appearance_color_overlay",
+    "qt-divider": "appearance_color_divider",
+    "qt-subtle-1": "appearance_color_subtle_1",
+    "qt-subtle-2": "appearance_color_subtle_2",
+    "qt-subtle-3": "appearance_color_subtle_3",
+    "qt-meter-rail": "appearance_color_meter_rail",
+    "qt-meter-well": "appearance_color_meter_well",
 };
 
 /* ─────────────────── 自定义主题 ─────────────────── */
