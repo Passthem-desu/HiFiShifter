@@ -24,6 +24,7 @@ const TRACK_METER_MAX_DB = 3;
 const TRACK_GAIN_MIN_DB = -60;
 const TRACK_GAIN_MAX_DB = 12;
 const TRACK_GAIN_WHEEL_STEP_DB = 0.5;
+const TRACK_GAIN_WHEEL_COMMIT_DEBOUNCE_MS = 120;
 
 function gainToDb(gain: number): number {
     if (!Number.isFinite(gain) || gain <= 1e-4) return TRACK_GAIN_MIN_DB;
@@ -161,6 +162,7 @@ export const TrackList: React.FC<{
         mode: "reorder" | "nest";
         indicatorY: number | null;
     } | null>(null);
+    const volumeCommitTimersRef = useRef<Record<string, number>>({});
 
     // 轨道颜色选择器弹出状�?
     const [colorPickerTrackId, setColorPickerTrackId] = useState<string | null>(null);
@@ -362,8 +364,30 @@ export const TrackList: React.FC<{
             // Safety cleanup.
             dragRef.current = null;
             setDragUi(null);
+            const timerIds = Object.values(volumeCommitTimersRef.current);
+            for (const timerId of timerIds) {
+                window.clearTimeout(timerId);
+            }
+            volumeCommitTimersRef.current = {};
         };
     }, []);
+
+    function clearPendingVolumeCommit(trackId: string) {
+        const timerId = volumeCommitTimersRef.current[trackId];
+        if (typeof timerId === "number") {
+            window.clearTimeout(timerId);
+            delete volumeCommitTimersRef.current[trackId];
+        }
+    }
+
+    function scheduleVolumeCommit(trackId: string, nextVolume: number) {
+        clearPendingVolumeCommit(trackId);
+        const timerId = window.setTimeout(() => {
+            delete volumeCommitTimersRef.current[trackId];
+            onVolumeCommit(trackId, nextVolume);
+        }, TRACK_GAIN_WHEEL_COMMIT_DEBOUNCE_MS);
+        volumeCommitTimersRef.current[trackId] = timerId;
+    }
 
     useEffect(() => {
         rowHeightRef.current = rowHeight;
@@ -474,7 +498,7 @@ export const TrackList: React.FC<{
                             );
                             const nextVolume = dbToGain(nextDb);
                             onVolumeUiChange(trackId, nextVolume);
-                            onVolumeCommit(trackId, nextVolume);
+                            scheduleVolumeCommit(trackId, nextVolume);
                             e.preventDefault();
                             e.stopPropagation();
                             return;
@@ -590,6 +614,7 @@ export const TrackList: React.FC<{
     ) {
         e.preventDefault();
         e.stopPropagation();
+        clearPendingVolumeCommit(trackId);
 
         const startY = e.clientY;
         const startDb = clampGainDb(gainToDb(volume));
@@ -1143,6 +1168,7 @@ export const TrackList: React.FC<{
                                             onClick={(e) => e.stopPropagation()}
                                             onDoubleClick={(e) => {
                                                 e.stopPropagation();
+                                                clearPendingVolumeCommit(track.id);
                                                 onVolumeUiChange(track.id, 1);
                                                 onVolumeCommit(track.id, 1);
                                             }}
