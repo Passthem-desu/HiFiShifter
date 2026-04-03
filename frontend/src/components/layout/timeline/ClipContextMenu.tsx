@@ -1,15 +1,9 @@
 import React, { useLayoutEffect, useRef } from "react";
-import type {
-    ClipInfo,
-    FadeCurveType,
-} from "../../../features/session/sessionTypes";
+import type { ClipInfo, FadeCurveType } from "../../../features/session/sessionTypes";
 import { useI18n } from "../../../i18n/I18nProvider";
 import type { MessageKey } from "../../../i18n/messages";
 import { useAppSelector } from "../../../app/hooks";
-import {
-    selectKeybinding,
-    formatKeybinding,
-} from "../../../features/keybindings/keybindingsSlice";
+import { selectKeybinding, formatKeybinding } from "../../../features/keybindings/keybindingsSlice";
 import { sortAndFilterFadedClips } from "./clipFadeContext";
 
 // ── 单条菜单项 ──────────────────────────────────────────────────────────────
@@ -37,15 +31,11 @@ const MenuItem: React.FC<{
         }}
     >
         <span>{label}</span>
-        {shortcut && (
-            <span className="text-[10px] opacity-50 shrink-0">{shortcut}</span>
-        )}
+        {shortcut && <span className="text-[10px] opacity-50 shrink-0">{shortcut}</span>}
     </button>
 );
 
-const Divider: React.FC = () => (
-    <div className="my-1 border-t border-qt-border" />
-);
+const Divider: React.FC = () => <div className="my-1 border-t border-qt-border" />;
 
 // ── 渐变曲线选项 ────────────────────────────────────────────────────────────
 const CURVE_OPTION_KEYS: { value: FadeCurveType; key: MessageKey }[] = [
@@ -63,9 +53,7 @@ const FadeCurveRow: React.FC<{
     t: (key: MessageKey) => string;
 }> = ({ label, current, onSelect, t }) => (
     <div className="px-3 py-1.5 flex items-center gap-1.5 flex-wrap">
-        <span className="text-[11px] text-qt-text/60 mr-1 shrink-0">
-            {label}
-        </span>
+        <span className="text-[11px] text-qt-text/60 mr-1 shrink-0">{label}</span>
         {CURVE_OPTION_KEYS.map((opt) => (
             <button
                 key={opt.value}
@@ -112,11 +100,7 @@ export const ClipContextMenu: React.FC<{
     onGlue: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
     onToggleReverse: (ids: string[], reversed: boolean) => void;
-    onFadeCurveChange?: (
-        clipId: string,
-        target: "in" | "out",
-        curve: FadeCurveType,
-    ) => void;
+    onFadeCurveChange?: (clipId: string, target: "in" | "out", curve: FadeCurveType) => void;
 }> = ({
     x,
     y,
@@ -140,19 +124,12 @@ export const ClipContextMenu: React.FC<{
 }) => {
     const { t } = useI18n();
     const menuRef = useRef<HTMLDivElement>(null);
-    const ids =
-        selectedClips.length >= 2
-            ? selectedClips.map((c) => c.id)
-            : [clip.id];
+    const ids = selectedClips.length >= 2 ? selectedClips.map((c) => c.id) : [clip.id];
     const isMulti = ids.length >= 2;
     const isSingle = !isMulti;
 
-    const normalizeKb = useAppSelector((state) =>
-        selectKeybinding(state, "clip.normalize"),
-    );
-    const normalizeShortcut = normalizeKb
-        ? formatKeybinding(normalizeKb, "")
-        : undefined;
+    const normalizeKb = useAppSelector((state) => selectKeybinding(state, "clip.normalize"));
+    const normalizeShortcut = normalizeKb ? formatKeybinding(normalizeKb, "") : undefined;
 
     // 胶合：仅同轨且多选时可用
     const glueDisabled =
@@ -164,9 +141,7 @@ export const ClipContextMenu: React.FC<{
 
     // 多选中是否全部静音
     const allMuted = isMulti ? selectedClips.every((c) => c.muted) : clip.muted;
-    const allReversed = isMulti
-        ? selectedClips.every((c) => c.reversed)
-        : clip.reversed;
+    const allReversed = isMulti ? selectedClips.every((c) => c.reversed) : clip.reversed;
 
     function close() {
         onClose();
@@ -179,10 +154,8 @@ export const ClipContextMenu: React.FC<{
         const rect = el.getBoundingClientRect();
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        if (rect.right > vw)
-            el.style.left = `${Math.max(0, vw - rect.width)}px`;
-        if (rect.bottom > vh)
-            el.style.top = `${Math.max(0, vh - rect.height)}px`;
+        if (rect.right > vw) el.style.left = `${Math.max(0, vw - rect.width)}px`;
+        if (rect.bottom > vh) el.style.top = `${Math.max(0, vh - rect.height)}px`;
     }, [x, y]);
 
     return (
@@ -196,10 +169,7 @@ export const ClipContextMenu: React.FC<{
             {isMulti && (
                 <>
                     <div className="px-3 py-1 text-[11px] text-qt-text/50 select-none">
-                        {t("ctx_selected_n").replace(
-                            "{n}",
-                            String(selectedClips.length),
-                        )}
+                        {t("ctx_selected_n").replace("{n}", String(selectedClips.length))}
                     </div>
                     <Divider />
                 </>
@@ -220,8 +190,8 @@ export const ClipContextMenu: React.FC<{
                             ? t("ctx_unmute_all")
                             : t("clip_unmute")
                         : isMulti
-                            ? t("ctx_mute_all")
-                            : t("clip_mute")
+                          ? t("ctx_mute_all")
+                          : t("clip_mute")
                 }
                 onClick={() => {
                     onMute(ids, !allMuted);
@@ -235,8 +205,8 @@ export const ClipContextMenu: React.FC<{
                             ? t("ctx_unreverse_selected")
                             : t("ctx_unreverse")
                         : isMulti
-                            ? t("ctx_reverse_selected")
-                            : t("ctx_reverse")
+                          ? t("ctx_reverse_selected")
+                          : t("ctx_reverse")
                 }
                 onClick={() => {
                     onToggleReverse(ids, !allReversed);
@@ -345,9 +315,7 @@ export const ClipContextMenu: React.FC<{
                                     {fc.fadeInSec > 0 && (
                                         <FadeCurveRow
                                             label={t("fade_in")}
-                                            current={
-                                                (fc.fadeInCurve as FadeCurveType) ?? "sine"
-                                            }
+                                            current={(fc.fadeInCurve as FadeCurveType) ?? "sine"}
                                             onSelect={(c) => {
                                                 onFadeCurveChange(fc.id, "in", c);
                                             }}
@@ -357,9 +325,7 @@ export const ClipContextMenu: React.FC<{
                                     {fc.fadeOutSec > 0 && (
                                         <FadeCurveRow
                                             label={t("fade_out")}
-                                            current={
-                                                (fc.fadeOutCurve as FadeCurveType) ?? "sine"
-                                            }
+                                            current={(fc.fadeOutCurve as FadeCurveType) ?? "sine"}
                                             onSelect={(c) => {
                                                 onFadeCurveChange(fc.id, "out", c);
                                             }}

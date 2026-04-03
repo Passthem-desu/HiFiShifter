@@ -95,12 +95,7 @@ export function useTimelineSelectionRect(params: {
 
             if (
                 !drag.hasSelectionDrag &&
-                isTimelineSelectionDrag(
-                    drag.startX,
-                    drag.startY,
-                    drag.curX,
-                    drag.curY,
-                )
+                isTimelineSelectionDrag(drag.startX, drag.startY, drag.curX, drag.curY)
             ) {
                 drag.hasSelectionDrag = true;
                 clearContextMenu();
@@ -141,19 +136,13 @@ export function useTimelineSelectionRect(params: {
             const session = sessionRef.current;
             const selected: string[] = [];
             for (const clip of session.clips) {
-                const trackIdx = session.tracks.findIndex(
-                    (t) => t.id === clip.trackId,
-                );
+                const trackIdx = session.tracks.findIndex((t) => t.id === clip.trackId);
                 if (trackIdx < 0) continue;
                 const cx1 = clip.startSec * pxPerBeat;
                 const cx2 = (clip.startSec + clip.lengthSec) * pxPerBeat;
                 const cy1 = trackIdx * rowHeight;
                 const cy2 = cy1 + rowHeight;
-                const hit =
-                    cx2 >= rect.x1 &&
-                    cx1 <= rect.x2 &&
-                    cy2 >= rect.y1 &&
-                    cy1 <= rect.y2;
+                const hit = cx2 >= rect.x1 && cx1 <= rect.x2 && cy2 >= rect.y1 && cy1 <= rect.y2;
                 if (hit) selected.push(clip.id);
             }
             setMultiSelectedClipIds(selected);
@@ -172,11 +161,7 @@ export function useTimelineSelectionRect(params: {
             });
             // 安全回退：200ms 后自动移除，防止意外吞掉后续正常右键
             setTimeout(() => {
-                window.removeEventListener(
-                    "contextmenu",
-                    suppressContextMenu,
-                    { capture: true },
-                );
+                window.removeEventListener("contextmenu", suppressContextMenu, { capture: true });
             }, 200);
 
             window.removeEventListener("pointermove", onMove);

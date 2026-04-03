@@ -87,10 +87,7 @@ const keybindingsSlice = createSlice({
     initialState,
     reducers: {
         /** 设置某个操作的快捷键绑定 */
-        setKeybinding(
-            state,
-            action: PayloadAction<{ actionId: ActionId; binding: Keybinding }>,
-        ) {
+        setKeybinding(state, action: PayloadAction<{ actionId: ActionId; binding: Keybinding }>) {
             const { actionId, binding } = action.payload;
             const defaultBinding = DEFAULT_KEYBINDINGS[actionId];
             if (defaultBinding && keybindingEqual(defaultBinding, binding)) {
@@ -116,17 +113,14 @@ const keybindingsSlice = createSlice({
     },
 });
 
-export const { setKeybinding, resetKeybinding, resetAllKeybindings } =
-    keybindingsSlice.actions;
+export const { setKeybinding, resetKeybinding, resetAllKeybindings } = keybindingsSlice.actions;
 
 export default keybindingsSlice.reducer;
 
 // ─── Selectors ───────────────────────────────────────────────────
 
 /** 获取合并后的完整快捷键映射 */
-export function selectMergedKeybindings(state: {
-    keybindings: KeybindingsState;
-}): KeybindingMap {
+export function selectMergedKeybindings(state: { keybindings: KeybindingsState }): KeybindingMap {
     return mergeKeybindings(state.keybindings.overrides);
 }
 
@@ -150,10 +144,11 @@ export function findConflicts(
         if (VIBRATO_WHEEL_MODIFIERS.has(actionId)) {
             const merged = mergeKeybindings(overrides);
             const conflicts = (Object.entries(merged) as [ActionId, Keybinding][])
-                .filter(([id, binding]) =>
-                    id !== actionId &&
-                    VIBRATO_WHEEL_MODIFIERS.has(id) &&
-                    isNoneBinding(binding),
+                .filter(
+                    ([id, binding]) =>
+                        id !== actionId &&
+                        VIBRATO_WHEEL_MODIFIERS.has(id) &&
+                        isNoneBinding(binding),
                 )
                 .map(([id]) => id);
             return conflicts;
@@ -170,8 +165,11 @@ export function findConflicts(
             const otherMeta = ACTION_META[id as ActionId];
             // 修饰键：仅同操作类型才冲突
             if (selfMeta?.group === "modifier" && otherMeta?.group === "modifier") {
-                if (selfMeta.modifierOperationType && otherMeta.modifierOperationType &&
-                    selfMeta.modifierOperationType !== otherMeta.modifierOperationType) {
+                if (
+                    selfMeta.modifierOperationType &&
+                    otherMeta.modifierOperationType &&
+                    selfMeta.modifierOperationType !== otherMeta.modifierOperationType
+                ) {
                     continue; // 不同操作类型，不算冲突
                 }
             }
@@ -202,8 +200,7 @@ export function isModifierActive(
 ): boolean {
     if (isNoneBinding(kb)) return false;
     const isMac =
-        typeof navigator !== "undefined" &&
-        navigator.platform?.toLowerCase().includes("mac");
+        typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
     if (kb.ctrl) return isMac ? Boolean(event.metaKey) : event.ctrlKey;
     if (kb.alt) return event.altKey;
     if (kb.shift) return event.shiftKey;

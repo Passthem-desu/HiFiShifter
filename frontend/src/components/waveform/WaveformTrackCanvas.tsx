@@ -146,9 +146,7 @@ export const WaveformTrackCanvas = React.memo(
             // ========================================
             const __perfDebug =
                 typeof window !== "undefined" &&
-                window.localStorage?.getItem(
-                    "hifishifter.debugWaveformPerf",
-                ) === "1";
+                window.localStorage?.getItem("hifishifter.debugWaveformPerf") === "1";
             const __t0 = __perfDebug ? performance.now() : 0;
             let __tSetup = 0,
                 __clipTimings: {
@@ -198,88 +196,56 @@ export const WaveformTrackCanvas = React.memo(
             if (__perfDebug) __tSetup = performance.now() - __t0;
 
             for (const clip of currentClips) {
-                if (
-                    !clip.sourcePath ||
-                    !clip.durationSec ||
-                    clip.durationSec <= 0
-                )
-                    continue;
+                if (!clip.sourcePath || !clip.durationSec || clip.durationSec <= 0) continue;
 
                 const clipStartSec = clip.startSec;
                 const clipEndSec = clipStartSec + clip.lengthSec;
                 const clipWidthPx = clip.lengthSec * currentPxPerSec;
 
                 // clip 与视口的交集
-                const visStartSec = Math.max(
-                    clipStartSec,
-                    currentViewportStartSec,
-                );
+                const visStartSec = Math.max(clipStartSec, currentViewportStartSec);
                 const visEndSec = Math.min(clipEndSec, currentViewportEndSec);
                 if (visEndSec <= visStartSec) continue;
 
                 // 统一使用浮点像素坐标，避免多重 round 导致的帧间抖动
-                const viewportStartPx =
-                    currentViewportStartSec * currentPxPerSec;
+                const viewportStartPx = currentViewportStartSec * currentPxPerSec;
                 const clipStartPx = clipStartSec * currentPxPerSec;
                 const clipEndPx = clipEndSec * currentPxPerSec;
                 const visLeftPx = Math.max(0, clipStartPx - viewportStartPx);
-                const visRightPx = Math.min(
-                    displayW,
-                    clipEndPx - viewportStartPx,
-                );
+                const visRightPx = Math.min(displayW, clipEndPx - viewportStartPx);
                 if (visRightPx <= visLeftPx) continue;
                 const pr = Math.max(1e-6, clip.playbackRate);
                 const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
-                const visibleWidthPx = Math.max(
-                    1,
-                    Math.ceil(visRightPx - visLeftPx),
-                );
+                const visibleWidthPx = Math.max(1, Math.ceil(visRightPx - visLeftPx));
 
                 // 计算源文件时间范围
                 const sampleRate = clip.sourceSampleRate || 44100;
-                const spp = Math.max(
-                    1,
-                    Math.round(sampleRate / currentPxPerSec),
-                );
+                const spp = Math.max(1, Math.round(sampleRate / currentPxPerSec));
                 const levelKey = `${clip.sourcePath}::${clip.id}`;
                 const previousLevel = lastLevelByClipRef.current[levelKey];
-                const stableLevel = waveformMipmapStore.selectLevelStable(
-                    spp,
-                    previousLevel,
-                );
+                const stableLevel = waveformMipmapStore.selectLevelStable(spp, previousLevel);
                 lastLevelByClipRef.current[levelKey] = stableLevel;
 
                 const clipSourceEndSec =
-                    Number(clip.sourceEndSec ?? clip.durationSec) ||
-                    clip.durationSec;
+                    Number(clip.sourceEndSec ?? clip.durationSec) || clip.durationSec;
                 const clipSourceSpanSec = Math.max(
                     0,
-                    Math.min(
-                        clip.lengthSec * pr,
-                        clipSourceEndSec - sourceStartSec,
-                    ),
+                    Math.min(clip.lengthSec * pr, clipSourceEndSec - sourceStartSec),
                 );
                 if (clipSourceSpanSec <= 1e-6) continue;
 
                 // 仅请求当前可见窗口对应的源数据，显著降低每帧处理成本
                 const visClipStartSec = Math.max(0, visStartSec - clipStartSec);
-                const visClipEndSec = Math.min(
-                    clip.lengthSec,
-                    visEndSec - clipStartSec,
-                );
+                const visClipEndSec = Math.min(clip.lengthSec, visEndSec - clipStartSec);
                 const clipSourceWindowStartSec = sourceStartSec;
-                const clipSourceWindowEndSec =
-                    sourceStartSec + clipSourceSpanSec;
+                const clipSourceWindowEndSec = sourceStartSec + clipSourceSpanSec;
                 const sourceVisStartSec = clip.reversed
                     ? clipSourceWindowEndSec - visClipEndSec * pr
                     : clipSourceWindowStartSec + visClipStartSec * pr;
                 const sourceVisEndSec = clip.reversed
                     ? clipSourceWindowEndSec - visClipStartSec * pr
                     : clipSourceWindowStartSec + visClipEndSec * pr;
-                const sourcePadSec = Math.max(
-                    0.005,
-                    (2 / Math.max(1, currentPxPerSec)) * pr,
-                );
+                const sourcePadSec = Math.max(0.005, (2 / Math.max(1, currentPxPerSec)) * pr);
                 const sourceTimeStart = Math.max(
                     clipSourceWindowStartSec,
                     Math.min(sourceVisStartSec, sourceVisEndSec) - sourcePadSec,
@@ -288,10 +254,7 @@ export const WaveformTrackCanvas = React.memo(
                     clipSourceWindowEndSec,
                     Math.max(sourceVisStartSec, sourceVisEndSec) + sourcePadSec,
                 );
-                const sourceDuration = Math.max(
-                    0.001,
-                    sourceTimeEnd - sourceTimeStart,
-                );
+                const sourceDuration = Math.max(0.001, sourceTimeEnd - sourceTimeStart);
 
                 // ========================================
                 // 从 mipmap 缓存获取 interleaved 数据（不 resample，与 PianoRoll 一致）
@@ -318,10 +281,7 @@ export const WaveformTrackCanvas = React.memo(
                 let releasedStoreInterleaved = false;
                 const rawSampleCount = storeInterleaved.length / 2;
                 // 使用与 clip 自身宽度绑定的稳定采样目标，避免滚屏时分桶边界漂移导致抖动
-                const stableTargetWidthPx = Math.max(
-                    1,
-                    Math.ceil(visibleWidthPx * 2),
-                );
+                const stableTargetWidthPx = Math.max(1, Math.ceil(visibleWidthPx * 2));
                 const targetSamples = stableTargetWidthPx * 2;
 
                 if (rawSampleCount > targetSamples && targetSamples >= 2) {
@@ -338,10 +298,7 @@ export const WaveformTrackCanvas = React.memo(
                         const srcEnd = srcStart + srcStep;
 
                         const iStart = Math.max(0, Math.floor(srcStart));
-                        const iEnd = Math.min(
-                            rawSampleCount - 1,
-                            Math.ceil(srcEnd),
-                        );
+                        const iEnd = Math.min(rawSampleCount - 1, Math.ceil(srcEnd));
 
                         let pMin = Infinity;
                         let pMax = -Infinity;
@@ -380,8 +337,7 @@ export const WaveformTrackCanvas = React.memo(
                     fadeInSec: Number(clip.fadeInSec ?? 0) || 0,
                     fadeOutSec: Number(clip.fadeOutSec ?? 0) || 0,
                     fadeInCurve: (clip.fadeInCurve as FadeCurveType) ?? "sine",
-                    fadeOutCurve:
-                        (clip.fadeOutCurve as FadeCurveType) ?? "sine",
+                    fadeOutCurve: (clip.fadeOutCurve as FadeCurveType) ?? "sine",
                     dataStartSec: result.dataStartSec,
                     dataDurationSec: result.dataDurationSec,
                     clipPixelOffset, // 相对于主 Canvas 的偏移
@@ -442,8 +398,7 @@ export const WaveformTrackCanvas = React.memo(
 
                 // 收集诊断数据
                 if (__perfDebug) {
-                    const fileName =
-                        clip.sourcePath?.split(/[/\\]/).pop() ?? "?";
+                    const fileName = clip.sourcePath?.split(/[/\\]/).pop() ?? "?";
                     __clipTimings.push({
                         name: fileName,
                         sliceMs: __tSlice1 - __tSlice0,
@@ -468,23 +423,11 @@ export const WaveformTrackCanvas = React.memo(
             if (__perfDebug) {
                 const totalMs = performance.now() - __t0;
                 const clipCount = __clipTimings.length;
-                const sumSlice = __clipTimings.reduce(
-                    (s, c) => s + c.sliceMs,
-                    0,
-                );
-                const sumDs = __clipTimings.reduce(
-                    (s, c) => s + c.downsampleMs,
-                    0,
-                );
+                const sumSlice = __clipTimings.reduce((s, c) => s + c.sliceMs, 0);
+                const sumDs = __clipTimings.reduce((s, c) => s + c.downsampleMs, 0);
                 const sumGain = __clipTimings.reduce((s, c) => s + c.gainMs, 0);
-                const sumRender = __clipTimings.reduce(
-                    (s, c) => s + c.renderMs,
-                    0,
-                );
-                const sumDrawImg = __clipTimings.reduce(
-                    (s, c) => s + c.drawImageMs,
-                    0,
-                );
+                const sumRender = __clipTimings.reduce((s, c) => s + c.renderMs, 0);
+                const sumDrawImg = __clipTimings.reduce((s, c) => s + c.drawImageMs, 0);
                 console.log(
                     `%c[WaveformPerf] frame ${totalMs.toFixed(1)}ms | setup=${__tSetup.toFixed(1)}ms | clips=${clipCount} | pxPerSec=${currentPxPerSec.toFixed(0)} | canvasW=${displayW} | dpr=${dpr}`,
                     totalMs > 16 ? "color:red;font-weight:bold" : "color:green",
@@ -509,13 +452,11 @@ export const WaveformTrackCanvas = React.memo(
                 if (clip.sourcePath) neededPaths.add(clip.sourcePath);
             }
 
-            const unsub = waveformMipmapStore.addListener(
-                (sourcePath, status) => {
-                    if (status === "done" && neededPaths.has(sourcePath)) {
-                        invalidate();
-                    }
-                },
-            );
+            const unsub = waveformMipmapStore.addListener((sourcePath, status) => {
+                if (status === "done" && neededPaths.has(sourcePath)) {
+                    invalidate();
+                }
+            });
 
             return unsub;
         }, [clips, invalidate]);
@@ -526,22 +467,20 @@ export const WaveformTrackCanvas = React.memo(
         // 完全绕过 React props 链路，与 PianoRoll 架构一致
         // ========================================
         React.useEffect(() => {
-            const unsub = timelineViewportBus.subscribe(
-                (scrollLeft, pxPerSec, viewportWidth) => {
-                    // 直接更新 ref（不触发 React re-render）
-                    pxPerSecRef.current = pxPerSec;
-                    const vpStartSec = scrollLeft / pxPerSec;
-                    const vpEndSec = vpStartSec + viewportWidth / pxPerSec;
-                    viewportStartSecRef.current = vpStartSec;
-                    viewportEndSecRef.current = vpEndSec;
-                    viewportWidthPxRef.current = viewportWidth;
-                    if (canvasRef.current) {
-                        canvasRef.current.style.transform = `translate3d(${scrollLeft}px,0,0)`;
-                    }
+            const unsub = timelineViewportBus.subscribe((scrollLeft, pxPerSec, viewportWidth) => {
+                // 直接更新 ref（不触发 React re-render）
+                pxPerSecRef.current = pxPerSec;
+                const vpStartSec = scrollLeft / pxPerSec;
+                const vpEndSec = vpStartSec + viewportWidth / pxPerSec;
+                viewportStartSecRef.current = vpStartSec;
+                viewportEndSecRef.current = vpEndSec;
+                viewportWidthPxRef.current = viewportWidth;
+                if (canvasRef.current) {
+                    canvasRef.current.style.transform = `translate3d(${scrollLeft}px,0,0)`;
+                }
 
-                    invalidate();
-                },
-            );
+                invalidate();
+            });
             return unsub;
         }, [invalidate]);
 
@@ -552,14 +491,7 @@ export const WaveformTrackCanvas = React.memo(
         // ========================================
         React.useEffect(() => {
             invalidate();
-        }, [
-            clips,
-            waveformHeight,
-            strokeColor,
-            strokeWidth,
-            viewportWidthPx,
-            invalidate,
-        ]);
+        }, [clips, waveformHeight, strokeColor, strokeWidth, viewportWidthPx, invalidate]);
 
         // 组件卸载时取消待执行的 rAF
         React.useEffect(() => {

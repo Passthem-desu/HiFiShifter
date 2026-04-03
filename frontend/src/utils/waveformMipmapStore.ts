@@ -12,10 +12,7 @@
  */
 
 import { waveformApi } from "../services/api/waveform";
-import {
-    decodeWaveformFromBase64,
-    type WaveformMipmapBinary,
-} from "./waveformBinaryCodec";
+import { decodeWaveformFromBase64, type WaveformMipmapBinary } from "./waveformBinaryCodec";
 
 // ============== 常量 ==============
 
@@ -96,10 +93,7 @@ class WaveformMipmapStoreImpl {
     }
 
     releaseInterleaved(buf: Float32Array): void {
-        if (
-            buf.length > 0 &&
-            this.interleavedPool.length < WaveformMipmapStoreImpl.POOL_MAX
-        ) {
+        if (buf.length > 0 && this.interleavedPool.length < WaveformMipmapStoreImpl.POOL_MAX) {
             this.interleavedPool.push(new Float32Array(buf.buffer));
         }
     }
@@ -153,10 +147,7 @@ class WaveformMipmapStoreImpl {
      * 如果尚未加载，会自动发起请求并返回 null。
      * 数据加载完成后通过 listener 通知。
      */
-    getPeaks(
-        sourcePath: string,
-        level: 0 | 1 | 2,
-    ): LevelPeaks | null {
+    getPeaks(sourcePath: string, level: 0 | 1 | 2): LevelPeaks | null {
         const entry = this.cache.get(sourcePath);
         if (!entry) {
             // 首次请求，发起加载
@@ -198,10 +189,7 @@ class WaveformMipmapStoreImpl {
         if (sampleRate <= 0 || divisionFactor <= 0) return null;
 
         // 计算索引范围
-        const startIdx = Math.max(
-            0,
-            Math.floor((startSec * sampleRate) / divisionFactor),
-        );
+        const startIdx = Math.max(0, Math.floor((startSec * sampleRate) / divisionFactor));
         const endIdx = Math.min(
             min.length,
             Math.ceil(((startSec + durationSec) * sampleRate) / divisionFactor),
@@ -264,10 +252,7 @@ class WaveformMipmapStoreImpl {
         let dataDurationSec = durationSec;
         if (peaks) {
             const { sampleRate, divisionFactor } = peaks;
-            const startIdx = Math.max(
-                0,
-                Math.floor((startSec * sampleRate) / divisionFactor),
-            );
+            const startIdx = Math.max(0, Math.floor((startSec * sampleRate) / divisionFactor));
             const endIdx = Math.min(
                 peaks.min.length,
                 Math.ceil(((startSec + durationSec) * sampleRate) / divisionFactor),
@@ -292,7 +277,7 @@ class WaveformMipmapStoreImpl {
             // 提取除法常数，消除循环内反复计算的除法与乘法开销
             const invWM1 = w > 1 ? 1 / (w - 1) : 0;
             const scale = (srcLen - 1) * invWM1;
-            
+
             for (let i = 0; i < w; i++) {
                 const srcPos = srcLen > 1 ? i * scale : 0;
                 const idx = Math.floor(srcPos);
@@ -302,8 +287,7 @@ class WaveformMipmapStoreImpl {
                     interleaved[i * 2] = slice.min[srcLen - 1];
                     interleaved[i * 2 + 1] = slice.max[srcLen - 1];
                 } else {
-                    interleaved[i * 2] =
-                        slice.min[idx] * (1 - frac) + slice.min[idx + 1] * frac;
+                    interleaved[i * 2] = slice.min[idx] * (1 - frac) + slice.min[idx + 1] * frac;
                     interleaved[i * 2 + 1] =
                         slice.max[idx] * (1 - frac) + slice.max[idx + 1] * frac;
                 }
@@ -312,12 +296,12 @@ class WaveformMipmapStoreImpl {
             // 每像素取 min/max 聚合
             // 提取线性步长常量
             const srcStep = srcLen / w;
-            
+
             for (let i = 0; i < w; i++) {
                 // 使用乘法和加法替代原本的 4 次浮点乘除运算
                 const srcStart = i * srcStep;
                 const srcEnd = srcStart + srcStep;
-                
+
                 const iStart = Math.max(0, Math.floor(srcStart));
                 const iEnd = Math.min(srcLen - 1, Math.ceil(srcEnd));
 
@@ -370,19 +354,13 @@ class WaveformMipmapStoreImpl {
         if (!slice) return null;
 
         const { sampleRate, divisionFactor } = peaks;
-        const startIdx = Math.max(
-            0,
-            Math.floor((startSec * sampleRate) / divisionFactor),
-        );
+        const startIdx = Math.max(0, Math.floor((startSec * sampleRate) / divisionFactor));
         const endIdx = Math.min(
             peaks.min.length,
             Math.ceil(((startSec + durationSec) * sampleRate) / divisionFactor),
         );
         const dataStartSec = (startIdx * divisionFactor) / sampleRate;
-        const dataDurationSec = Math.max(
-            0,
-            ((endIdx - startIdx) * divisionFactor) / sampleRate,
-        );
+        const dataDurationSec = Math.max(0, ((endIdx - startIdx) * divisionFactor) / sampleRate);
 
         const len = slice.min.length;
         const interleaved = this.acquireInterleaved(len * 2);
@@ -542,10 +520,7 @@ class WaveformMipmapStoreImpl {
      *
      * 返回的 Promise 可被多次 await，确保 preload 能等待正在进行的加载。
      */
-    private loadLevel(
-        sourcePath: string,
-        level: 0 | 1 | 2,
-    ): Promise<void> {
+    private loadLevel(sourcePath: string, level: 0 | 1 | 2): Promise<void> {
         // 确保缓存条目存在
         let entry = this.cache.get(sourcePath);
         if (!entry) {
@@ -570,10 +545,7 @@ class WaveformMipmapStoreImpl {
 
         const promise = (async () => {
             try {
-                const raw = await waveformApi.getWaveformMipmapBinary(
-                    sourcePath,
-                    level,
-                );
+                const raw = await waveformApi.getWaveformMipmapBinary(sourcePath, level);
                 const decoded = decodeWaveformFromBase64(raw);
 
                 if (decoded) {
@@ -598,11 +570,7 @@ class WaveformMipmapStoreImpl {
     /**
      * 将解码后的二进制数据写入缓存
      */
-    private applyDecoded(
-        sourcePath: string,
-        level: number,
-        decoded: WaveformMipmapBinary,
-    ): void {
+    private applyDecoded(sourcePath: string, level: number, decoded: WaveformMipmapBinary): void {
         let entry = this.cache.get(sourcePath);
         if (!entry) {
             entry = {
@@ -621,7 +589,6 @@ class WaveformMipmapStoreImpl {
             divisionFactor: decoded.divisionFactor,
             sampleRate: decoded.sampleRate,
         };
-
     }
 
     private getSliceFromPeaks(
@@ -632,10 +599,7 @@ class WaveformMipmapStoreImpl {
         const { sampleRate, divisionFactor, min, max } = peaks;
         if (sampleRate <= 0 || divisionFactor <= 0) return null;
 
-        const startIdx = Math.max(
-            0,
-            Math.floor((startSec * sampleRate) / divisionFactor),
-        );
+        const startIdx = Math.max(0, Math.floor((startSec * sampleRate) / divisionFactor));
         const endIdx = Math.min(
             min.length,
             Math.ceil(((startSec + durationSec) * sampleRate) / divisionFactor),
@@ -675,11 +639,7 @@ class WaveformMipmapStoreImpl {
     /**
      * 通知所有监听器
      */
-    private notify(
-        sourcePath: string,
-        status: "loading" | "done" | "error",
-        error?: string,
-    ): void {
+    private notify(sourcePath: string, status: "loading" | "done" | "error", error?: string): void {
         for (const cb of this.listeners) {
             try {
                 cb(sourcePath, status, error);

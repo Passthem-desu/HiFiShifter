@@ -77,7 +77,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const [averageOpen, setAverageOpen] = useState(false);
     const [smoothOpen, setSmoothOpen] = useState(false);
     const [vibratoOpen, setVibratoOpen] = useState(false);
-    const [vibratoParamRange, setVibratoParamRange] = useState<{ min: number; max: number } | undefined>(undefined);
+    const [vibratoParamRange, setVibratoParamRange] = useState<
+        { min: number; max: number } | undefined
+    >(undefined);
     const [quantizeOpen, setQuantizeOpen] = useState(false);
     const [meanQuantizeOpen, setMeanQuantizeOpen] = useState(false);
     const [menuImportMode, setMenuImportMode] = useState<{
@@ -97,8 +99,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
               : s.editParam === "volume" || s.editParam === "dyn_edit"
                 ? 1
                 : 0;
-    const setToValueLabel =
-        s.editParam === "pitch" ? tAny("dlg_midi_note") : tAny("dlg_value");
+    const setToValueLabel = s.editParam === "pitch" ? tAny("dlg_midi_note") : tAny("dlg_value");
     const quantizeDefaultUnit = (() => {
         if (isChildCentsParam) return 100;
         if (isChildDegreesParam) return 1;
@@ -132,15 +133,34 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         const handler = (e: Event) => {
             const dialog = (e as CustomEvent).detail?.dialog as string;
             switch (dialog) {
-                case "transposeCents": setTransposeCentsOpen(true); break;
-                case "transposeDegrees": setTransposeDegreesOpen(true); break;
-                case "setPitch": setSetPitchOpen(true); break;
-                case "average": setAverageOpen(true); break;
-                case "smooth": setSmoothOpen(true); break;
-                case "addVibrato": setVibratoParamRange((e as CustomEvent).detail?.paramRange); setVibratoOpen(true); break;
-                case "quantize": setQuantizeOpen(true); break;
-                case "meanQuantize": setMeanQuantizeOpen(true); break;
-                case "exportAudio": setExportDialogOpen(true); break;
+                case "transposeCents":
+                    setTransposeCentsOpen(true);
+                    break;
+                case "transposeDegrees":
+                    setTransposeDegreesOpen(true);
+                    break;
+                case "setPitch":
+                    setSetPitchOpen(true);
+                    break;
+                case "average":
+                    setAverageOpen(true);
+                    break;
+                case "smooth":
+                    setSmoothOpen(true);
+                    break;
+                case "addVibrato":
+                    setVibratoParamRange((e as CustomEvent).detail?.paramRange);
+                    setVibratoOpen(true);
+                    break;
+                case "quantize":
+                    setQuantizeOpen(true);
+                    break;
+                case "meanQuantize":
+                    setMeanQuantizeOpen(true);
+                    break;
+                case "exportAudio":
+                    setExportDialogOpen(true);
+                    break;
             }
         };
         window.addEventListener("hifi:openEditDialog", handler);
@@ -161,7 +181,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
     const handleImportAudioFromMenu = useCallback(async () => {
         try {
-            const res = await dispatch(importAudioFromDialog()).unwrap() as {
+            const res = (await dispatch(importAudioFromDialog()).unwrap()) as {
                 canceled?: boolean;
                 requiresModeChoice?: boolean;
                 audioPaths?: string[];
@@ -177,9 +197,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             setMenuImportMode({
                 audioPaths: res.audioPaths,
                 trackId: res.trackId ?? s.selectedTrackId ?? null,
-                startSec: typeof res.startSec === "number"
-                    ? res.startSec
-                    : (s.playheadSec ?? 0),
+                startSec: typeof res.startSec === "number" ? res.startSec : (s.playheadSec ?? 0),
             });
         } catch {
             // Error state is already handled by session thunk reducers.
@@ -238,17 +256,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
 
                     <DropdownMenu.Separator />
 
-                    <DropdownMenu.Item
-                        onSelect={() => void dispatch(saveProjectRemote())}
-                    >
+                    <DropdownMenu.Item onSelect={() => void dispatch(saveProjectRemote())}>
                         {t("menu_save_project")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("project.save")}
                         </div>
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                        onSelect={() => void dispatch(saveProjectAsRemote())}
-                    >
+                    <DropdownMenu.Item onSelect={() => void dispatch(saveProjectAsRemote())}>
                         {t("menu_save_project_as")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("project.saveAs")}
@@ -262,16 +276,12 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                             void handleImportAudioFromMenu();
                         }}
                     >
-                        {t("menu_import_audio")} {" "}
+                        {t("menu_import_audio")}{" "}
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                        onSelect={() => void dispatch(openReaperFromDialog())}
-                    >
+                    <DropdownMenu.Item onSelect={() => void dispatch(openReaperFromDialog())}>
                         {t("menu_import_reaper")}
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                        onSelect={() => void dispatch(openVocalShifterFromDialog())}
-                    >
+                    <DropdownMenu.Item onSelect={() => void dispatch(openVocalShifterFromDialog())}>
                         {t("menu_import_vocalshifter")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={() => setExportDialogOpen(true)}>
@@ -293,17 +303,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <span>{t("menu_edit")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
-                    <DropdownMenu.Item
-                        onSelect={() => void dispatch(undoRemote())}
-                    >
+                    <DropdownMenu.Item onSelect={() => void dispatch(undoRemote())}>
                         {t("menu_undo")}{" "}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("edit.undo")}
                         </div>
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                        onSelect={() => void dispatch(redoRemote())}
-                    >
+                    <DropdownMenu.Item onSelect={() => void dispatch(redoRemote())}>
                         {t("menu_redo")}{" "}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("edit.redo")}
@@ -405,17 +411,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     </DropdownMenu.Item>
 
                     <DropdownMenu.Separator />
-                    <DropdownMenu.Item
-                        onSelect={() => dispatchEditOp("pasteReaper")}
-                    >
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("pasteReaper")}>
                         {t("menu_paste_reaper_clipboard")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("edit.pasteReaper")}
                         </div>
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                        onSelect={() => dispatchEditOp("pasteVocalShifter")}
-                    >
+                    <DropdownMenu.Item onSelect={() => dispatchEditOp("pasteVocalShifter")}>
                         {t("menu_paste_vocalshifter_clipboard")}
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("edit.pasteVocalShifter")}
@@ -430,9 +432,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <span>{t("menu_track")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
-                    <DropdownMenu.Item
-                        onSelect={() => dispatch(addTrackRemote({}))}
-                    >
+                    <DropdownMenu.Item onSelect={() => dispatch(addTrackRemote({}))}>
                         {t("track_add")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item
@@ -440,13 +440,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                             !s.selectedTrackId ||
                             // 只剩最后一个根轨道时，禁止删除根轨道
                             (s.tracks.filter((t) => !t.parentId).length <= 1 &&
-                                !s.tracks.find(
-                                    (t) => t.id === s.selectedTrackId,
-                                )?.parentId)
+                                !s.tracks.find((t) => t.id === s.selectedTrackId)?.parentId)
                         }
                         onSelect={() =>
-                            s.selectedTrackId &&
-                            dispatch(removeTrackRemote(s.selectedTrackId))
+                            s.selectedTrackId && dispatch(removeTrackRemote(s.selectedTrackId))
                         }
                     >
                         {t("track_remove_selected")}
@@ -460,16 +457,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <span>{t("menu_view")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
-                    <DropdownMenu.Item
-                        onSelect={() => dispatch(refreshRuntime())}
-                    >
+                    <DropdownMenu.Item onSelect={() => dispatch(refreshRuntime())}>
                         {t("action_refresh")}
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                        onSelect={() =>
-                            void dispatch(clearWaveformCacheRemote())
-                        }
-                    >
+                    <DropdownMenu.Item onSelect={() => void dispatch(clearWaveformCacheRemote())}>
                         {t("menu_clear_waveform_cache")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
@@ -486,10 +477,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                             });
                         }}
                     >
-                        {t("theme")}:{" "}
-                        {theme.mode === "dark"
-                            ? t("theme_dark")
-                            : t("theme_light")}
+                        {t("theme")}: {theme.mode === "dark" ? t("theme_dark") : t("theme_light")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={() => setAppearanceDialogOpen(true)}>
                         {tAny("menu_appearance_settings")}
@@ -507,10 +495,14 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <span>{t("menu_help")}</span>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content variant="soft" color="gray">
-                    <DropdownMenu.Item onSelect={async () => {
-                        const { openUrl } = await import("@tauri-apps/plugin-opener");
-                        openUrl("https://github.com/ARounder-183/HiFiShifter");
-                    }}>{t("menu_about")}</DropdownMenu.Item>
+                    <DropdownMenu.Item
+                        onSelect={async () => {
+                            const { openUrl } = await import("@tauri-apps/plugin-opener");
+                            openUrl("https://github.com/ARounder-183/HiFiShifter");
+                        }}
+                    >
+                        {t("menu_about")}
+                    </DropdownMenu.Item>
                 </DropdownMenu.Content>
             </DropdownMenu.Root>
 
@@ -543,10 +535,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             </Flex>
 
             {/* 快捷键设置对话框 */}
-            <KeybindingsDialog
-                open={kbDialogOpen}
-                onOpenChange={setKbDialogOpen}
-            />
+            <KeybindingsDialog open={kbDialogOpen} onOpenChange={setKbDialogOpen} />
 
             {/* 外观设置对话框 */}
             <AppearanceSettingsDialog
@@ -554,10 +543,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 onOpenChange={setAppearanceDialogOpen}
             />
 
-            <ExportAudioDialog
-                open={exportDialogOpen}
-                onOpenChange={setExportDialogOpen}
-            />
+            <ExportAudioDialog open={exportDialogOpen} onOpenChange={setExportDialogOpen} />
 
             {/* 菜单导入模式选择（多文件） */}
             {menuImportMode && (
@@ -584,12 +570,14 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                 onClick={() => {
                                     const m = menuImportMode;
                                     setMenuImportMode(null);
-                                    void dispatch(importMultipleAudioAtPosition({
-                                        audioPaths: m.audioPaths,
-                                        mode: "across-time",
-                                        trackId: m.trackId,
-                                        startSec: m.startSec,
-                                    }));
+                                    void dispatch(
+                                        importMultipleAudioAtPosition({
+                                            audioPaths: m.audioPaths,
+                                            mode: "across-time",
+                                            trackId: m.trackId,
+                                            startSec: m.startSec,
+                                        }),
+                                    );
                                 }}
                             >
                                 {t("import_across_time")}
@@ -599,12 +587,14 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                 onClick={() => {
                                     const m = menuImportMode;
                                     setMenuImportMode(null);
-                                    void dispatch(importMultipleAudioAtPosition({
-                                        audioPaths: m.audioPaths,
-                                        mode: "across-tracks",
-                                        trackId: m.trackId,
-                                        startSec: m.startSec,
-                                    }));
+                                    void dispatch(
+                                        importMultipleAudioAtPosition({
+                                            audioPaths: m.audioPaths,
+                                            mode: "across-tracks",
+                                            trackId: m.trackId,
+                                            startSec: m.startSec,
+                                        }),
+                                    );
                                 }}
                             >
                                 {t("import_across_tracks")}
@@ -682,7 +672,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                 onOpenChange={setVibratoOpen}
                 editParam={s.editParam}
                 paramRange={vibratoParamRange}
-                onConfirm={(amplitude, rate, attack, release, phase) => dispatchEditOp("addVibrato", { amplitude, rate, attack, release, phase })}
+                onConfirm={(amplitude, rate, attack, release, phase) =>
+                    dispatchEditOp("addVibrato", { amplitude, rate, attack, release, phase })
+                }
             />
             <QuantizeDialog
                 open={quantizeOpen}

@@ -79,16 +79,19 @@ export function AppThemeProvider({ children }: PropsWithChildren) {
     const activeCustomThemeId = appearance.activeCustomThemeId;
 
     /* ── Setter helpers ── */
-    const updateField = useCallback(<K extends keyof AppearanceSettings>(
-        key: K,
-        value: AppearanceSettings[K],
-    ) => {
-        setAppearance((prev) => ({ ...prev, [key]: value }));
-    }, []);
+    const updateField = useCallback(
+        <K extends keyof AppearanceSettings>(key: K, value: AppearanceSettings[K]) => {
+            setAppearance((prev) => ({ ...prev, [key]: value }));
+        },
+        [],
+    );
 
-    const setMode = useCallback((next: ThemeMode) => {
-        updateField("mode", next);
-    }, [updateField]);
+    const setMode = useCallback(
+        (next: ThemeMode) => {
+            updateField("mode", next);
+        },
+        [updateField],
+    );
 
     const toggleMode = useCallback(() => {
         setAppearance((prev) => ({
@@ -97,21 +100,33 @@ export function AppThemeProvider({ children }: PropsWithChildren) {
         }));
     }, []);
 
-    const setAccentColor = useCallback((color: RadixAccentColor) => {
-        updateField("accentColor", color);
-    }, [updateField]);
+    const setAccentColor = useCallback(
+        (color: RadixAccentColor) => {
+            updateField("accentColor", color);
+        },
+        [updateField],
+    );
 
-    const setGrayColor = useCallback((color: RadixGrayColor) => {
-        updateField("grayColor", color);
-    }, [updateField]);
+    const setGrayColor = useCallback(
+        (color: RadixGrayColor) => {
+            updateField("grayColor", color);
+        },
+        [updateField],
+    );
 
-    const setRadius = useCallback((r: RadixRadius) => {
-        updateField("radius", r);
-    }, [updateField]);
+    const setRadius = useCallback(
+        (r: RadixRadius) => {
+            updateField("radius", r);
+        },
+        [updateField],
+    );
 
-    const setFontFamily = useCallback((font: string) => {
-        updateField("fontFamily", font);
-    }, [updateField]);
+    const setFontFamily = useCallback(
+        (font: string) => {
+            updateField("fontFamily", font);
+        },
+        [updateField],
+    );
 
     /* ── 批量应用（保存到 localStorage） ── */
     const applySettings = useCallback((settings: AppearanceSettings) => {
@@ -209,10 +224,7 @@ export function AppThemeProvider({ children }: PropsWithChildren) {
         };
 
         const onStorage = (e: StorageEvent) => {
-            if (
-                e.key === PREVIEW_SETTINGS_KEY ||
-                e.key === PREVIEW_COLORS_KEY
-            ) {
+            if (e.key === PREVIEW_SETTINGS_KEY || e.key === PREVIEW_COLORS_KEY) {
                 applyPreviewFromStorage();
             }
         };
@@ -259,13 +271,20 @@ export function AppThemeProvider({ children }: PropsWithChildren) {
             revertPreview,
         }),
         [
-            mode, setMode, toggleMode,
-            accentColor, setAccentColor,
-            grayColor, setGrayColor,
-            radius, setRadius,
-            fontFamily, setFontFamily,
+            mode,
+            setMode,
+            toggleMode,
+            accentColor,
+            setAccentColor,
+            grayColor,
+            setGrayColor,
+            radius,
+            setRadius,
+            fontFamily,
+            setFontFamily,
             activeCustomThemeId,
-            applySettings, revertPreview,
+            applySettings,
+            revertPreview,
         ],
     );
 

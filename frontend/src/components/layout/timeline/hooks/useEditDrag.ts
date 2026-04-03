@@ -55,9 +55,7 @@ async function stretchLinkedParams(
     const probe = await paramsApi.getParamFrames(trackId, "pitch", 0, 1, 1);
     if (!probe?.ok) return;
     const fp = Math.max(1, Number(probe.frame_period_ms) || 5);
-    const stretchParams = resolveStretchParamTypes(
-        probe.pitch_edit_user_modified,
-    );
+    const stretchParams = resolveStretchParamTypes(probe.pitch_edit_user_modified);
 
     const oldStartFrame = Math.round((oldStartSec * 1000) / fp);
     const oldEndFrame = Math.round(((oldStartSec + oldLengthSec) * 1000) / fp);
@@ -106,13 +104,7 @@ async function stretchLinkedParams(
         }
 
         // 将重映射后的值写入新范围
-        await paramsApi.setParamFrames(
-            trackId,
-            paramType,
-            newStartFrame,
-            newValues,
-            false,
-        );
+        await paramsApi.setParamFrames(trackId, paramType, newStartFrame, newValues, false);
 
         // 恢复旧范围中不再被新音频块覆盖的帧（还原到原始值）
         const newRangeMax = newStartFrame + newFrameCount - 1;
@@ -120,24 +112,12 @@ async function stretchLinkedParams(
 
         if (oldStartFrame < newStartFrame) {
             const clearLen = newStartFrame - oldStartFrame;
-            void paramsApi.restoreParamFrames(
-                trackId,
-                paramType,
-                oldStartFrame,
-                clearLen,
-                false,
-            );
+            void paramsApi.restoreParamFrames(trackId, paramType, oldStartFrame, clearLen, false);
         }
         if (oldRangeMax > newRangeMax) {
             const clearFrom = newRangeMax + 1;
             const clearLen = oldRangeMax - newRangeMax;
-            void paramsApi.restoreParamFrames(
-                trackId,
-                paramType,
-                clearFrom,
-                clearLen,
-                false,
-            );
+            void paramsApi.restoreParamFrames(trackId, paramType, clearFrom, clearLen, false);
         }
     }
 }
@@ -172,11 +152,7 @@ export function useEditDrag(deps: {
     sessionRef: React.RefObject<SessionState>;
     dispatch: AppDispatch;
     snapBeat: (beat: number) => number;
-    beatFromClientX: (
-        clientX: number,
-        bounds: DOMRect,
-        xScroll: number,
-    ) => number;
+    beatFromClientX: (clientX: number, bounds: DOMRect, xScroll: number) => number;
     /** modifier.clipNoSnap 绑定 */
     noSnapKb: Keybinding;
     /** 网格吸附全局开关 */
@@ -196,11 +172,7 @@ export function useEditDrag(deps: {
     // 用于节流向后端发送 clip 状态更新，避免拖动时频繁覆盖与后端同步引起闪烁
     const lastRemoteSentRef = useRef<Record<string, number>>({});
 
-    function startEditDrag(
-        e: React.PointerEvent,
-        clipId: string,
-        type: EditDragType,
-    ) {
+    function startEditDrag(e: React.PointerEvent, clipId: string, type: EditDragType) {
         if (e.button !== 0) return;
         const clip = sessionRef.current.clips.find((c) => c.id === clipId);
         if (!clip) return;
@@ -241,25 +213,19 @@ export function useEditDrag(deps: {
                 drag.type === "stretch_left" ||
                 drag.type === "stretch_right";
             const noSnapActive = isModifierActive(noSnapKb, ev);
-            const effectiveSnap = gridSnapEnabled
-                ? !noSnapActive
-                : noSnapActive;
+            const effectiveSnap = gridSnapEnabled ? !noSnapActive : noSnapActive;
             if (shouldSnap && effectiveSnap) {
                 beat = snapBeat(beat);
             }
 
-            const clipNow = sessionRef.current.clips.find(
-                (c) => c.id === drag.clipId,
-            );
+            const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
             if (!clipNow) return;
 
             const minLen = 0.0;
             if (drag.type === "fade_in") {
                 const raw = beat - drag.basestartSec;
                 const next = clamp(raw, 0, Math.max(0, drag.baselengthSec));
-                dispatch(
-                    setClipFades({ clipId: drag.clipId, fadeInSec: next }),
-                );
+                dispatch(setClipFades({ clipId: drag.clipId, fadeInSec: next }));
                 // Throttle remote updates to at most ~200ms
                 try {
                     const now = Date.now();
@@ -279,9 +245,7 @@ export function useEditDrag(deps: {
             if (drag.type === "fade_out") {
                 const raw = drag.rightEdgeBeat - beat;
                 const next = clamp(raw, 0, Math.max(0, drag.baselengthSec));
-                dispatch(
-                    setClipFades({ clipId: drag.clipId, fadeOutSec: next }),
-                );
+                dispatch(setClipFades({ clipId: drag.clipId, fadeOutSec: next }));
                 try {
                     const now = Date.now();
                     const last = lastRemoteSentRef.current[drag.clipId] || 0;
@@ -301,11 +265,7 @@ export function useEditDrag(deps: {
                 const movementY = (ev.movementY ?? 0) as number;
                 const deltaDb = -movementY * 0.25;
                 const nextDb = clamp(gainToDb(clipNow.gain) + deltaDb, -12, 12);
-                const nextGain = clamp(
-                    dbToGain(nextDb),
-                    dbToGain(-12),
-                    dbToGain(12),
-                );
+                const nextGain = clamp(dbToGain(nextDb), dbToGain(-12), dbToGain(12));
                 dispatch(setClipGain({ clipId: drag.clipId, gain: nextGain }));
                 try {
                     const now = Date.now();
@@ -324,16 +284,10 @@ export function useEditDrag(deps: {
             }
 
             if (drag.type === "trim_left") {
-                const desiredStart = clamp(
-                    beat,
-                    0,
-                    drag.rightEdgeBeat - minLen,
-                );
+                const desiredStart = clamp(beat, 0, drag.rightEdgeBeat - minLen);
                 const desiredDelta = desiredStart - drag.basestartSec;
                 const rate =
-                    Number(clipNow.playbackRate ?? 1) > 0
-                        ? Number(clipNow.playbackRate ?? 1)
-                        : 1;
+                    Number(clipNow.playbackRate ?? 1) > 0 ? Number(clipNow.playbackRate ?? 1) : 1;
                 if (clipNow.reversed) {
                     const sourceDuration = (() => {
                         if (
@@ -341,33 +295,21 @@ export function useEditDrag(deps: {
                             clipNow.sourceSampleRate &&
                             clipNow.sourceSampleRate > 0
                         ) {
-                            return (
-                                clipNow.durationFrames / clipNow.sourceSampleRate
-                            );
+                            return clipNow.durationFrames / clipNow.sourceSampleRate;
                         }
                         return Number(clipNow.durationSec ?? 0) || 0;
                     })();
-                    let nextTrimEnd =
-                        drag.baseSourceEndSec - desiredDelta * rate;
+                    let nextTrimEnd = drag.baseSourceEndSec - desiredDelta * rate;
                     nextTrimEnd = Math.max(drag.baseSourceStartSec, nextTrimEnd);
                     if (sourceDuration > 0) {
                         nextTrimEnd = Math.min(nextTrimEnd, sourceDuration);
                     }
-                    const actualDeltaTrim =
-                        drag.baseSourceEndSec - nextTrimEnd;
+                    const actualDeltaTrim = drag.baseSourceEndSec - nextTrimEnd;
                     const actualDeltaTimeline = actualDeltaTrim / rate;
                     const nextStart = drag.basestartSec + actualDeltaTimeline;
-                    const nextLen = clamp(
-                        drag.baselengthSec - actualDeltaTimeline,
-                        minLen,
-                        10_000,
-                    );
-                    dispatch(
-                        moveClipStart({ clipId: drag.clipId, startSec: nextStart }),
-                    );
-                    dispatch(
-                        setClipLength({ clipId: drag.clipId, lengthSec: nextLen }),
-                    );
+                    const nextLen = clamp(drag.baselengthSec - actualDeltaTimeline, minLen, 10_000);
+                    dispatch(moveClipStart({ clipId: drag.clipId, startSec: nextStart }));
+                    dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
                     dispatch(
                         setClipSourceRange({
                             clipId: drag.clipId,
@@ -382,17 +324,9 @@ export function useEditDrag(deps: {
                 const actualDeltaTrim = nextTrimStart - drag.baseSourceStartSec;
                 const actualDeltaTimeline = actualDeltaTrim / rate;
                 const nextStart = drag.basestartSec + actualDeltaTimeline;
-                const nextLen = clamp(
-                    drag.baselengthSec - actualDeltaTimeline,
-                    minLen,
-                    10_000,
-                );
-                dispatch(
-                    moveClipStart({ clipId: drag.clipId, startSec: nextStart }),
-                );
-                dispatch(
-                    setClipLength({ clipId: drag.clipId, lengthSec: nextLen }),
-                );
+                const nextLen = clamp(drag.baselengthSec - actualDeltaTimeline, minLen, 10_000);
+                dispatch(moveClipStart({ clipId: drag.clipId, startSec: nextStart }));
+                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
                 dispatch(
                     setClipSourceRange({
                         clipId: drag.clipId,
@@ -403,33 +337,18 @@ export function useEditDrag(deps: {
             }
 
             if (drag.type === "stretch_left") {
-                const desiredStart = clamp(
-                    beat,
-                    0,
-                    drag.rightEdgeBeat - minLen,
-                );
-                const rawLen = clamp(
-                    drag.rightEdgeBeat - desiredStart,
-                    minLen,
-                    10_000,
-                );
+                const desiredStart = clamp(beat, 0, drag.rightEdgeBeat - minLen);
+                const rawLen = clamp(drag.rightEdgeBeat - desiredStart, minLen, 10_000);
                 const baseLen = Math.max(1e-6, Number(drag.baselengthSec) || 0);
                 const baseRate =
-                    drag.basePlaybackRate > 0 &&
-                    Number.isFinite(drag.basePlaybackRate)
+                    drag.basePlaybackRate > 0 && Number.isFinite(drag.basePlaybackRate)
                         ? drag.basePlaybackRate
                         : 1;
-                const nextRate = clamp(
-                    (baseRate * baseLen) / Math.max(1e-6, rawLen),
-                    0.1,
-                    10,
-                );
+                const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, rawLen), 0.1, 10);
                 // 用 clamp 后的 rate 反算真实长度，确保 lengthSec 和 playbackRate 一致
                 const correctedLen = (baseRate * baseLen) / nextRate;
                 const nextStart = drag.rightEdgeBeat - correctedLen;
-                dispatch(
-                    moveClipStart({ clipId: drag.clipId, startSec: nextStart }),
-                );
+                dispatch(moveClipStart({ clipId: drag.clipId, startSec: nextStart }));
                 dispatch(
                     setClipLength({
                         clipId: drag.clipId,
@@ -446,15 +365,9 @@ export function useEditDrag(deps: {
             }
 
             if (drag.type === "trim_right") {
-                const desiredRight = clamp(
-                    beat,
-                    drag.basestartSec + minLen,
-                    10_000,
-                );
+                const desiredRight = clamp(beat, drag.basestartSec + minLen, 10_000);
                 const rate =
-                    Number(clipNow.playbackRate ?? 1) > 0
-                        ? Number(clipNow.playbackRate ?? 1)
-                        : 1;
+                    Number(clipNow.playbackRate ?? 1) > 0 ? Number(clipNow.playbackRate ?? 1) : 1;
                 // 计算源文件总时长，用于 clamp sourceEndSec 的上限
                 const sourceDuration = (() => {
                     if (
@@ -462,9 +375,7 @@ export function useEditDrag(deps: {
                         clipNow.sourceSampleRate &&
                         clipNow.sourceSampleRate > 0
                     ) {
-                        return (
-                            clipNow.durationFrames / clipNow.sourceSampleRate
-                        );
+                        return clipNow.durationFrames / clipNow.sourceSampleRate;
                     }
                     return Number(clipNow.durationSec ?? 0) || 0;
                 })();
@@ -472,20 +383,14 @@ export function useEditDrag(deps: {
                 const nextLen = clamp(desiredLen, minLen, 10_000);
                 const usedDeltaTimeline = nextLen - drag.baselengthSec;
                 if (clipNow.reversed) {
-                    let nextTrimStart =
-                        drag.baseSourceStartSec - usedDeltaTimeline * rate;
+                    let nextTrimStart = drag.baseSourceStartSec - usedDeltaTimeline * rate;
                     nextTrimStart = Math.max(0, nextTrimStart);
                     nextTrimStart = Math.min(nextTrimStart, drag.baseSourceEndSec);
-                    const actualSourceLen =
-                        drag.baseSourceEndSec - nextTrimStart;
+                    const actualSourceLen = drag.baseSourceEndSec - nextTrimStart;
                     const maxTimelineLen = actualSourceLen / rate;
                     const finalLen =
-                        maxTimelineLen > 0
-                            ? Math.min(nextLen, maxTimelineLen)
-                            : nextLen;
-                    dispatch(
-                        setClipLength({ clipId: drag.clipId, lengthSec: finalLen }),
-                    );
+                        maxTimelineLen > 0 ? Math.min(nextLen, maxTimelineLen) : nextLen;
+                    dispatch(setClipLength({ clipId: drag.clipId, lengthSec: finalLen }));
                     dispatch(
                         setClipSourceRange({
                             clipId: drag.clipId,
@@ -495,24 +400,17 @@ export function useEditDrag(deps: {
                     return;
                 }
 
-                let nextTrimEnd =
-                    drag.baseSourceEndSec + usedDeltaTimeline * rate;
+                let nextTrimEnd = drag.baseSourceEndSec + usedDeltaTimeline * rate;
                 nextTrimEnd = Math.max(0, nextTrimEnd);
                 // 不允许超出源文件实际时长
                 if (sourceDuration > 0) {
                     nextTrimEnd = Math.min(nextTrimEnd, sourceDuration);
                 }
                 // 反算实际可用的 timeline 长度（sourceEndSec 被 clamp 后，lengthSec 也要同步受限）
-                const actualSourceLen =
-                    nextTrimEnd - (clipNow.sourceStartSec ?? 0);
+                const actualSourceLen = nextTrimEnd - (clipNow.sourceStartSec ?? 0);
                 const maxTimelineLen = actualSourceLen / rate;
-                const finalLen =
-                    maxTimelineLen > 0
-                        ? Math.min(nextLen, maxTimelineLen)
-                        : nextLen;
-                dispatch(
-                    setClipLength({ clipId: drag.clipId, lengthSec: finalLen }),
-                );
+                const finalLen = maxTimelineLen > 0 ? Math.min(nextLen, maxTimelineLen) : nextLen;
+                dispatch(setClipLength({ clipId: drag.clipId, lengthSec: finalLen }));
                 dispatch(
                     setClipSourceRange({
                         clipId: drag.clipId,
@@ -523,27 +421,14 @@ export function useEditDrag(deps: {
             }
 
             if (drag.type === "stretch_right") {
-                const desiredRight = clamp(
-                    beat,
-                    drag.basestartSec + minLen,
-                    10_000,
-                );
-                const rawLen = clamp(
-                    desiredRight - drag.basestartSec,
-                    minLen,
-                    10_000,
-                );
+                const desiredRight = clamp(beat, drag.basestartSec + minLen, 10_000);
+                const rawLen = clamp(desiredRight - drag.basestartSec, minLen, 10_000);
                 const baseLen = Math.max(1e-6, Number(drag.baselengthSec) || 0);
                 const baseRate =
-                    drag.basePlaybackRate > 0 &&
-                    Number.isFinite(drag.basePlaybackRate)
+                    drag.basePlaybackRate > 0 && Number.isFinite(drag.basePlaybackRate)
                         ? drag.basePlaybackRate
                         : 1;
-                const nextRate = clamp(
-                    (baseRate * baseLen) / Math.max(1e-6, rawLen),
-                    0.1,
-                    10,
-                );
+                const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, rawLen), 0.1, 10);
                 // 用 clamp 后的 rate 反算真实长度，确保 lengthSec 和 playbackRate 一致
                 const correctedLen = (baseRate * baseLen) / nextRate;
                 dispatch(
@@ -566,9 +451,7 @@ export function useEditDrag(deps: {
             if (!drag || drag.pointerId !== e.pointerId) return;
             editDragRef.current = null;
 
-            const clipNow = sessionRef.current.clips.find(
-                (c) => c.id === drag.clipId,
-            );
+            const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
             if (!clipNow) {
                 dispatch(endInteraction());
                 return;
@@ -651,22 +534,13 @@ export function useEditDrag(deps: {
                     drag.type === "stretch_right");
             if (shouldApplyAutoCrossfade) {
                 void Promise.resolve(persistPromise).finally(() => {
-                    void applyAutoCrossfade(
-                        sessionRef.current,
-                        [drag.clipId],
-                        dispatch,
-                    );
+                    void applyAutoCrossfade(sessionRef.current, [drag.clipId], dispatch);
                 });
             }
 
             // 拉伸后同步参数线：当"锁定参数线"启用时，将旧范围内的参数值时域映射到新范围
-            const isStretch =
-                drag.type === "stretch_left" || drag.type === "stretch_right";
-            if (
-                isStretch &&
-                sessionRef.current.lockParamLinesEnabled &&
-                clipNow.trackId
-            ) {
+            const isStretch = drag.type === "stretch_left" || drag.type === "stretch_right";
+            if (isStretch && sessionRef.current.lockParamLinesEnabled && clipNow.trackId) {
                 const stretchTrackId = clipNow.trackId;
                 const oldStartSec = drag.basestartSec;
                 const oldLengthSec = drag.baselengthSec;

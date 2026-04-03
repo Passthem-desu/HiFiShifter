@@ -38,8 +38,7 @@ export function useVisualPlayhead({
         let rafId = 0;
 
         const tick = (timestampMs: number) => {
-            const elapsedSec =
-                (timestampMs - syncAnchorRef.current.timestampMs) / 1000;
+            const elapsedSec = (timestampMs - syncAnchorRef.current.timestampMs) / 1000;
             const nextPlayheadSec = Math.max(
                 syncAnchorRef.current.playheadSec,
                 syncAnchorRef.current.playheadSec + elapsedSec,

@@ -40,8 +40,7 @@ export const jaJP = {
     export_dialog_error_missing_project_file_name:
         "プロジェクト書き出しの出力ファイル名を入力してください。",
     export_dialog_error_missing_output_dir: "出力フォルダを選択してください。",
-    export_dialog_error_missing_targets:
-        "分離トラックの出力対象を1つ以上選択してください。",
+    export_dialog_error_missing_targets: "分離トラックの出力対象を1つ以上選択してください。",
     export_dialog_progress: "オーディオを書き出しています...",
     export_track_label_root_suffix: "(ルート)",
     export_track_label_sub_suffix: "(サブ)",
@@ -53,8 +52,7 @@ export const jaJP = {
     menu_import_reaper: "Reaper プロジェクトをインポート...",
     menu_import_vocalshifter: "VocalShifter プロジェクトをインポート...",
     menu_paste_reaper_clipboard: "Reaper クリップボードデータをペースト",
-    menu_paste_vocalshifter_clipboard:
-        "VocalShifter クリップボードデータをペースト",
+    menu_paste_vocalshifter_clipboard: "VocalShifter クリップボードデータをペースト",
     reaper_import_skipped_header:
         "Reaper インポート時に以下のオーディオファイルがスキップされました（非対応形式またはファイルが見つかりません）：",
     menu_pick_output: "出力先を選択",
@@ -129,8 +127,7 @@ export const jaJP = {
         "ピッチ編集を有効にするには「なし」以外のピッチアルゴリズムを選択してください",
     pitch_backend_unavailable:
         "ピッチバックエンドが利用不可（WORLD DLL / ONNX モデルを確認してください）",
-    pitch_edit_not_modified_hint:
-        "まだ編集されていません：カーブは元のピッチと同じです",
+    pitch_edit_not_modified_hint: "まだ編集されていません：カーブは元のピッチと同じです",
     pitch_status_label: "ピッチ",
     pitch_status_off: "オフ",
     pitch_status_pending: "分析中…",
@@ -219,8 +216,7 @@ export const jaJP = {
     fade_out: "フェードアウト",
     show_secondary_param: "サブパラメータオーバーレイを表示",
     hide_secondary_param: "サブパラメータオーバーレイを非表示",
-    onnx_compile_required:
-        "ONNX モデルが未コンパイルです。実行：cargo tauri dev --features onnx",
+    onnx_compile_required: "ONNX モデルが未コンパイルです。実行：cargo tauri dev --features onnx",
     onnx_unavailable_label: "（利用不可）",
     solo: "ソロ",
     status_analyzing_pitch: "ピッチを分析中",
@@ -273,8 +269,7 @@ export const jaJP = {
     fade_curve_logarithmic: "ログ",
     fade_curve_scurve: "S カーブ",
 
-    clip_gain_drag_hint:
-        "上下にドラッグしてゲインを調整 / ダブルクリックで数値入力",
+    clip_gain_drag_hint: "上下にドラッグしてゲインを調整 / ダブルクリックで数値入力",
     track_change_color: "トラックの色を変更",
     track_clone: "トラックを複製",
     color_blue: "ブルー",
@@ -313,8 +308,7 @@ export const jaJP = {
     kb_conflict_msg: "このショートカットは以下の操作と競合しています：",
     kb_conflict_override: "上書き",
     kb_conflict_cancel: "キャンセル",
-    kb_dialog_hint_click:
-        "左クリックで「なし」に設定。右クリックでデフォルトに戻す。",
+    kb_dialog_hint_click: "左クリックで「なし」に設定。右クリックでデフォルトに戻す。",
     kb_group_playback: "再生",
     kb_group_edit: "編集",
     kb_group_project: "プロジェクト",
@@ -346,25 +340,19 @@ export const jaJP = {
     kb_pianoroll_paste: "パラメータフレームをペースト",
     kb_pianoroll_shift_param_up: "パラメータを上へ移動（クリップ範囲）",
     kb_pianoroll_shift_param_down: "パラメータを下へ移動（クリップ範囲）",
-    kb_pianoroll_shift_param_up_selection:
-        "パラメーターライン上移動（選択範囲）",
-    kb_pianoroll_shift_param_down_selection:
-        "パラメーターライン下移動（選択範囲）",
+    kb_pianoroll_shift_param_up_selection: "パラメーターライン上移動（選択範囲）",
+    kb_pianoroll_shift_param_down_selection: "パラメーターライン下移動（選択範囲）",
     kb_modifier_slip_edit: "Slip 編集（クリップドラッグ中に押す）",
     kb_modifier_stretch: "タイムストレッチ（エッジドラッグ中に押す）",
-    kb_modifier_no_snap:
-        "ドラッグ中にグリッド吸着を切り替えます（押すと現在のグリッド吸着を反転）",
+    kb_modifier_no_snap: "ドラッグ中にグリッド吸着を切り替えます（押すと現在のグリッド吸着を反転）",
     kb_modifier_copy_drag: "コピードラッグ（クリップドラッグ中に押す）",
     kb_modifier_horizontal_zoom: "水平ズーム（押しながらスクロール）",
     kb_modifier_pr_vzoom: "垂直ズーム（押しながらスクロール）",
     kb_modifier_param_morph: "パラメータ形状変形（選択範囲内で押す）",
     kb_modifier_param_fine_adjust: "パラメータ微調整（押している間）",
-    kb_modifier_vibrato_amplitude_adjust:
-        "ビブラート振幅調整（押しながらスクロール）",
-    kb_modifier_vibrato_frequency_adjust:
-        "ビブラート周波数調整（押しながらスクロール）",
-    kb_modifier_piano_keys_scroll_v:
-        "鍵盤垂直スクロール（押しながらスクロール）",
+    kb_modifier_vibrato_amplitude_adjust: "ビブラート振幅調整（押しながらスクロール）",
+    kb_modifier_vibrato_frequency_adjust: "ビブラート周波数調整（押しながらスクロール）",
+    kb_modifier_piano_keys_scroll_v: "鍵盤垂直スクロール（押しながらスクロール）",
     kb_modifier_piano_keys_zoom_v: "鍵盤垂直ズーム（押しながらスクロール）",
     kb_group_mode: "モード",
     kb_mode_toggle: "モード切替",
@@ -380,16 +368,14 @@ export const jaJP = {
     kb_quick_search_preview: "プレビュー / 試聴",
     kb_quick_search_confirm: "オーディオを配置",
     kb_quick_search_close: "閉じる",
-    vs_paste_clipboard_not_found:
-        "VocalShifter のクリップボードデータが見つかりませんでした。",
+    vs_paste_clipboard_not_found: "VocalShifter のクリップボードデータが見つかりませんでした。",
     vs_paste_clipboard_invalid_format:
         "クリップボードファイルの形式が不正です（サイズが 0x80 の倍数でないか、レコードが破損しています）。",
     vs_paste_clipboard_io_error:
         "VocalShifter クリップボードファイルの読み取り中に I/O エラーが発生しました。",
     vs_paste_no_pitch_line:
         "ピッチラインが選択されていません。先にピッチラインを選択してください。",
-    vs_import_read_failed:
-        "VocalShifter プロジェクトファイルの読み取りに失敗しました。",
+    vs_import_read_failed: "VocalShifter プロジェクトファイルの読み取りに失敗しました。",
     vs_import_parse_failed: "VocalShifter プロジェクトの解析に失敗しました。",
     vs_import_skipped_header:
         "以下のオーディオファイルはスキップされました（非対応形式またはファイルが見つかりません）：",
@@ -404,8 +390,7 @@ export const jaJP = {
     midi_track_range: "範囲：{min} – {max}",
     midi_no_tracks: "MIDI ファイルにノートを含むトラックが見つかりません",
     midi_importing: "インポート中...",
-    midi_import_success:
-        "MIDI をインポートしました：{notes} ノート、{frames} フレーム",
+    midi_import_success: "MIDI をインポートしました：{notes} ノート、{frames} フレーム",
     midi_import_failed: "MIDI のインポートに失敗しました",
     midi_file_not_found: "MIDI ファイルが見つかりません",
     midi_no_notes: "選択したトラックにノートがありません",
@@ -596,8 +581,7 @@ export const jaJP = {
     pitch_snap_settings: "ピッチスナップ設定",
 
     // キーバインドヒント
-    kb_hint_recording:
-        "左クリックで「なし」に設定。右クリックでデフォルトに戻す。",
+    kb_hint_recording: "左クリックで「なし」に設定。右クリックでデフォルトに戻す。",
 
     // キーバインド None
     kb_none: "なし",
@@ -658,7 +642,8 @@ export const jaJP = {
     appearance_saved_themes: "保存済みテーマ",
     appearance_theme_name: "テーマ名",
     appearance_custom_theme: "カスタムテーマ",
-    appearance_no_custom_colors: "カスタムカラーの上書きはありません。「新規テーマ」をクリックして作成してください。",
+    appearance_no_custom_colors:
+        "カスタムカラーの上書きはありません。「新規テーマ」をクリックして作成してください。",
     appearance_quick_colors: "クイックカラー調整",
     appearance_quick_colors_hint: "よく使うカラーをここで調整。全カラーの編集は「カラー」タブへ。",
     appearance_theme_management: "テーマ管理",

@@ -14,10 +14,7 @@ function normalizeStep(step: number): number {
     return Number(step.toFixed(3));
 }
 
-export function getParamShiftStep(
-    paramId: string,
-    descriptor?: ProcessorParamDescriptor,
-): number {
+export function getParamShiftStep(paramId: string, descriptor?: ProcessorParamDescriptor): number {
     const childStep = childPitchOffsetShiftStep(paramId);
     if (childStep != null) {
         return childStep;
@@ -28,9 +25,7 @@ export function getParamShiftStep(
     }
 
     if (descriptor?.kind.type === "automation_curve") {
-        const range = Math.abs(
-            descriptor.kind.max_value - descriptor.kind.min_value,
-        );
+        const range = Math.abs(descriptor.kind.max_value - descriptor.kind.min_value);
         return normalizeStep(range / 40);
     }
 

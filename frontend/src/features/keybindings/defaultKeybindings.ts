@@ -334,9 +334,7 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
 /**
  * 所有 ActionId 列表（保持顺序一致，方便遍历）
  */
-export const ALL_ACTION_IDS: ActionId[] = Object.keys(
-    DEFAULT_KEYBINDINGS,
-) as ActionId[];
+export const ALL_ACTION_IDS: ActionId[] = Object.keys(DEFAULT_KEYBINDINGS) as ActionId[];
 
 /**
  * 分组标题 i18n key

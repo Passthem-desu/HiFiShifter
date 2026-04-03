@@ -109,8 +109,7 @@ export function useClipsPeaksForPianoRoll(args: {
 
         const visibleClips = clips.filter((clip) => {
             return (
-                clip.startSec + clip.lengthSec > visibleStartSec &&
-                clip.startSec < visibleEndSec
+                clip.startSec + clip.lengthSec > visibleStartSec && clip.startSec < visibleEndSec
             );
         });
 
@@ -118,11 +117,7 @@ export function useClipsPeaksForPianoRoll(args: {
             // 计算 source 文件总时长
             let sourceDurationSec: number;
             let sourceSampleRate = 44100;
-            if (
-                clip.durationFrames &&
-                clip.sourceSampleRate &&
-                clip.sourceSampleRate > 0
-            ) {
+            if (clip.durationFrames && clip.sourceSampleRate && clip.sourceSampleRate > 0) {
                 sourceDurationSec = clip.durationFrames / clip.sourceSampleRate;
                 sourceSampleRate = clip.sourceSampleRate;
             } else {
@@ -130,10 +125,7 @@ export function useClipsPeaksForPianoRoll(args: {
             }
 
             const playbackRate = Number(clip.playbackRate ?? 1);
-            const pr =
-                Number.isFinite(playbackRate) && playbackRate > 0
-                    ? playbackRate
-                    : 1;
+            const pr = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
 
             // sourceEndSec：与 WaveformTrackCanvas 一致，优先使用 clip.sourceEndSec
             const clipSourceEndSec =
@@ -143,12 +135,8 @@ export function useClipsPeaksForPianoRoll(args: {
                 clipId: clip.id,
                 startSec: clip.startSec,
                 lengthSec: clip.lengthSec,
-                sourceStartSec: Math.max(
-                    0,
-                    Number(clip.sourceStartSec ?? 0) || 0,
-                ),
-                sourceDurationSec:
-                    sourceDurationSec > 0 ? sourceDurationSec : 0,
+                sourceStartSec: Math.max(0, Number(clip.sourceStartSec ?? 0) || 0),
+                sourceDurationSec: sourceDurationSec > 0 ? sourceDurationSec : 0,
                 sourceEndSec: clipSourceEndSec,
                 sourceSampleRate,
                 playbackRate: pr,

@@ -51,8 +51,7 @@ export const zhTW = {
     menu_import_vocalshifter: "匯入 VocalShifter 專案...",
     menu_paste_reaper_clipboard: "貼上 Reaper 剪貼簿資料",
     menu_paste_vocalshifter_clipboard: "貼上 VocalShifter 剪貼簿資料",
-    reaper_import_skipped_header:
-        "Reaper 匯入時略過了以下音訊檔案（格式不支援或檔案不存在）：",
+    reaper_import_skipped_header: "Reaper 匯入時略過了以下音訊檔案（格式不支援或檔案不存在）：",
     menu_pick_output: "選擇匯出路徑",
     language: "語言",
     lang_en: "English",
@@ -103,13 +102,11 @@ export const zhTW = {
     pitch_shift: "升降調",
     output_path: "匯出路徑",
     hints: "提示",
-    hint_drag_clip:
-        "拖曳時間軸中的片段可移動起始位置（預設吸附至格線；按住 Shift 可自由移動）",
+    hint_drag_clip: "拖曳時間軸中的片段可移動起始位置（預設吸附至格線；按住 Shift 可自由移動）",
     hint_add_point: "在參數區雙擊可新增控制點",
     hint_drag_point: "拖動控制點可編輯曲線",
     hint_drop_audio: "將音訊檔案拖放至介面中可直接匯入並分析",
-    hint_alt_drag:
-        "拖動音訊片段時按住 Alt 進行內部偏移（Slip-Edit：移動內部內容，不吸附）",
+    hint_alt_drag: "拖動音訊片段時按住 Alt 進行內部偏移（Slip-Edit：移動內部內容，不吸附）",
 
     timeline_title: "時間軸",
     tracks: "軌道",
@@ -181,8 +178,7 @@ export const zhTW = {
     status_export_separated_done: "分軌匯出完成",
     status_export_separated_failed: "分軌匯出失敗",
     unsaved_changes_title: "未儲存的變更",
-    unsaved_changes_switch_desc:
-        "目前專案有未儲存的變更。切換專案前是否先儲存？",
+    unsaved_changes_switch_desc: "目前專案有未儲存的變更。切換專案前是否先儲存？",
     unsaved_changes_exit_desc: "目前專案有未儲存的變更。關閉應用程式前是否先儲存？",
     unsaved_changes_discard: "不儲存",
 
@@ -210,8 +206,7 @@ export const zhTW = {
     fade_out: "淡出",
     show_secondary_param: "顯示副參數疊加曲線",
     hide_secondary_param: "隱藏副參數疊加曲線",
-    onnx_compile_required:
-        "ONNX 模型未編譯，請執行：cargo tauri dev --features onnx",
+    onnx_compile_required: "ONNX 模型未編譯，請執行：cargo tauri dev --features onnx",
     onnx_unavailable_label: "（不可用）",
     solo: "獨奏",
     status_analyzing_pitch: "正在分析音高",
@@ -385,8 +380,7 @@ export const zhTW = {
     midi_import_failed: "MIDI 匯入失敗",
     midi_file_not_found: "MIDI 檔案未找到",
     midi_no_notes: "選取的軌道沒有音符",
-    midi_no_frames_touched:
-        "MIDI 匯入沒有寫入任何幀，請檢查播放頭位置和專案長度",
+    midi_no_frames_touched: "MIDI 匯入沒有寫入任何幀，請檢查播放頭位置和專案長度",
 
     // 工具列切換按鈕
     auto_crossfade: "自動交叉淡化",
