@@ -279,7 +279,11 @@ export function useTimelineState(): TimelineStateResult {
             rulerContentRef.current.style.transform = `translateX(${-next}px)`;
         }
         // ★ 立即广播视口变化 → WaveformTrackCanvas 直接 invalidate（绕过 React）
-        timelineViewportBus.emit(next, pxPerSecRef.current, viewportWidthRef.current);
+        timelineViewportBus.emit(
+            next,
+            pxPerSecRef.current,
+            viewportWidthRef.current,
+        );
         // 用 rAF 合并状态更新，保证自动滚屏可达 60Hz 且避免同步抖动
         if (scrollStateRafRef.current == null) {
             scrollStateRafRef.current = requestAnimationFrame(() => {
@@ -338,9 +342,9 @@ export function useTimelineState(): TimelineStateResult {
     } | null>(null);
 
     // ── trackVolumeUi ────────────────────────────────────────
-    const [trackVolumeUi, setTrackVolumeUi] = useState<
-        Record<string, number>
-    >({});
+    const [trackVolumeUi, setTrackVolumeUi] = useState<Record<string, number>>(
+        {},
+    );
 
     // ── dropPreview ──────────────────────────────────────────
     const [dropPreview, setDropPreview] = useState<{
@@ -460,10 +464,7 @@ export function useTimelineState(): TimelineStateResult {
             const leftBeat = leftPx / beatPx;
             const rightBeat = rightPx / beatPx;
 
-            startBarIndex = Math.max(
-                0,
-                Math.floor(leftBeat / beatsPerBar) - 1,
-            );
+            startBarIndex = Math.max(0, Math.floor(leftBeat / beatsPerBar) - 1);
             endBarIndex = Math.min(
                 totalBars,
                 Math.ceil(rightBeat / beatsPerBar) + 1,
@@ -481,7 +482,14 @@ export function useTimelineState(): TimelineStateResult {
             result.push({ beat, label: `${barIndex + 1}.1` });
         }
         return result;
-    }, [s.beats, dynamicProjectSec, s.bpm, viewportWidth, pxPerSec, scrollLeft]);
+    }, [
+        s.beats,
+        dynamicProjectSec,
+        s.bpm,
+        viewportWidth,
+        pxPerSec,
+        scrollLeft,
+    ]);
 
     // ── clipsByTrackId ───────────────────────────────────────
     const clipsByTrackId = useMemo(() => {

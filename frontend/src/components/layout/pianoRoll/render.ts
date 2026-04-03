@@ -41,7 +41,8 @@ import {
  */
 function getFixedDashPattern(baseDashPx: number, baseGapPx: number): number[] {
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const toAlignedCssPx = (v: number) => Math.max(1, Math.round(v * dpr) / dpr);
+    const toAlignedCssPx = (v: number) =>
+        Math.max(1, Math.round(v * dpr) / dpr);
     return [toAlignedCssPx(baseDashPx), toAlignedCssPx(baseGapPx)];
 }
 
@@ -164,7 +165,7 @@ function drawCurveTimed(args: {
         const frame = startFrame + i * step;
         const tSec = framesToTime(frame, fp);
         if (tSec > visibleStartSec + visibleDurSec) {
-            break; 
+            break;
         }
         if (tSec < visibleStartSec) {
             started = false;
@@ -558,7 +559,9 @@ export function drawPianoRoll(args: {
                 if (isChildPitchOffsetCentsParam(editParam)) {
                     // 候选步长（以音分为单位），从大到小
                     const range = vMax - vMin;
-                    const candidates = [1200, 600, 300, 200, 100, 50, 25, 10, 5, 1];
+                    const candidates = [
+                        1200, 600, 300, 200, 100, 50, 25, 10, 5, 1,
+                    ];
                     let chosen = candidates[candidates.length - 1];
                     for (const c of candidates) {
                         const count = Math.ceil(range / c) + 1;
@@ -570,16 +573,25 @@ export function drawPianoRoll(args: {
                     // 退化：若跨度相对较大，回退到更粗的步长以避免过多刻度
                     const approxCount = range / chosen;
                     if (approxCount > 12) {
-                        const fallbackStep = Math.max(candidates[0], niceAxisStep(range, 8));
+                        const fallbackStep = Math.max(
+                            candidates[0],
+                            niceAxisStep(range, 8),
+                        );
                         chosen = fallbackStep;
                     }
 
                     const firstMark = Math.ceil(vMin / chosen) * chosen;
-                    for (let m = firstMark; m <= vMax + chosen * 0.01; m += chosen) {
+                    for (
+                        let m = firstMark;
+                        m <= vMax + chosen * 0.01;
+                        m += chosen
+                    ) {
                         const y = valueToY(editParam, m, h);
                         const isStrong = Math.round(m) % 1200 === 0;
                         ctx.fillText(formatAxisMark(m, editParam), 6, y);
-                        ctx.strokeStyle = isStrong ? colors.tensionLine : colors.tensionLine;
+                        ctx.strokeStyle = isStrong
+                            ? colors.tensionLine
+                            : colors.tensionLine;
                         ctx.lineWidth = isStrong ? 1.25 : 1;
                         ctx.beginPath();
                         ctx.moveTo(0, y + 0.5);
@@ -598,12 +610,18 @@ export function drawPianoRoll(args: {
                         }
                     }
                     const firstMark = Math.ceil(vMin / chosen) * chosen;
-                    for (let m = firstMark; m <= vMax + chosen * 0.01; m += chosen) {
+                    for (
+                        let m = firstMark;
+                        m <= vMax + chosen * 0.01;
+                        m += chosen
+                    ) {
                         const y = valueToY(editParam, m, h);
                         const rounded = Math.round(m);
                         const isStrong = rounded % 7 === 0;
                         ctx.fillText(formatAxisMark(m, editParam), 6, y);
-                        ctx.strokeStyle = isStrong ? colors.tensionLine : colors.tensionLine;
+                        ctx.strokeStyle = isStrong
+                            ? colors.tensionLine
+                            : colors.tensionLine;
                         ctx.lineWidth = isStrong ? 1.25 : 1;
                         ctx.beginPath();
                         ctx.moveTo(0, y + 0.5);
@@ -617,7 +635,11 @@ export function drawPianoRoll(args: {
                     // 回退：使用常规的“nice”步长
                     const niceStep = niceAxisStep(span, 4);
                     const firstMark = Math.ceil(vMin / niceStep) * niceStep;
-                    for (let m = firstMark; m <= vMax + niceStep * 0.01; m += niceStep) {
+                    for (
+                        let m = firstMark;
+                        m <= vMax + niceStep * 0.01;
+                        m += niceStep
+                    ) {
                         const y = valueToY(editParam, m, h);
                         ctx.fillText(formatAxisMark(m, editParam), 6, y);
                         ctx.strokeStyle = colors.tensionLine;
@@ -803,7 +825,10 @@ export function drawPianoRoll(args: {
         const spp = Math.max(1, Math.round(sampleRate / pxPerSec));
         const levelKey = `${entry.sourcePath}::${entry.clipId}`;
         const previousLevel = lastLevelByClip[levelKey];
-        const stableLevel = waveformMipmapStore.selectLevelStable(spp, previousLevel);
+        const stableLevel = waveformMipmapStore.selectLevelStable(
+            spp,
+            previousLevel,
+        );
         lastLevelByClip[levelKey] = stableLevel;
 
         // 从 mipmap 缓存获取 interleaved 数据
@@ -858,7 +883,7 @@ export function drawPianoRoll(args: {
         ctx.clip();
 
         // 静音 clip 半透明
-        ctx.globalAlpha = entry.muted ? 0.30 : 0.86;
+        ctx.globalAlpha = entry.muted ? 0.3 : 0.86;
         // 因为 renderWaveform 内部是从 x=0 开始画的，所以我们把画布的原点平移到 Clip 的可视起始点
         ctx.translate(clipVisLeft, 0);
         renderWaveform(
@@ -875,7 +900,7 @@ export function drawPianoRoll(args: {
             releaseGainBuffer(withGains);
         }
         waveformMipmapStore.releaseInterleaved(result.interleaved);
-        }
+    }
 
     // Selection (time band)
     if (selection) {
@@ -963,10 +988,7 @@ export function drawPianoRoll(args: {
 
     // Curves
     // 副参数曲线（半透明、细线，绘制在主参数曲线下方�?
-    if (
-        showSecondaryParam &&
-        secondaryParamIds.length > 0
-    ) {
+    if (showSecondaryParam && secondaryParamIds.length > 0) {
         const secondaryPalette = [
             "rgba(100, 200, 255, 0.62)",
             "rgba(255, 180, 60, 0.62)",

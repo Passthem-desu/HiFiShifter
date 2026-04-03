@@ -18,7 +18,6 @@ import { fadeInAreaPath, fadeOutAreaPath } from "./paths";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
 
-
 export const ClipItem = React.memo(function ClipItem({
     clip,
     rowHeight,
@@ -110,8 +109,6 @@ export const ClipItem = React.memo(function ClipItem({
     const fadeStrokeColor = selected
         ? "var(--qt-clip-selected-border)"
         : "var(--qt-clip-border)";
-
-
 
     const startDeferredFadeEditDrag = React.useCallback(
         (
@@ -207,8 +204,7 @@ export const ClipItem = React.memo(function ClipItem({
             onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                const keepExistingMultiSelection =
-                    multiSelectedCount > 1;
+                const keepExistingMultiSelection = multiSelectedCount > 1;
                 if (!keepExistingMultiSelection) {
                     ensureSelected(clip.id);
                     selectClipRemote(clip.id);
@@ -225,7 +221,8 @@ export const ClipItem = React.memo(function ClipItem({
                 );
 
                 // Shift+点击范围选择在 pointerup 时处理（避免阻止拖动）
-                const doShiftRangeSelect = e.shiftKey && !alt && !e.ctrlKey && !e.metaKey;
+                const doShiftRangeSelect =
+                    e.shiftKey && !alt && !e.ctrlKey && !e.metaKey;
 
                 // Seek should happen on click, not on drag.
                 // Track whether the pointer moved beyond a small deadzone.
