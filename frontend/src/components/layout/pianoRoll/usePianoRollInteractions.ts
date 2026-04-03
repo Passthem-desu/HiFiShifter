@@ -11,10 +11,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { ParamFramesPayload } from "../../../types/api";
 import type { AppDispatch } from "../../../app/store";
 import { paramsApi } from "../../../services/api";
-import {
-    seekPlayhead,
-    setplayheadSec,
-} from "../../../features/session/sessionSlice";
+import { seekPlayhead, setplayheadSec } from "../../../features/session/sessionSlice";
 import { clamp, MAX_PX_PER_SEC, MIN_PX_PER_SEC } from "../timeline";
 import type {
     ParamMorphOverlay,
@@ -25,10 +22,7 @@ import type {
     ValueViewport,
 } from "./types";
 import type { MutableRefObject as MutRef } from "react";
-import {
-    isModifierActive,
-    isNoneBinding,
-} from "../../../features/keybindings/keybindingsSlice";
+import { isModifierActive, isNoneBinding } from "../../../features/keybindings/keybindingsSlice";
 import { matchesKeybinding } from "../../../features/keybindings/useKeybindings";
 import { ACTION_META } from "../../../features/keybindings/defaultKeybindings";
 import type { Keybinding } from "../../../features/keybindings/types";
@@ -60,12 +54,7 @@ import {
     writeSystemClipboardObject,
 } from "../../../utils/systemClipboard";
 
-type CanvasCursor =
-    | "default"
-    | "crosshair"
-    | "grab"
-    | "grabbing"
-    | "ew-resize";
+type CanvasCursor = "default" | "crosshair" | "grab" | "grabbing" | "ew-resize";
 
 export function usePianoRollInteractions(args: {
     dispatch: AppDispatch;
@@ -181,12 +170,14 @@ export function usePianoRollInteractions(args: {
     /** 参数值浮窗是否启用 */
     paramValuePopupEnabled?: boolean;
     /** 参数值浮窗预览回调 */
-    onParamValuePreviewChange?: (next: {
-        clientX: number;
-        clientY: number;
-        value: number;
-        displayText?: string;
-    } | null) => void;
+    onParamValuePreviewChange?: (
+        next: {
+            clientX: number;
+            clientY: number;
+            value: number;
+            displayText?: string;
+        } | null,
+    ) => void;
     /** 是否启用绘制时音高吸附 */
     pitchSnapEnabled?: boolean;
     /** 音高吸附方式 */
@@ -289,24 +280,13 @@ export function usePianoRollInteractions(args: {
     } = args;
 
     const pointerFineScale = useCallback(
-        (
-            ev: {
-                ctrlKey: boolean;
-                shiftKey: boolean;
-                altKey: boolean;
-                metaKey?: boolean;
-            },
-        ) => (isModifierActive(paramFineAdjustKb, ev as any) ? 0.1 : 1),
+        (ev: { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey?: boolean }) =>
+            isModifierActive(paramFineAdjustKb, ev as any) ? 0.1 : 1,
         [paramFineAdjustKb],
     );
 
     const isSnapToggleModifierHeld = useCallback(
-        (ev: {
-            ctrlKey: boolean;
-            shiftKey: boolean;
-            altKey: boolean;
-            metaKey?: boolean;
-        }) => {
+        (ev: { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey?: boolean }) => {
             const noSnapKb = keybindingMap?.["modifier.clipNoSnap" as ActionId];
             if (noSnapKb) {
                 return Boolean(isModifierActive(noSnapKb, ev as any));
@@ -317,12 +297,7 @@ export function usePianoRollInteractions(args: {
     );
 
     const isEffectivePitchSnapActive = useCallback(
-        (ev: {
-            ctrlKey: boolean;
-            shiftKey: boolean;
-            altKey: boolean;
-            metaKey?: boolean;
-        }) => {
+        (ev: { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey?: boolean }) => {
             const snapToggled = isSnapToggleModifierHeld(ev);
             return Boolean(snapToggled ? !pitchSnapEnabled : pitchSnapEnabled);
         },
@@ -384,12 +359,7 @@ export function usePianoRollInteractions(args: {
     );
 
     const applyEdgeSmoothingToDense = useCallback(
-        (
-            editedDense: number[],
-            editedStartIdx: number,
-            editedLen: number,
-            changeFactor = 1,
-        ) => {
+        (editedDense: number[], editedStartIdx: number, editedLen: number, changeFactor = 1) => {
             const effectiveChange = clamp(Number(changeFactor) || 0, 0, 1);
             if (effectiveChange <= 0) return;
             const strength = clamp(Number(edgeSmoothnessPercent) || 0, 0, 100);
@@ -398,9 +368,7 @@ export function usePianoRollInteractions(args: {
             const maxTransitionFrames = Math.floor(editedLen / 2);
             if (maxTransitionFrames <= 0) return;
 
-            const transitionFrames = Math.round(
-                (strength / 100) * maxTransitionFrames,
-            );
+            const transitionFrames = Math.round((strength / 100) * maxTransitionFrames);
             if (transitionFrames <= 0) return;
 
             const snapshot = editedDense.slice();
@@ -424,8 +392,7 @@ export function usePianoRollInteractions(args: {
                     const outsideVal = snapshot[outsideIdx] ?? editedDense[idx];
                     const insideVal = snapshot[insideIdx] ?? editedDense[idx];
                     const smoothed = outsideVal + (insideVal - outsideVal) * t;
-                    editedDense[idx] =
-                        snapshot[idx] + (smoothed - snapshot[idx]) * effectiveChange;
+                    editedDense[idx] = snapshot[idx] + (smoothed - snapshot[idx]) * effectiveChange;
                 }
             }
 
@@ -441,8 +408,7 @@ export function usePianoRollInteractions(args: {
                     const insideVal = snapshot[insideIdx] ?? editedDense[idx];
                     const outsideVal = snapshot[outsideIdx] ?? editedDense[idx];
                     const smoothed = insideVal + (outsideVal - insideVal) * t;
-                    editedDense[idx] =
-                        snapshot[idx] + (smoothed - snapshot[idx]) * effectiveChange;
+                    editedDense[idx] = snapshot[idx] + (smoothed - snapshot[idx]) * effectiveChange;
                 }
             }
         },
@@ -467,7 +433,12 @@ export function usePianoRollInteractions(args: {
         shiftHeld: boolean;
     } | null>(null);
     // Track last pointer position so we can synthesize pointermove when modifiers change
-    const lastPointerPosRef = useRef<{ clientX: number; clientY: number; pointerId?: number; buttons?: number }>({
+    const lastPointerPosRef = useRef<{
+        clientX: number;
+        clientY: number;
+        pointerId?: number;
+        buttons?: number;
+    }>({
         clientX: 0,
         clientY: 0,
         pointerId: 0,
@@ -490,15 +461,11 @@ export function usePianoRollInteractions(args: {
 
         const aBeat = Math.min(sel.aBeat, sel.bBeat);
         const bBeat = Math.max(sel.aBeat, sel.bBeat);
-        if (!Number.isFinite(aBeat) || !Number.isFinite(bBeat) || bBeat <= aBeat)
-            return null;
+        if (!Number.isFinite(aBeat) || !Number.isFinite(bBeat) || bBeat <= aBeat) return null;
 
         const fp = Math.max(1e-6, pv.framePeriodMs);
         const stride = Math.max(1, pv.stride);
-        const selStartFrameRaw = Math.max(
-            0,
-            Math.floor((aBeat * secPerBeat * 1000) / fp),
-        );
+        const selStartFrameRaw = Math.max(0, Math.floor((aBeat * secPerBeat * 1000) / fp));
         const selEndFrameRaw = Math.max(
             selStartFrameRaw,
             Math.ceil((bBeat * secPerBeat * 1000) / fp),
@@ -517,13 +484,10 @@ export function usePianoRollInteractions(args: {
         if (baselineValues.length === 0) return null;
 
         const valid =
-            editParam === "pitch"
-                ? baselineValues.filter((v) => Number(v) !== 0)
-                : baselineValues;
+            editParam === "pitch" ? baselineValues.filter((v) => Number(v) !== 0) : baselineValues;
         const meanValue =
             valid.length > 0
-                ? valid.reduce((sum, v) => sum + (Number(v) || 0), 0) /
-                  valid.length
+                ? valid.reduce((sum, v) => sum + (Number(v) || 0), 0) / valid.length
                 : 0;
 
         const selectionStartFrame = pv.startFrame + selStartIdx * stride;
@@ -702,7 +666,10 @@ export function usePianoRollInteractions(args: {
             const effective = snapToggleHeld ? !pitchSnapEnabled : pitchSnapEnabled;
             if (!effective) return v;
 
-            if (isChildPitchOffsetCentsParam(editParam) || isChildPitchOffsetDegreesParam(editParam)) {
+            if (
+                isChildPitchOffsetCentsParam(editParam) ||
+                isChildPitchOffsetDegreesParam(editParam)
+            ) {
                 return snapChildPitchOffsetValue(editParam, v);
             }
 
@@ -711,25 +678,14 @@ export function usePianoRollInteractions(args: {
                 pitchSnapUnit === "scale" && projectScale
                     ? snapToScale(v, projectScale)
                     : snapToSemitone(v);
-            const toleranceSemitone = Math.max(
-                0,
-                Number(pitchSnapToleranceCents ?? 0) / 100,
-            );
+            const toleranceSemitone = Math.max(0, Number(pitchSnapToleranceCents ?? 0) / 100);
             if (Math.abs(v - snapped) <= toleranceSemitone) {
                 return v;
             }
-            return snapped + (((v - snapped) > 0 ? 1 : -1)) * toleranceSemitone;
+            return snapped + (v - snapped > 0 ? 1 : -1) * toleranceSemitone;
         },
-        [
-            pitchSnapEnabled,
-            pitchSnapUnit,
-            projectScale,
-            pitchSnapToleranceCents,
-            editParam,
-        ],
+        [pitchSnapEnabled, pitchSnapUnit, projectScale, pitchSnapToleranceCents, editParam],
     );
-
-    
 
     const pitchDeltaToDegreeSteps = useCallback(
         (basePitch: number, targetPitch: number, scale: ScaleLike): number => {
@@ -757,7 +713,7 @@ export function usePianoRollInteractions(args: {
             for (let i = 0; i < 24; i += 1) {
                 const mid = (left + right) / 2;
                 const midPitch = transposePitchByScaleSteps(basePitch, mid, scale);
-                if ((midPitch < targetPitch) === ascending) {
+                if (midPitch < targetPitch === ascending) {
                     left = mid;
                 } else {
                     right = mid;
@@ -838,7 +794,9 @@ export function usePianoRollInteractions(args: {
         }
 
         const updateMorphActivation = (
-            e: globalThis.KeyboardEvent | { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey?: boolean },
+            e:
+                | globalThis.KeyboardEvent
+                | { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey?: boolean },
         ) => {
             const active =
                 toolMode === "select" &&
@@ -989,16 +947,10 @@ export function usePianoRollInteractions(args: {
     const onRulerMouseDown = useCallback(
         (e: ReactMouseEvent<HTMLDivElement>) => {
             if (e.button !== 0) return;
-            const bounds = (
-                e.currentTarget as HTMLDivElement
-            ).getBoundingClientRect();
+            const bounds = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
             const sl = scrollLeftRef.current;
             const ppb = pxPerBeatRef.current;
-            const beat = clamp(
-                (e.clientX - bounds.left + sl) / Math.max(1e-9, ppb),
-                0,
-                1e12,
-            );
+            const beat = clamp((e.clientX - bounds.left + sl) / Math.max(1e-9, ppb), 0, 1e12);
             // beat → sec：playheadSec 存储的是秒，必须转换后再 dispatch
             const sec = beat * secPerBeat;
             dispatch(setplayheadSec(sec));
@@ -1042,12 +994,19 @@ export function usePianoRollInteractions(args: {
             // Handle edit.* keybindings passed through from useKeybindings global handler
             // (must be before the selectionRef guard since selectAll/deselect work without selection)
             if (keybindingMap && onEditAction) {
-                const editActionEntries = (Object.entries(keybindingMap) as [ActionId, Keybinding][])
-                    .filter(([id]) => id.startsWith("edit."));
+                const editActionEntries = (
+                    Object.entries(keybindingMap) as [ActionId, Keybinding][]
+                ).filter(([id]) => id.startsWith("edit."));
                 // 需要弹出对话框的操作列表
                 const dialogOps = new Set([
-                    "transposeCents", "transposeDegrees", "setPitch",
-                    "average", "smooth", "addVibrato", "quantize", "meanQuantize",
+                    "transposeCents",
+                    "transposeDegrees",
+                    "setPitch",
+                    "average",
+                    "smooth",
+                    "addVibrato",
+                    "quantize",
+                    "meanQuantize",
                 ]);
                 for (const [actionId, kb] of editActionEntries) {
                     if (kb.modifierOnly) continue;
@@ -1083,11 +1042,7 @@ export function usePianoRollInteractions(args: {
             const durSec = Math.max(0, (bBeat - aBeat) * secPerBeat);
             const fp = paramView?.framePeriodMs ?? 5;
             const startFrame = Math.max(0, Math.floor((startSec * 1000) / fp));
-            const frameCount = clamp(
-                Math.ceil((durSec * 1000) / fp),
-                1,
-                200_000,
-            );
+            const frameCount = clamp(Math.ceil((durSec * 1000) / fp), 1, 200_000);
 
             // 检测 pianoRoll.copy 绑定
             {
@@ -1096,13 +1051,10 @@ export function usePianoRollInteractions(args: {
                 if (kb.modifierOnly) {
                     keyMatch = isModifierActive(kb, e.nativeEvent);
                 } else {
-                    let pressedKey =
-                        e.key === " " ? "space" : e.key.toLowerCase();
+                    let pressedKey = e.key === " " ? "space" : e.key.toLowerCase();
                     if (pressedKey !== kb.key) keyMatch = false;
                     else {
-                        const isMac = navigator.platform
-                            .toLowerCase()
-                            .includes("mac");
+                        const isMac = navigator.platform.toLowerCase().includes("mac");
                         const modKey = isMac ? e.metaKey : e.ctrlKey;
                         keyMatch =
                             modKey === Boolean(kb.ctrl) &&
@@ -1124,22 +1076,16 @@ export function usePianoRollInteractions(args: {
                         const payload = res as ParamFramesPayload;
                         clipboardRef.current = {
                             param: editParam,
-                            framePeriodMs:
-                                Number(payload.frame_period_ms ?? fp) || fp,
-                            values: (payload.edit ?? []).map(
-                                (v) => Number(v) || 0,
-                            ),
+                            framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
+                            values: (payload.edit ?? []).map((v) => Number(v) || 0),
                         };
                         try {
                             await writeSystemClipboardObject({
                                 version: 1,
                                 kind: "param",
                                 param: editParam,
-                                framePeriodMs:
-                                    Number(payload.frame_period_ms ?? fp) || fp,
-                                values: (payload.edit ?? []).map(
-                                    (v) => Number(v) || 0,
-                                ),
+                                framePeriodMs: Number(payload.frame_period_ms ?? fp) || fp,
+                                values: (payload.edit ?? []).map((v) => Number(v) || 0),
                             });
                         } catch {
                             // ignore clipboard write failures
@@ -1158,13 +1104,10 @@ export function usePianoRollInteractions(args: {
                 if (kb.modifierOnly) {
                     keyMatch = isModifierActive(kb, e.nativeEvent);
                 } else {
-                    let pressedKey =
-                        e.key === " " ? "space" : e.key.toLowerCase();
+                    let pressedKey = e.key === " " ? "space" : e.key.toLowerCase();
                     if (pressedKey !== kb.key) keyMatch = false;
                     else {
-                        const isMac = navigator.platform
-                            .toLowerCase()
-                            .includes("mac");
+                        const isMac = navigator.platform.toLowerCase().includes("mac");
                         const modKey = isMac ? e.metaKey : e.ctrlKey;
                         keyMatch =
                             modKey === Boolean(kb.ctrl) &&
@@ -1181,8 +1124,7 @@ export function usePianoRollInteractions(args: {
                             if (fromSystem?.kind === "param") {
                                 clip = {
                                     param: fromSystem.param,
-                                    framePeriodMs:
-                                        Number(fromSystem.framePeriodMs) || fp,
+                                    framePeriodMs: Number(fromSystem.framePeriodMs) || fp,
                                     values: Array.isArray(fromSystem.values)
                                         ? fromSystem.values.map((v) => Number(v) || 0)
                                         : [],
@@ -1291,7 +1233,8 @@ export function usePianoRollInteractions(args: {
                     if (freqActive) {
                         // 上滚减小频率，下滚增大频率；按倍率缩放且始终为正。
                         const ratio = Math.pow(1 + 0.1 * fineScale, steps);
-                        vib.frequency = e.deltaY < 0 ? vib.frequency / ratio : vib.frequency * ratio;
+                        vib.frequency =
+                            e.deltaY < 0 ? vib.frequency / ratio : vib.frequency * ratio;
                         vib.frequency = Math.max(1e-4, vib.frequency);
                     }
 
@@ -1309,7 +1252,7 @@ export function usePianoRollInteractions(args: {
                             vib.frequency,
                             e.shiftKey,
                         );
-                                    vib.shiftHeld = e.shiftKey;
+                        vib.shiftHeld = e.shiftKey;
                         st.points = [
                             { frame: vib.startFrame, value: vib.startValue },
                             { frame: vib.currentFrame, value: vib.currentValue },
@@ -1332,15 +1275,12 @@ export function usePianoRollInteractions(args: {
                 return;
             }
 
-            const noModifierPressed =
-                !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+            const noModifierPressed = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
             const isWheelBindingRequested = (kb: Keybinding) => {
                 if (isNoneBinding(kb)) return noModifierPressed;
                 return isModifierActive(kb, e);
             };
-            const horizontalScrollModifierActive = isWheelBindingRequested(
-                scrollHorizontalKb,
-            );
+            const horizontalScrollModifierActive = isWheelBindingRequested(scrollHorizontalKb);
             const wheelAction = getParamEditorWheelAction({
                 deltaX: e.deltaX,
                 deltaY: e.deltaY,
@@ -1353,9 +1293,7 @@ export function usePianoRollInteractions(args: {
             // Scroll modifier: convert wheel to horizontal scroll
             if (wheelAction === "horizontal-scroll") {
                 e.preventDefault();
-                el.scrollLeft += horizontalScrollModifierActive
-                    ? e.deltaY
-                    : e.deltaX;
+                el.scrollLeft += horizontalScrollModifierActive ? e.deltaY : e.deltaX;
                 syncScrollLeft(el);
                 return;
             }
@@ -1450,18 +1388,11 @@ export function usePianoRollInteractions(args: {
 
             // Playhead-based zoom: use playhead position as anchor instead of pointer
             const secPerBeatLocal = 60 / Math.max(1, bpm);
-            const totalBeats = Math.max(
-                0,
-                dynamicProjectSec / Math.max(1e-9, secPerBeatLocal),
-            );
+            const totalBeats = Math.max(0, dynamicProjectSec / Math.max(1e-9, secPerBeatLocal));
             let anchorX: number;
             let anchorBeat: number;
             if (playheadZoomEnabled && playheadSec != null) {
-                anchorBeat = clamp(
-                    playheadSec / secPerBeatLocal,
-                    0,
-                    totalBeats,
-                );
+                anchorBeat = clamp(playheadSec / secPerBeatLocal, 0, totalBeats);
                 anchorX = anchorBeat * curPxPerBeat - el.scrollLeft;
                 if (anchorX < 0 || anchorX > bounds.width) {
                     anchorX = bounds.width / 2;
@@ -1549,30 +1480,18 @@ export function usePianoRollInteractions(args: {
             const fp = pv.framePeriodMs;
             const sec = beat * secPerBeat;
             const frame = Math.max(0, Math.floor((sec * 1000) / fp));
-            const idx = Math.round(
-                (frame - pv.startFrame) / Math.max(1, pv.stride),
-            );
-            const curveVal =
-                idx >= 0 && idx < pv.edit.length ? Number(pv.edit[idx]) : null;
+            const idx = Math.round((frame - pv.startFrame) / Math.max(1, pv.stride));
+            const curveVal = idx >= 0 && idx < pv.edit.length ? Number(pv.edit[idx]) : null;
             if (curveVal == null || !Number.isFinite(curveVal)) return null;
 
             const rect = canvas.getBoundingClientRect();
             const rectH = rect.height || viewSizeRef.current.h || 1;
             const mouseY = clientY - rect.top;
-            const mappedCurveVal =
-                editParam === "pitch" ? curveVal + 0.5 : curveVal;
+            const mappedCurveVal = editParam === "pitch" ? curveVal + 0.5 : curveVal;
             const curveY = valueToY(editParam, mappedCurveVal, rectH);
             return Math.abs(mouseY - curveY) < 10 ? curveVal : null;
         },
-        [
-            paramViewRef,
-            canvasRef,
-            pointerBeat,
-            secPerBeat,
-            viewSizeRef,
-            editParam,
-            valueToY,
-        ],
+        [paramViewRef, canvasRef, pointerBeat, secPerBeat, viewSizeRef, editParam, valueToY],
     );
 
     const isPointerNearDraggableSelection = useCallback(
@@ -1588,12 +1507,7 @@ export function usePianoRollInteractions(args: {
 
             return getCurveValueNearPointer(clientX, clientY) != null;
         },
-        [
-            toolMode,
-            selectionRef,
-            pointerBeat,
-            getCurveValueNearPointer,
-        ],
+        [toolMode, selectionRef, pointerBeat, getCurveValueNearPointer],
     );
 
     const isPointerNearStretchSelectionEdge = useCallback(
@@ -1610,26 +1524,15 @@ export function usePianoRollInteractions(args: {
             const rightX = bBeat * pxPerBeatRef.current - scrollLeftRef.current;
             const localX = e.clientX - rect.left;
             const edgeHitPx = 8;
-            return (
-                Math.abs(localX - leftX) <= edgeHitPx ||
-                Math.abs(localX - rightX) <= edgeHitPx
-            );
+            return Math.abs(localX - leftX) <= edgeHitPx || Math.abs(localX - rightX) <= edgeHitPx;
         },
-        [
-            toolMode,
-            paramStretchKb,
-            selectionRef,
-            canvasRef,
-            pxPerBeatRef,
-            scrollLeftRef,
-        ],
+        [toolMode, paramStretchKb, selectionRef, canvasRef, pxPerBeatRef, scrollLeftRef],
     );
 
     const onCanvasPointerMove = useCallback(
         (e: ReactPointerEvent<HTMLCanvasElement>) => {
             if (paramValuePopupEnabled) {
-                const draggingLeft =
-                    Boolean(strokeRef.current) && (e.buttons & 1) === 1;
+                const draggingLeft = Boolean(strokeRef.current) && (e.buttons & 1) === 1;
                 if (draggingLeft) {
                     const rawPreviewValue = pointerValue(e.clientY);
                     const dragPreviewValue =
@@ -1649,10 +1552,7 @@ export function usePianoRollInteractions(args: {
                         value: dragPreviewValue,
                     });
                 } else {
-                    const nearCurveValue = getCurveValueNearPointer(
-                        e.clientX,
-                        e.clientY,
-                    );
+                    const nearCurveValue = getCurveValueNearPointer(e.clientX, e.clientY);
                     if (nearCurveValue == null) {
                         onParamValuePreviewChange?.(null);
                     } else {
@@ -1700,13 +1600,7 @@ export function usePianoRollInteractions(args: {
         if (panRef.current || strokeRef.current) return;
         onParamValuePreviewChange?.(null);
         setCanvasCursor(getDefaultCanvasCursor());
-    }, [
-        panRef,
-        strokeRef,
-        onParamValuePreviewChange,
-        setCanvasCursor,
-        getDefaultCanvasCursor,
-    ]);
+    }, [panRef, strokeRef, onParamValuePreviewChange, setCanvasCursor, getDefaultCanvasCursor]);
 
     const onCanvasPointerDown = useCallback(
         (e: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -1827,8 +1721,8 @@ export function usePianoRollInteractions(args: {
                         const mapped = editParam === "pitch" ? p.value + 0.5 : p.value;
                         const y = valueToY(editParam, mapped, h);
                         return (
-                            Math.abs((e.clientX - rect.left) - x) <= 8 &&
-                            Math.abs((e.clientY - rect.top) - y) <= 8
+                            Math.abs(e.clientX - rect.left - x) <= 8 &&
+                            Math.abs(e.clientY - rect.top - y) <= 8
                         );
                     });
 
@@ -1855,12 +1749,7 @@ export function usePianoRollInteractions(args: {
                             const drag = morphDragRef.current;
                             const overlayNow = morphOverlayRef.current;
                             const pvNow = paramViewRef.current;
-                            if (
-                                !drag ||
-                                drag.pointerId !== e.pointerId ||
-                                !overlayNow ||
-                                !pvNow
-                            ) {
+                            if (!drag || drag.pointerId !== e.pointerId || !overlayNow || !pvNow) {
                                 return;
                             }
 
@@ -1872,7 +1761,10 @@ export function usePianoRollInteractions(args: {
                                 }
                                 const beat = pointerBeat(ev.clientX);
                                 const sec = beat * secPerBeat;
-                                const rawFrame = Math.max(0, Math.floor((sec * 1000) / Math.max(1e-6, pvNow.framePeriodMs)));
+                                const rawFrame = Math.max(
+                                    0,
+                                    Math.floor((sec * 1000) / Math.max(1e-6, pvNow.framePeriodMs)),
+                                );
                                 const clampedFrame = clamp(
                                     rawFrame,
                                     overlayNow.selectionStartFrame,
@@ -1972,10 +1864,8 @@ export function usePianoRollInteractions(args: {
                         const canvas = canvasRef.current;
                         if (canvas) {
                             const rect = canvas.getBoundingClientRect();
-                            const leftX =
-                                aBeat * pxPerBeatRef.current - scrollLeftRef.current;
-                            const rightX =
-                                bBeat * pxPerBeatRef.current - scrollLeftRef.current;
+                            const leftX = aBeat * pxPerBeatRef.current - scrollLeftRef.current;
+                            const rightX = bBeat * pxPerBeatRef.current - scrollLeftRef.current;
                             const localX = e.clientX - rect.left;
                             const EDGE_HIT_PX = 8;
                             const hitLeft = Math.abs(localX - leftX) <= EDGE_HIT_PX;
@@ -2051,29 +1941,23 @@ export function usePianoRollInteractions(args: {
                                     );
                                     const edgeHalfSpanIdx = Math.ceil(
                                         Math.round(
-                                            (edgeSmoothStr / 100) *
-                                                Math.floor(nextLen / 2),
+                                            (edgeSmoothStr / 100) * Math.floor(nextLen / 2),
                                         ) / 2,
                                     );
                                     const extraEdgeFrames = edgeHalfSpanIdx * stride;
                                     const overallMinFrame = Math.max(
                                         0,
-                                        Math.min(oldStartFrame, nextStartFrame) -
-                                            extraEdgeFrames,
+                                        Math.min(oldStartFrame, nextStartFrame) - extraEdgeFrames,
                                     );
                                     const overallMaxFrame =
-                                        Math.max(oldEndFrame, nextEndFrame) +
-                                        extraEdgeFrames;
+                                        Math.max(oldEndFrame, nextEndFrame) + extraEdgeFrames;
                                     const overallLen =
-                                        Math.floor(
-                                            (overallMaxFrame - overallMinFrame) / stride,
-                                        ) + 1;
+                                        Math.floor((overallMaxFrame - overallMinFrame) / stride) +
+                                        1;
                                     const dense = new Array<number>(overallLen);
                                     for (let i = 0; i < overallLen; i += 1) {
                                         const frame = overallMinFrame + i * stride;
-                                        const idx = Math.round(
-                                            (frame - pvNow.startFrame) / stride,
-                                        );
+                                        const idx = Math.round((frame - pvNow.startFrame) / stride);
                                         dense[i] =
                                             idx >= 0 && idx < pvNow.edit.length
                                                 ? pvNow.edit[idx]
@@ -2109,7 +1993,9 @@ export function usePianoRollInteractions(args: {
                                         srcFrame: number,
                                         fallback: number,
                                     ) => {
-                                        const srcIdx = Math.round((srcFrame - pvNow.startFrame) / stride);
+                                        const srcIdx = Math.round(
+                                            (srcFrame - pvNow.startFrame) / stride,
+                                        );
                                         if (srcIdx >= 0 && srcIdx < pvNow.edit.length) {
                                             return pvNow.edit[srcIdx];
                                         }
@@ -2120,11 +2006,8 @@ export function usePianoRollInteractions(args: {
                                         1,
                                         Math.round(oldValues.length * 0.2),
                                     );
-                                    const smoothRatio = clamp(
-                                        Number(edgeSmoothnessPercent) || 0,
-                                        0,
-                                        100,
-                                    ) / 100;
+                                    const smoothRatio =
+                                        clamp(Number(edgeSmoothnessPercent) || 0, 0, 100) / 100;
                                     const outsideWindowLen = Math.max(
                                         1,
                                         Math.round(maxOutsideWindow * smoothRatio),
@@ -2133,13 +2016,21 @@ export function usePianoRollInteractions(args: {
                                     // 缩短时，用原选区内侧一小段值回填被腾空区域。
                                     // smoothness=0 时 outsideWindowLen=1，相当于边缘值沿边界内侧延展。
                                     if (nextStartFrame > oldStartFrame) {
-                                        const fillLen = Math.floor((nextStartFrame - oldStartFrame) / stride);
+                                        const fillLen = Math.floor(
+                                            (nextStartFrame - oldStartFrame) / stride,
+                                        );
                                         for (let i = 0; i < fillLen; i += 1) {
                                             const targetFrame = oldStartFrame + i * stride;
-                                            const targetIdx = Math.round((targetFrame - overallMinFrame) / stride);
-                                            const srcWindowPos = fillLen > 1
-                                                ? Math.round((i / (fillLen - 1)) * (outsideWindowLen - 1))
-                                                : 0;
+                                            const targetIdx = Math.round(
+                                                (targetFrame - overallMinFrame) / stride,
+                                            );
+                                            const srcWindowPos =
+                                                fillLen > 1
+                                                    ? Math.round(
+                                                          (i / (fillLen - 1)) *
+                                                              (outsideWindowLen - 1),
+                                                      )
+                                                    : 0;
                                             const srcFrame = oldStartFrame + srcWindowPos * stride;
                                             if (targetIdx >= 0 && targetIdx < dense.length) {
                                                 dense[targetIdx] = sampleOutsideValue(
@@ -2150,13 +2041,21 @@ export function usePianoRollInteractions(args: {
                                         }
                                     }
                                     if (nextEndFrame < oldEndFrame) {
-                                        const fillLen = Math.floor((oldEndFrame - nextEndFrame) / stride);
+                                        const fillLen = Math.floor(
+                                            (oldEndFrame - nextEndFrame) / stride,
+                                        );
                                         for (let i = 0; i < fillLen; i += 1) {
                                             const targetFrame = nextEndFrame + (i + 1) * stride;
-                                            const targetIdx = Math.round((targetFrame - overallMinFrame) / stride);
-                                            const srcWindowPos = fillLen > 1
-                                                ? Math.round((i / (fillLen - 1)) * (outsideWindowLen - 1))
-                                                : 0;
+                                            const targetIdx = Math.round(
+                                                (targetFrame - overallMinFrame) / stride,
+                                            );
+                                            const srcWindowPos =
+                                                fillLen > 1
+                                                    ? Math.round(
+                                                          (i / (fillLen - 1)) *
+                                                              (outsideWindowLen - 1),
+                                                      )
+                                                    : 0;
                                             const srcFrame = oldEndFrame - srcWindowPos * stride;
                                             if (targetIdx >= 0 && targetIdx < dense.length) {
                                                 dense[targetIdx] = sampleOutsideValue(
@@ -2265,8 +2164,7 @@ export function usePianoRollInteractions(args: {
                                             built.dense,
                                             true,
                                         );
-                                        if (liveEditActiveRef)
-                                            liveEditActiveRef.current = false;
+                                        if (liveEditActiveRef) liveEditActiveRef.current = false;
                                         bumpRefreshToken();
                                     })();
                                     setCanvasCursor("default");
@@ -2287,18 +2185,11 @@ export function usePianoRollInteractions(args: {
                         if (pv && pv.edit.length > 0) {
                             const fp = pv.framePeriodMs;
                             const sec = b * secPerBeat;
-                            const frame = Math.max(
-                                0,
-                                Math.floor((sec * 1000) / fp),
-                            );
+                            const frame = Math.max(0, Math.floor((sec * 1000) / fp));
                             const idx = Math.round(
-                                (frame - pv.startFrame) /
-                                    Math.max(1, pv.stride),
+                                (frame - pv.startFrame) / Math.max(1, pv.stride),
                             );
-                            const curveVal =
-                                idx >= 0 && idx < pv.edit.length
-                                    ? pv.edit[idx]
-                                    : null;
+                            const curveVal = idx >= 0 && idx < pv.edit.length ? pv.edit[idx] : null;
                             const mouseVal = pointerValue(e.clientY);
 
                             // 使用像素距离判断是否靠近曲线，避免不同参数值域差异的影响
@@ -2322,17 +2213,12 @@ export function usePianoRollInteractions(args: {
                                     : null;
                             const HIT_THRESHOLD_PX = 10;
 
-                            if (
-                                curveY !== null &&
-                                Math.abs(mouseY - curveY) < HIT_THRESHOLD_PX
-                            ) {
+                            if (curveY !== null && Math.abs(mouseY - curveY) < HIT_THRESHOLD_PX) {
                                 if (e.button === 2) {
                                     e.preventDefault();
                                     const startClientY = e.clientY;
                                     const pid = e.pointerId;
-                                    (
-                                        e.currentTarget as HTMLCanvasElement
-                                    ).setPointerCapture(pid);
+                                    (e.currentTarget as HTMLCanvasElement).setPointerCapture(pid);
 
                                     setCanvasCursor("grabbing");
                                     if (paramValuePopupEnabled) {
@@ -2357,22 +2243,13 @@ export function usePianoRollInteractions(args: {
                                     const stride = Math.max(1, pv.stride);
                                     const selStartIdx = Math.max(
                                         0,
-                                        Math.round(
-                                            (selStartFrame - pv.startFrame) /
-                                                stride,
-                                        ),
+                                        Math.round((selStartFrame - pv.startFrame) / stride),
                                     );
                                     const selEndIdx = Math.min(
                                         pv.edit.length - 1,
-                                        Math.round(
-                                            (selEndFrame - pv.startFrame) /
-                                                stride,
-                                        ),
+                                        Math.round((selEndFrame - pv.startFrame) / stride),
                                     );
-                                    const origValues = pv.edit.slice(
-                                        selStartIdx,
-                                        selEndIdx + 1,
-                                    );
+                                    const origValues = pv.edit.slice(selStartIdx, selEndIdx + 1);
 
                                     let didDrag = false;
                                     let latestDense = origValues.slice();
@@ -2380,8 +2257,7 @@ export function usePianoRollInteractions(args: {
                                     let latestAppliedDense = origValues.slice();
 
                                     ensureLiveEditBase(pv);
-                                    if (liveEditActiveRef)
-                                        liveEditActiveRef.current = true;
+                                    if (liveEditActiveRef) liveEditActiveRef.current = true;
 
                                     const buildRightDragDense = (
                                         pvNow: ParamViewSegment,
@@ -2390,23 +2266,36 @@ export function usePianoRollInteractions(args: {
                                         const selLen = nextSelectionValues.length;
                                         const maxTransitionFrames = Math.floor(selLen / 2);
                                         const transitionFrames =
-                                            Number(edgeSmoothnessPercent) > 0 && maxTransitionFrames > 0
+                                            Number(edgeSmoothnessPercent) > 0 &&
+                                            maxTransitionFrames > 0
                                                 ? Math.round(
-                                                    (clamp(Number(edgeSmoothnessPercent) || 0, 0, 100) / 100) *
-                                                        maxTransitionFrames,
-                                                )
+                                                      (clamp(
+                                                          Number(edgeSmoothnessPercent) || 0,
+                                                          0,
+                                                          100,
+                                                      ) /
+                                                          100) *
+                                                          maxTransitionFrames,
+                                                  )
                                                 : 0;
                                         const extraEdgeFrames =
                                             Math.max(0, Math.ceil(transitionFrames / 2)) * stride;
-                                        const denseStartFrame = Math.max(0, selStartFrame - extraEdgeFrames);
+                                        const denseStartFrame = Math.max(
+                                            0,
+                                            selStartFrame - extraEdgeFrames,
+                                        );
                                         const denseEndFrame = selEndFrame + extraEdgeFrames;
                                         const denseLength =
-                                            Math.floor((denseEndFrame - denseStartFrame) / stride) + 1;
+                                            Math.floor((denseEndFrame - denseStartFrame) / stride) +
+                                            1;
                                         const dense = new Array<number>(denseLength);
 
                                         for (let index = 0; index < denseLength; index += 1) {
                                             const globalIdx = Math.round(
-                                                (denseStartFrame + index * stride - pvNow.startFrame) / stride,
+                                                (denseStartFrame +
+                                                    index * stride -
+                                                    pvNow.startFrame) /
+                                                    stride,
                                             );
                                             dense[index] =
                                                 globalIdx >= 0 && globalIdx < pvNow.edit.length
@@ -2419,7 +2308,11 @@ export function usePianoRollInteractions(args: {
                                             (selStartFrame - denseStartFrame) / stride,
                                         );
 
-                                        for (let index = 0; index < nextSelectionValues.length; index += 1) {
+                                        for (
+                                            let index = 0;
+                                            index < nextSelectionValues.length;
+                                            index += 1
+                                        ) {
                                             const denseIdx = selectionStartDenseIdx + index;
                                             if (denseIdx >= 0 && denseIdx < dense.length) {
                                                 dense[denseIdx] = nextSelectionValues[index] ?? 0;
@@ -2453,8 +2346,7 @@ export function usePianoRollInteractions(args: {
 
                                     const onMove = (ev: globalThis.PointerEvent) => {
                                         const fineScale = pointerFineScale(ev);
-                                        const dy =
-                                            (startClientY - ev.clientY) * fineScale;
+                                        const dy = (startClientY - ev.clientY) * fineScale;
                                         if (Math.abs(dy) >= 2) {
                                             didDrag = true;
                                         }
@@ -2467,10 +2359,7 @@ export function usePianoRollInteractions(args: {
 
                                         const pvNow = paramViewRef.current;
                                         if (!pvNow) return;
-                                        const nextApplied = buildRightDragDense(
-                                            pvNow,
-                                            latestDense,
-                                        );
+                                        const nextApplied = buildRightDragDense(pvNow, latestDense);
                                         latestAppliedStartFrame = nextApplied.denseStartFrame;
                                         latestAppliedDense = nextApplied.dense;
                                         applyDenseToLiveEdit(
@@ -2509,10 +2398,7 @@ export function usePianoRollInteractions(args: {
                                             }
                                             setCanvasCursor("grab");
                                             if (args.onContextMenu) {
-                                                args.onContextMenu(
-                                                    ev.clientX,
-                                                    ev.clientY,
-                                                );
+                                                args.onContextMenu(ev.clientX, ev.clientY);
                                             }
                                             invalidate();
                                             return;
@@ -2555,9 +2441,7 @@ export function usePianoRollInteractions(args: {
                                             bumpRefreshToken();
                                         })();
 
-                                        const suppressOnce = (
-                                            evt: globalThis.MouseEvent,
-                                        ) => {
+                                        const suppressOnce = (evt: globalThis.MouseEvent) => {
                                             evt.preventDefault();
                                             evt.stopPropagation();
                                             window.removeEventListener(
@@ -2566,11 +2450,7 @@ export function usePianoRollInteractions(args: {
                                                 true,
                                             );
                                         };
-                                        window.addEventListener(
-                                            "contextmenu",
-                                            suppressOnce,
-                                            true,
-                                        );
+                                        window.addEventListener("contextmenu", suppressOnce, true);
                                         setTimeout(() => {
                                             window.removeEventListener(
                                                 "contextmenu",
@@ -2599,9 +2479,7 @@ export function usePianoRollInteractions(args: {
                                 const startMouseVal = mouseVal;
                                 const startBeat = pointerBeat(e.clientX);
                                 const pid = e.pointerId;
-                                (
-                                    e.currentTarget as HTMLCanvasElement
-                                ).setPointerCapture(pid);
+                                (e.currentTarget as HTMLCanvasElement).setPointerCapture(pid);
 
                                 // 保存选区内曲线原始值
                                 const selStartSec = aBeat * secPerBeat;
@@ -2610,31 +2488,19 @@ export function usePianoRollInteractions(args: {
                                     0,
                                     Math.floor((selStartSec * 1000) / fp),
                                 );
-                                const selEndFrame = Math.max(
-                                    0,
-                                    Math.ceil((selEndSec * 1000) / fp),
-                                );
+                                const selEndFrame = Math.max(0, Math.ceil((selEndSec * 1000) / fp));
                                 const stride = Math.max(1, pv.stride);
                                 const selStartIdx = Math.max(
                                     0,
-                                    Math.round(
-                                        (selStartFrame - pv.startFrame) /
-                                            stride,
-                                    ),
+                                    Math.round((selStartFrame - pv.startFrame) / stride),
                                 );
                                 const selEndIdx = Math.min(
                                     pv.edit.length - 1,
-                                    Math.round(
-                                        (selEndFrame - pv.startFrame) / stride,
-                                    ),
+                                    Math.round((selEndFrame - pv.startFrame) / stride),
                                 );
-                                const origValues = pv.edit.slice(
-                                    selStartIdx,
-                                    selEndIdx + 1,
-                                );
+                                const origValues = pv.edit.slice(selStartIdx, selEndIdx + 1);
                                 ensureLiveEditBase(pv);
-                                if (liveEditActiveRef)
-                                    liveEditActiveRef.current = true;
+                                if (liveEditActiveRef) liveEditActiveRef.current = true;
                                 if (
                                     editParam === "pitch" ||
                                     isChildPitchOffsetCentsParam(editParam) ||
@@ -2651,13 +2517,10 @@ export function usePianoRollInteractions(args: {
                                 // 使用闭包变量跟踪当前拖动方向（可通过右键切换）
                                 let currentDragDir = dragDirection ?? "y-only";
 
-                                const onMove = (
-                                    ev: globalThis.PointerEvent,
-                                ) => {
+                                const onMove = (ev: globalThis.PointerEvent) => {
                                     const fineScale = pointerFineScale(ev);
                                     const currentVal = pointerValue(ev.clientY);
-                                    let rawValueDelta =
-                                        (currentVal - startMouseVal) * fineScale;
+                                    let rawValueDelta = (currentVal - startMouseVal) * fineScale;
 
                                     // 音高吸附：Toggle snap modifier (XOR with pitchSnapEnabled)
                                     const effectiveSnap = isEffectivePitchSnapActive(ev);
@@ -2681,8 +2544,7 @@ export function usePianoRollInteractions(args: {
                                         yDragEnabled
                                     ) {
                                         useScaleDegreeTranspose = false;
-                                        rawValueDelta =
-                                            Math.round(rawValueDelta / 100) * 100;
+                                        rawValueDelta = Math.round(rawValueDelta / 100) * 100;
                                     } else if (
                                         effectiveSnap &&
                                         isChildPitchOffsetDegreesParam(editParam) &&
@@ -2700,16 +2562,14 @@ export function usePianoRollInteractions(args: {
 
                                     // 计算 X 方向帧偏移
                                     const currentBeat = pointerBeat(ev.clientX);
-                                    const beatDelta =
-                                        (currentBeat - startBeat) * fineScale;
+                                    const beatDelta = (currentBeat - startBeat) * fineScale;
                                     const secDelta = beatDelta * secPerBeat;
-                                    const rawFrameDelta = Math.round(
-                                        (secDelta * 1000) / fp,
-                                    );
+                                    const rawFrameDelta = Math.round((secDelta * 1000) / fp);
 
                                     // 应用拖动方向限制
                                     lastValueDelta = yDragEnabled ? rawValueDelta : 0;
-                                    lastFrameDelta = currentDragDir === "y-only" ? 0 : rawFrameDelta;
+                                    lastFrameDelta =
+                                        currentDragDir === "y-only" ? 0 : rawFrameDelta;
 
                                     const pvNow = paramViewRef.current;
                                     if (!pvNow) return;
@@ -2721,70 +2581,61 @@ export function usePianoRollInteractions(args: {
 
                                     // 构造覆盖原选区 + 新位置的完整 dense 数组
                                     const selLen = selEndIdx - selStartIdx + 1;
-                                    const origDenseStart =
-                                        pv.startFrame + selStartIdx * stride;
+                                    const origDenseStart = pv.startFrame + selStartIdx * stride;
 
                                     // 计算需要覆盖的帧范围：原选区 ∪ 新位置选区
-                                    const newDenseStart =
-                                        origDenseStart + lastFrameDelta;
+                                    const newDenseStart = origDenseStart + lastFrameDelta;
                                     const overallMinFrame = Math.max(
                                         0,
                                         Math.min(origDenseStart, newDenseStart),
                                     );
-                                    const origDenseEnd =
-                                        origDenseStart + (selLen - 1) * stride;
-                                    const newDenseEnd =
-                                        newDenseStart + (selLen - 1) * stride;
-                                    const overallMaxFrame = Math.max(
-                                        origDenseEnd,
-                                        newDenseEnd,
-                                    );
+                                    const origDenseEnd = origDenseStart + (selLen - 1) * stride;
+                                    const newDenseEnd = newDenseStart + (selLen - 1) * stride;
+                                    const overallMaxFrame = Math.max(origDenseEnd, newDenseEnd);
 
                                     // 边缘平滑度：扩展 dense 范围以包含选区边界外侧上下文
                                     // halfSpan 与 applyEdgeSmoothingToDense 内的计算保持一致
-                                    const edgeSmoothStr = clamp(Number(edgeSmoothnessPercent) || 0, 0, 100);
+                                    const edgeSmoothStr = clamp(
+                                        Number(edgeSmoothnessPercent) || 0,
+                                        0,
+                                        100,
+                                    );
                                     const edgeHalfSpanIdx = Math.ceil(
-                                        Math.round((edgeSmoothStr / 100) * Math.floor(selLen / 2)) / 2,
+                                        Math.round((edgeSmoothStr / 100) * Math.floor(selLen / 2)) /
+                                            2,
                                     );
                                     const extraEdgeFrames = edgeHalfSpanIdx * stride;
-                                    const overallMinFrameExt = Math.max(0, overallMinFrame - extraEdgeFrames);
+                                    const overallMinFrameExt = Math.max(
+                                        0,
+                                        overallMinFrame - extraEdgeFrames,
+                                    );
                                     const overallMaxFrameExt = overallMaxFrame + extraEdgeFrames;
 
                                     const overallLen =
                                         Math.floor(
-                                            (overallMaxFrameExt -
-                                                overallMinFrameExt) /
-                                                stride,
+                                            (overallMaxFrameExt - overallMinFrameExt) / stride,
                                         ) + 1;
                                     const dense = new Array<number>(overallLen);
 
                                     // 先用当前 edit 曲线填充整个范围（含扩展部分；选区外锚点应基于当前新值）
                                     for (let i = 0; i < overallLen; i++) {
                                         const globalIdx = Math.round(
-                                            (overallMinFrameExt +
-                                                i * stride -
-                                                pv.startFrame) /
+                                            (overallMinFrameExt + i * stride - pv.startFrame) /
                                                 stride,
                                         );
                                         dense[i] =
-                                            globalIdx >= 0 &&
-                                            globalIdx < pvNow.edit.length
+                                            globalIdx >= 0 && globalIdx < pvNow.edit.length
                                                 ? pvNow.edit[globalIdx]
                                                 : 0;
                                     }
                                     const denseBefore = dense.slice();
                                     // 再将选区值写入新位置（覆盖 orig）
                                     for (let i = 0; i < selLen; i++) {
-                                        const targetFrame =
-                                            newDenseStart + i * stride;
+                                        const targetFrame = newDenseStart + i * stride;
                                         const denseIdx = Math.round(
-                                            (targetFrame - overallMinFrameExt) /
-                                                stride,
+                                            (targetFrame - overallMinFrameExt) / stride,
                                         );
-                                        if (
-                                            denseIdx >= 0 &&
-                                            denseIdx < overallLen
-                                        ) {
+                                        if (denseIdx >= 0 && denseIdx < overallLen) {
                                             const orig = origValues[i] ?? 0;
                                             if (
                                                 useScaleDegreeTranspose &&
@@ -2800,23 +2651,20 @@ export function usePianoRollInteractions(args: {
                                                               projectScale,
                                                           );
                                             } else {
-                                                dense[denseIdx] =
-                                                    orig + lastValueDelta;
+                                                dense[denseIdx] = orig + lastValueDelta;
                                             }
                                         }
                                     }
 
                                     const movedStartDenseIdx = Math.round(
-                                        (newDenseStart - overallMinFrameExt) /
-                                            stride,
+                                        (newDenseStart - overallMinFrameExt) / stride,
                                     );
-                                    const changeFactor =
-                                        computeSelectionChangeFactor(
-                                            denseBefore,
-                                            dense,
-                                            movedStartDenseIdx,
-                                            selLen,
-                                        );
+                                    const changeFactor = computeSelectionChangeFactor(
+                                        denseBefore,
+                                        dense,
+                                        movedStartDenseIdx,
+                                        selLen,
+                                    );
                                     applyEdgeSmoothingToDense(
                                         dense,
                                         movedStartDenseIdx,
@@ -2835,9 +2683,7 @@ export function usePianoRollInteractions(args: {
 
                                     // 实时更新选区位置显示
                                     const beatDeltaForSel =
-                                        (lastFrameDelta * fp) /
-                                        1000 /
-                                        secPerBeat;
+                                        (lastFrameDelta * fp) / 1000 / secPerBeat;
                                     selectionRef.current = {
                                         aBeat: aBeat + beatDeltaForSel,
                                         bBeat: bBeat + beatDeltaForSel,
@@ -2867,68 +2713,51 @@ export function usePianoRollInteractions(args: {
                                 };
 
                                 const onUp = () => {
-                                    window.removeEventListener(
-                                        "pointermove",
-                                        onMove,
-                                    );
-                                    window.removeEventListener(
-                                        "pointerup",
-                                        onUp,
-                                    );
-                                    window.removeEventListener(
-                                        "pointercancel",
-                                        onUp,
-                                    );
+                                    window.removeEventListener("pointermove", onMove);
+                                    window.removeEventListener("pointerup", onUp);
+                                    window.removeEventListener("pointercancel", onUp);
 
                                     // 提交拖拽结果到后端
                                     const pvNow = paramViewRef.current;
                                     if (pvNow && rootTrackId) {
-                                        const selLen =
-                                            selEndIdx - selStartIdx + 1;
-                                        const origDenseStart =
-                                            pv.startFrame +
-                                            selStartIdx * stride;
-                                        const newDenseStart =
-                                            origDenseStart + lastFrameDelta;
+                                        const selLen = selEndIdx - selStartIdx + 1;
+                                        const origDenseStart = pv.startFrame + selStartIdx * stride;
+                                        const newDenseStart = origDenseStart + lastFrameDelta;
 
                                         const overallMinFrame = Math.max(
                                             0,
-                                            Math.min(
-                                                origDenseStart,
-                                                newDenseStart,
-                                            ),
+                                            Math.min(origDenseStart, newDenseStart),
                                         );
-                                        const origDenseEnd =
-                                            origDenseStart +
-                                            (selLen - 1) * stride;
-                                        const newDenseEnd =
-                                            newDenseStart +
-                                            (selLen - 1) * stride;
-                                        const overallMaxFrame = Math.max(
-                                            origDenseEnd,
-                                            newDenseEnd,
-                                        );
+                                        const origDenseEnd = origDenseStart + (selLen - 1) * stride;
+                                        const newDenseEnd = newDenseStart + (selLen - 1) * stride;
+                                        const overallMaxFrame = Math.max(origDenseEnd, newDenseEnd);
 
                                         // 边缘平滑度：扩展 dense 范围以包含选区边界外侧上下文
-                                        const edgeSmoothStrUp = clamp(Number(edgeSmoothnessPercent) || 0, 0, 100);
+                                        const edgeSmoothStrUp = clamp(
+                                            Number(edgeSmoothnessPercent) || 0,
+                                            0,
+                                            100,
+                                        );
                                         const edgeHalfSpanIdxUp = Math.ceil(
-                                            Math.round((edgeSmoothStrUp / 100) * Math.floor(selLen / 2)) / 2,
+                                            Math.round(
+                                                (edgeSmoothStrUp / 100) * Math.floor(selLen / 2),
+                                            ) / 2,
                                         );
                                         const extraEdgeFramesUp = edgeHalfSpanIdxUp * stride;
-                                        const overallMinFrameExt = Math.max(0, overallMinFrame - extraEdgeFramesUp);
-                                        const overallMaxFrameExt = overallMaxFrame + extraEdgeFramesUp;
+                                        const overallMinFrameExt = Math.max(
+                                            0,
+                                            overallMinFrame - extraEdgeFramesUp,
+                                        );
+                                        const overallMaxFrameExt =
+                                            overallMaxFrame + extraEdgeFramesUp;
 
                                         const overallLen =
                                             Math.floor(
-                                                (overallMaxFrameExt -
-                                                    overallMinFrameExt) /
-                                                    stride,
+                                                (overallMaxFrameExt - overallMinFrameExt) / stride,
                                             ) + 1;
 
                                         // 构造最终提交的 dense 数组
-                                        const finalDense = new Array<number>(
-                                            overallLen,
-                                        );
+                                        const finalDense = new Array<number>(overallLen);
 
                                         // 先用当前 edit 填充整个范围（含扩展部分；选区外锚点应基于当前新值）
                                         for (let i = 0; i < overallLen; i++) {
@@ -2939,26 +2768,18 @@ export function usePianoRollInteractions(args: {
                                                     stride,
                                             );
                                             finalDense[i] =
-                                                globalIdx >= 0 &&
-                                                globalIdx < pvNow.edit.length
+                                                globalIdx >= 0 && globalIdx < pvNow.edit.length
                                                     ? pvNow.edit[globalIdx]
                                                     : 0;
                                         }
-                                        const finalDenseBefore =
-                                            finalDense.slice();
+                                        const finalDenseBefore = finalDense.slice();
                                         // 再将偏移后的选区值写入新位置
                                         for (let i = 0; i < selLen; i++) {
-                                            const targetFrame =
-                                                newDenseStart + i * stride;
+                                            const targetFrame = newDenseStart + i * stride;
                                             const denseIdx = Math.round(
-                                                (targetFrame -
-                                                    overallMinFrameExt) /
-                                                    stride,
+                                                (targetFrame - overallMinFrameExt) / stride,
                                             );
-                                            if (
-                                                denseIdx >= 0 &&
-                                                denseIdx < overallLen
-                                            ) {
+                                            if (denseIdx >= 0 && denseIdx < overallLen) {
                                                 const orig = origValues[i] ?? 0;
                                                 if (
                                                     useScaleDegreeTranspose &&
@@ -2974,23 +2795,20 @@ export function usePianoRollInteractions(args: {
                                                                   projectScale,
                                                               );
                                                 } else {
-                                                    finalDense[denseIdx] =
-                                                        orig + lastValueDelta;
+                                                    finalDense[denseIdx] = orig + lastValueDelta;
                                                 }
                                             }
                                         }
 
                                         const movedStartDenseIdx = Math.round(
-                                            (newDenseStart - overallMinFrameExt) /
-                                                stride,
+                                            (newDenseStart - overallMinFrameExt) / stride,
                                         );
-                                        const changeFactor =
-                                            computeSelectionChangeFactor(
-                                                finalDenseBefore,
-                                                finalDense,
-                                                movedStartDenseIdx,
-                                                selLen,
-                                            );
+                                        const changeFactor = computeSelectionChangeFactor(
+                                            finalDenseBefore,
+                                            finalDense,
+                                            movedStartDenseIdx,
+                                            selLen,
+                                        );
                                         applyEdgeSmoothingToDense(
                                             finalDense,
                                             movedStartDenseIdx,
@@ -3007,12 +2825,8 @@ export function usePianoRollInteractions(args: {
                                                     pvNow.startFrame) /
                                                     stride,
                                             );
-                                            if (
-                                                globalIdx >= 0 &&
-                                                globalIdx < nextEdit.length
-                                            ) {
-                                                nextEdit[globalIdx] =
-                                                    finalDense[i];
+                                            if (globalIdx >= 0 && globalIdx < nextEdit.length) {
+                                                nextEdit[globalIdx] = finalDense[i];
                                             }
                                         }
                                         setParamView({
@@ -3023,9 +2837,7 @@ export function usePianoRollInteractions(args: {
 
                                         // 确保选区位置最终正确
                                         const beatDeltaForSel =
-                                            (lastFrameDelta * fp) /
-                                            1000 /
-                                            secPerBeat;
+                                            (lastFrameDelta * fp) / 1000 / secPerBeat;
                                         selectionRef.current = {
                                             aBeat: aBeat + beatDeltaForSel,
                                             bBeat: bBeat + beatDeltaForSel,
@@ -3045,8 +2857,7 @@ export function usePianoRollInteractions(args: {
                                             bumpRefreshToken();
                                         })();
                                     } else {
-                                        if (liveEditActiveRef)
-                                            liveEditActiveRef.current = false;
+                                        if (liveEditActiveRef) liveEditActiveRef.current = false;
                                     }
                                     // 清除参数浮窗预览（如果启用）
                                     if (paramValuePopupEnabled) {
@@ -3062,8 +2873,16 @@ export function usePianoRollInteractions(args: {
                                     }
                                     setCanvasCursor("grab");
                                     invalidate();
-                                    window.removeEventListener("contextmenu", onContextMenuDuringDrag, true);
-                                    window.removeEventListener("mousedown", onMouseDownDuringDrag, true);
+                                    window.removeEventListener(
+                                        "contextmenu",
+                                        onContextMenuDuringDrag,
+                                        true,
+                                    );
+                                    window.removeEventListener(
+                                        "mousedown",
+                                        onMouseDownDuringDrag,
+                                        true,
+                                    );
                                 };
 
                                 // 拖拽过程中右键点击切换拖动方向
@@ -3077,7 +2896,11 @@ export function usePianoRollInteractions(args: {
                                     if ((ev.buttons & 1) !== 1) return;
                                     ev.preventDefault();
                                     ev.stopPropagation();
-                                    const order: Array<"free" | "x-only" | "y-only"> = ["free", "x-only", "y-only"];
+                                    const order: Array<"free" | "x-only" | "y-only"> = [
+                                        "free",
+                                        "x-only",
+                                        "y-only",
+                                    ];
                                     const idx = order.indexOf(currentDragDir);
                                     currentDragDir = order[(idx + 1) % order.length];
                                     // Also cycle the global setting
@@ -3087,7 +2910,11 @@ export function usePianoRollInteractions(args: {
                                 window.addEventListener("pointermove", onMove);
                                 window.addEventListener("pointerup", onUp);
                                 window.addEventListener("pointercancel", onUp);
-                                window.addEventListener("contextmenu", onContextMenuDuringDrag, true);
+                                window.addEventListener(
+                                    "contextmenu",
+                                    onContextMenuDuringDrag,
+                                    true,
+                                );
                                 window.addEventListener("mousedown", onMouseDownDuringDrag, true);
                                 return;
                             }
@@ -3101,8 +2928,7 @@ export function usePianoRollInteractions(args: {
                         0,
                         dynamicProjectSec / Math.max(1e-9, secPerBeat),
                     );
-                    const clampSelectionBeat = (beat: number) =>
-                        clamp(beat, 0, maxSelectableBeat);
+                    const clampSelectionBeat = (beat: number) => clamp(beat, 0, maxSelectableBeat);
 
                     const selectionBeatFromClientX = (
                         clientX: number,
@@ -3120,21 +2946,17 @@ export function usePianoRollInteractions(args: {
                         if (allowAutoScroll) {
                             let deltaPx = 0;
                             if (clientX < bounds.left + edgePx) {
-                                const ratio =
-                                    (bounds.left + edgePx - clientX) / edgePx;
+                                const ratio = (bounds.left + edgePx - clientX) / edgePx;
                                 deltaPx = -clamp(ratio, 0, 1.5) * maxStepPx;
                             } else if (clientX > bounds.right - edgePx) {
-                                const ratio =
-                                    (clientX - (bounds.right - edgePx)) /
-                                    edgePx;
+                                const ratio = (clientX - (bounds.right - edgePx)) / edgePx;
                                 deltaPx = clamp(ratio, 0, 1.5) * maxStepPx;
                             }
 
                             if (Math.abs(deltaPx) > 0.01) {
                                 const maxScrollLeft = Math.max(
                                     0,
-                                    maxSelectableBeat *
-                                        Math.max(1e-9, pxPerBeatRef.current) -
+                                    maxSelectableBeat * Math.max(1e-9, pxPerBeatRef.current) -
                                         scroller.clientWidth,
                                 );
                                 const nextScrollLeft = clamp(
@@ -3142,24 +2964,16 @@ export function usePianoRollInteractions(args: {
                                     0,
                                     maxScrollLeft,
                                 );
-                                if (
-                                    Math.abs(nextScrollLeft - scroller.scrollLeft) >
-                                    0.01
-                                ) {
+                                if (Math.abs(nextScrollLeft - scroller.scrollLeft) > 0.01) {
                                     scroller.scrollLeft = nextScrollLeft;
                                     syncScrollLeft(scroller);
                                 }
                             }
                         }
 
-                        const clampedClientX = clamp(
-                            clientX,
-                            bounds.left,
-                            bounds.right,
-                        );
+                        const clampedClientX = clamp(clientX, bounds.left, bounds.right);
                         const beat =
-                            (scroller.scrollLeft +
-                                (clampedClientX - bounds.left)) /
+                            (scroller.scrollLeft + (clampedClientX - bounds.left)) /
                             Math.max(1e-9, pxPerBeatRef.current);
                         return clampSelectionBeat(beat);
                     };
@@ -3244,9 +3058,7 @@ export function usePianoRollInteractions(args: {
                     mode,
                 );
             }
-            (e.currentTarget as HTMLCanvasElement).setPointerCapture(
-                e.pointerId,
-            );
+            (e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId);
             invalidate();
 
             if (isLineTool || isVibratoTool) {
@@ -3286,7 +3098,10 @@ export function usePianoRollInteractions(args: {
                     const v2 = isDrawMode ? snapDrawValue(rawV2, moveSnapToggleHeld) : rawV2;
 
                     // Update stroke to only have start and current end
-                    st.points = [{ frame: startFrame, value: startValue }, { frame: f2, value: v2 }];
+                    st.points = [
+                        { frame: startFrame, value: startValue },
+                        { frame: f2, value: v2 },
+                    ];
 
                     const pv2 = paramViewRef.current;
                     if (pv2) {
@@ -3416,14 +3231,14 @@ export function usePianoRollInteractions(args: {
                     const fineScale = pointerFineScale(ev);
                     const b2Raw = pointerBeat(ev.clientX);
                     const last = st.points[st.points.length - 1];
-                    const lastBeat = last
-                        ? (last.frame * fp) / 1000 / secPerBeat
-                        : b2Raw;
+                    const lastBeat = last ? (last.frame * fp) / 1000 / secPerBeat : b2Raw;
                     const b2 = lastBeat + (b2Raw - lastBeat) * fineScale;
                     const sec2 = b2 * secPerBeat;
                     const f2 = Math.max(0, Math.floor((sec2 * 1000) / fp));
                     const yDragEnabled = currentDragDir !== "x-only";
-                    const rawV2Abs = yDragEnabled ? pointerValue(ev.clientY) : (last?.value ?? value);
+                    const rawV2Abs = yDragEnabled
+                        ? pointerValue(ev.clientY)
+                        : (last?.value ?? value);
                     const baseV = last?.value ?? rawV2Abs;
                     const rawV2 = baseV + (rawV2Abs - baseV) * fineScale;
                     const moveSnapToggleHeld = isSnapToggleModifierHeld(ev);
@@ -3462,14 +3277,7 @@ export function usePianoRollInteractions(args: {
                         }
 
                         if (pv2) {
-                            applyDenseToLiveEdit(
-                                pv2,
-                                minF,
-                                dense,
-                                minF,
-                                maxF,
-                                mode,
-                            );
+                            applyDenseToLiveEdit(pv2, minF, dense, minF, maxF, mode);
                         }
                     }
                     invalidate();

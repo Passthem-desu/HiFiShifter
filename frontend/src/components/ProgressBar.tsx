@@ -53,16 +53,16 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
                         <LoadingSpinner size="sm" />
                     )}
                     {label && <span className="text-gray-300">{label}</span>}
-                    <span className="text-gray-400">
-                        {clampedPercentage.toFixed(0)}%
-                    </span>
+                    <span className="text-gray-400">{clampedPercentage.toFixed(0)}%</span>
                 </div>
-                {estimatedRemaining !== null &&
-                    estimatedRemaining !== undefined && (
-                        <span className="text-xs text-gray-500">
-                            {t("progress_est_remaining").replace("{time}", formatTime(estimatedRemaining))}
-                        </span>
-                    )}
+                {estimatedRemaining !== null && estimatedRemaining !== undefined && (
+                    <span className="text-xs text-gray-500">
+                        {t("progress_est_remaining").replace(
+                            "{time}",
+                            formatTime(estimatedRemaining),
+                        )}
+                    </span>
+                )}
             </div>
 
             <div className="relative h-2 w-full overflow-hidden rounded-full bg-gray-700">

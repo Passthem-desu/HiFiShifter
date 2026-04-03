@@ -2,16 +2,10 @@ import { useEffect } from "react";
 import type { AppDispatch } from "../../../../app/store";
 import { useAppSelector } from "../../../../app/hooks";
 import type { SessionState } from "../../../../features/session/sessionSlice";
-import {
-    removeClipsRemote,
-} from "../../../../features/session/sessionSlice";
+import { removeClipsRemote } from "../../../../features/session/sessionSlice";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { selectMergedKeybindings } from "../../../../features/keybindings/keybindingsSlice";
-import type {
-    ActionId,
-    Keybinding,
-    KeybindingMap,
-} from "../../../../features/keybindings/types";
+import type { ActionId, Keybinding, KeybindingMap } from "../../../../features/keybindings/types";
 import { writeSystemClipboardObject } from "../../../../utils/systemClipboard";
 
 /**
@@ -24,8 +18,7 @@ function matchesKeybinding(e: KeyboardEvent, kb: Keybinding): boolean {
     if (key !== kb.key) return false;
 
     const isMac =
-        typeof navigator !== "undefined" &&
-        navigator.platform?.toLowerCase().includes("mac");
+        typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
 
     const modKey = isMac ? e.metaKey : e.ctrlKey;
     if (modKey !== Boolean(kb.ctrl)) return false;
@@ -38,10 +31,7 @@ function matchesKeybinding(e: KeyboardEvent, kb: Keybinding): boolean {
  * 在 keybinding map 中查找匹配的 actionId
  * 只检查 clip.* 操作
  */
-function matchClipAction(
-    e: KeyboardEvent,
-    keybindings: KeybindingMap,
-): ActionId | null {
+function matchClipAction(e: KeyboardEvent, keybindings: KeybindingMap): ActionId | null {
     const clipActions: ActionId[] = [
         "clip.delete",
         "clip.copy",
@@ -96,15 +86,10 @@ export function useKeyboardShortcuts(deps: {
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
             if (e.repeat) return;
-            if (
-                isEditableTarget(document.activeElement) ||
-                isEditableTarget(e.target)
-            )
-                return;
+            if (isEditableTarget(document.activeElement) || isEditableTarget(e.target)) return;
 
             // 快捷键设置对话框打开时，阻塞所有快捷键
-            if (document.body.hasAttribute("data-keybindings-dialog-open"))
-                return;
+            if (document.body.hasAttribute("data-keybindings-dialog-open")) return;
 
             const s = sessionRef.current;
             const selectedIds =
@@ -118,11 +103,7 @@ export function useKeyboardShortcuts(deps: {
             if (!actionId) return;
 
             // clip.copy / clip.cut / clip.paste: 焦点在 PianoRoll 时优先交给参数编辑器。
-            if (
-                actionId === "clip.copy" ||
-                actionId === "clip.cut" ||
-                actionId === "clip.paste"
-            ) {
+            if (actionId === "clip.copy" || actionId === "clip.cut" || actionId === "clip.paste") {
                 const active = document.activeElement as HTMLElement | null;
                 const inPianoRoll =
                     active?.hasAttribute("data-piano-roll-scroller") ||
@@ -132,9 +113,7 @@ export function useKeyboardShortcuts(deps: {
                         e.preventDefault();
                         e.stopPropagation();
                         const op = actionId.replace("clip.", "");
-                        window.dispatchEvent(
-                            new CustomEvent("hifi:editOp", { detail: { op } }),
-                        );
+                        window.dispatchEvent(new CustomEvent("hifi:editOp", { detail: { op } }));
                     }
                     return;
                 }
@@ -157,14 +136,10 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     void (async () => {
-                        const templates = await buildClipClipboardTemplates(
-                            selectedIds,
-                        );
+                        const templates = await buildClipClipboardTemplates(selectedIds);
                         if (templates.length === 0) return;
                         (
-                            clipClipboardRef as React.MutableRefObject<
-                                ClipTemplate[] | null
-                            >
+                            clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>
                         ).current = templates;
                         try {
                             await writeSystemClipboardObject({
@@ -184,14 +159,10 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     void (async () => {
-                        const templates = await buildClipClipboardTemplates(
-                            selectedIds,
-                        );
+                        const templates = await buildClipClipboardTemplates(selectedIds);
                         if (templates.length === 0) return;
                         (
-                            clipClipboardRef as React.MutableRefObject<
-                                ClipTemplate[] | null
-                            >
+                            clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>
                         ).current = templates;
                         try {
                             await writeSystemClipboardObject({

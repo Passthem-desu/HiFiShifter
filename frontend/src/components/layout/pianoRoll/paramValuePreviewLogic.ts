@@ -55,11 +55,7 @@ export function getSelectDragPreviewValue(args: {
 
     if (editParam === "pitch") {
         if (pitchSnapUnit === "scale" && projectScale) {
-            const stepDelta = scaleStepDeltaBetween(
-                startValue,
-                currentValue,
-                projectScale,
-            );
+            const stepDelta = scaleStepDeltaBetween(startValue, currentValue, projectScale);
             return transposePitchByScaleSteps(startValue, stepDelta, projectScale);
         }
         return startValue + Math.round(rawValueDelta);
@@ -109,10 +105,7 @@ export function getDrawPreviewValue(args: {
         pitchSnapUnit === "scale" && projectScale
             ? snapToScale(rawValue, projectScale)
             : snapToSemitone(rawValue);
-    const toleranceSemitone = Math.max(
-        0,
-        Number(pitchSnapToleranceCents ?? 0) / 100,
-    );
+    const toleranceSemitone = Math.max(0, Number(pitchSnapToleranceCents ?? 0) / 100);
     if (Math.abs(rawValue - snapped) <= toleranceSemitone) {
         return rawValue;
     }

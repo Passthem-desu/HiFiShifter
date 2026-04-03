@@ -1,7 +1,4 @@
-import {
-    fileBrowserApi,
-    type AudioPreviewData,
-} from "../../services/api/fileBrowser";
+import { fileBrowserApi, type AudioPreviewData } from "../../services/api/fileBrowser";
 
 /**
  * 音频预览播放引擎（单例）
@@ -39,8 +36,7 @@ class AudioPreviewEngine {
         let buffer = this.cache.get(filePath);
         if (!buffer) {
             // 从后端获取 PCM 数据
-            const data: AudioPreviewData =
-                await fileBrowserApi.readAudioPreview(filePath, 480_000);
+            const data: AudioPreviewData = await fileBrowserApi.readAudioPreview(filePath, 480_000);
             buffer = this.decodePreviewData(ctx, data);
             this.cache.set(filePath, buffer);
         }
@@ -100,10 +96,7 @@ class AudioPreviewEngine {
      * 将后端返回的 base64 编码 f32 LE interleaved PCM 数据
      * 解码为 Web Audio AudioBuffer
      */
-    private decodePreviewData(
-        ctx: AudioContext,
-        data: AudioPreviewData,
-    ): AudioBuffer {
+    private decodePreviewData(ctx: AudioContext, data: AudioPreviewData): AudioBuffer {
         const binaryStr = atob(data.pcmBase64);
         const bytes = new Uint8Array(binaryStr.length);
         for (let i = 0; i < binaryStr.length; i++) {

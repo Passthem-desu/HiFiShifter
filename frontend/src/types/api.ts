@@ -43,10 +43,7 @@ export interface TimelineClip {
     duration_sec?: number;
     duration_frames?: number; // 精确frame总数
     source_sample_rate?: number; // 源文件采样率
-    waveform_preview?:
-        | number[]
-        | { l: number[]; r: number[] }
-        | { min: number[]; max: number[] };
+    waveform_preview?: number[] | { l: number[]; r: number[] } | { min: number[]; max: number[] };
     pitch_range?: {
         min: number;
         max: number;

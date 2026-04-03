@@ -22,9 +22,7 @@ export function PitchSnapSettingsDialog({ open, onOpenChange }: Props) {
     );
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
-    const [toleranceInput, setToleranceInput] = useState(
-        String(pitchSnapToleranceCents),
-    );
+    const [toleranceInput, setToleranceInput] = useState(String(pitchSnapToleranceCents));
 
     useEffect(() => {
         if (open) {
@@ -34,10 +32,7 @@ export function PitchSnapSettingsDialog({ open, onOpenChange }: Props) {
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
-            <Dialog.Content
-                style={{ maxWidth: 360 }}
-                onKeyDown={(e) => e.stopPropagation()}
-            >
+            <Dialog.Content style={{ maxWidth: 360 }} onKeyDown={(e) => e.stopPropagation()}>
                 <Dialog.Title>{tAny("pitch_snap_settings")}</Dialog.Title>
 
                 <Flex direction="column" gap="3" mt="3">
@@ -50,9 +45,7 @@ export function PitchSnapSettingsDialog({ open, onOpenChange }: Props) {
                             value={pitchSnapUnit}
                             size="2"
                             onValueChange={(v) => {
-                                dispatch(
-                                    setPitchSnapUnit(v as PitchSnapUnit),
-                                );
+                                dispatch(setPitchSnapUnit(v as PitchSnapUnit));
                                 void dispatch(persistUiSettings());
                             }}
                         >
@@ -61,9 +54,7 @@ export function PitchSnapSettingsDialog({ open, onOpenChange }: Props) {
                                 <Select.Item value="semitone">
                                     {tAny("quantize_semitone")}
                                 </Select.Item>
-                                <Select.Item value="scale">
-                                    {tAny("quantize_scale")}
-                                </Select.Item>
+                                <Select.Item value="scale">{tAny("quantize_scale")}</Select.Item>
                             </Select.Content>
                         </Select.Root>
                     </Flex>
@@ -76,9 +67,7 @@ export function PitchSnapSettingsDialog({ open, onOpenChange }: Props) {
                             size="2"
                             type="number"
                             value={toleranceInput}
-                            onChange={(e) =>
-                                setToleranceInput(e.target.value)
-                            }
+                            onChange={(e) => setToleranceInput(e.target.value)}
                             style={{ flex: 1 }}
                         />
                     </Flex>
@@ -90,9 +79,7 @@ export function PitchSnapSettingsDialog({ open, onOpenChange }: Props) {
                             variant="soft"
                             color="gray"
                             onClick={() => {
-                                const parsed = Math.abs(
-                                    Math.round(Number(toleranceInput) || 0),
-                                );
+                                const parsed = Math.abs(Math.round(Number(toleranceInput) || 0));
                                 dispatch(setPitchSnapToleranceCents(parsed));
                                 void dispatch(persistUiSettings());
                             }}

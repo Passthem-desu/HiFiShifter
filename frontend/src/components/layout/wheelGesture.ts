@@ -51,9 +51,7 @@ export function getParamEditorWheelAction(input: {
         return "horizontal-zoom";
     }
 
-    return getWheelGestureAxis(input) === "horizontal"
-        ? "horizontal-scroll"
-        : "horizontal-zoom";
+    return getWheelGestureAxis(input) === "horizontal" ? "horizontal-scroll" : "horizontal-zoom";
 }
 
 export function getTimelineWheelAction(input: {
@@ -80,7 +78,5 @@ export function getTimelineWheelAction(input: {
         return "horizontal-zoom";
     }
 
-    return getWheelGestureAxis(input) === "horizontal"
-        ? "horizontal-scroll"
-        : "native";
+    return getWheelGestureAxis(input) === "horizontal" ? "horizontal-scroll" : "native";
 }

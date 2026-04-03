@@ -32,7 +32,8 @@ export const koKR = {
     export_dialog_select_exclude_muted: "음소거 제외",
     export_dialog_select_none: "전체 해제",
     export_dialog_select_all_subtracks: "하위 트랙 전체 선택",
-    export_dialog_error_invalid_range: "시간 범위가 올바르지 않습니다. 종료 시간은 시작 시간보다 커야 합니다.",
+    export_dialog_error_invalid_range:
+        "시간 범위가 올바르지 않습니다. 종료 시간은 시작 시간보다 커야 합니다.",
     export_dialog_error_missing_project_path: "출력 파일 경로를 선택하세요.",
     export_dialog_error_missing_project_output_dir: "프로젝트 내보내기 출력 폴더를 선택하세요.",
     export_dialog_error_missing_project_file_name: "프로젝트 내보내기 출력 파일 이름을 입력하세요.",
@@ -184,8 +185,7 @@ export const koKR = {
     hint_add_point: "파라미터 패널을 더블 클릭하여 포인트 추가",
     hint_drag_point: "포인트를 드래그하여 커브 편집",
     hint_drop_audio: "오디오 파일을 드롭하여 가져오기 및 분석",
-    hint_alt_drag:
-        "클립 드래그 중 Alt 키를 누르면 Slip-Edit (내부 콘텐츠 이동; 스냅 없음)",
+    hint_alt_drag: "클립 드래그 중 Alt 키를 누르면 Slip-Edit (내부 콘텐츠 이동; 스냅 없음)",
 
     timeline_title: "타임라인",
     tracks: "트랙",
@@ -195,14 +195,10 @@ export const koKR = {
     track_remove_selected: "선택한 트랙 삭제",
 
     param_editor: "파라미터 에디터",
-    pitch_requires_compose:
-        "루트 트랙에서 Compose(C)를 활성화하여 피치 커브를 생성하세요",
-    pitch_requires_algo:
-        "피치 편집을 활성화하려면 '없음' 이외의 피치 알고리즘을 선택하세요",
-    pitch_backend_unavailable:
-        "피치 백엔드 사용 불가 (WORLD DLL / ONNX 모델을 확인하세요)",
-    pitch_edit_not_modified_hint:
-        "아직 편집되지 않음: 커브가 원본 피치와 동일합니다",
+    pitch_requires_compose: "루트 트랙에서 Compose(C)를 활성화하여 피치 커브를 생성하세요",
+    pitch_requires_algo: "피치 편집을 활성화하려면 '없음' 이외의 피치 알고리즘을 선택하세요",
+    pitch_backend_unavailable: "피치 백엔드 사용 불가 (WORLD DLL / ONNX 모델을 확인하세요)",
+    pitch_edit_not_modified_hint: "아직 편집되지 않음: 커브가 원본 피치와 동일합니다",
     pitch_status_label: "피치",
     pitch_status_off: "꺼짐",
     pitch_status_pending: "분석 중…",
@@ -345,8 +341,7 @@ export const koKR = {
     fade_curve_logarithmic: "로그",
     fade_curve_scurve: "S 커브",
 
-    clip_gain_drag_hint:
-        "위아래로 드래그하여 게인 조절 / 더블 클릭으로 수치 입력",
+    clip_gain_drag_hint: "위아래로 드래그하여 게인 조절 / 더블 클릭으로 수치 입력",
     track_change_color: "트랙 색상 변경",
     track_clone: "트랙 복제",
     color_blue: "파랑",
@@ -417,22 +412,18 @@ export const koKR = {
     kb_pianoroll_paste: "파라미터 프레임 붙여넣기",
     kb_pianoroll_shift_param_up: "파라미터 위로 이동 (클립 범위)",
     kb_pianoroll_shift_param_down: "파라미터 아래로 이동 (클립 범위)",
-    kb_pianoroll_shift_param_up_selection:
-        "파라미터 라인 위로 이동 (선택 범위)",
-    kb_pianoroll_shift_param_down_selection:
-        "파라미터 라인 아래로 이동 (선택 범위)",
+    kb_pianoroll_shift_param_up_selection: "파라미터 라인 위로 이동 (선택 범위)",
+    kb_pianoroll_shift_param_down_selection: "파라미터 라인 아래로 이동 (선택 범위)",
     kb_modifier_slip_edit: "Slip 편집 (클립 드래그 중 누르기)",
     kb_modifier_stretch: "타임 스트레치 (엣지 드래그 중 누르기)",
-    kb_modifier_no_snap:
-        "드래그 중 그리드 스냅을 전환합니다 (누르면 현재 그리드 스냅을 반전)",
+    kb_modifier_no_snap: "드래그 중 그리드 스냅을 전환합니다 (누르면 현재 그리드 스냅을 반전)",
     kb_modifier_copy_drag: "복사 드래그 (클립 드래그 중 누르기)",
     kb_modifier_horizontal_zoom: "수평 줌 (누른 채 스크롤)",
     kb_modifier_pr_vzoom: "수직 줌 (누른 채 스크롤)",
     kb_modifier_param_morph: "파라미터 형태 변형 (선택 영역에서 누르기)",
     kb_modifier_param_fine_adjust: "파라미터 미세 조정 (누르고 있는 동안)",
     kb_modifier_vibrato_amplitude_adjust: "비브라토 진폭 조절 (누른 채 스크롤)",
-    kb_modifier_vibrato_frequency_adjust:
-        "비브라토 주파수 조절 (누른 채 스크롤)",
+    kb_modifier_vibrato_frequency_adjust: "비브라토 주파수 조절 (누른 채 스크롤)",
     kb_modifier_piano_keys_scroll_v: "피아노 키 수직 스크롤 (누른 채 스크롤)",
     kb_modifier_piano_keys_zoom_v: "피아노 키 수직 줌 (누른 채 스크롤)",
     kb_group_mode: "모드",
@@ -449,14 +440,11 @@ export const koKR = {
     kb_quick_search_preview: "미리듣기",
     kb_quick_search_confirm: "오디오 배치",
     kb_quick_search_close: "닫기",
-    vs_paste_clipboard_not_found:
-        "VocalShifter 클립보드 데이터를 찾을 수 없습니다.",
+    vs_paste_clipboard_not_found: "VocalShifter 클립보드 데이터를 찾을 수 없습니다.",
     vs_paste_clipboard_invalid_format:
         "클립보드 파일 형식이 올바르지 않습니다 (크기가 0x80의 배수가 아니거나 레코드가 손상됨).",
-    vs_paste_clipboard_io_error:
-        "VocalShifter 클립보드 파일을 읽는 중 I/O 오류가 발생했습니다.",
-    vs_paste_no_pitch_line:
-        "피치 라인이 선택되지 않았습니다. 먼저 피치 라인을 선택하세요.",
+    vs_paste_clipboard_io_error: "VocalShifter 클립보드 파일을 읽는 중 I/O 오류가 발생했습니다.",
+    vs_paste_no_pitch_line: "피치 라인이 선택되지 않았습니다. 먼저 피치 라인을 선택하세요.",
     vs_import_read_failed: "VocalShifter 프로젝트 파일을 읽지 못했습니다.",
     vs_import_parse_failed: "VocalShifter 프로젝트 파싱에 실패했습니다.",
     vs_import_skipped_header:

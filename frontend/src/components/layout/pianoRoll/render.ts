@@ -10,12 +10,7 @@
  * @module render
  */
 
-import type {
-    ParamMorphOverlay,
-    ParamName,
-    ParamViewSegment,
-    ValueViewport,
-} from "./types";
+import type { ParamMorphOverlay, ParamName, ParamViewSegment, ValueViewport } from "./types";
 import type { ClipPeaksEntry } from "./useClipsPeaksForPianoRoll";
 import { clamp } from "../timeline";
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./constants";
@@ -41,8 +36,7 @@ import {
  */
 function getFixedDashPattern(baseDashPx: number, baseGapPx: number): number[] {
     const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const toAlignedCssPx = (v: number) =>
-        Math.max(1, Math.round(v * dpr) / dpr);
+    const toAlignedCssPx = (v: number) => Math.max(1, Math.round(v * dpr) / dpr);
     return [toAlignedCssPx(baseDashPx), toAlignedCssPx(baseGapPx)];
 }
 
@@ -61,8 +55,7 @@ function niceAxisStep(range: number, targetCount: number): number {
 
 /** 格式化轴标记数值，避免浮点噪声 */
 function formatAxisMark(v: number, param?: ParamName): string {
-    const displayValue =
-        param != null ? childPitchOffsetValueToDisplay(param, v) : v;
+    const displayValue = param != null ? childPitchOffsetValueToDisplay(param, v) : v;
     // 最多保留 4 位有效数字，去掉尾随零
     const s = parseFloat(displayValue.toPrecision(4)).toString();
     return s;
@@ -74,20 +67,7 @@ function isBlackKey(midi: number): boolean {
 }
 
 function midiToLabel(midi: number): string {
-    const NOTE_NAMES = [
-        "C",
-        "C#",
-        "D",
-        "D#",
-        "E",
-        "F",
-        "F#",
-        "G",
-        "G#",
-        "A",
-        "A#",
-        "B",
-    ];
+    const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     const octave = Math.floor(midi / 12) - 1;
     const name = NOTE_NAMES[((midi % 12) + 12) % 12];
     return `${name}${octave}`;
@@ -131,10 +111,7 @@ function drawCurveTimed(args: {
 
     // DEBUG: 验证曲线时间参数（使用统一转换函数�?
     const curveStartSec = framesToTime(startFrame, fp);
-    const curveEndSec = framesToTime(
-        startFrame + (values.length - 1) * step,
-        fp,
-    );
+    const curveEndSec = framesToTime(startFrame + (values.length - 1) * step, fp);
     const curveTotalDurSec = curveEndSec - curveStartSec;
 
     if (debugEnabled) {
@@ -201,12 +178,7 @@ function drawCurveTimed(args: {
                 x: firstPoint.x,
                 // Verify conversion
                 verifyTime: framesToTime(firstPoint.frame, fp),
-                verifyPixel: timeToPixel(
-                    firstPoint.tSec,
-                    visibleStartSec,
-                    visibleDurSec,
-                    w,
-                ),
+                verifyPixel: timeToPixel(firstPoint.tSec, visibleStartSec, visibleDurSec, w),
             },
             lastPoint: {
                 frame: lastPoint.frame,
@@ -214,18 +186,11 @@ function drawCurveTimed(args: {
                 x: lastPoint.x,
                 // Verify conversion
                 verifyTime: framesToTime(lastPoint.frame, fp),
-                verifyPixel: timeToPixel(
-                    lastPoint.tSec,
-                    visibleStartSec,
-                    visibleDurSec,
-                    w,
-                ),
+                verifyPixel: timeToPixel(lastPoint.tSec, visibleStartSec, visibleDurSec, w),
             },
             pixelSpan: lastPoint.x - firstPoint.x,
             timeSpan: lastPoint.tSec - firstPoint.tSec,
-            pxPerSec:
-                (lastPoint.x - firstPoint.x) /
-                (lastPoint.tSec - firstPoint.tSec),
+            pxPerSec: (lastPoint.x - firstPoint.x) / (lastPoint.tSec - firstPoint.tSec),
         });
     }
 
@@ -260,12 +225,8 @@ function drawParamMorphOverlay(args: {
     const points = overlay.points.slice().sort((a, b) => a.frame - b.frame);
     if (points.length !== 4) return;
 
-    const lineColor = isDark
-        ? "rgba(255, 210, 95, 0.9)"
-        : "rgba(160, 90, 10, 0.9)";
-    const fillColor = isDark
-        ? "rgba(255, 210, 95, 0.22)"
-        : "rgba(160, 90, 10, 0.18)";
+    const lineColor = isDark ? "rgba(255, 210, 95, 0.9)" : "rgba(160, 90, 10, 0.9)";
+    const fillColor = isDark ? "rgba(255, 210, 95, 0.22)" : "rgba(160, 90, 10, 0.18)";
 
     const toCanvasX = (frame: number) => {
         const sec = framesToTime(frame, fp);
@@ -469,11 +430,7 @@ export function drawPianoRoll(args: {
                 const absMax = PITCH_MAX_MIDI;
                 const view = pitchView;
                 const span = clamp(view.span, 1e-6, absMax - absMin);
-                const min = clamp(
-                    view.center - span / 2,
-                    absMin,
-                    absMax - span,
-                );
+                const min = clamp(view.center - span / 2, absMin, absMax - span);
                 const max = min + span;
                 const startMidi = clamp(Math.floor(min), absMin, absMax);
                 const endMidi = clamp(Math.ceil(max), absMin, absMax);
@@ -498,12 +455,7 @@ export function drawPianoRoll(args: {
                         ctx.fillStyle = colors.blackKey;
                         ctx.fillRect(0, top, w * 0.72, keyH);
                         // 黑键右侧渐变边缘
-                        const grad = ctx.createLinearGradient(
-                            w * 0.62,
-                            0,
-                            w * 0.72,
-                            0,
-                        );
+                        const grad = ctx.createLinearGradient(w * 0.62, 0, w * 0.72, 0);
                         grad.addColorStop(0, "rgba(0,0,0,0)");
                         grad.addColorStop(1, colors.blackKeyGradient);
                         ctx.fillStyle = grad;
@@ -516,12 +468,8 @@ export function drawPianoRoll(args: {
                         const midY = top + keyH / 2;
                         if (!black) {
                             // 白键：C 音用蓝色加粗，其他用灰色
-                            ctx.fillStyle =
-                                pc === 0 ? colors.cLabel : colors.whiteKeyLabel;
-                            ctx.font =
-                                pc === 0
-                                    ? "bold 9px sans-serif"
-                                    : "9px sans-serif";
+                            ctx.fillStyle = pc === 0 ? colors.cLabel : colors.whiteKeyLabel;
+                            ctx.font = pc === 0 ? "bold 9px sans-serif" : "9px sans-serif";
                             ctx.fillText(midiToLabel(midi), 4, midY);
                         } else {
                             // 黑键：在黑键宽度内裁剪绘制
@@ -537,8 +485,7 @@ export function drawPianoRoll(args: {
                     }
 
                     // 分隔线：C 音用较深的线，其他用浅线
-                    ctx.strokeStyle =
-                        pc === 0 ? colors.cSeparator : colors.keySeparator;
+                    ctx.strokeStyle = pc === 0 ? colors.cSeparator : colors.keySeparator;
                     ctx.lineWidth = pc === 0 ? 1 : 0.5;
                     ctx.beginPath();
                     ctx.moveTo(0, top + 0.5);
@@ -559,9 +506,7 @@ export function drawPianoRoll(args: {
                 if (isChildPitchOffsetCentsParam(editParam)) {
                     // 候选步长（以音分为单位），从大到小
                     const range = vMax - vMin;
-                    const candidates = [
-                        1200, 600, 300, 200, 100, 50, 25, 10, 5, 1,
-                    ];
+                    const candidates = [1200, 600, 300, 200, 100, 50, 25, 10, 5, 1];
                     let chosen = candidates[candidates.length - 1];
                     for (const c of candidates) {
                         const count = Math.ceil(range / c) + 1;
@@ -573,25 +518,16 @@ export function drawPianoRoll(args: {
                     // 退化：若跨度相对较大，回退到更粗的步长以避免过多刻度
                     const approxCount = range / chosen;
                     if (approxCount > 12) {
-                        const fallbackStep = Math.max(
-                            candidates[0],
-                            niceAxisStep(range, 8),
-                        );
+                        const fallbackStep = Math.max(candidates[0], niceAxisStep(range, 8));
                         chosen = fallbackStep;
                     }
 
                     const firstMark = Math.ceil(vMin / chosen) * chosen;
-                    for (
-                        let m = firstMark;
-                        m <= vMax + chosen * 0.01;
-                        m += chosen
-                    ) {
+                    for (let m = firstMark; m <= vMax + chosen * 0.01; m += chosen) {
                         const y = valueToY(editParam, m, h);
                         const isStrong = Math.round(m) % 1200 === 0;
                         ctx.fillText(formatAxisMark(m, editParam), 6, y);
-                        ctx.strokeStyle = isStrong
-                            ? colors.tensionLine
-                            : colors.tensionLine;
+                        ctx.strokeStyle = isStrong ? colors.tensionLine : colors.tensionLine;
                         ctx.lineWidth = isStrong ? 1.25 : 1;
                         ctx.beginPath();
                         ctx.moveTo(0, y + 0.5);
@@ -610,18 +546,12 @@ export function drawPianoRoll(args: {
                         }
                     }
                     const firstMark = Math.ceil(vMin / chosen) * chosen;
-                    for (
-                        let m = firstMark;
-                        m <= vMax + chosen * 0.01;
-                        m += chosen
-                    ) {
+                    for (let m = firstMark; m <= vMax + chosen * 0.01; m += chosen) {
                         const y = valueToY(editParam, m, h);
                         const rounded = Math.round(m);
                         const isStrong = rounded % 7 === 0;
                         ctx.fillText(formatAxisMark(m, editParam), 6, y);
-                        ctx.strokeStyle = isStrong
-                            ? colors.tensionLine
-                            : colors.tensionLine;
+                        ctx.strokeStyle = isStrong ? colors.tensionLine : colors.tensionLine;
                         ctx.lineWidth = isStrong ? 1.25 : 1;
                         ctx.beginPath();
                         ctx.moveTo(0, y + 0.5);
@@ -635,11 +565,7 @@ export function drawPianoRoll(args: {
                     // 回退：使用常规的“nice”步长
                     const niceStep = niceAxisStep(span, 4);
                     const firstMark = Math.ceil(vMin / niceStep) * niceStep;
-                    for (
-                        let m = firstMark;
-                        m <= vMax + niceStep * 0.01;
-                        m += niceStep
-                    ) {
+                    for (let m = firstMark; m <= vMax + niceStep * 0.01; m += niceStep) {
                         const y = valueToY(editParam, m, h);
                         ctx.fillText(formatAxisMark(m, editParam), 6, y);
                         ctx.strokeStyle = colors.tensionLine;
@@ -694,25 +620,18 @@ export function drawPianoRoll(args: {
             if (mode === "off") return false;
             return mode === "always";
         })();
-        const projectScaleNotes = args.projectScale
-            ? resolveScaleNotes(args.projectScale)
-            : [];
+        const projectScaleNotes = args.projectScale ? resolveScaleNotes(args.projectScale) : [];
 
         for (let midi = startMidi; midi <= endMidi; midi += 1) {
             const y = valueToY("pitch", midi + 0.5, h);
             const pc = ((midi % 12) + 12) % 12;
-            const isScaleNote = highlightActive
-                ? projectScaleNotes.includes(pc)
-                : false;
+            const isScaleNote = highlightActive ? projectScaleNotes.includes(pc) : false;
 
             if (isScaleNote) {
-                ctx.strokeStyle = isDark
-                    ? "rgba(255,200,80,0.22)"
-                    : "rgba(200,120,20,0.22)";
+                ctx.strokeStyle = isDark ? "rgba(255,200,80,0.22)" : "rgba(200,120,20,0.22)";
                 ctx.lineWidth = 2;
             } else {
-                ctx.strokeStyle =
-                    pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
+                ctx.strokeStyle = pc === 0 ? colors.pitchGridC : colors.pitchGridOther;
                 ctx.lineWidth = 1;
             }
             ctx.beginPath();
@@ -811,8 +730,7 @@ export function drawPianoRoll(args: {
         const clipVisRight = Math.min(w, clipEndPx - viewportStartPx);
         const visibleClipWidthPx = Math.max(1, clipVisRight - clipVisLeft);
 
-        const clipSourceEndSec =
-            Number(entry.sourceEndSec ?? sourceDurSec) || sourceDurSec;
+        const clipSourceEndSec = Number(entry.sourceEndSec ?? sourceDurSec) || sourceDurSec;
         const clipSourceSpanSec = Math.max(
             0,
             Math.min(entry.lengthSec * pr, clipSourceEndSec - sourceStartSec),
@@ -825,10 +743,7 @@ export function drawPianoRoll(args: {
         const spp = Math.max(1, Math.round(sampleRate / pxPerSec));
         const levelKey = `${entry.sourcePath}::${entry.clipId}`;
         const previousLevel = lastLevelByClip[levelKey];
-        const stableLevel = waveformMipmapStore.selectLevelStable(
-            spp,
-            previousLevel,
-        );
+        const stableLevel = waveformMipmapStore.selectLevelStable(spp, previousLevel);
         lastLevelByClip[levelKey] = stableLevel;
 
         // 从 mipmap 缓存获取 interleaved 数据
@@ -886,14 +801,7 @@ export function drawPianoRoll(args: {
         ctx.globalAlpha = entry.muted ? 0.3 : 0.86;
         // 因为 renderWaveform 内部是从 x=0 开始画的，所以我们把画布的原点平移到 Clip 的可视起始点
         ctx.translate(clipVisLeft, 0);
-        renderWaveform(
-            ctx,
-            withGains,
-            params,
-            waveformColors.stroke,
-            0.5,
-            "line",
-        );
+        renderWaveform(ctx, withGains, params, waveformColors.stroke, 0.5, "line");
 
         ctx.restore();
         if (withGains !== result.interleaved) {
@@ -921,11 +829,7 @@ export function drawPianoRoll(args: {
 
     // 检测音高参考线：在 pitch 模式下，将后端推送的 per-clip 检测曲线渲染为半透明彩色参考线�?
     // 渲染在用户编辑曲线下方，不干扰主曲线的视觉层次�?
-    if (
-        editParam === "pitch" &&
-        detectedPitchCurves &&
-        detectedPitchCurves.length > 0
-    ) {
+    if (editParam === "pitch" && detectedPitchCurves && detectedPitchCurves.length > 0) {
         // �?clip 时循环颜色，增强区分�?
         const DETECTED_COLORS = [
             "rgba(80, 220, 180, 0.56)", // 青绿
@@ -999,10 +903,7 @@ export function drawPianoRoll(args: {
             const secondaryParamView = secondaryParamViews[paramId];
             if (
                 !secondaryParamView ||
-                Math.max(
-                    secondaryParamView.orig.length,
-                    secondaryParamView.edit.length,
-                ) < 2
+                Math.max(secondaryParamView.orig.length, secondaryParamView.edit.length) < 2
             ) {
                 return;
             }
@@ -1141,9 +1042,7 @@ export function drawPianoRoll(args: {
             ctx.rect(selX0, 0, selX1 - selX0, h);
             ctx.clip();
 
-            ctx.strokeStyle = isDark
-                ? "rgba(255, 180, 60, 0.65)"
-                : "rgba(220, 140, 20, 0.65)";
+            ctx.strokeStyle = isDark ? "rgba(255, 180, 60, 0.65)" : "rgba(220, 140, 20, 0.65)";
             ctx.lineWidth = 2;
             ctx.setLineDash(getFixedDashPattern(4, 4));
             ctx.beginPath();
@@ -1156,8 +1055,7 @@ export function drawPianoRoll(args: {
                 if (tSec > selEndSec) break;
                 const x = timeToPixel(tSec, visibleStartSec, visibleDurSec, w);
                 const rawValue = clipboardPreview.values[i] ?? 0;
-                const mappedValue =
-                    editParam === "pitch" ? rawValue + 0.5 : rawValue;
+                const mappedValue = editParam === "pitch" ? rawValue + 0.5 : rawValue;
                 const y = valueToY(editParam, mappedValue, h);
                 if (!started) {
                     ctx.moveTo(x, y);

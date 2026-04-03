@@ -86,8 +86,6 @@ export const LIGHT_THEME_COLORS: Record<QtColorToken, string> = {
 };
 
 /** 根据模式获取内置主题颜色 */
-export function getBuiltinThemeColors(
-    mode: "dark" | "light",
-): Record<QtColorToken, string> {
+export function getBuiltinThemeColors(mode: "dark" | "light"): Record<QtColorToken, string> {
     return mode === "dark" ? DARK_THEME_COLORS : LIGHT_THEME_COLORS;
 }

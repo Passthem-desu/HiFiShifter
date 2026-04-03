@@ -39,9 +39,8 @@ export function CustomScaleDialog({ open, onOpenChange }: Props) {
 
     useEffect(() => {
         if (!open) return;
-        const current = s.project.useCustomScale && s.project.customScale
-            ? s.project.customScale
-            : null;
+        const current =
+            s.project.useCustomScale && s.project.customScale ? s.project.customScale : null;
         if (current) {
             const normalized = sanitizeCustomScalePreset(current);
             setName(normalized.name);
@@ -104,13 +103,18 @@ export function CustomScaleDialog({ open, onOpenChange }: Props) {
 
                 <Flex direction="column" gap="3" mt="3">
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 112 }}>{tAny("custom_scale_template")}</Text>
+                        <Text size="2" style={{ minWidth: 112 }}>
+                            {tAny("custom_scale_template")}
+                        </Text>
                         <Select.Root value={templateValue} onValueChange={applyTemplate} size="2">
                             <Select.Trigger style={{ flex: 1 }} />
                             <Select.Content>
                                 <Select.Group>
                                     {SCALE_KEYS.map((k) => (
-                                        <Select.Item key={k} value={`${BUILTIN_TEMPLATE_PREFIX}${k}`}>
+                                        <Select.Item
+                                            key={k}
+                                            value={`${BUILTIN_TEMPLATE_PREFIX}${k}`}
+                                        >
                                             {SCALE_LABELS[k]}
                                         </Select.Item>
                                     ))}
@@ -135,7 +139,9 @@ export function CustomScaleDialog({ open, onOpenChange }: Props) {
                     </Flex>
 
                     <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 112 }}>{tAny("custom_scale_name")}</Text>
+                        <Text size="2" style={{ minWidth: 112 }}>
+                            {tAny("custom_scale_name")}
+                        </Text>
                         <TextField.Root
                             size="2"
                             value={name}
@@ -168,7 +174,9 @@ export function CustomScaleDialog({ open, onOpenChange }: Props) {
 
                 <Flex justify="end" gap="2" mt="4">
                     <Dialog.Close>
-                        <Button variant="soft" color="gray">{tAny("cancel")}</Button>
+                        <Button variant="soft" color="gray">
+                            {tAny("cancel")}
+                        </Button>
                     </Dialog.Close>
                     <Button onClick={handleSave}>{tAny("custom_scale_save_apply")}</Button>
                 </Flex>

@@ -110,14 +110,14 @@ export async function buildChildOffsetPasteValues(args: {
         const centsPayload = curvePayloads[i * 2];
         const degreesPayload = curvePayloads[i * 2 + 1];
         curvesByTrack.set(trackId, {
-                cents:
-                    centsPayload?.ok && Array.isArray(centsPayload.edit)
-                        ? centsPayload.edit.map((v: any) => Number(v) || 0)
-                        : [],
-                degrees:
-                    degreesPayload?.ok && Array.isArray(degreesPayload.edit)
-                        ? degreesPayload.edit.map((v: any) => Number(v) || 0)
-                        : [],
+            cents:
+                centsPayload?.ok && Array.isArray(centsPayload.edit)
+                    ? centsPayload.edit.map((v: any) => Number(v) || 0)
+                    : [],
+            degrees:
+                degreesPayload?.ok && Array.isArray(degreesPayload.edit)
+                    ? degreesPayload.edit.map((v: any) => Number(v) || 0)
+                    : [],
         });
     }
 
@@ -140,11 +140,7 @@ export async function buildChildOffsetPasteValues(args: {
             if (applyDegrees) {
                 const degreeSteps = Number(curves.degrees[i] ?? 0);
                 if (Math.abs(degreeSteps) > 1e-9) {
-                    tempPitch = transposePitchByScaleSteps(
-                        tempPitch,
-                        degreeSteps,
-                        projectScale,
-                    );
+                    tempPitch = transposePitchByScaleSteps(tempPitch, degreeSteps, projectScale);
                 }
             }
 
@@ -170,11 +166,7 @@ export async function buildChildOffsetPasteValues(args: {
                 CHILD_PITCH_OFFSET_CENTS_RANGE.max,
             );
         } else {
-            const degreeSteps = pitchDeltaToDegreeSteps(
-                tempPitch,
-                targetPitch,
-                projectScale,
-            );
+            const degreeSteps = pitchDeltaToDegreeSteps(tempPitch, targetPitch, projectScale);
             out[i] = clamp(
                 degreeSteps,
                 CHILD_PITCH_OFFSET_DEGREES_RANGE.min,

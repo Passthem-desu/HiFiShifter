@@ -1,10 +1,4 @@
-import React, {
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, Select, IconButton } from "@radix-ui/themes";
 import { MagnifyingGlassIcon } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
@@ -27,23 +21,10 @@ import {
 } from "./quickSearchPosition";
 
 /** 支持的音频扩展名 */
-const AUDIO_EXTENSIONS = new Set([
-    "wav",
-    "mp3",
-    "flac",
-    "ogg",
-    "aac",
-    "aif",
-    "aiff",
-    "m4a",
-]);
+const AUDIO_EXTENSIONS = new Set(["wav", "mp3", "flac", "ogg", "aac", "aif", "aiff", "m4a"]);
 
 function isAudioFile(entry: FileEntry): boolean {
-    return (
-        !entry.isDir &&
-        !!entry.extension &&
-        AUDIO_EXTENSIONS.has(entry.extension)
-    );
+    return !entry.isDir && !!entry.extension && AUDIO_EXTENSIONS.has(entry.extension);
 }
 
 interface QuickSearchPopupProps {
@@ -57,25 +38,16 @@ interface QuickSearchPopupProps {
  * - 搜索当前文件管理选中文件夹下的音频文件
  * - ↑/↓ 切换候选项，空格预览，回车放置到当前轨道+playhead位置
  */
-export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
-    open,
-    onClose,
-}) => {
+export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClose }) => {
     const dispatch = useAppDispatch();
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
 
     const keybindings = useAppSelector(selectMergedKeybindings);
 
-    const currentPath = useAppSelector(
-        (state: RootState) => state.fileBrowser.currentPath,
-    );
-    const selectedTrackId = useAppSelector(
-        (state: RootState) => state.session.selectedTrackId,
-    );
-    const playheadSec = useAppSelector(
-        (state: RootState) => state.session.playheadSec,
-    );
+    const currentPath = useAppSelector((state: RootState) => state.fileBrowser.currentPath);
+    const selectedTrackId = useAppSelector((state: RootState) => state.session.selectedTrackId);
+    const playheadSec = useAppSelector((state: RootState) => state.session.playheadSec);
 
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<FileEntry[]>([]);
@@ -86,13 +58,9 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
     const [position, setPosition] = useState<{ x: number; y: number }>(() =>
         getQuickSearchInitialPosition({
             viewportWidth:
-                typeof window === "undefined"
-                    ? QUICK_SEARCH_POPUP_WIDTH
-                    : window.innerWidth,
+                typeof window === "undefined" ? QUICK_SEARCH_POPUP_WIDTH : window.innerWidth,
             viewportHeight:
-                typeof window === "undefined"
-                    ? QUICK_SEARCH_POPUP_HEIGHT
-                    : window.innerHeight,
+                typeof window === "undefined" ? QUICK_SEARCH_POPUP_HEIGHT : window.innerHeight,
             pointer: null,
         }),
     );
@@ -183,16 +151,12 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                         }),
                     );
                     if (searchFilesRecursive.fulfilled.match(action)) {
-                        let audioResults = (
-                            action.payload as FileEntry[]
-                        ).filter(isAudioFile);
+                        let audioResults = (action.payload as FileEntry[]).filter(isAudioFile);
                         // 正则模式下进行客户端过滤
                         if (regexEnabled) {
                             try {
                                 const re = new RegExp(q.trim(), "i");
-                                audioResults = audioResults.filter((e) =>
-                                    re.test(e.name),
-                                );
+                                audioResults = audioResults.filter((e) => re.test(e.name));
                             } catch {
                                 // 正则无效，返回空结果
                                 audioResults = [];
@@ -236,9 +200,7 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                 sorted.sort((a, b) => a.name.localeCompare(b.name));
                 break;
             case "date":
-                sorted.sort(
-                    (a, b) => (b.modifiedTime ?? 0) - (a.modifiedTime ?? 0),
-                );
+                sorted.sort((a, b) => (b.modifiedTime ?? 0) - (a.modifiedTime ?? 0));
                 break;
             case "size":
                 sorted.sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
@@ -293,9 +255,7 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                     if (entry && isAudioFile(entry)) {
                         audioPreview.stop();
                         setPreviewingPath(entry.path);
-                        void audioPreview.play(entry.path, () =>
-                            setPreviewingPath(null),
-                        );
+                        void audioPreview.play(entry.path, () => setPreviewingPath(null));
                     }
                     return next;
                 });
@@ -307,9 +267,7 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                     if (entry && isAudioFile(entry)) {
                         audioPreview.stop();
                         setPreviewingPath(entry.path);
-                        void audioPreview.play(entry.path, () =>
-                            setPreviewingPath(null),
-                        );
+                        void audioPreview.play(entry.path, () => setPreviewingPath(null));
                     }
                     return next;
                 });
@@ -406,12 +364,9 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                         onKeyDown={handleKeyDown}
                         placeholder={
                             noFolder
-                                ? (t as (key: string) => string)(
-                                      "qs_no_folder",
-                                  ) || "请先选择文件夹"
-                                : (t as (key: string) => string)(
-                                      "qs_placeholder",
-                                  ) || "搜索音频文件..."
+                                ? (t as (key: string) => string)("qs_no_folder") || "请先选择文件夹"
+                                : (t as (key: string) => string)("qs_placeholder") ||
+                                  "搜索音频文件..."
                         }
                         disabled={noFolder}
                         className="flex-1 bg-transparent border-none outline-none text-qt-text text-xs placeholder:text-qt-text-muted"
@@ -439,9 +394,7 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                     <Select.Root
                         value={sortMode}
                         size="1"
-                        onValueChange={(v) =>
-                            setSortMode(v as "name" | "date" | "size")
-                        }
+                        onValueChange={(v) => setSortMode(v as "name" | "date" | "size")}
                     >
                         <Select.Trigger
                             style={{
@@ -452,21 +405,13 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                             }}
                         />
                         <Select.Content>
-                            <Select.Item value="name">
-                                {tAny("fb_sort_name") || "Name"}
-                            </Select.Item>
-                            <Select.Item value="date">
-                                {tAny("fb_sort_date") || "Date"}
-                            </Select.Item>
-                            <Select.Item value="size">
-                                {tAny("fb_sort_size") || "Size"}
-                            </Select.Item>
+                            <Select.Item value="name">{tAny("fb_sort_name") || "Name"}</Select.Item>
+                            <Select.Item value="date">{tAny("fb_sort_date") || "Date"}</Select.Item>
+                            <Select.Item value="size">{tAny("fb_sort_size") || "Size"}</Select.Item>
                         </Select.Content>
                     </Select.Root>
                     {loading && (
-                        <span className="text-[10px] text-qt-text-muted shrink-0">
-                            ...
-                        </span>
+                        <span className="text-[10px] text-qt-text-muted shrink-0">...</span>
                     )}
                 </div>
 
@@ -477,42 +422,22 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                     style={{ maxHeight: 340 }}
                 >
                     {noFolder ? (
-                        <Text
-                            size="1"
-                            color="gray"
-                            className="px-3 py-4 block text-center"
-                        >
-                            {(t as (key: string) => string)(
-                                "qs_no_folder_hint",
-                            ) || "请先在文件管理器中选择目录"}
+                        <Text size="1" color="gray" className="px-3 py-4 block text-center">
+                            {(t as (key: string) => string)("qs_no_folder_hint") ||
+                                "请先在文件管理器中选择目录"}
                         </Text>
                     ) : !query.trim() ? (
-                        <Text
-                            size="1"
-                            color="gray"
-                            className="px-3 py-4 block text-center"
-                        >
-                            {(t as (key: string) => string)(
-                                "qs_type_to_search",
-                            ) || "输入关键词搜索音频文件"}
+                        <Text size="1" color="gray" className="px-3 py-4 block text-center">
+                            {(t as (key: string) => string)("qs_type_to_search") ||
+                                "输入关键词搜索音频文件"}
                         </Text>
                     ) : loading ? (
-                        <Text
-                            size="1"
-                            color="gray"
-                            className="px-3 py-4 block text-center"
-                        >
-                            {(t as (key: string) => string)("fb_searching") ||
-                                "搜索中..."}
+                        <Text size="1" color="gray" className="px-3 py-4 block text-center">
+                            {(t as (key: string) => string)("fb_searching") || "搜索中..."}
                         </Text>
                     ) : sortedResults.length === 0 ? (
-                        <Text
-                            size="1"
-                            color="gray"
-                            className="px-3 py-4 block text-center"
-                        >
-                            {(t as (key: string) => string)("fb_no_results") ||
-                                "无匹配文件"}
+                        <Text size="1" color="gray" className="px-3 py-4 block text-center">
+                            {(t as (key: string) => string)("fb_no_results") || "无匹配文件"}
                         </Text>
                     ) : (
                         sortedResults.map((entry, index) => (
@@ -549,10 +474,7 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                                     />
                                 </svg>
                                 {/* 文件名 */}
-                                <span
-                                    className="truncate flex-1"
-                                    title={entry.name}
-                                >
+                                <span className="truncate flex-1" title={entry.name}>
                                     {entry.name}
                                 </span>
                                 {/* 预览指示 */}
@@ -570,34 +492,18 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({
                 {sortedResults.length > 0 && (
                     <div className="px-2 py-1 border-t border-qt-border flex items-center gap-2">
                         <Text size="1" color="gray" className="text-[10px]">
-                            {formatKeybinding(
-                                keybindings["quickSearch.navigate.up"],
-                            )}
-                            /
-                            {formatKeybinding(
-                                keybindings["quickSearch.navigate.down"],
-                            )}{" "}
-                            {(t as (key: string) => string)("qs_hint_nav") ||
-                                "导航"}
+                            {formatKeybinding(keybindings["quickSearch.navigate.up"])}/
+                            {formatKeybinding(keybindings["quickSearch.navigate.down"])}{" "}
+                            {(t as (key: string) => string)("qs_hint_nav") || "导航"}
                             {"  "}
-                            {formatKeybinding(
-                                keybindings["quickSearch.preview"],
-                            )}{" "}
-                            {(t as (key: string) => string)(
-                                "qs_hint_preview",
-                            ) || "预览"}
+                            {formatKeybinding(keybindings["quickSearch.preview"])}{" "}
+                            {(t as (key: string) => string)("qs_hint_preview") || "预览"}
                             {"  "}
-                            {formatKeybinding(
-                                keybindings["quickSearch.confirm"],
-                            )}{" "}
-                            {(t as (key: string) => string)("qs_hint_place") ||
-                                "放置"}
+                            {formatKeybinding(keybindings["quickSearch.confirm"])}{" "}
+                            {(t as (key: string) => string)("qs_hint_place") || "放置"}
                             {"  "}
-                            {formatKeybinding(
-                                keybindings["quickSearch.close"],
-                            )}{" "}
-                            {(t as (key: string) => string)("qs_hint_close") ||
-                                "关闭"}
+                            {formatKeybinding(keybindings["quickSearch.close"])}{" "}
+                            {(t as (key: string) => string)("qs_hint_close") || "关闭"}
                         </Text>
                     </div>
                 )}

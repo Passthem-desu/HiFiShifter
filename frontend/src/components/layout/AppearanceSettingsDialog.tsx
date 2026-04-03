@@ -24,10 +24,7 @@ interface AppearanceSettingsDialogProps {
     onOpenChange: (open: boolean) => void;
 }
 
-export const AppearanceSettingsDialog = ({
-    open,
-    onOpenChange,
-}: AppearanceSettingsDialogProps) => {
+export const AppearanceSettingsDialog = ({ open, onOpenChange }: AppearanceSettingsDialogProps) => {
     const theme = useAppTheme();
     const prevOpenRef = useRef(false);
     const windowCreatedRef = useRef(false);
@@ -193,7 +190,7 @@ export const AppearanceSettingsDialog = ({
             unlistenPreview?.();
             unlistenReverted?.();
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => {

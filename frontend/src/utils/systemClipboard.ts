@@ -27,23 +27,25 @@ export interface ParamClipboardObject {
 }
 
 function hasClipboardReadWrite(): boolean {
-    return typeof navigator !== "undefined" &&
+    return (
+        typeof navigator !== "undefined" &&
         !!navigator.clipboard &&
         typeof navigator.clipboard.read === "function" &&
         typeof navigator.clipboard.write === "function" &&
-        typeof ClipboardItem !== "undefined";
+        typeof ClipboardItem !== "undefined"
+    );
 }
 
 function hasClipboardTextReadWrite(): boolean {
-    return typeof navigator !== "undefined" &&
+    return (
+        typeof navigator !== "undefined" &&
         !!navigator.clipboard &&
         typeof navigator.clipboard.readText === "function" &&
-        typeof navigator.clipboard.writeText === "function";
+        typeof navigator.clipboard.writeText === "function"
+    );
 }
 
-function encodeClipboardEnvelope(
-    payload: ClipClipboardObject | ParamClipboardObject,
-): string {
+function encodeClipboardEnvelope(payload: ClipClipboardObject | ParamClipboardObject): string {
     const bytes = new TextEncoder().encode(JSON.stringify(payload));
     let binary = "";
     for (const b of bytes) {
@@ -52,9 +54,7 @@ function encodeClipboardEnvelope(
     return `${TEXT_PREFIX}${btoa(binary)}`;
 }
 
-function decodeClipboardEnvelope(
-    raw: string,
-): ClipClipboardObject | ParamClipboardObject | null {
+function decodeClipboardEnvelope(raw: string): ClipClipboardObject | ParamClipboardObject | null {
     if (!raw.startsWith(TEXT_PREFIX)) return null;
     const body = raw.slice(TEXT_PREFIX.length);
     try {
@@ -110,9 +110,7 @@ export async function readSystemClipboardObject(
             const blob = await item.getType(mime);
             const text = await blob.text();
             try {
-                const parsed = JSON.parse(text) as
-                    | ClipClipboardObject
-                    | ParamClipboardObject;
+                const parsed = JSON.parse(text) as ClipClipboardObject | ParamClipboardObject;
                 if (parsed?.version !== 1 || parsed?.kind !== kind) continue;
                 return parsed;
             } catch {

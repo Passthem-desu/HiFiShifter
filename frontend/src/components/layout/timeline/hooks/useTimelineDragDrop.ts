@@ -14,10 +14,7 @@ import {
     importMultipleAudioAtPosition,
 } from "../../../../features/session/sessionSlice";
 import { emitExternalFileAction } from "../../../../features/session/projectOpenEvents";
-import {
-    detectExternalPathAction,
-    findFirstExternalPathAction,
-} from "../";
+import { detectExternalPathAction, findFirstExternalPathAction } from "../";
 
 export interface UseTimelineDragDropArgs {
     dispatch: AppDispatch;
@@ -27,11 +24,7 @@ export interface UseTimelineDragDropArgs {
     rowHeightRef: React.MutableRefObject<number>;
     dropPreviewRef: React.MutableRefObject<HTMLDivElement | null>;
     pendingDropDurationPathRef: React.MutableRefObject<string | null>;
-    beatFromClientX: (
-        clientX: number,
-        bounds: DOMRect,
-        xScroll: number,
-    ) => number;
+    beatFromClientX: (clientX: number, bounds: DOMRect, xScroll: number) => number;
     trackIdFromClientY: (clientY: number) => string | null;
     rowTopForTrackId: (trackId: string | null) => number;
     setDropPreview: React.Dispatch<
@@ -64,9 +57,7 @@ export interface UseTimelineDragDropResult {
     tauriDropHandledAtRef: React.MutableRefObject<number>;
 }
 
-export function useTimelineDragDrop(
-    args: UseTimelineDragDropArgs,
-): UseTimelineDragDropResult {
+export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineDragDropResult {
     const {
         dispatch,
         scrollRef,
@@ -93,8 +84,7 @@ export function useTimelineDragDrop(
         let disposed = false;
         let unlisten: null | (() => void) = null;
 
-        const debugDnd =
-            localStorage.getItem("hifishifter.debugDnd") === "1";
+        const debugDnd = localStorage.getItem("hifishifter.debugDnd") === "1";
 
         async function setup() {
             try {
@@ -114,214 +104,154 @@ export function useTimelineDragDrop(
                     cursorPosition?: { x?: number; y?: number };
                 };
 
-                type TauriDragDropEvent =
-                    | { payload?: TauriDragDropPayload }
-                    | TauriDragDropPayload;
+                type TauriDragDropEvent = { payload?: TauriDragDropPayload } | TauriDragDropPayload;
 
-                unlisten = await win.onDragDropEvent(
-                    (event: TauriDragDropEvent) => {
-                        if (disposed) return;
-                        const payload = (
-                            "payload" in event ? event.payload : event
-                        ) as TauriDragDropPayload | undefined;
-                        const type = String(
-                            payload?.type ?? payload?.event ?? "",
-                        );
-                        const paths: string[] = Array.isArray(payload?.paths)
-                            ? payload.paths
-                            : [];
+                unlisten = await win.onDragDropEvent((event: TauriDragDropEvent) => {
+                    if (disposed) return;
+                    const payload = ("payload" in event ? event.payload : event) as
+                        | TauriDragDropPayload
+                        | undefined;
+                    const type = String(payload?.type ?? payload?.event ?? "");
+                    const paths: string[] = Array.isArray(payload?.paths) ? payload.paths : [];
 
-                        if (debugDnd) {
-                            console.log("[dnd] tauri event", {
-                                type,
-                                pathsCount: paths.length,
-                                hasPosition: Boolean(
-                                    payload?.position ??
-                                        payload?.pos ??
-                                        payload?.cursorPosition,
-                                ),
-                            });
-                        }
+                    if (debugDnd) {
+                        console.log("[dnd] tauri event", {
+                            type,
+                            pathsCount: paths.length,
+                            hasPosition: Boolean(
+                                payload?.position ?? payload?.pos ?? payload?.cursorPosition,
+                            ),
+                        });
+                    }
 
-                        const scroller = scrollRef.current;
-                        const bounds =
-                            scroller?.getBoundingClientRect() ?? null;
-                        const pos = (payload?.position ??
-                            payload?.pos ??
-                            payload?.cursorPosition) as
-                            | { x?: number; y?: number }
-                            | undefined;
-                        const dpr = window.devicePixelRatio || 1;
-                        const clientX =
-                            typeof pos?.x === "number"
-                                ? pos.x / dpr
-                                : undefined;
-                        const clientY =
-                            typeof pos?.y === "number"
-                                ? pos.y / dpr
-                                : undefined;
-                        const fallbackBeat =
-                            sessionRef.current.playheadSec ?? 0;
-                        const beat =
-                            clientX !== undefined && bounds && scroller
-                                ? beatFromClientX(
-                                      clientX,
-                                      bounds,
-                                      scroller.scrollLeft,
-                                  )
-                                : fallbackBeat;
-                        const trackId =
-                            clientY !== undefined
-                                ? trackIdFromClientY(clientY)
-                                : null;
+                    const scroller = scrollRef.current;
+                    const bounds = scroller?.getBoundingClientRect() ?? null;
+                    const pos = (payload?.position ?? payload?.pos ?? payload?.cursorPosition) as
+                        | { x?: number; y?: number }
+                        | undefined;
+                    const dpr = window.devicePixelRatio || 1;
+                    const clientX = typeof pos?.x === "number" ? pos.x / dpr : undefined;
+                    const clientY = typeof pos?.y === "number" ? pos.y / dpr : undefined;
+                    const fallbackBeat = sessionRef.current.playheadSec ?? 0;
+                    const beat =
+                        clientX !== undefined && bounds && scroller
+                            ? beatFromClientX(clientX, bounds, scroller.scrollLeft)
+                            : fallbackBeat;
+                    const trackId = clientY !== undefined ? trackIdFromClientY(clientY) : null;
 
-                        const primaryPath =
-                            paths.length > 0 ? paths[0] : null;
-                        function fileNameFromPath(p: string) {
-                            return String(p.split(/[\\/]/).pop() ?? p);
-                        }
+                    const primaryPath = paths.length > 0 ? paths[0] : null;
+                    function fileNameFromPath(p: string) {
+                        return String(p.split(/[\\/]/).pop() ?? p);
+                    }
 
-                        if (type === "enter" || type === "over") {
-                            if (primaryPath) {
-                                tauriDraggedPathRef.current = primaryPath;
-                                if (
-                                    detectExternalPathAction(primaryPath) ===
-                                    "importAudio"
-                                ) {
-                                    ensureDropPreviewDuration(primaryPath);
-                                }
-                            }
-                            setDropPreview((prev) => {
-                                const path =
-                                    primaryPath ??
-                                    tauriDraggedPathRef.current ??
-                                    prev?.path ??
-                                    null;
-                                if (!path) return prev;
-                                if (
-                                    detectExternalPathAction(path) !==
-                                    "importAudio"
-                                ) {
-                                    return null;
-                                }
-                                const nextFileName = fileNameFromPath(path);
-
-                                if (prev && dropPreviewRef.current) {
-                                    dropPreviewRef.current.style.left = `${Math.max(0, beat * pxPerSecRef.current)}px`;
-                                    dropPreviewRef.current.style.top = `${rowTopForTrackId(trackId) + 8}px`;
-                                    dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(prev.durationSec)}px`;
-                                }
-
-                                if (
-                                    !prev ||
-                                    prev.trackId !== trackId ||
-                                    prev.path !== path
-                                ) {
-                                    return {
-                                        path,
-                                        fileName:
-                                            prev?.fileName ?? nextFileName,
-                                        trackId,
-                                        startSec: beat,
-                                        durationSec: prev?.durationSec ?? 0,
-                                    };
-                                }
-                                return prev;
-                            });
-                            return;
-                        }
-
-                        if (type === "leave") {
-                            tauriDraggedPathRef.current = null;
-                            setDropPreview(null);
-                            return;
-                        }
-
-                        if (type === "drop") {
-                            if (primaryPath) {
-                                tauriDraggedPathRef.current = primaryPath;
-                                tauriLastDropPathRef.current = primaryPath;
-                            }
-                            if (
-                                primaryPath &&
-                                detectExternalPathAction(primaryPath) ===
-                                    "importAudio"
-                            ) {
+                    if (type === "enter" || type === "over") {
+                        if (primaryPath) {
+                            tauriDraggedPathRef.current = primaryPath;
+                            if (detectExternalPathAction(primaryPath) === "importAudio") {
                                 ensureDropPreviewDuration(primaryPath);
                             }
-                            setDropPreview(null);
-
-                            const externalAction =
-                                findFirstExternalPathAction(paths);
-                            if (
-                                externalAction &&
-                                externalAction.kind !== "importAudio"
-                            ) {
-                                tauriDropHandledAtRef.current = Date.now();
-                                tauriDraggedPathRef.current = null;
-                                tauriLastDropPathRef.current = null;
-                                emitExternalFileAction(
-                                    externalAction.kind,
-                                    externalAction.path,
-                                );
-                                return;
-                            }
-
-                            // Multi-file drop
-                            if (paths.length > 1) {
-                                tauriDropHandledAtRef.current = Date.now();
-                                tauriDraggedPathRef.current = null;
-                                tauriLastDropPathRef.current = null;
-
-                                void dispatch(
-                                    importMultipleAudioAtPosition({
-                                        audioPaths: paths,
-                                        mode: "across-time",
-                                        trackId,
-                                        startSec: beat,
-                                    }),
-                                );
-
-                                return;
-                            }
-
-                            const resolvedPath =
-                                primaryPath ||
-                                tauriDraggedPathRef.current ||
-                                tauriLastDropPathRef.current;
-                            if (resolvedPath) {
-                                tauriDropHandledAtRef.current = Date.now();
-                                tauriDraggedPathRef.current = null;
-                                tauriLastDropPathRef.current = null;
-                                const actionKind =
-                                    detectExternalPathAction(resolvedPath);
-                                if (
-                                    actionKind &&
-                                    actionKind !== "importAudio"
-                                ) {
-                                    emitExternalFileAction(
-                                        actionKind,
-                                        resolvedPath,
-                                    );
-                                    return;
-                                }
-                                void dispatch(
-                                    importAudioAtPosition({
-                                        audioPath: resolvedPath,
-                                        trackId,
-                                        startSec: beat,
-                                    }),
-                                );
-                            }
                         }
-                    },
-                );
+                        setDropPreview((prev) => {
+                            const path =
+                                primaryPath ?? tauriDraggedPathRef.current ?? prev?.path ?? null;
+                            if (!path) return prev;
+                            if (detectExternalPathAction(path) !== "importAudio") {
+                                return null;
+                            }
+                            const nextFileName = fileNameFromPath(path);
+
+                            if (prev && dropPreviewRef.current) {
+                                dropPreviewRef.current.style.left = `${Math.max(0, beat * pxPerSecRef.current)}px`;
+                                dropPreviewRef.current.style.top = `${rowTopForTrackId(trackId) + 8}px`;
+                                dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(prev.durationSec)}px`;
+                            }
+
+                            if (!prev || prev.trackId !== trackId || prev.path !== path) {
+                                return {
+                                    path,
+                                    fileName: prev?.fileName ?? nextFileName,
+                                    trackId,
+                                    startSec: beat,
+                                    durationSec: prev?.durationSec ?? 0,
+                                };
+                            }
+                            return prev;
+                        });
+                        return;
+                    }
+
+                    if (type === "leave") {
+                        tauriDraggedPathRef.current = null;
+                        setDropPreview(null);
+                        return;
+                    }
+
+                    if (type === "drop") {
+                        if (primaryPath) {
+                            tauriDraggedPathRef.current = primaryPath;
+                            tauriLastDropPathRef.current = primaryPath;
+                        }
+                        if (
+                            primaryPath &&
+                            detectExternalPathAction(primaryPath) === "importAudio"
+                        ) {
+                            ensureDropPreviewDuration(primaryPath);
+                        }
+                        setDropPreview(null);
+
+                        const externalAction = findFirstExternalPathAction(paths);
+                        if (externalAction && externalAction.kind !== "importAudio") {
+                            tauriDropHandledAtRef.current = Date.now();
+                            tauriDraggedPathRef.current = null;
+                            tauriLastDropPathRef.current = null;
+                            emitExternalFileAction(externalAction.kind, externalAction.path);
+                            return;
+                        }
+
+                        // Multi-file drop
+                        if (paths.length > 1) {
+                            tauriDropHandledAtRef.current = Date.now();
+                            tauriDraggedPathRef.current = null;
+                            tauriLastDropPathRef.current = null;
+
+                            void dispatch(
+                                importMultipleAudioAtPosition({
+                                    audioPaths: paths,
+                                    mode: "across-time",
+                                    trackId,
+                                    startSec: beat,
+                                }),
+                            );
+
+                            return;
+                        }
+
+                        const resolvedPath =
+                            primaryPath ||
+                            tauriDraggedPathRef.current ||
+                            tauriLastDropPathRef.current;
+                        if (resolvedPath) {
+                            tauriDropHandledAtRef.current = Date.now();
+                            tauriDraggedPathRef.current = null;
+                            tauriLastDropPathRef.current = null;
+                            const actionKind = detectExternalPathAction(resolvedPath);
+                            if (actionKind && actionKind !== "importAudio") {
+                                emitExternalFileAction(actionKind, resolvedPath);
+                                return;
+                            }
+                            void dispatch(
+                                importAudioAtPosition({
+                                    audioPath: resolvedPath,
+                                    trackId,
+                                    startSec: beat,
+                                }),
+                            );
+                        }
+                    }
+                });
             } catch (err) {
                 if (debugDnd) {
-                    console.warn(
-                        "Failed to attach Tauri drag-drop listener",
-                        err,
-                    );
+                    console.warn("Failed to attach Tauri drag-drop listener", err);
                 }
             }
         }
@@ -361,8 +291,7 @@ export function useTimelineDragDrop(
                 setDropPreview((prev) => {
                     if (prev && prev.path === detail.filePath) {
                         if (dropPreviewRef.current) {
-                            const nextDuration =
-                                Number((detail as any).durationSec) || 0;
+                            const nextDuration = Number((detail as any).durationSec) || 0;
                             dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(nextDuration)}px`;
                         }
                         return {
@@ -378,11 +307,7 @@ export function useTimelineDragDrop(
             // 移动时的 DOM 直通与重绘拦截
             if (detail.type === "move" || detail.type === "start") {
                 if (isOverTimeline && scroller) {
-                    const beat = beatFromClientX(
-                        detail.clientX,
-                        bounds!,
-                        scroller.scrollLeft,
-                    );
+                    const beat = beatFromClientX(detail.clientX, bounds!, scroller.scrollLeft);
                     const trackId = trackIdFromClientY(detail.clientY);
                     const path = detail.filePath;
                     const fileName = detail.fileName;
@@ -398,21 +323,14 @@ export function useTimelineDragDrop(
                             dropPreviewRef.current.style.top = `${rowTopForTrackId(trackId) + 8}px`;
                             dropPreviewRef.current.style.width = `${getDropPreviewWidthPx(prev.durationSec)}px`;
                         }
-                        if (
-                            !prev ||
-                            prev.trackId !== trackId ||
-                            prev.path !== path
-                        ) {
+                        if (!prev || prev.trackId !== trackId || prev.path !== path) {
                             ensureDropPreviewDuration(path);
                             return {
                                 path,
                                 fileName,
                                 trackId,
                                 startSec: beat,
-                                durationSec:
-                                    prev?.path === path
-                                        ? prev.durationSec
-                                        : 2,
+                                durationSec: prev?.path === path ? prev.durationSec : 2,
                             };
                         }
                         return prev;
@@ -426,53 +344,31 @@ export function useTimelineDragDrop(
             if (detail.type === "drop") {
                 setDropPreview(null);
                 if (isOverTimeline && scroller) {
-                    const beat = beatFromClientX(
-                        detail.clientX,
-                        bounds!,
-                        scroller.scrollLeft,
-                    );
+                    const beat = beatFromClientX(detail.clientX, bounds!, scroller.scrollLeft);
                     const trackId = trackIdFromClientY(detail.clientY);
                     const filePaths: string[] = (detail as any).filePaths;
                     const isRightDrag = !!(detail as any).isRightDrag;
-                    const isMulti =
-                        Array.isArray(filePaths) && filePaths.length > 1;
+                    const isMulti = Array.isArray(filePaths) && filePaths.length > 1;
 
                     if (isRightDrag) {
                         const suppressCtx = (ev: Event) => {
                             ev.preventDefault();
                             ev.stopImmediatePropagation();
-                            window.removeEventListener(
-                                "contextmenu",
-                                suppressCtx,
-                                true,
-                            );
+                            window.removeEventListener("contextmenu", suppressCtx, true);
                         };
-                        window.addEventListener(
-                            "contextmenu",
-                            suppressCtx,
-                            true,
-                        );
+                        window.addEventListener("contextmenu", suppressCtx, true);
 
                         setImportModeMenu({
                             x: detail.clientX,
                             y: detail.clientY,
-                            audioPaths: isMulti
-                                ? filePaths
-                                : [detail.filePath],
+                            audioPaths: isMulti ? filePaths : [detail.filePath],
                             trackId,
                             startSec: beat,
                         });
                     } else if (isMulti) {
-                        const externalAction =
-                            findFirstExternalPathAction(filePaths);
-                        if (
-                            externalAction &&
-                            externalAction.kind !== "importAudio"
-                        ) {
-                            emitExternalFileAction(
-                                externalAction.kind,
-                                externalAction.path,
-                            );
+                        const externalAction = findFirstExternalPathAction(filePaths);
+                        if (externalAction && externalAction.kind !== "importAudio") {
+                            emitExternalFileAction(externalAction.kind, externalAction.path);
                             return;
                         }
                         void dispatch(
@@ -484,14 +380,9 @@ export function useTimelineDragDrop(
                             }),
                         );
                     } else {
-                        const actionKind = detectExternalPathAction(
-                            detail.filePath,
-                        );
+                        const actionKind = detectExternalPathAction(detail.filePath);
                         if (actionKind && actionKind !== "importAudio") {
-                            emitExternalFileAction(
-                                actionKind,
-                                detail.filePath,
-                            );
+                            emitExternalFileAction(actionKind, detail.filePath);
                             return;
                         }
                         void dispatch(

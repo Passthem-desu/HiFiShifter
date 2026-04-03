@@ -119,10 +119,7 @@ export function releaseGainBuffer(buf: Float32Array): void {
  * @param params - 渲染参数（需要时间域 + fade 相关字段）
  * @returns Float32Array，与 peaks 等长，已叠加增益（可能是原数组引用）
  */
-export function applyGainsToPeaks(
-    peaks: Float32Array,
-    params: WaveformRenderParams,
-): Float32Array {
+export function applyGainsToPeaks(peaks: Float32Array, params: WaveformRenderParams): Float32Array {
     const {
         sourceStartSec,
         clipDuration,
@@ -141,10 +138,10 @@ export function applyGainsToPeaks(
 
     // 计算数据的时间范围（与 renderWaveform 保持一致）
     const effectiveDataStartSec = dataStartSec ?? sourceStartSec;
-    const effectiveDataDurationSec = dataDurationSec ?? (clipDuration * playbackRate);
+    const effectiveDataDurationSec = dataDurationSec ?? clipDuration * playbackRate;
 
     // 快速路径：无淡入淡出且增益为 1 时直接返回原数组（零拷贝）
-    const hasFade = (fadeInSec > 0) || (fadeOutSec > 0);
+    const hasFade = fadeInSec > 0 || fadeOutSec > 0;
     if (!hasFade && Math.abs(volumeGain - 1) < 1e-6) {
         return peaks;
     }
@@ -171,11 +168,12 @@ export function applyGainsToPeaks(
     const baseTime = reversed
         ? (clipSourceEndSec - effectiveDataStartSec) * invPlaybackRate
         : (effectiveDataStartSec - sourceStartSec) * invPlaybackRate;
-    const timeStep = totalSamples > 1
-        ? (reversed
-            ? -(effectiveDataDurationSec * invTotalSamplesM1 * invPlaybackRate)
-            : (effectiveDataDurationSec * invTotalSamplesM1 * invPlaybackRate))
-        : 0;
+    const timeStep =
+        totalSamples > 1
+            ? reversed
+                ? -(effectiveDataDurationSec * invTotalSamplesM1 * invPlaybackRate)
+                : effectiveDataDurationSec * invTotalSamplesM1 * invPlaybackRate
+            : 0;
 
     for (let i = 0; i < totalSamples; i++) {
         // 使用预计算的等差数列求解 time
@@ -262,11 +260,17 @@ export function renderWaveform(
     mode: "line" | "jitter" = "line",
 ): void {
     const {
-        canvasWidth, canvasHeight, centerY,
-        sourceStartSec, clipDuration, playbackRate,
+        canvasWidth,
+        canvasHeight,
+        centerY,
+        sourceStartSec,
+        clipDuration,
+        playbackRate,
         reversed = false,
-        dataStartSec, dataDurationSec,
-        clipPixelOffset = 0, clipTotalWidthPx,
+        dataStartSec,
+        dataDurationSec,
+        clipPixelOffset = 0,
+        clipTotalWidthPx,
     } = params;
     const totalSamples = peaks.length / 2;
 
@@ -278,11 +282,11 @@ export function renderWaveform(
     const clipTotalW = clipTotalWidthPx ?? canvasWidth;
 
     // 振幅比例：0 电平在中心（静音），±1 电平顶到底边界（0dB）
-    const amplitudeScale = params.zeroDbHalfHeight ?? (canvasHeight / 2);
+    const amplitudeScale = params.zeroDbHalfHeight ?? canvasHeight / 2;
 
     // 计算数据的时间范围（源文件坐标系）
     const effectiveDataStartSec = dataStartSec ?? sourceStartSec;
-    const effectiveDataDurationSec = dataDurationSec ?? (clipDuration * playbackRate);
+    const effectiveDataDurationSec = dataDurationSec ?? clipDuration * playbackRate;
     const dataEndSec = effectiveDataStartSec + effectiveDataDurationSec;
 
     // 计算 clip 在源文件中的时间范围
@@ -314,10 +318,7 @@ export function renderWaveform(
 
     // 裁剪到当前 canvas 范围 [0, canvasWidth)
     const localPxStart = Math.max(0, Math.floor(globalPxStart - clipPixelOffset));
-    const localPxEnd = Math.min(
-        canvasWidth - 1,
-        Math.ceil(globalPxEnd - clipPixelOffset) - 1,
-    );
+    const localPxEnd = Math.min(canvasWidth - 1, Math.ceil(globalPxEnd - clipPixelOffset) - 1);
 
     if (localPxEnd <= localPxStart) return;
 
@@ -331,13 +332,15 @@ export function renderWaveform(
     //
     // 合并：pxToIndex(localPx) = ((localPx + clipPixelOffset) * pxToTimeScale + sourceStartSec - effectiveDataStartSec) * timeToIdxScale
     //                          = localPx * pxToIdxScale + pxToIdxBase
-    const pxToTimeScale = clipDuration * playbackRate / clipTotalW;
+    const pxToTimeScale = (clipDuration * playbackRate) / clipTotalW;
     const invDataDuration = 1 / effectiveDataDurationSec;
     const timeToIdxScale = (totalSamples - 1) * invDataDuration;
     const pxToIdxScale = (reversed ? -1 : 1) * pxToTimeScale * timeToIdxScale;
     const pxToIdxBase = reversed
-        ? (clipSourceEndSec - clipPixelOffset * pxToTimeScale - effectiveDataStartSec) * timeToIdxScale
-        : (clipPixelOffset * pxToTimeScale + sourceStartSec - effectiveDataStartSec) * timeToIdxScale;
+        ? (clipSourceEndSec - clipPixelOffset * pxToTimeScale - effectiveDataStartSec) *
+          timeToIdxScale
+        : (clipPixelOffset * pxToTimeScale + sourceStartSec - effectiveDataStartSec) *
+          timeToIdxScale;
     // halfPixelIdx 对应 0.5 像素覆盖的索引偏移量
     const halfPixelIdx = Math.abs(0.5 * pxToIdxScale);
 
@@ -370,12 +373,11 @@ export function renderWaveform(
 
         // 裁剪到有效数据范围
         const idxLeft = rawIdxLeft < 0 ? 0 : rawIdxLeft;
-        const idxRight = rawIdxRight > maxIdx
-            ? maxIdx
-            : (rawIdxRight > idxAtDataEnd ? idxAtDataEnd : rawIdxRight);
+        const idxRight =
+            rawIdxRight > maxIdx ? maxIdx : rawIdxRight > idxAtDataEnd ? idxAtDataEnd : rawIdxRight;
 
         // 取该范围内所有采样点的 min/max
-        const iStart = idxLeft < 0 ? 0 : (idxLeft | 0);
+        const iStart = idxLeft < 0 ? 0 : idxLeft | 0;
         const iEnd = idxRight > maxIdx ? maxIdx : Math.ceil(idxRight);
 
         let pixelMin = Infinity;
@@ -396,7 +398,7 @@ export function renderWaveform(
             // ========================================
             // 抖动线模式
             // ========================================
-            const t = px & 1 ? 0.75 : 0.25; 
+            const t = px & 1 ? 0.75 : 0.25;
             const value = pixelMax + (pixelMin - pixelMax) * t;
             const y = centerY - value * amplitudeScale;
 
@@ -424,5 +426,4 @@ export function renderWaveform(
     if (mode === "jitter") {
         ctx.stroke();
     }
-    }
-
+}

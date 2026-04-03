@@ -74,11 +74,7 @@ export function getWaveformColors(
     }
 
     if (surface === "piano-roll") {
-        return mode === "dark"
-            ? darkPianoRollWaveformColors
-            : lightPianoRollWaveformColors;
+        return mode === "dark" ? darkPianoRollWaveformColors : lightPianoRollWaveformColors;
     }
-    return mode === "dark"
-        ? darkTimelineWaveformColors
-        : lightTimelineWaveformColors;
+    return mode === "dark" ? darkTimelineWaveformColors : lightTimelineWaveformColors;
 }

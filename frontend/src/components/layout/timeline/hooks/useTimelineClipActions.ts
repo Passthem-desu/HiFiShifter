@@ -33,9 +33,7 @@ import { waveformMipmapStore } from "../../../../utils/waveformMipmapStore";
 import { dbToGain } from "../math";
 import { computeAutoCrossfadeFromPayload } from "./autoCrossfade";
 import { useTimelineSelectionRect } from "../";
-import {
-    readSystemClipboardObject,
-} from "../../../../utils/systemClipboard";
+import { readSystemClipboardObject } from "../../../../utils/systemClipboard";
 
 // ── Args / Result 类型 ────────────────────────────────────────
 
@@ -54,9 +52,7 @@ export interface UseTimelineClipActionsResult {
     multiSelectedSet: Set<string>;
     multiSelectedClipIdsRef: React.MutableRefObject<string[]>;
     multiSelectedSetRef: React.MutableRefObject<Set<string>>;
-    setMultiSelectedClipIds: (
-        ids: string[] | ((prev: string[]) => string[]),
-    ) => void;
+    setMultiSelectedClipIds: (ids: string[] | ((prev: string[]) => string[])) => void;
 
     // Context menus
     contextMenu: {
@@ -129,11 +125,7 @@ export interface UseTimelineClipActionsResult {
     // TrackLane callbacks
     ensureTrackLaneSelected: (clipId: string) => void;
     selectTrackLaneClipRemote: (clipId: string) => void;
-    openTrackLaneContextMenu: (
-        clipId: string,
-        clientX: number,
-        clientY: number,
-    ) => void;
+    openTrackLaneContextMenu: (clipId: string, clientX: number, clientY: number) => void;
     seekFromTrackLaneClientX: (clientX: number, commit: boolean) => void;
     toggleTrackLaneClipMuted: (clipId: string, nextMuted: boolean) => void;
     toggleTrackLaneMultiSelect: (clipId: string) => void;
@@ -142,9 +134,7 @@ export interface UseTimelineClipActionsResult {
     commitTrackLaneGain: (clipId: string, db: number) => void;
 
     // sameSourceConfirm helpers (forwarded from state)
-    sameSourceConfirmResolverRef: React.MutableRefObject<
-        ((confirmed: boolean) => void) | null
-    >;
+    sameSourceConfirmResolverRef: React.MutableRefObject<((confirmed: boolean) => void) | null>;
 }
 
 // ── Hook 实现 ─────────────────────────────────────────────────
@@ -152,12 +142,8 @@ export interface UseTimelineClipActionsResult {
 export function useTimelineClipActions(
     args: UseTimelineClipActionsArgs & {
         dispatch: AppDispatch;
-        sameSourceConfirmResolverRef: React.MutableRefObject<
-            ((confirmed: boolean) => void) | null
-        >;
-        setSameSourceConfirmOpen: React.Dispatch<
-            React.SetStateAction<boolean>
-        >;
+        sameSourceConfirmResolverRef: React.MutableRefObject<((confirmed: boolean) => void) | null>;
+        setSameSourceConfirmOpen: React.Dispatch<React.SetStateAction<boolean>>;
         setPlayheadFromClientX: (
             clientX: number,
             bounds: DOMRect,
@@ -207,10 +193,7 @@ export function useTimelineClipActions(
         dispatch(setMultiSelectedClipIdsAction([]));
     }, [s.toolMode, dispatch]);
 
-    const multiSelectedSet = useMemo(
-        () => new Set(multiSelectedClipIds),
-        [multiSelectedClipIds],
-    );
+    const multiSelectedSet = useMemo(() => new Set(multiSelectedClipIds), [multiSelectedClipIds]);
     const multiSelectedSetRef = useRef(multiSelectedSet);
     useEffect(() => {
         multiSelectedSetRef.current = multiSelectedSet;
@@ -249,43 +232,34 @@ export function useTimelineClipActions(
         [dispatch],
     );
 
-    const { selectionRect, onPointerDown: onSelectionRectPointerDown } =
-        useTimelineSelectionRect({
-            scrollRef,
-            sessionRef,
-            pxPerBeat: pxPerSec,
-            rowHeight,
-            clearContextMenu,
-            setMultiSelectedClipIds,
-            onSingleSelect: handleSelectionRectSingleSelect,
-        });
+    const { selectionRect, onPointerDown: onSelectionRectPointerDown } = useTimelineSelectionRect({
+        scrollRef,
+        sessionRef,
+        pxPerBeat: pxPerSec,
+        rowHeight,
+        clearContextMenu,
+        setMultiSelectedClipIds,
+        onSingleSelect: handleSelectionRectSingleSelect,
+    });
 
     // ── Clipboard ────────────────────────────────────────────
     const clipClipboardRef = useRef<ClipTemplate[] | null>(null);
 
-    const buildClipClipboardTemplates = React.useCallback(
-        async (ids: string[]) => {
-            const clips = sessionRef.current.clips.filter((c) =>
-                ids.includes(c.id),
-            );
-            return Promise.all(
-                clips.map(async (clip) => {
-                    const linkedParamsResult = await webApi.getClipLinkedParams(
-                        clip.id,
-                    );
-                    return {
-                        ...clip,
-                        waveformPreview:
-                            sessionRef.current.clipWaveforms[clip.id],
-                        linkedParams: linkedParamsResult.ok
-                            ? linkedParamsResult.linkedParams
-                            : undefined,
-                    };
-                }),
-            );
-        },
-        [],
-    );
+    const buildClipClipboardTemplates = React.useCallback(async (ids: string[]) => {
+        const clips = sessionRef.current.clips.filter((c) => ids.includes(c.id));
+        return Promise.all(
+            clips.map(async (clip) => {
+                const linkedParamsResult = await webApi.getClipLinkedParams(clip.id);
+                return {
+                    ...clip,
+                    waveformPreview: sessionRef.current.clipWaveforms[clip.id],
+                    linkedParams: linkedParamsResult.ok
+                        ? linkedParamsResult.linkedParams
+                        : undefined,
+                };
+            }),
+        );
+    }, []);
 
     // ── normalizeClips ───────────────────────────────────────
     const normalizeClips = React.useCallback(
@@ -298,10 +272,7 @@ export function useTimelineClipActions(
                 const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
                 const sourceEndSec =
                     Number(clip.sourceEndSec ?? clip.durationSec) || clip.durationSec;
-                const playbackRate = Math.max(
-                    1e-6,
-                    Number(clip.playbackRate ?? 1) || 1,
-                );
+                const playbackRate = Math.max(1e-6, Number(clip.playbackRate ?? 1) || 1);
                 const clipSourceSpanSec = Math.max(
                     0,
                     Math.min(clip.lengthSec * playbackRate, sourceEndSec - sourceStartSec),
@@ -323,14 +294,9 @@ export function useTimelineClipActions(
                 }
                 waveformMipmapStore.releaseInterleaved(data);
                 if (peak <= 0) continue;
-                const newGain = Math.min(
-                    Math.max(1.0 / peak, dbToGain(-12)),
-                    dbToGain(12),
-                );
+                const newGain = Math.min(Math.max(1.0 / peak, dbToGain(-12)), dbToGain(12));
                 dispatch(setClipGain({ clipId: id, gain: newGain }));
-                void dispatch(
-                    setClipStateRemote({ clipId: id, gain: newGain }),
-                );
+                void dispatch(setClipStateRemote({ clipId: id, gain: newGain }));
             }
         },
         [dispatch, sessionRef],
@@ -339,9 +305,7 @@ export function useTimelineClipActions(
     // ── replaceClipSources ───────────────────────────────────
     const replaceClipSources = React.useCallback(
         async (ids: string[]) => {
-            const selected = sessionRef.current.clips.filter((c) =>
-                ids.includes(c.id),
-            );
+            const selected = sessionRef.current.clips.filter((c) => ids.includes(c.id));
             if (selected.length === 0) return;
 
             const picked = await webApi.openAudioDialog();
@@ -350,29 +314,21 @@ export function useTimelineClipActions(
             const selectedSourcePaths = new Set(
                 selected
                     .map((c) => c.sourcePath)
-                    .filter(
-                        (v): v is string => Boolean(v && v.trim().length),
-                    ),
+                    .filter((v): v is string => Boolean(v && v.trim().length)),
             );
 
             let replaceSameSource = false;
             if (selectedSourcePaths.size > 0) {
-                const hasOtherClipsWithSameSource =
-                    sessionRef.current.clips.some(
-                        (clip) =>
-                            !ids.includes(clip.id) &&
-                            Boolean(
-                                clip.sourcePath &&
-                                    selectedSourcePaths.has(clip.sourcePath),
-                            ),
-                    );
+                const hasOtherClipsWithSameSource = sessionRef.current.clips.some(
+                    (clip) =>
+                        !ids.includes(clip.id) &&
+                        Boolean(clip.sourcePath && selectedSourcePaths.has(clip.sourcePath)),
+                );
                 if (hasOtherClipsWithSameSource) {
-                    replaceSameSource = await new Promise<boolean>(
-                        (resolve) => {
-                            sameSourceConfirmResolverRef.current = resolve;
-                            setSameSourceConfirmOpen(true);
-                        },
-                    );
+                    replaceSameSource = await new Promise<boolean>((resolve) => {
+                        sameSourceConfirmResolverRef.current = resolve;
+                        setSameSourceConfirmOpen(true);
+                    });
                 }
             }
 
@@ -390,19 +346,11 @@ export function useTimelineClipActions(
     // ── splitClipIdsAtPlayhead ────────────────────────────────
     const splitClipIdsAtPlayhead = React.useCallback(
         (clipIds: string[]) => {
-            const splitSec = Math.max(
-                0,
-                Number(sessionRef.current.playheadSec ?? 0) || 0,
-            );
+            const splitSec = Math.max(0, Number(sessionRef.current.playheadSec ?? 0) || 0);
             const eligibleIds = clipIds.filter((id) => {
-                const c = sessionRef.current.clips.find(
-                    (clip) => clip.id === id,
-                );
+                const c = sessionRef.current.clips.find((clip) => clip.id === id);
                 if (!c) return false;
-                return (
-                    splitSec >= c.startSec &&
-                    splitSec <= c.startSec + c.lengthSec
-                );
+                return splitSec >= c.startSec && splitSec <= c.startSec + c.lengthSec;
             });
             for (const clipId of eligibleIds) {
                 void dispatch(splitClipRemote({ clipId, splitSec }));
@@ -417,8 +365,8 @@ export function useTimelineClipActions(
             multiSelectedClipIdsRef.current.length > 0
                 ? [...multiSelectedClipIdsRef.current]
                 : sessionRef.current.selectedClipId
-                    ? [sessionRef.current.selectedClipId]
-                    : [];
+                  ? [sessionRef.current.selectedClipId]
+                  : [];
         if (selectedIds.length === 0) return;
         splitClipIdsAtPlayhead(selectedIds);
     }, [splitClipIdsAtPlayhead]);
@@ -430,16 +378,10 @@ export function useTimelineClipActions(
             const target = session.clips.find((c) => c.id === targetClipId);
             if (!target) return;
 
-            const anchorId =
-                lastClickedClipIdRef.current ??
-                session.selectedClipId ??
-                targetClipId;
-            const anchor =
-                session.clips.find((c) => c.id === anchorId) ?? target;
+            const anchorId = lastClickedClipIdRef.current ?? session.selectedClipId ?? targetClipId;
+            const anchor = session.clips.find((c) => c.id === anchorId) ?? target;
 
-            const trackIndexById = new Map(
-                session.tracks.map((track, index) => [track.id, index]),
-            );
+            const trackIndexById = new Map(session.tracks.map((track, index) => [track.id, index]));
             const anchorTrackIndex = trackIndexById.get(anchor.trackId);
             const targetTrackIndex = trackIndexById.get(target.trackId);
             if (anchorTrackIndex == null || targetTrackIndex == null) {
@@ -460,11 +402,7 @@ export function useTimelineClipActions(
             const selected = session.clips
                 .filter((clip) => {
                     const trackIndex = trackIndexById.get(clip.trackId);
-                    if (
-                        trackIndex == null ||
-                        trackIndex < minTrack ||
-                        trackIndex > maxTrack
-                    ) {
+                    if (trackIndex == null || trackIndex < minTrack || trackIndex > maxTrack) {
                         return false;
                     }
                     const clipStart = clip.startSec;
@@ -501,8 +439,7 @@ export function useTimelineClipActions(
                 .map((c) => c.startSec)
                 .reduce((a, b) => Math.min(a, b), Number.POSITIVE_INFINITY);
             const delta =
-                Number.isFinite(minStart) &&
-                minStart !== Number.POSITIVE_INFINITY
+                Number.isFinite(minStart) && minStart !== Number.POSITIVE_INFINITY
                     ? playhead - minStart
                     : 0;
             const templates = tpl.map((c) => ({
@@ -542,10 +479,7 @@ export function useTimelineClipActions(
                         fade_in_sec?: number;
                         fade_out_sec?: number;
                     }>;
-                    const fadeUpdates = computeAutoCrossfadeFromPayload(
-                        allClips,
-                        created,
-                    );
+                    const fadeUpdates = computeAutoCrossfadeFromPayload(allClips, created);
                     if (fadeUpdates.length > 0) {
                         const fadePromises = fadeUpdates.map((u) =>
                             dispatch(
@@ -603,12 +537,7 @@ export function useTimelineClipActions(
             const scroller = scrollRef.current;
             if (!scroller) return;
             const bounds = scroller.getBoundingClientRect();
-            setPlayheadFromClientX(
-                clientX,
-                bounds,
-                scroller.scrollLeft,
-                commit,
-            );
+            setPlayheadFromClientX(clientX, bounds, scroller.scrollLeft, commit);
         },
         [setPlayheadFromClientX],
     );

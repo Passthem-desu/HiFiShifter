@@ -49,8 +49,7 @@ export function I18nProvider({ children }: PropsWithChildren) {
     useEffect(() => {
         // Native close-confirmation dialog lives in Rust (Tauri). Keep backend locale in sync
         // so the dialog follows the user's in-app language.
-        const tauriInvoke =
-            window.__TAURI__?.core?.invoke ?? window.__TAURI__?.invoke;
+        const tauriInvoke = window.__TAURI__?.core?.invoke ?? window.__TAURI__?.invoke;
         if (typeof tauriInvoke !== "function") return;
 
         void coreApi.setUiLocale(localeState).catch(() => {
@@ -66,18 +65,13 @@ export function I18nProvider({ children }: PropsWithChildren) {
                 localStorage.setItem(STORAGE_KEY, nextLocale);
             },
             t: (key: MessageKey) => {
-                const localeMessages = messages[localeState] as Record<
-                    MessageKey,
-                    string
-                >;
+                const localeMessages = messages[localeState] as Record<MessageKey, string>;
                 return localeMessages[key] ?? messages["en-US"][key];
             },
         };
     }, [localeState]);
 
-    return (
-        <I18nContext.Provider value={value}>{children}</I18nContext.Provider>
-    );
+    return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
 export function useI18n() {
