@@ -124,6 +124,9 @@ impl ProgressTracker {
 
     /// Get current progress percentage
     pub fn get_current_progress(&self) -> f32 {
+        if self.total_workload <= 0.0 {
+            return 1.0;
+        }
         let completed = self.completed_workload.load(Ordering::Relaxed) as f64 / 1000.0;
         let progress = (completed / self.total_workload).clamp(0.0, 1.0);
         progress as f32

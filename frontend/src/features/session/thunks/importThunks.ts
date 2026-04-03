@@ -252,7 +252,8 @@ export const importAudioFileAtPosition = createAsyncThunk(
                 reader.readAsDataURL(payload.file);
             });
 
-            const base64 = dataUrl.includes(",") ? dataUrl.split(",").slice(1).join(",") : dataUrl;
+            const commaIdx = dataUrl.indexOf(",");
+            const base64 = commaIdx !== -1 ? dataUrl.substring(commaIdx + 1) : dataUrl;
 
             const imported = await webApi.importAudioBytes(
                 fileName,

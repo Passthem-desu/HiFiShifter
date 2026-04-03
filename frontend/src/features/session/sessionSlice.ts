@@ -97,6 +97,29 @@ import { markProjectDirty } from "./sessionDirtyState";
 import { resolveTrackIdForClipSelection } from "./selectionFocus";
 
 const MAX_TRACK_VOLUME = 4;
+const VALID_GRID_SIZES = new Set<GridSize>([
+    "1/1",
+    "1/2",
+    "1/4",
+    "1/8",
+    "1/16",
+    "1/32",
+    "1/64",
+    "1/1d",
+    "1/2d",
+    "1/4d",
+    "1/8d",
+    "1/16d",
+    "1/32d",
+    "1/64d",
+    "1/1t",
+    "1/2t",
+    "1/4t",
+    "1/8t",
+    "1/16t",
+    "1/32t",
+    "1/64t",
+]);
 
 export type {
     AutomationPoint,
@@ -511,31 +534,7 @@ function applyTimelineState(
             32,
         );
         const nextGridSizeRaw = String(project.grid_size ?? state.project.gridSize);
-        const nextGridSize = (
-            [
-                "1/1",
-                "1/2",
-                "1/4",
-                "1/8",
-                "1/16",
-                "1/32",
-                "1/64",
-                "1/1d",
-                "1/2d",
-                "1/4d",
-                "1/8d",
-                "1/16d",
-                "1/32d",
-                "1/64d",
-                "1/1t",
-                "1/2t",
-                "1/4t",
-                "1/8t",
-                "1/16t",
-                "1/32t",
-                "1/64t",
-            ] as const
-        ).includes(nextGridSizeRaw as any)
+        const nextGridSize = VALID_GRID_SIZES.has(nextGridSizeRaw as GridSize)
             ? (nextGridSizeRaw as GridSize)
             : "1/4";
 
@@ -2251,31 +2250,7 @@ const sessionSlice = createSlice({
                 }
                 const beats = clamp(Number(payload.project?.beats_per_bar ?? state.beats), 1, 32);
                 const gridRaw = String(payload.project?.grid_size ?? state.grid);
-                const valid = (
-                    [
-                        "1/1",
-                        "1/2",
-                        "1/4",
-                        "1/8",
-                        "1/16",
-                        "1/32",
-                        "1/64",
-                        "1/1d",
-                        "1/2d",
-                        "1/4d",
-                        "1/8d",
-                        "1/16d",
-                        "1/32d",
-                        "1/64d",
-                        "1/1t",
-                        "1/2t",
-                        "1/4t",
-                        "1/8t",
-                        "1/16t",
-                        "1/32t",
-                        "1/64t",
-                    ] as const
-                ).includes(gridRaw as any);
+                const valid = VALID_GRID_SIZES.has(gridRaw as GridSize);
                 const grid = (valid ? gridRaw : "1/4") as GridSize;
 
                 state.beats = beats;

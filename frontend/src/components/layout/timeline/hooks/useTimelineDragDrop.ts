@@ -140,8 +140,11 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                     const trackId = clientY !== undefined ? trackIdFromClientY(clientY) : null;
 
                     const primaryPath = paths.length > 0 ? paths[0] : null;
+
+                    // 改用 $O(1)$ 零内存分配的切片
                     function fileNameFromPath(p: string) {
-                        return String(p.split(/[\\/]/).pop() ?? p);
+                        const slashIdx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+                        return slashIdx >= 0 ? p.substring(slashIdx + 1) : p;
                     }
 
                     if (type === "enter" || type === "over") {
@@ -158,7 +161,6 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                             if (detectExternalPathAction(path) !== "importAudio") {
                                 return null;
                             }
-                            const nextFileName = fileNameFromPath(path);
 
                             if (prev && dropPreviewRef.current) {
                                 dropPreviewRef.current.style.left = `${Math.max(0, beat * pxPerSecRef.current)}px`;
@@ -167,9 +169,10 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                             }
 
                             if (!prev || prev.trackId !== trackId || prev.path !== path) {
+                                // 仅仅在真正需要更新对象时，才执行提取文件名的操作
                                 return {
                                     path,
-                                    fileName: prev?.fileName ?? nextFileName,
+                                    fileName: prev?.fileName ?? fileNameFromPath(path),
                                     trackId,
                                     startSec: beat,
                                     durationSec: prev?.durationSec ?? 0,
@@ -249,6 +252,10 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                         }
                     }
                 });
+
+                if (disposed && unlisten) {
+                    unlisten();
+                }
             } catch (err) {
                 if (debugDnd) {
                     console.warn("Failed to attach Tauri drag-drop listener", err);

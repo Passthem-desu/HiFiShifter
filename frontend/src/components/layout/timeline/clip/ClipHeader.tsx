@@ -41,7 +41,10 @@ export const ClipHeader: React.FC<{
     const isDark = mode === "dark";
     const gainDb = gainToDb(clip.gain);
     const clampedGainDb = Math.min(12, Math.max(-12, gainDb));
-    const gainKnobDeg = (clampedGainDb / 12) * 135;
+    const [wheelGainDb, setWheelGainDb] = useState<number | null>(null);
+    const wheelTimerRef = useRef<number | null>(null);
+    const activeGainDb = wheelGainDb !== null ? wheelGainDb : clampedGainDb;
+    const gainKnobDeg = (activeGainDb / 12) * 135;
 
     // 根据 clip 像素宽度决定显示哪些元素（从右往左依次隐藏）
     // >= 120px: 全显示 | 80-120px: 隐藏名称 | 52-80px: 隐藏名称+增益值 | 32-52px: 只留M | < 32px: 全隐藏
@@ -162,13 +165,23 @@ export const ClipHeader: React.FC<{
                             12,
                             Math.max(
                                 -12,
-                                clampedGainDb + direction * CLIP_GAIN_WHEEL_STEP_DB * notches,
+                                activeGainDb + direction * CLIP_GAIN_WHEEL_STEP_DB * notches,
                             ),
                         );
 
                         e.preventDefault();
                         e.stopPropagation();
-                        onGainCommit(clip.id, nextDb);
+
+                        // 立即更新本地 UI，但延迟 200ms 才提交给后端
+                        setWheelGainDb(nextDb);
+                        if (wheelTimerRef.current !== null) {
+                            window.clearTimeout(wheelTimerRef.current);
+                        }
+                        wheelTimerRef.current = window.setTimeout(() => {
+                            onGainCommit(clip.id, nextDb);
+                            setWheelGainDb(null);
+                            wheelTimerRef.current = null;
+                        }, 200);
                     }}
                 >
                     <div
@@ -268,8 +281,8 @@ export const ClipHeader: React.FC<{
                         onGainCommit?.(clip.id, 0);
                     }}
                 >
-                    {gainToDb(clip.gain) >= 0 ? "+" : ""}
-                    {gainToDb(clip.gain).toFixed(1)}dB
+                    {activeGainDb >= 0 ? "+" : ""}
+                    {activeGainDb.toFixed(1)}dB
                 </div>
             ) : null}
         </div>

@@ -228,6 +228,16 @@ export function useAsyncPitchRefresh(): UseAsyncPitchRefreshResult {
     }, [state.taskId]);
 
     const reset = useCallback(() => {
+        // 清理可能残留的轮询和防抖定时器
+        if (pollTimerRef.current) {
+            clearInterval(pollTimerRef.current);
+            pollTimerRef.current = null;
+        }
+        if (debounceTimerRef.current) {
+            clearTimeout(debounceTimerRef.current);
+            debounceTimerRef.current = null;
+        }
+
         setState({
             isLoading: false,
             taskId: null,
