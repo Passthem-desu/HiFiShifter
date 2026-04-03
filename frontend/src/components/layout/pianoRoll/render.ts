@@ -765,6 +765,7 @@ export function drawPianoRoll(args: {
     // waveformMipmapStore.getInterleavedSlice() → applyGainsToPeaks → renderWaveform
     for (const entry of clipPeaks) {
         if (!entry.sourcePath) continue;
+        if (entry.muted) continue;
 
         const pr = entry.playbackRate > 0 ? entry.playbackRate : 1;
         const sourceStartSec = entry.sourceStartSec ?? 0;
@@ -902,10 +903,10 @@ export function drawPianoRoll(args: {
     ) {
         // �?clip 时循环颜色，增强区分�?
         const DETECTED_COLORS = [
-            "rgba(80, 220, 180, 0.78)", // 青绿
-            "rgba(255, 180, 60, 0.78)", // 橙黄
-            "rgba(180, 120, 255, 0.78)", // 紫色
-            "rgba(60, 180, 255, 0.78)", // 天蓝
+            "rgba(80, 220, 180, 0.56)", // 青绿
+            "rgba(255, 180, 60, 0.56)", // 橙黄
+            "rgba(180, 120, 255, 0.56)", // 紫色
+            "rgba(60, 180, 255, 0.56)", // 天蓝
         ];
 
         for (let ci = 0; ci < detectedPitchCurves.length; ci++) {
@@ -1012,54 +1013,58 @@ export function drawPianoRoll(args: {
         });
     }
 
-    if (paramView && paramView.orig.length >= 2 && paramView.edit.length >= 2) {
+    if (paramView) {
         const editValues =
             liveEditOverride && liveEditOverride.key === paramView.key
                 ? liveEditOverride.edit
                 : paramView.edit;
 
-        // original (dashed)
-        ctx.save();
-        ctx.strokeStyle = colors.origCurve;
-        ctx.lineWidth = 1.8;
-        ctx.setLineDash(getFixedDashPattern(6, 6));
-        drawCurveTimed({
-            ctx,
-            values: paramView.orig,
-            param: editParam,
-            w,
-            h,
-            startFrame: paramView.startFrame,
-            stride: paramView.stride,
-            framePeriodMs: paramView.framePeriodMs,
-            visibleStartSec,
-            visibleDurSec,
-            valueToY,
-        });
-        ctx.restore();
+        if (paramView.orig.length >= 2) {
+            // original (dashed)
+            ctx.save();
+            ctx.strokeStyle = colors.origCurve;
+            ctx.lineWidth = 1.8;
+            ctx.setLineDash(getFixedDashPattern(6, 6));
+            drawCurveTimed({
+                ctx,
+                values: paramView.orig,
+                param: editParam,
+                w,
+                h,
+                startFrame: paramView.startFrame,
+                stride: paramView.stride,
+                framePeriodMs: paramView.framePeriodMs,
+                visibleStartSec,
+                visibleDurSec,
+                valueToY,
+            });
+            ctx.restore();
+        }
 
-        // edited (solid)
-        ctx.save();
-        ctx.strokeStyle = colors.editCurve;
-        ctx.lineWidth = 2.6;
-        ctx.setLineDash([]);
-        drawCurveTimed({
-            ctx,
-            values: editValues,
-            param: editParam,
-            w,
-            h,
-            startFrame: paramView.startFrame,
-            stride: paramView.stride,
-            framePeriodMs: paramView.framePeriodMs,
-            visibleStartSec,
-            visibleDurSec,
-            valueToY,
-        });
-        ctx.restore();
+        if (editValues.length >= 2) {
+            // edited (solid)
+            ctx.save();
+            ctx.strokeStyle = colors.editCurve;
+            ctx.lineWidth = 2.6;
+            ctx.setLineDash([]);
+            drawCurveTimed({
+                ctx,
+                values: editValues,
+                param: editParam,
+                w,
+                h,
+                startFrame: paramView.startFrame,
+                stride: paramView.stride,
+                framePeriodMs: paramView.framePeriodMs,
+                visibleStartSec,
+                visibleDurSec,
+                valueToY,
+            });
+            ctx.restore();
+        }
 
         // 选区内曲线高亮：在选区范围内用亮蓝色加粗重绘编辑曲线
-        if (selection) {
+        if (selection && editValues.length >= 2) {
             const selMinBeat = Math.min(selection.aBeat, selection.bBeat);
             const selMaxBeat = Math.max(selection.aBeat, selection.bBeat);
             const selX0 = selMinBeat * pxPerBeat - scrollLeft;

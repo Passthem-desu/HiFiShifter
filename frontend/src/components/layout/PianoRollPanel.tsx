@@ -992,6 +992,15 @@ export const PianoRollPanel: React.FC = () => {
         ),
     });
 
+    useEffect(() => {
+        return () => {
+            if (scrollStateRafRef.current != null) {
+                cancelAnimationFrame(scrollStateRafRef.current);
+                scrollStateRafRef.current = null;
+            }
+        };
+    }, []);
+
     function syncScrollLeft(scroller: HTMLDivElement) {
         const next = scroller.scrollLeft;
         if (
@@ -1029,11 +1038,10 @@ export const PianoRollPanel: React.FC = () => {
         }
 
         if (scrollStateRafRef.current == null) {
-            // 用 setTimeout 替代 requestAnimationFrame 强制降频
-            scrollStateRafRef.current = setTimeout(() => {
+            scrollStateRafRef.current = requestAnimationFrame(() => {
                 scrollStateRafRef.current = null;
                 setScrollLeft(scrollLeftRef.current);
-            }, 50) as unknown as number; // 约等于 20fps 的状态更新，释放 CPU
+            });
         }
 
         invalidate();
@@ -1408,7 +1416,7 @@ export const PianoRollPanel: React.FC = () => {
             .filter(([clipId]) => {
                 // 只保留属于当前轨道组内的 clip，显示 root 及所有子轨道的 detected curve
                 const clip = s.clips.find((cl) => cl.id === clipId);
-                return clip && groupTrackIds.has(clip.trackId);
+                return clip && groupTrackIds.has(clip.trackId) && !clip.muted;
             })
             .map(([, c]) => ({
                 curveStartSec: c.curveStartSec,

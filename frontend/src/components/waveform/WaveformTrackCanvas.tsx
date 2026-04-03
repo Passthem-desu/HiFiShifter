@@ -98,7 +98,6 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
     const lastLevelByClipRef = React.useRef<Record<string, 0 | 1 | 2>>({});
     const rafRef = React.useRef<number | null>(null);
-    const offCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
     // 高频参数用 ref 存储，避免依赖数组变化触发 useLayoutEffect
     const pxPerSecRef = React.useRef(props.pxPerSec);
@@ -132,13 +131,6 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             rafRef.current = null;
             drawRef.current();
         });
-    }, []);
-
-    /**
-     * 对齐到整像素，优先保证自动滚屏时波形绝对稳定（可接受轻微锐度损失）。
-     */
-    const snapToDevicePixel = React.useCallback((value: number): number => {
-        return Math.round(value);
     }, []);
 
     // ========================================
@@ -190,11 +182,6 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         canvas.style.width = `${displayW}px`;
         canvas.style.height = `${displayH}px`;
 
-        // 初始化离屏 canvas（复用，避免每帧创建）
-        if (!offCanvasRef.current) {
-            offCanvasRef.current = document.createElement("canvas");
-        }
-
         if (__perfDebug) __tSetup = performance.now() - __t0;
 
         for (const clip of currentClips) {
@@ -209,10 +196,10 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             const visEndSec = Math.min(clipEndSec, currentViewportEndSec);
             if (visEndSec <= visStartSec) continue;
 
-            // 使用整像素坐标，避免滚动时子像素裁剪造成前景闪烁/抖动
-            const viewportStartPx = Math.round(currentViewportStartSec * currentPxPerSec);
-            const clipStartPx = Math.round(clipStartSec * currentPxPerSec);
-            const clipEndPx = Math.round(clipEndSec * currentPxPerSec);
+            // 统一使用浮点像素坐标，避免多重 round 导致的帧间抖动
+            const viewportStartPx = currentViewportStartSec * currentPxPerSec;
+            const clipStartPx = clipStartSec * currentPxPerSec;
+            const clipEndPx = clipEndSec * currentPxPerSec;
             const visLeftPx = Math.max(0, clipStartPx - viewportStartPx);
             const visRightPx = Math.min(displayW, clipEndPx - viewportStartPx);
             if (visRightPx <= visLeftPx) continue;
@@ -234,8 +221,29 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 0,
                 Math.min(clip.lengthSec * pr, clipSourceEndSec - sourceStartSec),
             );
-            const sourceTimeStart = sourceStartSec;
-            const sourceDuration = Math.max(0.001, clipSourceSpanSec);
+            if (clipSourceSpanSec <= 1e-6) continue;
+
+            // 仅请求当前可见窗口对应的源数据，显著降低每帧处理成本
+            const visClipStartSec = Math.max(0, visStartSec - clipStartSec);
+            const visClipEndSec = Math.min(clip.lengthSec, visEndSec - clipStartSec);
+            const clipSourceWindowStartSec = sourceStartSec;
+            const clipSourceWindowEndSec = sourceStartSec + clipSourceSpanSec;
+            const sourceVisStartSec = clip.reversed
+                ? clipSourceWindowEndSec - visClipEndSec * pr
+                : clipSourceWindowStartSec + visClipStartSec * pr;
+            const sourceVisEndSec = clip.reversed
+                ? clipSourceWindowEndSec - visClipStartSec * pr
+                : clipSourceWindowStartSec + visClipEndSec * pr;
+            const sourcePadSec = Math.max(0.005, (2 / Math.max(1, currentPxPerSec)) * pr);
+            const sourceTimeStart = Math.max(
+                clipSourceWindowStartSec,
+                Math.min(sourceVisStartSec, sourceVisEndSec) - sourcePadSec,
+            );
+            const sourceTimeEnd = Math.min(
+                clipSourceWindowEndSec,
+                Math.max(sourceVisStartSec, sourceVisEndSec) + sourcePadSec,
+            );
+            const sourceDuration = Math.max(0.001, sourceTimeEnd - sourceTimeStart);
 
             // ========================================
             // 从 mipmap 缓存获取 interleaved 数据（不 resample，与 PianoRoll 一致）
@@ -262,10 +270,7 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
             let releasedStoreInterleaved = false;
             const rawSampleCount = storeInterleaved.length / 2;
             // 使用与 clip 自身宽度绑定的稳定采样目标，避免滚屏时分桶边界漂移导致抖动
-            const stableTargetWidthPx = Math.max(
-                1,
-                Math.ceil(Math.min(clipWidthPx, currentViewportWidthPx * 4)),
-            );
+            const stableTargetWidthPx = Math.max(1, Math.ceil(visibleWidthPx * 2));
             const targetSamples = stableTargetWidthPx * 2;
 
             if (rawSampleCount > targetSamples && targetSamples >= 2) {
@@ -455,20 +460,19 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
         const unsub = timelineViewportBus.subscribe((scrollLeft, pxPerSec, viewportWidth) => {
             // 直接更新 ref（不触发 React re-render）
             pxPerSecRef.current = pxPerSec;
-            const snappedScrollLeft = snapToDevicePixel(scrollLeft);
-            const vpStartSec = snappedScrollLeft / pxPerSec;
+            const vpStartSec = scrollLeft / pxPerSec;
             const vpEndSec = vpStartSec + viewportWidth / pxPerSec;
             viewportStartSecRef.current = vpStartSec;
             viewportEndSecRef.current = vpEndSec;
             viewportWidthPxRef.current = viewportWidth;
             if (canvasRef.current) {
-                canvasRef.current.style.left = `${snappedScrollLeft}px`;
+                canvasRef.current.style.transform = `translate3d(${scrollLeft}px,0,0)`;
             }
 
             invalidate();
         });
         return unsub;
-    }, [invalidate, snapToDevicePixel]);
+    }, [invalidate]);
 
     // ========================================
     // 低频 props 变化时 invalidate
@@ -507,6 +511,8 @@ export const WaveformTrackCanvas = React.memo(function WaveformTrackCanvas(
                 height: waveformHeight,
                 pointerEvents: "none",
                 zIndex: 1,
+                left: 0,
+                willChange: "transform",
                 // 移除 left 和 width
                 // 它们属于高频变化属性，已完全交由内部 drawRef 直接操作 DOM 更新。
             }}

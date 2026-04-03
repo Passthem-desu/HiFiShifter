@@ -425,7 +425,7 @@ export const ClipItem = React.memo(function ClipItem({
                                         24,
                                         clip.fadeInCurve ?? "sine",
                                     )}
-                                    fill="rgba(0,0,0,0.08)"
+                                    fill="rgba(0,0,0,0.30)"
                                     stroke={fadeStrokeColor}
                                     strokeWidth="1"
                                     vectorEffect="non-scaling-stroke"
@@ -456,7 +456,7 @@ export const ClipItem = React.memo(function ClipItem({
                                         24,
                                         clip.fadeOutCurve ?? "sine",
                                     )}
-                                    fill="rgba(0,0,0,0.08)"
+                                    fill="rgba(0,0,0,0.30)"
                                     stroke={fadeStrokeColor}
                                     strokeWidth="1"
                                     vectorEffect="non-scaling-stroke"

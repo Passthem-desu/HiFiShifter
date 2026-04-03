@@ -236,6 +236,15 @@ export function useTimelineState(): TimelineStateResult {
         scrollLeftRef.current = scrollLeft;
     }, [scrollLeft]);
 
+    useEffect(() => {
+        return () => {
+            if (scrollStateRafRef.current != null) {
+                cancelAnimationFrame(scrollStateRafRef.current);
+                scrollStateRafRef.current = null;
+            }
+        };
+    }, []);
+
     // ── ResizeObserver → viewportWidth ────────────────────────
     useEffect(() => {
         const scroller = scrollRef.current;
@@ -271,12 +280,12 @@ export function useTimelineState(): TimelineStateResult {
         }
         // ★ 立即广播视口变化 → WaveformTrackCanvas 直接 invalidate（绕过 React）
         timelineViewportBus.emit(next, pxPerSecRef.current, viewportWidthRef.current);
-        // 50ms setTimeout 降频 React state 更新
+        // 用 rAF 合并状态更新，保证自动滚屏可达 60Hz 且避免同步抖动
         if (scrollStateRafRef.current == null) {
-            scrollStateRafRef.current = setTimeout(() => {
+            scrollStateRafRef.current = requestAnimationFrame(() => {
                 scrollStateRafRef.current = null;
                 setScrollLeft(scrollLeftRef.current);
-            }, 50) as unknown as number;
+            });
         }
     }
 
