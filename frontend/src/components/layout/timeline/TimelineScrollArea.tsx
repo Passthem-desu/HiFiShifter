@@ -1,16 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef } from "react";
 
-import {
-    MAX_PX_PER_SEC,
-    MAX_ROW_HEIGHT,
-    MIN_PX_PER_SEC,
-    MIN_ROW_HEIGHT,
-} from "./constants";
+import { MAX_PX_PER_SEC, MAX_ROW_HEIGHT, MIN_PX_PER_SEC, MIN_ROW_HEIGHT } from "./constants";
 import { clamp } from "./math";
-import {
-    isNoneBinding,
-    isModifierActive,
-} from "../../../features/keybindings/keybindingsSlice";
+import { isNoneBinding, isModifierActive } from "../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../features/keybindings/types";
 import { getTimelineWheelAction } from "../wheelGesture";
 import { computeAnchoredHorizontalZoom } from "../../../utils/horizontalZoom";
@@ -83,10 +75,7 @@ export const TimelineScrollArea: React.FC<
 
     function syncScrollLeft(scroller: HTMLDivElement) {
         const next = scroller.scrollLeft;
-        if (
-            lastScrollLeftRef.current != null &&
-            lastScrollLeftRef.current === next
-        ) {
+        if (lastScrollLeftRef.current != null && lastScrollLeftRef.current === next) {
             return;
         }
         lastScrollLeftRef.current = next;
@@ -132,14 +121,8 @@ export const TimelineScrollArea: React.FC<
 
         pendingVerticalZoomRef.current = null;
 
-        const maxScrollTop = Math.max(
-            0,
-            scroller.scrollHeight - scroller.clientHeight,
-        );
-        scroller.scrollTop = Math.min(
-            Math.max(0, pending.nextScrollTop),
-            maxScrollTop,
-        );
+        const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        scroller.scrollTop = Math.min(Math.max(0, pending.nextScrollTop), maxScrollTop);
     }, [rowHeight, scrollRef]);
 
     useEffect(() => {
@@ -162,21 +145,16 @@ export const TimelineScrollArea: React.FC<
             if (clipGainKnobEl) {
                 return;
             }
-            const noModifierPressed =
-                !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+            const noModifierPressed = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
             const isWheelBindingRequested = (kb?: Keybinding) => {
                 if (!kb) return false;
                 if (isNoneBinding(kb)) return noModifierPressed;
                 return isModifierActive(kb, e);
             };
-            const horizontalScrollRequested =
-                isWheelBindingRequested(scrollHorizontalKb);
-            const verticalScrollRequested =
-                isWheelBindingRequested(scrollVerticalKb);
-            const horizontalZoomRequested =
-                isWheelBindingRequested(horizontalZoomKb);
-            const verticalZoomRequested =
-                isWheelBindingRequested(verticalZoomKb);
+            const horizontalScrollRequested = isWheelBindingRequested(scrollHorizontalKb);
+            const verticalScrollRequested = isWheelBindingRequested(scrollVerticalKb);
+            const horizontalZoomRequested = isWheelBindingRequested(horizontalZoomKb);
+            const verticalZoomRequested = isWheelBindingRequested(verticalZoomKb);
 
             const wheelAction = getTimelineWheelAction({
                 deltaX: e.deltaX,
@@ -189,9 +167,7 @@ export const TimelineScrollArea: React.FC<
 
             if (wheelAction === "horizontal-scroll") {
                 e.preventDefault();
-                scroller.scrollLeft += horizontalScrollRequested
-                    ? e.deltaY
-                    : e.deltaX;
+                scroller.scrollLeft += horizontalScrollRequested ? e.deltaY : e.deltaX;
                 syncScrollLeft(scroller);
                 return;
             }
@@ -213,24 +189,13 @@ export const TimelineScrollArea: React.FC<
                 const dir = e.deltaY < 0 ? 1 : -1;
                 const factor = dir > 0 ? 1.1 : 0.9;
                 const baseRowHeight =
-                    pendingVerticalZoomRef.current?.nextRowHeight ??
-                    rowHeightRef.current;
+                    pendingVerticalZoomRef.current?.nextRowHeight ?? rowHeightRef.current;
                 const baseScrollTop =
-                    pendingVerticalZoomRef.current?.nextScrollTop ??
-                    scroller.scrollTop;
-                const pointerY = clamp(
-                    e.clientY - bounds.top,
-                    0,
-                    Math.max(1, bounds.height),
-                );
-                const rowUnitAtPointer =
-                    (baseScrollTop + pointerY) / Math.max(1e-9, baseRowHeight);
+                    pendingVerticalZoomRef.current?.nextScrollTop ?? scroller.scrollTop;
+                const pointerY = clamp(e.clientY - bounds.top, 0, Math.max(1, bounds.height));
+                const rowUnitAtPointer = (baseScrollTop + pointerY) / Math.max(1e-9, baseRowHeight);
                 const nextRowHeight = Math.round(
-                    clamp(
-                        baseRowHeight * factor,
-                        MIN_ROW_HEIGHT,
-                        MAX_ROW_HEIGHT,
-                    ),
+                    clamp(baseRowHeight * factor, MIN_ROW_HEIGHT, MAX_ROW_HEIGHT),
                 );
                 if (Math.abs(nextRowHeight - baseRowHeight) < 1e-9) {
                     return;
@@ -239,10 +204,7 @@ export const TimelineScrollArea: React.FC<
                     pointerY,
                     rowUnitAtPointer,
                     nextRowHeight,
-                    nextScrollTop: Math.max(
-                        0,
-                        rowUnitAtPointer * nextRowHeight - pointerY,
-                    ),
+                    nextScrollTop: Math.max(0, rowUnitAtPointer * nextRowHeight - pointerY),
                 };
                 setRowHeight(nextRowHeight);
                 return;
@@ -256,10 +218,8 @@ export const TimelineScrollArea: React.FC<
             const dir = e.deltaY < 0 ? 1 : -1;
             const factor = dir > 0 ? 1.1 : 0.9;
 
-            const basePxPerSec =
-                zoomPendingRef.current?.nextPxPerSec ?? pxPerSecRef.current;
-            const baseScrollLeft =
-                zoomPendingRef.current?.nextScrollLeft ?? scroller.scrollLeft;
+            const basePxPerSec = zoomPendingRef.current?.nextPxPerSec ?? pxPerSecRef.current;
+            const baseScrollLeft = zoomPendingRef.current?.nextScrollLeft ?? scroller.scrollLeft;
 
             const totalSec = Math.max(0, projectSec);
             let anchorSec: number;
@@ -268,13 +228,8 @@ export const TimelineScrollArea: React.FC<
             if (playheadZoomEnabled && playheadSec != null) {
                 anchorSec = clamp(playheadSec, 0, totalSec);
             } else {
-                const anchorX = clamp(
-                    e.clientX - bounds.left,
-                    0,
-                    Math.max(1, bounds.width),
-                );
-                anchorSec =
-                    (anchorX + baseScrollLeft) / Math.max(1e-9, basePxPerSec);
+                const anchorX = clamp(e.clientX - bounds.left, 0, Math.max(1, bounds.width));
+                anchorSec = (anchorX + baseScrollLeft) / Math.max(1e-9, basePxPerSec);
             }
 
             const zoom = computeAnchoredHorizontalZoom({

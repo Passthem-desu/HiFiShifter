@@ -16,8 +16,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
         return true;
     }
     if (el.isContentEditable) return true;
-    if (el.closest?.('input,textarea,select,[contenteditable="true"]'))
-        return true;
+    if (el.closest?.('input,textarea,select,[contenteditable="true"]')) return true;
     return false;
 }
 
@@ -38,8 +37,7 @@ export function matchesKeybinding(e: KeyboardEvent, kb: Keybinding): boolean {
     if (key !== kb.key) return false;
 
     const isMac =
-        typeof navigator !== "undefined" &&
-        navigator.platform?.toLowerCase().includes("mac");
+        typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
 
     const modKey = isMac ? e.metaKey : e.ctrlKey;
     const wantCtrl = Boolean(kb.ctrl);
@@ -89,9 +87,7 @@ function findMatchingAction(
     return null;
 }
 
-function mergeExcludes(
-    ...sets: Array<Set<string> | undefined>
-): Set<string> | undefined {
+function mergeExcludes(...sets: Array<Set<string> | undefined>): Set<string> | undefined {
     const merged = new Set<string>();
     for (const s of sets) {
         if (!s) continue;
@@ -135,8 +131,7 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
 
         function onKeyDown(e: KeyboardEvent) {
             if (e.repeat) return;
-            if (isEditableTarget(document.activeElement) || isEditableTarget(e.target))
-                return;
+            if (isEditableTarget(document.activeElement) || isEditableTarget(e.target)) return;
 
             // 快捷键设置对话框打开时，阻塞所有快捷键
             if (document.body.hasAttribute("data-keybindings-dialog-open")) return;
@@ -170,7 +165,10 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
                 // paramEditorSelect 级别的操作（如 edit.initialize/transposeCents/...）
                 // 仅当当前工具为 "select" 时放行给 PianoRoll 处理；
                 // 否则跳过此操作，继续查找非 scoped 的匹配（如 clip.delete）
-                if (matchedAction && ACTION_META[matchedAction]?.scopedContext === "paramEditorSelect") {
+                if (
+                    matchedAction &&
+                    ACTION_META[matchedAction]?.scopedContext === "paramEditorSelect"
+                ) {
                     if (toolModeRef.current === "select") {
                         return; // PianoRoll 会处理
                     }

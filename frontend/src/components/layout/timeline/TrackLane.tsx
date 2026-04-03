@@ -3,11 +3,7 @@
  */
 import React from "react";
 
-
-import type {
-    ClipInfo,
-    TrackInfo,
-} from "../../../features/session/sessionTypes";
+import type { ClipInfo, TrackInfo } from "../../../features/session/sessionTypes";
 import type { GhostDragInfo } from "./hooks/useClipDrag";
 import { ClipItem } from "./ClipItem";
 import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
@@ -138,10 +134,8 @@ export const TrackLane = React.memo(function TrackLane(props: {
                     continue;
                 } else {
                     const sourceIndex = trackIndexById[initial.trackId];
-                    const targetIndex =
-                        sourceIndex + ghostDrag.targetTrackOffset;
-                    ghostTrackId =
-                        orderedTrackIds[targetIndex] ?? initial.trackId;
+                    const targetIndex = sourceIndex + ghostDrag.targetTrackOffset;
+                    ghostTrackId = orderedTrackIds[targetIndex] ?? initial.trackId;
                 }
             }
             if (ghostTrackId !== track.id) continue;
@@ -153,10 +147,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
             if (!clip) continue;
             result.push({
                 clip,
-                ghostStartSec: Math.max(
-                    0,
-                    initial.startSec + ghostDrag.deltaSec,
-                ),
+                ghostStartSec: Math.max(0, initial.startSec + ghostDrag.deltaSec),
             });
         }
         return result;

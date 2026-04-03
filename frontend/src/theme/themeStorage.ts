@@ -6,8 +6,20 @@
  * 导入时向后兼容 v1（仅颜色覆盖）。
  */
 
-import type { AppearanceSettings, CustomTheme, ThemeExportData, RadixAccentColor, RadixGrayColor, RadixRadius } from "./themeTypes";
-import { DEFAULT_APPEARANCE, RADIX_ACCENT_COLORS, RADIX_GRAY_COLORS, RADIX_RADIUS_OPTIONS } from "./themeTypes";
+import type {
+    AppearanceSettings,
+    CustomTheme,
+    ThemeExportData,
+    RadixAccentColor,
+    RadixGrayColor,
+    RadixRadius,
+} from "./themeTypes";
+import {
+    DEFAULT_APPEARANCE,
+    RADIX_ACCENT_COLORS,
+    RADIX_GRAY_COLORS,
+    RADIX_RADIUS_OPTIONS,
+} from "./themeTypes";
 
 /* ─────────── Storage Keys ─────────── */
 
@@ -128,7 +140,9 @@ export function importThemeFromJson(json: string): {
                 base: parsed.base,
                 colors: parsed.colors,
                 waveformColors: parsed.waveformColors ?? undefined,
-                accentColor: isValidAccentColor(parsed.accentColor) ? parsed.accentColor : undefined,
+                accentColor: isValidAccentColor(parsed.accentColor)
+                    ? parsed.accentColor
+                    : undefined,
                 grayColor: isValidGrayColor(parsed.grayColor) ? parsed.grayColor : undefined,
                 radius: isValidRadius(parsed.radius) ? parsed.radius : undefined,
             };

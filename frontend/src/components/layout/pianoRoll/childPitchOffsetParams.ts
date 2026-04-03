@@ -8,10 +8,7 @@
  * - degree display formatting helpers.
  */
 
-import {
-    degreeInputToScaleSteps,
-    scaleStepsToDegreeDisplay,
-} from "../../../utils/musicalScales";
+import { degreeInputToScaleSteps, scaleStepsToDegreeDisplay } from "../../../utils/musicalScales";
 
 export const CHILD_PITCH_OFFSET_CENTS_PREFIX = "child_pitch_offset_cents@";
 export const CHILD_PITCH_OFFSET_DEGREES_PREFIX = "child_pitch_offset_degrees@";
@@ -44,10 +41,7 @@ export function isChildPitchOffsetDegreesParam(param: string): boolean {
 }
 
 export function isChildPitchOffsetParam(param: string): boolean {
-    return (
-        isChildPitchOffsetCentsParam(param) ||
-        isChildPitchOffsetDegreesParam(param)
-    );
+    return isChildPitchOffsetCentsParam(param) || isChildPitchOffsetDegreesParam(param);
 }
 
 export function parseChildPitchOffsetParam(
@@ -68,10 +62,7 @@ export function parseChildPitchOffsetParam(
     return null;
 }
 
-export function snapChildPitchOffsetValue(
-    param: string,
-    value: number,
-): number {
+export function snapChildPitchOffsetValue(param: string, value: number): number {
     if (!Number.isFinite(value)) return 0;
     if (isChildPitchOffsetCentsParam(param)) {
         return Math.round(value / 100) * 100;
@@ -88,10 +79,7 @@ export function childPitchOffsetShiftStep(param: string): number | null {
     return null;
 }
 
-export function childPitchOffsetValueToDisplay(
-    param: string,
-    value: number,
-): number {
+export function childPitchOffsetValueToDisplay(param: string, value: number): number {
     if (!Number.isFinite(value)) return 0;
     if (isChildPitchOffsetDegreesParam(param)) {
         return scaleStepsToDegreeDisplay(value);

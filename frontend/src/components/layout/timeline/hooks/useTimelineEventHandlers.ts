@@ -20,11 +20,7 @@ import {
 } from "../../../../features/session/sessionSlice";
 import { computeAnchoredHorizontalZoom } from "../../../../utils/horizontalZoom";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
-import {
-    gridStepBeats,
-    MIN_PX_PER_SEC,
-    MAX_PX_PER_SEC,
-} from "../";
+import { gridStepBeats, MIN_PX_PER_SEC, MAX_PX_PER_SEC } from "../";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { computeAutoFollowScrollLeft } from "../../../../utils/autoFollowScroll";
 
@@ -46,9 +42,7 @@ export interface UseTimelineEventHandlersArgs {
 
     // multi-select
     multiSelectedClipIds: string[];
-    setMultiSelectedClipIds: (
-        ids: string[] | ((prev: string[]) => string[]),
-    ) => void;
+    setMultiSelectedClipIds: (ids: string[] | ((prev: string[]) => string[])) => void;
 
     // clipboard
     clipClipboardRef: React.MutableRefObject<ClipTemplate[] | null>;
@@ -98,9 +92,7 @@ export interface UseTimelineEventHandlersArgs {
 }
 
 // ── Hook 实现 ─────────────────────────────────────────────────
-export function useTimelineEventHandlers(
-    args: UseTimelineEventHandlersArgs,
-): void {
+export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): void {
     const {
         dispatch,
         sessionRef,
@@ -159,13 +151,9 @@ export function useTimelineEventHandlers(
             }
 
             if (op === "selectAll") {
-                const allIds = sessionRef.current.clips.map(
-                    (clip) => clip.id,
-                );
+                const allIds = sessionRef.current.clips.map((clip) => clip.id);
                 setMultiSelectedClipIds(allIds);
-                dispatch(
-                    setSelectedClipPreservingTrack(allIds[0] ?? null),
-                );
+                dispatch(setSelectedClipPreservingTrack(allIds[0] ?? null));
                 return;
             }
 
@@ -183,41 +171,26 @@ export function useTimelineEventHandlers(
             }
         }
         window.addEventListener("hifi:editOp", onEditOp as EventListener);
-        return () =>
-            window.removeEventListener(
-                "hifi:editOp",
-                onEditOp as EventListener,
-            );
+        return () => window.removeEventListener("hifi:editOp", onEditOp as EventListener);
     }, [pasteClipsAtPlayhead, splitSelectedAtPlayhead]);
 
     // ── hifi:nudgePlayhead ───────────────────────────────────
     useEffect(() => {
         function onNudge(e: Event) {
             const direction = Number(
-                (e as CustomEvent<{ direction?: number }>).detail
-                    ?.direction ?? 0,
+                (e as CustomEvent<{ direction?: number }>).detail?.direction ?? 0,
             );
             if (!direction) return;
             const stepSec =
-                gridStepBeats(sessionRef.current.grid) *
-                (60 / Math.max(1, sessionRef.current.bpm));
-            const current =
-                Number(sessionRef.current.playheadSec ?? 0) || 0;
-            const next =
-                Math.max(0, current + Math.sign(direction) * stepSec);
+                gridStepBeats(sessionRef.current.grid) * (60 / Math.max(1, sessionRef.current.bpm));
+            const current = Number(sessionRef.current.playheadSec ?? 0) || 0;
+            const next = Math.max(0, current + Math.sign(direction) * stepSec);
             dispatch(setplayheadSec(next));
             void dispatch(seekPlayhead(next));
         }
 
-        window.addEventListener(
-            "hifi:nudgePlayhead",
-            onNudge as EventListener,
-        );
-        return () =>
-            window.removeEventListener(
-                "hifi:nudgePlayhead",
-                onNudge as EventListener,
-            );
+        window.addEventListener("hifi:nudgePlayhead", onNudge as EventListener);
+        return () => window.removeEventListener("hifi:nudgePlayhead", onNudge as EventListener);
     }, [dispatch]);
 
     // ── hifi:zoomTimelineFocus ───────────────────────────────
@@ -227,14 +200,10 @@ export function useTimelineEventHandlers(
             const inTimeline =
                 active?.hasAttribute("data-timeline-scroller") ||
                 active?.closest?.("[data-timeline-scroller]") ||
-                document.body.getAttribute("data-hs-focus-window") ===
-                    "timeline";
+                document.body.getAttribute("data-hs-focus-window") === "timeline";
             if (!inTimeline) return;
 
-            const factor = Number(
-                (e as CustomEvent<{ factor?: number }>).detail?.factor ??
-                    1,
-            );
+            const factor = Number((e as CustomEvent<{ factor?: number }>).detail?.factor ?? 1);
             if (!Number.isFinite(factor) || factor <= 0) return;
 
             const scroller = scrollRef.current;
@@ -247,8 +216,7 @@ export function useTimelineEventHandlers(
                 maxScale: MAX_PX_PER_SEC,
                 scrollLeft: scroller.scrollLeft,
                 viewportWidth: scroller.clientWidth,
-                anchorSec:
-                    Number(sessionRef.current.playheadSec ?? 0) || 0,
+                anchorSec: Number(sessionRef.current.playheadSec ?? 0) || 0,
                 contentSec: sessionRef.current.projectSec,
             });
             if (!zoom) return;
@@ -260,15 +228,9 @@ export function useTimelineEventHandlers(
             setPxPerSec(zoom.nextScale);
         }
 
-        window.addEventListener(
-            "hifi:zoomTimelineFocus",
-            onZoomFocused as EventListener,
-        );
+        window.addEventListener("hifi:zoomTimelineFocus", onZoomFocused as EventListener);
         return () =>
-            window.removeEventListener(
-                "hifi:zoomTimelineFocus",
-                onZoomFocused as EventListener,
-            );
+            window.removeEventListener("hifi:zoomTimelineFocus", onZoomFocused as EventListener);
     }, []);
 
     // ── Context menu dismiss ─────────────────────────────────
@@ -281,12 +243,7 @@ export function useTimelineEventHandlers(
             setTrackAreaMenu(null);
         }
         window.addEventListener("pointerdown", onAnyPointerDown, true);
-        return () =>
-            window.removeEventListener(
-                "pointerdown",
-                onAnyPointerDown,
-                true,
-            );
+        return () => window.removeEventListener("pointerdown", onAnyPointerDown, true);
     }, [contextMenu, trackAreaMenu]);
 
     // ── Auto-scroll: keep playhead visible during playback ───
@@ -321,7 +278,6 @@ export function useTimelineEventHandlers(
             syncScrollLeft(next);
         }
         window.addEventListener("hifi:focusCursor", handler);
-        return () =>
-            window.removeEventListener("hifi:focusCursor", handler);
+        return () => window.removeEventListener("hifi:focusCursor", handler);
     }, [playheadSec, pxPerSec]);
 }

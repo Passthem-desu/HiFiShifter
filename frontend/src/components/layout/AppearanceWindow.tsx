@@ -45,24 +45,61 @@ import {
 
 /** Radix 强调色 hex（用于色块显示） */
 const RADIX_ACCENT_HEX: Record<RadixAccentColor, string> = {
-    gray: "#8b8d98", gold: "#978365", bronze: "#a18072", brown: "#ad7f58",
-    yellow: "#ffe16a", amber: "#ffc53d", orange: "#f76b15", tomato: "#e54d2e",
-    red: "#e5484d", ruby: "#e54666", crimson: "#e93d82", pink: "#d6409f",
-    plum: "#ab4aba", purple: "#8e4ec6", violet: "#6e56cf", iris: "#5b5bd6",
-    indigo: "#3e63dd", blue: "#0090ff", cyan: "#00a2c7", teal: "#12a594",
-    jade: "#29a383", green: "#30a46c", grass: "#46a758", lime: "#bdee63",
-    mint: "#86ead4", sky: "#7ce2fe",
+    gray: "#8b8d98",
+    gold: "#978365",
+    bronze: "#a18072",
+    brown: "#ad7f58",
+    yellow: "#ffe16a",
+    amber: "#ffc53d",
+    orange: "#f76b15",
+    tomato: "#e54d2e",
+    red: "#e5484d",
+    ruby: "#e54666",
+    crimson: "#e93d82",
+    pink: "#d6409f",
+    plum: "#ab4aba",
+    purple: "#8e4ec6",
+    violet: "#6e56cf",
+    iris: "#5b5bd6",
+    indigo: "#3e63dd",
+    blue: "#0090ff",
+    cyan: "#00a2c7",
+    teal: "#12a594",
+    jade: "#29a383",
+    green: "#30a46c",
+    grass: "#46a758",
+    lime: "#bdee63",
+    mint: "#86ead4",
+    sky: "#7ce2fe",
 };
 
 /** 强调色 → 推荐灰阶自动映射 */
 const ACCENT_TO_GRAY: Partial<Record<RadixAccentColor, RadixGrayColor>> = {
-    crimson: "mauve", pink: "mauve", plum: "mauve", purple: "mauve", violet: "mauve",
-    iris: "mauve", ruby: "mauve",
-    indigo: "slate", blue: "slate", sky: "slate", cyan: "slate",
-    teal: "sage", jade: "sage", mint: "sage", green: "sage",
-    grass: "olive", lime: "olive",
-    gold: "sand", bronze: "sand", brown: "sand", orange: "sand", amber: "sand",
-    yellow: "sand", tomato: "mauve", red: "mauve",
+    crimson: "mauve",
+    pink: "mauve",
+    plum: "mauve",
+    purple: "mauve",
+    violet: "mauve",
+    iris: "mauve",
+    ruby: "mauve",
+    indigo: "slate",
+    blue: "slate",
+    sky: "slate",
+    cyan: "slate",
+    teal: "sage",
+    jade: "sage",
+    mint: "sage",
+    green: "sage",
+    grass: "olive",
+    lime: "olive",
+    gold: "sand",
+    bronze: "sand",
+    brown: "sand",
+    orange: "sand",
+    amber: "sand",
+    yellow: "sand",
+    tomato: "mauve",
+    red: "mauve",
 };
 
 function getAutoGray(accent: RadixAccentColor): RadixGrayColor {
@@ -73,13 +110,25 @@ function getAutoGray(accent: RadixAccentColor): RadixGrayColor {
 type SettingsTab = "theme" | "font";
 
 const PALETTE_GROUPS: Array<{ labelKey: string; tokens: QtColorToken[] }> = [
-    { labelKey: "appearance_color_group_base", tokens: ["qt-window", "qt-base", "qt-panel", "qt-surface"] },
+    {
+        labelKey: "appearance_color_group_base",
+        tokens: ["qt-window", "qt-base", "qt-panel", "qt-surface"],
+    },
     { labelKey: "appearance_color_group_text", tokens: ["qt-text", "qt-text-muted"] },
-    { labelKey: "appearance_color_group_ui", tokens: ["qt-highlight", "qt-playhead", "qt-border", "qt-clip-bg", "qt-clip-border", "qt-clip-selected-border"] },
+    {
+        labelKey: "appearance_color_group_ui",
+        tokens: [
+            "qt-highlight",
+            "qt-playhead",
+            "qt-border",
+            "qt-clip-bg",
+            "qt-clip-border",
+            "qt-clip-selected-border",
+        ],
+    },
 ];
 
-const CARD_CLASS =
-    "rounded-md border border-qt-border bg-qt-panel";
+const CARD_CLASS = "rounded-md border border-qt-border bg-qt-panel";
 const SECTION_LABEL_CLASS = "text-[11px] font-semibold text-qt-text";
 const SECONDARY_BUTTON_CLASS =
     "px-3 py-1.5 text-[11px] font-medium rounded border border-qt-border bg-qt-surface text-qt-text-muted hover:bg-qt-hover hover:text-qt-text transition-colors cursor-pointer select-none";
@@ -89,28 +138,91 @@ const PREVIEW_SETTINGS_KEY = "hifishifter.appearance.preview";
 const PREVIEW_COLORS_KEY = "hifishifter.appearance.preview.colors";
 
 const COMMON_SYSTEM_FONT_CANDIDATES = [
-    "Segoe UI", "Segoe UI Variable", "Arial", "Arial Nova", "Verdana", "Tahoma", "Trebuchet MS",
-    "Calibri", "Cambria", "Corbel", "Candara", "Constantia", "Consolas", "Courier New", "Georgia",
-    "Times New Roman", "Palatino Linotype", "Impact", "Franklin Gothic Medium", "Bahnschrift",
-    "Yu Gothic UI", "Yu Gothic", "Meiryo", "MS Gothic", "MS UI Gothic", "Microsoft YaHei",
-    "Microsoft JhengHei", "Malgun Gothic", "SimSun", "SimHei", "KaiTi", "PingFang SC",
-    "PingFang TC", "PingFang HK", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans",
-    "Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans CJK JP", "Noto Sans CJK KR",
-    "Noto Serif", "Roboto", "Roboto Flex", "Roboto Condensed", "Open Sans", "Lato", "Inter",
-    "Ubuntu", "Ubuntu Sans", "Cantarell", "Fira Sans", "Fira Code", "JetBrains Mono", "Source Sans 3",
-    "Source Han Sans SC", "Source Han Sans TC", "Source Han Sans JP", "Source Han Sans KR",
-    "Helvetica", "Helvetica Neue", "SF Pro Text", "SF Pro Display", "Avenir", "Avenir Next", "Menlo",
-    "Monaco", "Geneva", "Marker Felt", "Optima", "Apple SD Gothic Neo", "Apple Color Emoji",
+    "Segoe UI",
+    "Segoe UI Variable",
+    "Arial",
+    "Arial Nova",
+    "Verdana",
+    "Tahoma",
+    "Trebuchet MS",
+    "Calibri",
+    "Cambria",
+    "Corbel",
+    "Candara",
+    "Constantia",
+    "Consolas",
+    "Courier New",
+    "Georgia",
+    "Times New Roman",
+    "Palatino Linotype",
+    "Impact",
+    "Franklin Gothic Medium",
+    "Bahnschrift",
+    "Yu Gothic UI",
+    "Yu Gothic",
+    "Meiryo",
+    "MS Gothic",
+    "MS UI Gothic",
+    "Microsoft YaHei",
+    "Microsoft JhengHei",
+    "Malgun Gothic",
+    "SimSun",
+    "SimHei",
+    "KaiTi",
+    "PingFang SC",
+    "PingFang TC",
+    "PingFang HK",
+    "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN",
+    "Noto Sans",
+    "Noto Sans CJK SC",
+    "Noto Sans CJK TC",
+    "Noto Sans CJK JP",
+    "Noto Sans CJK KR",
+    "Noto Serif",
+    "Roboto",
+    "Roboto Flex",
+    "Roboto Condensed",
+    "Open Sans",
+    "Lato",
+    "Inter",
+    "Ubuntu",
+    "Ubuntu Sans",
+    "Cantarell",
+    "Fira Sans",
+    "Fira Code",
+    "JetBrains Mono",
+    "Source Sans 3",
+    "Source Han Sans SC",
+    "Source Han Sans TC",
+    "Source Han Sans JP",
+    "Source Han Sans KR",
+    "Helvetica",
+    "Helvetica Neue",
+    "SF Pro Text",
+    "SF Pro Display",
+    "Avenir",
+    "Avenir Next",
+    "Menlo",
+    "Monaco",
+    "Geneva",
+    "Marker Felt",
+    "Optima",
+    "Apple SD Gothic Neo",
+    "Apple Color Emoji",
 ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 
 function uniqueSortedStrings(values: Iterable<string>): string[] {
-    return [...new Set([...values].map((value) => value.trim()).filter(Boolean))].sort(
-        (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }),
+    return [...new Set([...values].map((value) => value.trim()).filter(Boolean))].sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" }),
     );
 }
 
 function normalizeFontName(value: string): string {
-    return value.trim().replace(/^['"]|['"]$/g, "").trim();
+    return value
+        .trim()
+        .replace(/^['"]|['"]$/g, "")
+        .trim();
 }
 
 function extractFontFamilies(value: string): string[] {
@@ -118,7 +230,11 @@ function extractFontFamilies(value: string): string[] {
         value
             .split(",")
             .map((part) => normalizeFontName(part))
-            .filter((part) => part && !["sans-serif", "serif", "monospace", "system-ui"].includes(part.toLowerCase())),
+            .filter(
+                (part) =>
+                    part &&
+                    !["sans-serif", "serif", "monospace", "system-ui"].includes(part.toLowerCase()),
+            ),
     );
 }
 
@@ -152,7 +268,12 @@ function detectInstalledFontsFromCandidates(candidates: string[]): string[] {
  * 系统字体检测 Hook
  * ═══════════════════════════════════════════════════════════ */
 
-interface FontInfo { family: string; fullName: string; postscriptName: string; style: string; }
+interface FontInfo {
+    family: string;
+    fullName: string;
+    postscriptName: string;
+    style: string;
+}
 
 function useSystemFonts() {
     const [fonts, setFonts] = useState<string[]>([]);
@@ -170,9 +291,11 @@ function useSystemFonts() {
         setSupported(true);
         try {
             if ("queryLocalFonts" in window) {
-                const fontData: FontInfo[] = await (window as unknown as {
-                    queryLocalFonts: () => Promise<FontInfo[]>;
-                }).queryLocalFonts();
+                const fontData: FontInfo[] = await (
+                    window as unknown as {
+                        queryLocalFonts: () => Promise<FontInfo[]>;
+                    }
+                ).queryLocalFonts();
                 const families = uniqueSortedStrings(fontData.map((f) => f.family));
                 if (families.length > 0) {
                     setFonts(families);
@@ -182,13 +305,17 @@ function useSystemFonts() {
                 }
             }
 
-            const fallbackFamilies = detectInstalledFontsFromCandidates(COMMON_SYSTEM_FONT_CANDIDATES);
+            const fallbackFamilies = detectInstalledFontsFromCandidates(
+                COMMON_SYSTEM_FONT_CANDIDATES,
+            );
             setFonts(fallbackFamilies);
             setSource("fallback");
             setSupported(fallbackFamilies.length > 0);
             loadedRef.current = true;
         } catch {
-            const fallbackFamilies = detectInstalledFontsFromCandidates(COMMON_SYSTEM_FONT_CANDIDATES);
+            const fallbackFamilies = detectInstalledFontsFromCandidates(
+                COMMON_SYSTEM_FONT_CANDIDATES,
+            );
             setFonts(fallbackFamilies);
             setSource("fallback");
             setSupported(fallbackFamilies.length > 0);
@@ -250,7 +377,9 @@ const ColorTokenRow: React.FC<{
                 "flex items-center gap-2 px-2 py-2 rounded border border-qt-border bg-qt-panel group"
             }
         >
-            <label className={`relative shrink-0 ${hasPicker ? "cursor-pointer" : "cursor-default"}`}>
+            <label
+                className={`relative shrink-0 ${hasPicker ? "cursor-pointer" : "cursor-default"}`}
+            >
                 <div
                     className={`w-5 h-5 rounded ${hasPicker ? "transition-transform duration-100 group-hover:scale-110" : ""}`}
                     style={{
@@ -305,18 +434,16 @@ async function emitThemeApplied() {
     }
 }
 
-async function emitThemePreview(
-    payload: {
-        settings: {
-            mode: "dark" | "light";
-            accentColor: RadixAccentColor;
-            grayColor: RadixGrayColor;
-            radius: RadixRadius;
-            fontFamily: string;
-        };
-        colors: Partial<Record<QtColorToken, string>>;
-    },
-) {
+async function emitThemePreview(payload: {
+    settings: {
+        mode: "dark" | "light";
+        accentColor: RadixAccentColor;
+        grayColor: RadixGrayColor;
+        radius: RadixRadius;
+        fontFamily: string;
+    };
+    colors: Partial<Record<QtColorToken, string>>;
+}) {
     try {
         const { emit } = await import("@tauri-apps/api/event");
         await emit("appearance-preview", payload);
@@ -355,7 +482,9 @@ export const AppearanceWindow: React.FC = () => {
     const [customThemes, setCustomThemes] = useState<CustomTheme[]>([]);
     const [activeThemeId, setActiveThemeId] = useState<string | null>(theme.activeCustomThemeId);
     const [editColors, setEditColors] = useState<Partial<Record<QtColorToken, string>>>({});
-    const [editWaveform, setEditWaveform] = useState<{ fill: string; stroke: string } | undefined>(undefined);
+    const [editWaveform, setEditWaveform] = useState<{ fill: string; stroke: string } | undefined>(
+        undefined,
+    );
     const [editThemeName, setEditThemeName] = useState("");
     const [activePaletteGroup, setActivePaletteGroup] = useState(PALETTE_GROUPS[0].labelKey);
 
@@ -432,7 +561,7 @@ export const AppearanceWindow: React.FC = () => {
                 void unlistenPromise.then((unlisten) => unlisten?.());
             }
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     /* ── 强调色 → 灰阶自动映射 ── */
@@ -441,10 +570,7 @@ export const AppearanceWindow: React.FC = () => {
     }, [accentColor]);
 
     /* ── 内置颜色 ── */
-    const builtinColors = useMemo(
-        () => getBuiltinThemeColors(theme.mode),
-        [theme.mode],
-    );
+    const builtinColors = useMemo(() => getBuiltinThemeColors(theme.mode), [theme.mode]);
 
     const getDisplayColor = useCallback(
         (token: QtColorToken) => editColors[token] ?? builtinColors[token] ?? "#000000",
@@ -454,22 +580,22 @@ export const AppearanceWindow: React.FC = () => {
     /* ── 实时预览（Radix 属性） ── */
     useEffect(() => {
         theme.setAccentColor(accentColor);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [accentColor]);
 
     useEffect(() => {
         theme.setGrayColor(grayColor);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [grayColor]);
 
     useEffect(() => {
         theme.setRadius(radius);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [radius]);
 
     useEffect(() => {
         theme.setFontFamily(fontFamily);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fontFamily]);
 
     /* ── 实时预览（自定义颜色 CSS 变量） ── */
@@ -486,13 +612,16 @@ export const AppearanceWindow: React.FC = () => {
     }, [editColors, theme.mode]);
 
     useEffect(() => {
-        localStorage.setItem(PREVIEW_SETTINGS_KEY, JSON.stringify({
-            mode: theme.mode,
-            accentColor,
-            grayColor,
-            radius,
-            fontFamily,
-        }));
+        localStorage.setItem(
+            PREVIEW_SETTINGS_KEY,
+            JSON.stringify({
+                mode: theme.mode,
+                accentColor,
+                grayColor,
+                radius,
+                fontFamily,
+            }),
+        );
         localStorage.setItem(PREVIEW_COLORS_KEY, JSON.stringify(editColors));
         void emitThemePreview({
             settings: {
@@ -550,9 +679,17 @@ export const AppearanceWindow: React.FC = () => {
         // 通知主窗口刷新 → 关闭自身
         void emitThemeApplied().then(() => closeThisWindow());
     }, [
-        accentColor, grayColor, radius, fontFamily,
-        editColors, editWaveform, editThemeName,
-        activeThemeId, customThemes, theme, tAny,
+        accentColor,
+        grayColor,
+        radius,
+        fontFamily,
+        editColors,
+        editWaveform,
+        editThemeName,
+        activeThemeId,
+        customThemes,
+        theme,
+        tAny,
     ]);
 
     const handleClose = useCallback(() => {
@@ -562,14 +699,8 @@ export const AppearanceWindow: React.FC = () => {
         void emitThemeReverted().then(() => closeThisWindow());
     }, [theme]);
 
-    const paletteTokens = useMemo(
-        () => PALETTE_GROUPS.flatMap((group) => group.tokens),
-        [],
-    );
-    const paletteTokenSet = useMemo(
-        () => new Set<QtColorToken>(paletteTokens),
-        [paletteTokens],
-    );
+    const paletteTokens = useMemo(() => PALETTE_GROUPS.flatMap((group) => group.tokens), []);
+    const paletteTokenSet = useMemo(() => new Set<QtColorToken>(paletteTokens), [paletteTokens]);
 
     /* ── 颜色操作 ── */
     const handleResetColors = useCallback(() => {
@@ -595,17 +726,20 @@ export const AppearanceWindow: React.FC = () => {
         if (item.radius) setRadius(item.radius);
     }, []);
 
-    const handleDeleteTheme = useCallback((id: string) => {
-        const updated = customThemes.filter((ct) => ct.id !== id);
-        setCustomThemes(updated);
-        saveCustomThemes(updated);
-        if (activeThemeId === id) {
-            setActiveThemeId(null);
-            setEditColors({});
-            setEditWaveform(undefined);
-            setEditThemeName("");
-        }
-    }, [customThemes, activeThemeId]);
+    const handleDeleteTheme = useCallback(
+        (id: string) => {
+            const updated = customThemes.filter((ct) => ct.id !== id);
+            setCustomThemes(updated);
+            saveCustomThemes(updated);
+            if (activeThemeId === id) {
+                setActiveThemeId(null);
+                setEditColors({});
+                setEditWaveform(undefined);
+                setEditThemeName("");
+            }
+        },
+        [customThemes, activeThemeId],
+    );
 
     const handleExportTheme = useCallback(() => {
         const themeData: CustomTheme = {
@@ -614,7 +748,9 @@ export const AppearanceWindow: React.FC = () => {
             base: theme.mode,
             colors: editColors,
             waveformColors: editWaveform,
-            accentColor, grayColor, radius,
+            accentColor,
+            grayColor,
+            radius,
         };
         const json = exportThemeAsJson(themeData, { accentColor, grayColor, radius });
         const blob = new Blob([json], { type: "application/json" });
@@ -624,48 +760,63 @@ export const AppearanceWindow: React.FC = () => {
         a.download = `${themeData.name.replace(/\s+/g, "_")}.json`;
         a.click();
         URL.revokeObjectURL(url);
-    }, [activeThemeId, editThemeName, theme.mode, editColors, editWaveform, accentColor, grayColor, radius]);
+    }, [
+        activeThemeId,
+        editThemeName,
+        theme.mode,
+        editColors,
+        editWaveform,
+        accentColor,
+        grayColor,
+        radius,
+    ]);
 
-    const handleImportTheme = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-            const result = importThemeFromJson(reader.result as string);
-            if (result) {
-                const updated = [...customThemes, result.theme];
-                setCustomThemes(updated);
-                saveCustomThemes(updated);
-                setActiveThemeId(result.theme.id);
-                setEditColors(result.theme.colors);
-                setEditWaveform(result.theme.waveformColors);
-                setEditThemeName(result.theme.name);
-                if (result.accentColor) setAccentColor(result.accentColor);
-                if (result.grayColor) setGrayColor(result.grayColor);
-                if (result.radius) setRadius(result.radius);
-            }
-        };
-        reader.readAsText(file);
-        e.target.value = "";
-    }, [customThemes]);
+    const handleImportTheme = useCallback(
+        (e: React.ChangeEvent<HTMLInputElement>) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                const result = importThemeFromJson(reader.result as string);
+                if (result) {
+                    const updated = [...customThemes, result.theme];
+                    setCustomThemes(updated);
+                    saveCustomThemes(updated);
+                    setActiveThemeId(result.theme.id);
+                    setEditColors(result.theme.colors);
+                    setEditWaveform(result.theme.waveformColors);
+                    setEditThemeName(result.theme.name);
+                    if (result.accentColor) setAccentColor(result.accentColor);
+                    if (result.grayColor) setGrayColor(result.grayColor);
+                    if (result.radius) setRadius(result.radius);
+                }
+            };
+            reader.readAsText(file);
+            e.target.value = "";
+        },
+        [customThemes],
+    );
 
     const updateColorToken = useCallback((token: QtColorToken, value: string) => {
         setEditColors((prev) => ({ ...prev, [token]: value }));
     }, []);
 
     const modifiedColorCount = useMemo(
-        () => Object.keys(editColors).filter((token) => paletteTokenSet.has(token as QtColorToken)).length,
+        () =>
+            Object.keys(editColors).filter((token) => paletteTokenSet.has(token as QtColorToken))
+                .length,
         [editColors, paletteTokenSet],
     );
     const hasCustomColors = modifiedColorCount > 0;
 
     /* ── 字体过滤 ── */
     const availableFonts = useMemo(
-        () => uniqueSortedStrings([
-            ...systemFonts.fonts,
-            ...extractFontFamilies(fontFamily),
-            ...extractFontFamilies(DEFAULT_FONT_FAMILY),
-        ]),
+        () =>
+            uniqueSortedStrings([
+                ...systemFonts.fonts,
+                ...extractFontFamilies(fontFamily),
+                ...extractFontFamilies(DEFAULT_FONT_FAMILY),
+            ]),
         [fontFamily, systemFonts.fonts],
     );
 
@@ -675,10 +826,13 @@ export const AppearanceWindow: React.FC = () => {
         return availableFonts.filter((f) => f.toLowerCase().includes(q));
     }, [availableFonts, fontSearch]);
 
-    const tabItems = useMemo(() => [
-        { id: "theme", label: tAny("appearance_tab_theme") },
-        { id: "font", label: tAny("appearance_tab_font") },
-    ], [tAny]);
+    const tabItems = useMemo(
+        () => [
+            { id: "theme", label: tAny("appearance_tab_theme") },
+            { id: "font", label: tAny("appearance_tab_font") },
+        ],
+        [tAny],
+    );
 
     /* ═══════════════════════════════════════════════════════════
      * 渲染 — 直接作为窗口内容，不需要 portal
@@ -693,13 +847,16 @@ export const AppearanceWindow: React.FC = () => {
                 <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
                         <h2 className="m-0 text-base font-semibold text-qt-text">
-                        {tAny("appearance_title")}
+                            {tAny("appearance_title")}
                         </h2>
                     </div>
                     <div className="flex items-center gap-2 pt-1">
                         {modifiedColorCount > 0 && (
                             <span className="text-[10px] text-qt-highlight bg-qt-highlight/10 px-2 py-0.5 rounded font-semibold">
-                                {tAny("appearance_modified_count").replace("{count}", String(modifiedColorCount))}
+                                {tAny("appearance_modified_count").replace(
+                                    "{count}",
+                                    String(modifiedColorCount),
+                                )}
                             </span>
                         )}
                     </div>
@@ -714,13 +871,13 @@ export const AppearanceWindow: React.FC = () => {
             {/* ═══════ 内容区 ═══════ */}
             <div className="mx-auto mt-1 flex-1 w-full max-w-[920px] overflow-y-auto custom-scrollbar">
                 <div className="pb-1">
-
                     {/* ═══════ Tab: 主题 ═══════ */}
                     {activeTab === "theme" && (
                         <div className="space-y-2">
-
                             {/* ── 工具栏 ── */}
-                            <div className={`${CARD_CLASS} flex items-center gap-2 flex-wrap px-3 py-2`}>
+                            <div
+                                className={`${CARD_CLASS} flex items-center gap-2 flex-wrap px-3 py-2`}
+                            >
                                 <button
                                     className={SECONDARY_BUTTON_CLASS}
                                     onClick={() => fileInputRef.current?.click()}
@@ -830,29 +987,45 @@ export const AppearanceWindow: React.FC = () => {
                                             >
                                                 <div
                                                     className="w-full h-10 rounded-lg overflow-hidden relative"
-                                                    style={{ backgroundColor: isDarkMode ? "#2d2d2d" : "#f0f0f0" }}
+                                                    style={{
+                                                        backgroundColor: isDarkMode
+                                                            ? "#2d2d2d"
+                                                            : "#f0f0f0",
+                                                    }}
                                                 >
                                                     <div
                                                         className="absolute inset-x-0 top-0 h-3"
-                                                        style={{ backgroundColor: isDarkMode ? "#353535" : "#fff" }}
+                                                        style={{
+                                                            backgroundColor: isDarkMode
+                                                                ? "#353535"
+                                                                : "#fff",
+                                                        }}
                                                     />
                                                     <div className="absolute bottom-1 left-1.5 right-1.5 flex gap-0.5">
                                                         <div
                                                             className="h-1.5 flex-1 rounded-sm"
                                                             style={{
-                                                                backgroundColor: isDarkMode ? "rgba(59,130,246,0.4)" : "rgba(91,91,214,0.3)",
+                                                                backgroundColor: isDarkMode
+                                                                    ? "rgba(59,130,246,0.4)"
+                                                                    : "rgba(91,91,214,0.3)",
                                                             }}
                                                         />
                                                         <div
                                                             className="h-1.5 flex-1 rounded-sm"
                                                             style={{
-                                                                backgroundColor: isDarkMode ? "#404040" : "#d9d9e0",
+                                                                backgroundColor: isDarkMode
+                                                                    ? "#404040"
+                                                                    : "#d9d9e0",
                                                             }}
                                                         />
                                                     </div>
                                                 </div>
-                                                <span className={`text-[10px] font-medium ${isSelected ? "text-qt-highlight" : "text-qt-text-muted"}`}>
-                                                    {tAny(isDarkMode ? "theme_dark" : "theme_light")}
+                                                <span
+                                                    className={`text-[10px] font-medium ${isSelected ? "text-qt-highlight" : "text-qt-text-muted"}`}
+                                                >
+                                                    {tAny(
+                                                        isDarkMode ? "theme_dark" : "theme_light",
+                                                    )}
                                                 </span>
                                             </button>
                                         );
@@ -885,7 +1058,8 @@ export const AppearanceWindow: React.FC = () => {
                                                     }
                                                     style={{
                                                         backgroundColor: RADIX_ACCENT_HEX[c],
-                                                        ["--tw-ring-offset-color" as string]: "var(--qt-panel)",
+                                                        ["--tw-ring-offset-color" as string]:
+                                                            "var(--qt-panel)",
                                                     }}
                                                     onClick={() => {
                                                         setAccentColor(c);
@@ -912,7 +1086,11 @@ export const AppearanceWindow: React.FC = () => {
                                     {RADIX_RADIUS_OPTIONS.map((r) => {
                                         const isSelected = radius === r;
                                         const px: Record<string, string> = {
-                                            none: "0", small: "3px", medium: "6px", large: "10px", full: "9999px",
+                                            none: "0",
+                                            small: "3px",
+                                            medium: "6px",
+                                            large: "10px",
+                                            full: "9999px",
                                         };
                                         return (
                                             <button
@@ -930,7 +1108,9 @@ export const AppearanceWindow: React.FC = () => {
                                                     className="w-7 h-5 border-2 transition-colors duration-100"
                                                     style={{
                                                         borderRadius: px[r],
-                                                        borderColor: isSelected ? "var(--qt-highlight)" : "var(--qt-text-muted)",
+                                                        borderColor: isSelected
+                                                            ? "var(--qt-highlight)"
+                                                            : "var(--qt-text-muted)",
                                                         opacity: isSelected ? 0.8 : 0.25,
                                                     }}
                                                 />
@@ -944,9 +1124,14 @@ export const AppearanceWindow: React.FC = () => {
                             {/* ── 颜色编辑（单套色卡） ── */}
                             <div className={`${CARD_CLASS} space-y-3 p-3`}>
                                 <div className="flex items-center justify-between">
-                                    <span className={SECTION_LABEL_CLASS}>{tAny("appearance_tab_colors")}</span>
+                                    <span className={SECTION_LABEL_CLASS}>
+                                        {tAny("appearance_tab_colors")}
+                                    </span>
                                     <span className="text-[10px] text-qt-text-muted">
-                                        {tAny("appearance_modified_count").replace("{count}", String(modifiedColorCount))}
+                                        {tAny("appearance_modified_count").replace(
+                                            "{count}",
+                                            String(modifiedColorCount),
+                                        )}
                                     </span>
                                 </div>
 
@@ -962,7 +1147,9 @@ export const AppearanceWindow: React.FC = () => {
                                                         ? "bg-qt-highlight text-white"
                                                         : "text-qt-text-muted hover:bg-qt-hover hover:text-qt-text")
                                                 }
-                                                onClick={() => setActivePaletteGroup(group.labelKey)}
+                                                onClick={() =>
+                                                    setActivePaletteGroup(group.labelKey)
+                                                }
                                             >
                                                 {tAny(group.labelKey)}
                                             </button>
@@ -971,7 +1158,11 @@ export const AppearanceWindow: React.FC = () => {
                                 </div>
 
                                 <div className="space-y-1">
-                                    {(PALETTE_GROUPS.find((group) => group.labelKey === activePaletteGroup)?.tokens ?? PALETTE_GROUPS[0].tokens).map((token) => (
+                                    {(
+                                        PALETTE_GROUPS.find(
+                                            (group) => group.labelKey === activePaletteGroup,
+                                        )?.tokens ?? PALETTE_GROUPS[0].tokens
+                                    ).map((token) => (
                                         <ColorTokenRow
                                             key={token}
                                             label={tAny(QT_COLOR_TOKEN_LABELS[token])}
@@ -987,7 +1178,6 @@ export const AppearanceWindow: React.FC = () => {
                     {/* ═══════ Tab: 字体 ═══════ */}
                     {activeTab === "font" && (
                         <div className="space-y-2">
-
                             {/* 字体输入 */}
                             <div className={`${CARD_CLASS} p-3 space-y-2`}>
                                 <span className={SECTION_LABEL_CLASS}>
@@ -997,7 +1187,9 @@ export const AppearanceWindow: React.FC = () => {
                                     <input
                                         type="text"
                                         value={fontFamily}
-                                        onChange={(e: ChangeEvent<HTMLInputElement>) => setFontFamily(e.target.value)}
+                                        onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                            setFontFamily(e.target.value)
+                                        }
                                         className="flex-1 rounded-xl border border-[color:var(--qt-divider)] bg-qt-surface/40 px-3 py-2 text-[11px] text-qt-text font-mono focus:outline-none focus:ring-1 focus:ring-qt-highlight/30 transition-all"
                                         placeholder={DEFAULT_FONT_FAMILY}
                                         spellCheck={false}
@@ -1024,9 +1216,15 @@ export const AppearanceWindow: React.FC = () => {
                                     className="rounded border border-qt-border bg-qt-base px-3 py-3 text-qt-text"
                                     style={{ fontFamily }}
                                 >
-                                    <div className="text-sm mb-1.5 leading-relaxed">The quick brown fox jumps over the lazy dog.</div>
-                                    <div className="text-sm mb-1.5 leading-relaxed">中文字体预览：你好世界 1234567890</div>
-                                    <div className="text-[10px] text-qt-text-muted">ABCDEFG abcdefg !@#$%^&*()</div>
+                                    <div className="text-sm mb-1.5 leading-relaxed">
+                                        The quick brown fox jumps over the lazy dog.
+                                    </div>
+                                    <div className="text-sm mb-1.5 leading-relaxed">
+                                        中文字体预览：你好世界 1234567890
+                                    </div>
+                                    <div className="text-[10px] text-qt-text-muted">
+                                        ABCDEFG abcdefg !@#$%^&*()
+                                    </div>
                                 </div>
                             </div>
 
@@ -1035,11 +1233,14 @@ export const AppearanceWindow: React.FC = () => {
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="flex items-center gap-2">
                                         <span className={SECTION_LABEL_CLASS}>
-                                        {tAny("appearance_font_system")}
+                                            {tAny("appearance_font_system")}
                                         </span>
                                         {availableFonts.length > 0 && (
                                             <span className="rounded-full bg-qt-surface/60 px-2 py-0.5 text-[10px] text-qt-text-muted">
-                                                {tAny("appearance_font_count").replace("{count}", String(availableFonts.length))}
+                                                {tAny("appearance_font_count").replace(
+                                                    "{count}",
+                                                    String(availableFonts.length),
+                                                )}
                                             </span>
                                         )}
                                     </div>
@@ -1047,7 +1248,9 @@ export const AppearanceWindow: React.FC = () => {
                                         className={SECONDARY_BUTTON_CLASS}
                                         onClick={() => void systemFonts.detect(true)}
                                     >
-                                        {systemFonts.loading ? tAny("appearance_font_detecting") : tAny("appearance_font_detect")}
+                                        {systemFonts.loading
+                                            ? tAny("appearance_font_detecting")
+                                            : tAny("appearance_font_detect")}
                                     </button>
                                 </div>
 
@@ -1075,9 +1278,13 @@ export const AppearanceWindow: React.FC = () => {
                                             <input
                                                 type="text"
                                                 value={fontSearch}
-                                                onChange={(e: ChangeEvent<HTMLInputElement>) => setFontSearch(e.target.value)}
+                                                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                                                    setFontSearch(e.target.value)
+                                                }
                                                 className="w-full rounded-xl border border-[color:var(--qt-divider)] bg-qt-surface/40 py-2 pl-8 pr-8 text-[11px] text-qt-text focus:outline-none focus:ring-1 focus:ring-qt-highlight/30 transition-all"
-                                                placeholder={tAny("appearance_font_search_placeholder")}
+                                                placeholder={tAny(
+                                                    "appearance_font_search_placeholder",
+                                                )}
                                                 spellCheck={false}
                                             />
                                             {fontSearch && (
@@ -1093,7 +1300,9 @@ export const AppearanceWindow: React.FC = () => {
                                         <div className="max-h-[320px] overflow-y-auto rounded border border-qt-border bg-qt-base p-1 custom-scrollbar">
                                             {filteredFonts.length > 0 ? (
                                                 filteredFonts.map((f) => {
-                                                    const isActive = extractFontFamilies(fontFamily).includes(normalizeFontName(f));
+                                                    const isActive = extractFontFamilies(
+                                                        fontFamily,
+                                                    ).includes(normalizeFontName(f));
                                                     return (
                                                         <button
                                                             key={f}
@@ -1109,7 +1318,9 @@ export const AppearanceWindow: React.FC = () => {
                                                                 setFontSearch("");
                                                             }}
                                                         >
-                                                            <span className={`shrink-0 w-[150px] truncate ${isActive ? "font-semibold" : ""}`}>
+                                                            <span
+                                                                className={`shrink-0 w-[150px] truncate ${isActive ? "font-semibold" : ""}`}
+                                                            >
                                                                 {f}
                                                             </span>
                                                             <span
@@ -1119,7 +1330,9 @@ export const AppearanceWindow: React.FC = () => {
                                                                 AaBbCc 你好 123
                                                             </span>
                                                             {isActive && (
-                                                                <span className="text-qt-highlight text-[10px] shrink-0 font-bold">✓</span>
+                                                                <span className="text-qt-highlight text-[10px] shrink-0 font-bold">
+                                                                    ✓
+                                                                </span>
                                                             )}
                                                         </button>
                                                     );
@@ -1140,16 +1353,10 @@ export const AppearanceWindow: React.FC = () => {
 
             {/* ═══════ 底部按钮 ═══════ */}
             <div className="mx-auto mt-1 flex w-full max-w-[920px] items-center justify-end gap-2 border-t border-qt-border px-1 pt-1.5 shrink-0">
-                <button
-                    className={SECONDARY_BUTTON_CLASS}
-                    onClick={handleClose}
-                >
+                <button className={SECONDARY_BUTTON_CLASS} onClick={handleClose}>
                     {tAny("close")}
                 </button>
-                <button
-                    className={PRIMARY_BUTTON_CLASS}
-                    onClick={handleApply}
-                >
+                <button className={PRIMARY_BUTTON_CLASS} onClick={handleApply}>
                     {tAny("appearance_apply")}
                 </button>
             </div>

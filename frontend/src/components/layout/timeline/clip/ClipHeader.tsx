@@ -12,11 +12,7 @@ export const ClipHeader: React.FC<{
     clipWidthPx: number;
     ensureSelected: (clipId: string) => void;
     selectClipRemote: (clipId: string) => void;
-    startEditDrag: (
-        e: React.PointerEvent,
-        clipId: string,
-        type: "gain",
-    ) => void;
+    startEditDrag: (e: React.PointerEvent, clipId: string, type: "gain") => void;
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
     isInMultiSelectedSet: boolean;
     multiSelectedCount: number;
@@ -155,29 +151,18 @@ export const ClipHeader: React.FC<{
                     onWheel={(e) => {
                         if (!onGainCommit) return;
                         const rawDelta =
-                            Math.abs(e.deltaY) >= Math.abs(e.deltaX)
-                                ? e.deltaY
-                                : e.deltaX;
-                        if (
-                            !Number.isFinite(rawDelta) ||
-                            Math.abs(rawDelta) < 0.01
-                        ) {
+                            Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+                        if (!Number.isFinite(rawDelta) || Math.abs(rawDelta) < 0.01) {
                             return;
                         }
 
                         const direction = rawDelta < 0 ? 1 : -1;
-                        const notches = Math.max(
-                            1,
-                            Math.round(Math.abs(rawDelta) / 100),
-                        );
+                        const notches = Math.max(1, Math.round(Math.abs(rawDelta) / 100));
                         const nextDb = Math.min(
                             12,
                             Math.max(
                                 -12,
-                                clampedGainDb +
-                                    direction *
-                                        CLIP_GAIN_WHEEL_STEP_DB *
-                                        notches,
+                                clampedGainDb + direction * CLIP_GAIN_WHEEL_STEP_DB * notches,
                             ),
                         );
 
@@ -196,7 +181,9 @@ export const ClipHeader: React.FC<{
                         <span
                             className="absolute left-1/2 top-1/2 w-[2px] h-1.5 -translate-x-1/2 -translate-y-full rounded-full"
                             style={{
-                                backgroundColor: isDark ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.72)",
+                                backgroundColor: isDark
+                                    ? "rgba(255,255,255,0.92)"
+                                    : "rgba(0,0,0,0.72)",
                                 transform: `translate(-50%, -100%) rotate(${gainKnobDeg}deg)`,
                                 transformOrigin: "50% 100%",
                             }}
@@ -214,7 +201,9 @@ export const ClipHeader: React.FC<{
                             className="w-full text-xs font-medium rounded px-1 outline-none"
                             style={{
                                 color: isDark ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.88)",
-                                backgroundColor: isDark ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.70)",
+                                backgroundColor: isDark
+                                    ? "rgba(0,0,0,0.45)"
+                                    : "rgba(255,255,255,0.70)",
                                 border: `1px solid ${isDark ? "rgba(255,255,255,0.40)" : "rgba(0,0,0,0.35)"}`,
                             }}
                             value={nameInputVal}
@@ -231,16 +220,15 @@ export const ClipHeader: React.FC<{
                     ) : (
                         <div
                             className="text-xs font-medium drop-shadow-md truncate cursor-text"
-                            style={{ color: isDark ? "rgba(255,255,255,0.94)" : "rgba(0,0,0,0.86)" }}
+                            style={{
+                                color: isDark ? "rgba(255,255,255,0.94)" : "rgba(0,0,0,0.86)",
+                            }}
                             onDoubleClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 setNameInputVal(clip.name);
                                 setNameEditing(true);
-                                setTimeout(
-                                    () => nameInputRef.current?.select(),
-                                    0,
-                                );
+                                setTimeout(() => nameInputRef.current?.select(), 0);
                             }}
                         >
                             {clip.name}

@@ -50,8 +50,7 @@ export const zhCN = {
     menu_import_vocalshifter: "导入 VocalShifter 工程...",
     menu_paste_reaper_clipboard: "粘贴 Reaper 剪贴板数据",
     menu_paste_vocalshifter_clipboard: "粘贴 VocalShifter 剪贴板数据",
-    reaper_import_skipped_header:
-        "Reaper 导入时跳过了以下音频文件（格式不支持或文件不存在）：",
+    reaper_import_skipped_header: "Reaper 导入时跳过了以下音频文件（格式不支持或文件不存在）：",
     menu_pick_output: "选择导出路径",
     language: "语言",
     lang_en: "English",
@@ -102,13 +101,11 @@ export const zhCN = {
     pitch_shift: "升降调",
     output_path: "导出路径",
     hints: "提示",
-    hint_drag_clip:
-        "拖拽时间轴中的块可移动起始位置（默认吸附到网格；按住 Shift 可自由移动）",
+    hint_drag_clip: "拖拽时间轴中的块可移动起始位置（默认吸附到网格；按住 Shift 可自由移动）",
     hint_add_point: "参数区双击可新增控制点",
     hint_drag_point: "拖动控制点可编辑曲线",
     hint_drop_audio: "把音频文件拖到界面中可直接导入并分析",
-    hint_alt_drag:
-        "拖动音频块时按住 Alt 进行内部偏移（Slip-Edit：移动内部内容，不吸附）",
+    hint_alt_drag: "拖动音频块时按住 Alt 进行内部偏移（Slip-Edit：移动内部内容，不吸附）",
 
     timeline_title: "时间轴",
     tracks: "轨道",
@@ -180,8 +177,7 @@ export const zhCN = {
     status_export_separated_done: "分轨导出完成",
     status_export_separated_failed: "分轨导出失败",
     unsaved_changes_title: "未保存更改",
-    unsaved_changes_switch_desc:
-        "当前工程有未保存的更改。切换工程前是否先保存？",
+    unsaved_changes_switch_desc: "当前工程有未保存的更改。切换工程前是否先保存？",
     unsaved_changes_exit_desc: "当前工程有未保存的更改。关闭应用前是否先保存？",
     unsaved_changes_discard: "不保存",
 
@@ -209,8 +205,7 @@ export const zhCN = {
     fade_out: "淡出",
     show_secondary_param: "显示副参数叠加曲线",
     hide_secondary_param: "隐藏副参数叠加曲线",
-    onnx_compile_required:
-        "ONNX 模型未编译，请运行：cargo tauri dev --features onnx",
+    onnx_compile_required: "ONNX 模型未编译，请运行：cargo tauri dev --features onnx",
     onnx_unavailable_label: "（不可用）",
     solo: "独奏",
     status_analyzing_pitch: "正在分析音高",
@@ -384,8 +379,7 @@ export const zhCN = {
     midi_import_failed: "MIDI 导入失败",
     midi_file_not_found: "MIDI 文件未找到",
     midi_no_notes: "选中的轨道没有音符",
-    midi_no_frames_touched:
-        "MIDI 导入没有写入任何帧，请检查播放头位置和工程长度",
+    midi_no_frames_touched: "MIDI 导入没有写入任何帧，请检查播放头位置和工程长度",
 
     // Toolbar toggle buttons
     auto_crossfade: "自动交叉淡化",

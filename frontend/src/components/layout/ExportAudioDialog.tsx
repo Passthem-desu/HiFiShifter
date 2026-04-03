@@ -68,7 +68,10 @@ function buildTargetGroups(
     // 预计算每个轨道是否包含片段以及是否包含未静音片段，以避免在 isTrackExcludedByRule 中反复遍历 clips。
     const trackClipStats = new Map<string, { hasAnyClip: boolean; hasAnyUnmutedClip: boolean }>();
     clips.forEach((clip) => {
-        const existing = trackClipStats.get(clip.trackId) ?? { hasAnyClip: false, hasAnyUnmutedClip: false };
+        const existing = trackClipStats.get(clip.trackId) ?? {
+            hasAnyClip: false,
+            hasAnyUnmutedClip: false,
+        };
         const updated = {
             hasAnyClip: true,
             hasAnyUnmutedClip: existing.hasAnyUnmutedClip || !clip.muted,
@@ -185,7 +188,9 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
     const [projectOutputDir, setProjectOutputDir] = useState("");
     const [projectFileName, setProjectFileName] = useState("<ProjectName>.wav");
     const [separatedOutputDir, setSeparatedOutputDir] = useState("");
-    const [separatedNamePattern, setSeparatedNamePattern] = useState("<ExportIndex>_<TrackName>.wav");
+    const [separatedNamePattern, setSeparatedNamePattern] = useState(
+        "<ExportIndex>_<TrackName>.wav",
+    );
     const [sampleRate, setSampleRate] = useState("48000");
     const [bitDepth, setBitDepth] = useState<ExportBitDepth>(32);
     const [selectedTargetIds, setSelectedTargetIds] = useState<string[]>([]);
@@ -202,7 +207,11 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
     const [keepProgressVisible, setKeepProgressVisible] = useState(false);
     const [awaitingConflictDecision, setAwaitingConflictDecision] = useState(false);
     const [activeInputKey, setActiveInputKey] = useState<
-        "projectOutputDir" | "projectFileName" | "separatedOutputDir" | "separatedNamePattern" | null
+        | "projectOutputDir"
+        | "projectFileName"
+        | "separatedOutputDir"
+        | "separatedNamePattern"
+        | null
     >(null);
     const activeInputRef = useRef<HTMLInputElement | null>(null);
     const [conflictDialog, setConflictDialog] = useState<{
@@ -247,17 +256,20 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
         setSampleRate("48000");
         setBitDepth(32);
         setSubmitting(false);
-        setExportProgress({ active: false, mode: null, progress: null, current: null, total: null });
+        setExportProgress({
+            active: false,
+            mode: null,
+            progress: null,
+            current: null,
+            total: null,
+        });
         setDisplayProgress(0);
         setKeepProgressVisible(false);
         setAwaitingConflictDecision(false);
 
         const defaultSelected = targetGroups.flatMap((group) => {
             return group.options
-                .filter(
-                    (option) =>
-                        option.kind === "root" && !option.excludedByRule,
-                )
+                .filter((option) => option.kind === "root" && !option.excludedByRule)
                 .map((option) => option.id);
         });
         setSelectedTargetIds(defaultSelected);
@@ -275,11 +287,15 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                 setProjectOutputDir(defaults.projectOutputDir ?? "");
                 setProjectFileName(defaults.projectFileName ?? "<ProjectName>.wav");
                 setSeparatedOutputDir(defaults.separatedOutputDir ?? "");
-                setSeparatedNamePattern(defaults.separatedFileName ?? "<ExportIndex>_<TrackName>.wav");
+                setSeparatedNamePattern(
+                    defaults.separatedFileName ?? "<ExportIndex>_<TrackName>.wav",
+                );
                 setSampleRate(String(defaults.sampleRate ?? 48000));
-                setBitDepth((defaults.bitDepth === 16 || defaults.bitDepth === 24 || defaults.bitDepth === 32)
-                    ? defaults.bitDepth
-                    : 32);
+                setBitDepth(
+                    defaults.bitDepth === 16 || defaults.bitDepth === 24 || defaults.bitDepth === 32
+                        ? defaults.bitDepth
+                        : 32,
+                );
             } catch {
                 // 保持回退默认值。
             }
@@ -357,8 +373,13 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                 if (awaitingConflictDecision && !exportProgress.active) {
                     return prev;
                 }
-                if (typeof exportProgress.progress === "number" && Number.isFinite(exportProgress.progress)) {
-                    const target = Math.round(Math.max(0, Math.min(1, exportProgress.progress)) * 100);
+                if (
+                    typeof exportProgress.progress === "number" &&
+                    Number.isFinite(exportProgress.progress)
+                ) {
+                    const target = Math.round(
+                        Math.max(0, Math.min(1, exportProgress.progress)) * 100,
+                    );
                     if (target > prev) return Math.min(target, prev + 6);
                     if (target < prev) return prev;
                     if (target >= 100) return 100;
@@ -464,20 +485,26 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
     }
 
     async function askConflict(path: string) {
-        return new Promise<{ choice: "overwrite" | "skip" | "cancel"; applyAll: boolean }>((resolve) => {
-            setAwaitingConflictDecision(true);
-            conflictResolverRef.current = (value) => {
-                setAwaitingConflictDecision(false);
-                resolve(value);
-            };
-            setConflictDialog({ open: true, path, applyAll: false });
-        });
+        return new Promise<{ choice: "overwrite" | "skip" | "cancel"; applyAll: boolean }>(
+            (resolve) => {
+                setAwaitingConflictDecision(true);
+                conflictResolverRef.current = (value) => {
+                    setAwaitingConflictDecision(false);
+                    resolve(value);
+                };
+                setConflictDialog({ open: true, path, applyAll: false });
+            },
+        );
     }
 
     async function resolveExportConflicts(request: any) {
         const plan = await coreApi.previewExportAudioPlan(request as any);
         if (!plan?.ok || !Array.isArray(plan.existingPaths) || plan.existingPaths.length === 0) {
-            return { overwriteExistingPaths: [] as string[], skipExistingPaths: [] as string[], canceled: false };
+            return {
+                overwriteExistingPaths: [] as string[],
+                skipExistingPaths: [] as string[],
+                canceled: false,
+            };
         }
 
         const overwriteExistingPaths: string[] = [];
@@ -734,392 +761,449 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
 
     return (
         <>
-        <Dialog.Root open={open} onOpenChange={onOpenChange}>
-            <Dialog.Content style={{ maxWidth: 760 }} onKeyDown={(event) => event.stopPropagation()}>
-                <Dialog.Title>{tAny("menu_export_audio")}</Dialog.Title>
-                <Dialog.Description>{tAny("export_dialog_desc")}</Dialog.Description>
+            <Dialog.Root open={open} onOpenChange={onOpenChange}>
+                <Dialog.Content
+                    style={{ maxWidth: 760 }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                >
+                    <Dialog.Title>{tAny("menu_export_audio")}</Dialog.Title>
+                    <Dialog.Description>{tAny("export_dialog_desc")}</Dialog.Description>
 
-                <Flex direction="column" gap="3" mt="3">
-                    <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 132 }}>
-                            {tAny("export_dialog_mode")}
-                        </Text>
-                        <Select.Root value={mode} onValueChange={(value) => setMode(value as ExportMode)}>
-                            <Select.Trigger style={{ flex: 1 }} />
-                            <Select.Content>
-                                <Select.Item value="project">{tAny("export_dialog_mode_project")}</Select.Item>
-                                <Select.Item value="separated">{tAny("export_dialog_mode_separated")}</Select.Item>
-                            </Select.Content>
-                        </Select.Root>
-                    </Flex>
-
-                    <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 132 }}>
-                            {tAny("export_dialog_range")}
-                        </Text>
-                        <Select.Root
-                            value={rangeKind}
-                            onValueChange={(value) => setRangeKind(value as ExportRangeKind)}
-                        >
-                            <Select.Trigger style={{ flex: 1 }} />
-                            <Select.Content>
-                                <Select.Item value="all">{tAny("export_dialog_range_all")}</Select.Item>
-                                <Select.Item value="custom">{tAny("export_dialog_range_custom")}</Select.Item>
-                            </Select.Content>
-                        </Select.Root>
-                    </Flex>
-
-                    {rangeKind === "custom" && (
-                        <Flex gap="2" align="center">
+                    <Flex direction="column" gap="3" mt="3">
+                        <Flex align="center" gap="2">
                             <Text size="2" style={{ minWidth: 132 }}>
-                                {tAny("export_dialog_range_custom_label")}
+                                {tAny("export_dialog_mode")}
                             </Text>
-                            <TextField.Root
-                                size="2"
-                                type="number"
-                                min={0}
-                                step="0.001"
-                                value={customStartSec}
-                                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                    setCustomStartSec(event.target.value)
-                                }
-                                style={{ width: 160 }}
-                            />
-                            <Text size="2" color="gray">
-                                ~
-                            </Text>
-                            <TextField.Root
-                                size="2"
-                                type="number"
-                                min={0}
-                                step="0.001"
-                                value={customEndSec}
-                                onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                    setCustomEndSec(event.target.value)
-                                }
-                                style={{ width: 160 }}
-                            />
-                            <Text size="1" color="gray">
-                                sec
-                            </Text>
+                            <Select.Root
+                                value={mode}
+                                onValueChange={(value) => setMode(value as ExportMode)}
+                            >
+                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Content>
+                                    <Select.Item value="project">
+                                        {tAny("export_dialog_mode_project")}
+                                    </Select.Item>
+                                    <Select.Item value="separated">
+                                        {tAny("export_dialog_mode_separated")}
+                                    </Select.Item>
+                                </Select.Content>
+                            </Select.Root>
                         </Flex>
-                    )}
 
-                    <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 132 }}>
-                            {tAny("export_dialog_sample_rate")}
-                        </Text>
-                        <Select.Root
-                            value={sampleRate}
-                            onValueChange={(value) => setSampleRate(value)}
-                        >
-                            <Select.Trigger style={{ flex: 1 }} />
-                            <Select.Content>
-                                <Select.Item value="22050">22050 Hz</Select.Item>
-                                <Select.Item value="32000">32000 Hz</Select.Item>
-                                <Select.Item value="44100">44100 Hz</Select.Item>
-                                <Select.Item value="48000">48000 Hz</Select.Item>
-                                <Select.Item value="88200">88200 Hz</Select.Item>
-                                <Select.Item value="96000">96000 Hz</Select.Item>
-                            </Select.Content>
-                        </Select.Root>
-                    </Flex>
+                        <Flex align="center" gap="2">
+                            <Text size="2" style={{ minWidth: 132 }}>
+                                {tAny("export_dialog_range")}
+                            </Text>
+                            <Select.Root
+                                value={rangeKind}
+                                onValueChange={(value) => setRangeKind(value as ExportRangeKind)}
+                            >
+                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Content>
+                                    <Select.Item value="all">
+                                        {tAny("export_dialog_range_all")}
+                                    </Select.Item>
+                                    <Select.Item value="custom">
+                                        {tAny("export_dialog_range_custom")}
+                                    </Select.Item>
+                                </Select.Content>
+                            </Select.Root>
+                        </Flex>
 
-                    <Flex align="center" gap="2">
-                        <Text size="2" style={{ minWidth: 132 }}>
-                            {tAny("export_dialog_bit_depth")}
-                        </Text>
-                        <Select.Root
-                            value={String(bitDepth)}
-                            onValueChange={(value) => {
-                                const parsed = Number(value);
-                                if (parsed === 16 || parsed === 24 || parsed === 32) {
-                                    setBitDepth(parsed);
-                                }
-                            }}
-                        >
-                            <Select.Trigger style={{ flex: 1 }} />
-                            <Select.Content>
-                                <Select.Item value="16">16-bit</Select.Item>
-                                <Select.Item value="24">24-bit</Select.Item>
-                                <Select.Item value="32">32-bit</Select.Item>
-                            </Select.Content>
-                        </Select.Root>
-                    </Flex>
-
-                    {mode === "project" ? (
-                        <>
-                            <Flex align="center" gap="2">
+                        {rangeKind === "custom" && (
+                            <Flex gap="2" align="center">
                                 <Text size="2" style={{ minWidth: 132 }}>
-                                    {tAny("export_dialog_output_dir")}
+                                    {tAny("export_dialog_range_custom_label")}
                                 </Text>
                                 <TextField.Root
                                     size="2"
-                                    value={projectOutputDir}
-                                    onFocus={(event) => {
-                                        setActiveInputKey("projectOutputDir");
-                                        activeInputRef.current = event.target as HTMLInputElement;
-                                    }}
+                                    type="number"
+                                    min={0}
+                                    step="0.001"
+                                    value={customStartSec}
                                     onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                        setProjectOutputDir(event.target.value)
+                                        setCustomStartSec(event.target.value)
                                     }
-                                    style={{ flex: 1 }}
+                                    style={{ width: 160 }}
                                 />
-                                <Button variant="soft" color="gray" onClick={() => void browseProjectOutputDir()}>
-                                    {tAny("export_dialog_browse")}
-                                </Button>
-                            </Flex>
-
-                            <Flex align="center" gap="2">
-                                <Text size="2" style={{ minWidth: 132 }}>
-                                    {tAny("export_dialog_project_file_name")}
+                                <Text size="2" color="gray">
+                                    ~
                                 </Text>
                                 <TextField.Root
                                     size="2"
-                                    value={projectFileName}
-                                    onFocus={(event) => {
-                                        setActiveInputKey("projectFileName");
-                                        activeInputRef.current = event.target as HTMLInputElement;
-                                    }}
+                                    type="number"
+                                    min={0}
+                                    step="0.001"
+                                    value={customEndSec}
                                     onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                        setProjectFileName(event.target.value)
+                                        setCustomEndSec(event.target.value)
                                     }
-                                    style={{ flex: 1 }}
+                                    style={{ width: 160 }}
                                 />
+                                <Text size="1" color="gray">
+                                    sec
+                                </Text>
                             </Flex>
+                        )}
 
-                            <Flex gap="2" wrap="wrap" align="center">
-                                <Text size="1" color="gray">占位符：</Text>
-                                {(["<ProjectName>", "<ProjectFolder>"] as const).map((token) => (
+                        <Flex align="center" gap="2">
+                            <Text size="2" style={{ minWidth: 132 }}>
+                                {tAny("export_dialog_sample_rate")}
+                            </Text>
+                            <Select.Root
+                                value={sampleRate}
+                                onValueChange={(value) => setSampleRate(value)}
+                            >
+                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Content>
+                                    <Select.Item value="22050">22050 Hz</Select.Item>
+                                    <Select.Item value="32000">32000 Hz</Select.Item>
+                                    <Select.Item value="44100">44100 Hz</Select.Item>
+                                    <Select.Item value="48000">48000 Hz</Select.Item>
+                                    <Select.Item value="88200">88200 Hz</Select.Item>
+                                    <Select.Item value="96000">96000 Hz</Select.Item>
+                                </Select.Content>
+                            </Select.Root>
+                        </Flex>
+
+                        <Flex align="center" gap="2">
+                            <Text size="2" style={{ minWidth: 132 }}>
+                                {tAny("export_dialog_bit_depth")}
+                            </Text>
+                            <Select.Root
+                                value={String(bitDepth)}
+                                onValueChange={(value) => {
+                                    const parsed = Number(value);
+                                    if (parsed === 16 || parsed === 24 || parsed === 32) {
+                                        setBitDepth(parsed);
+                                    }
+                                }}
+                            >
+                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Content>
+                                    <Select.Item value="16">16-bit</Select.Item>
+                                    <Select.Item value="24">24-bit</Select.Item>
+                                    <Select.Item value="32">32-bit</Select.Item>
+                                </Select.Content>
+                            </Select.Root>
+                        </Flex>
+
+                        {mode === "project" ? (
+                            <>
+                                <Flex align="center" gap="2">
+                                    <Text size="2" style={{ minWidth: 132 }}>
+                                        {tAny("export_dialog_output_dir")}
+                                    </Text>
+                                    <TextField.Root
+                                        size="2"
+                                        value={projectOutputDir}
+                                        onFocus={(event) => {
+                                            setActiveInputKey("projectOutputDir");
+                                            activeInputRef.current =
+                                                event.target as HTMLInputElement;
+                                        }}
+                                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                            setProjectOutputDir(event.target.value)
+                                        }
+                                        style={{ flex: 1 }}
+                                    />
                                     <Button
-                                        key={token}
-                                        size="1"
-                                        variant="ghost"
-                                        color="gray"
-                                        onClick={() => applyTokenToActiveInput(token)}
-                                    >
-                                        {token}
-                                    </Button>
-                                ))}
-                            </Flex>
-                        </>
-                    ) : (
-                        <>
-                            <Flex align="center" gap="2">
-                                <Text size="2" style={{ minWidth: 132 }}>
-                                    {tAny("export_dialog_output_dir")}
-                                </Text>
-                                <TextField.Root
-                                    size="2"
-                                    value={separatedOutputDir}
-                                    onFocus={(event) => {
-                                        setActiveInputKey("separatedOutputDir");
-                                        activeInputRef.current = event.target as HTMLInputElement;
-                                    }}
-                                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                        setSeparatedOutputDir(event.target.value)
-                                    }
-                                    style={{ flex: 1 }}
-                                />
-                                <Button variant="soft" color="gray" onClick={() => void browseSeparatedOutputDir()}>
-                                    {tAny("export_dialog_browse")}
-                                </Button>
-                            </Flex>
-
-                            <Flex align="center" gap="2">
-                                <Text size="2" style={{ minWidth: 132 }}>
-                                    {tAny("export_dialog_name_pattern")}
-                                </Text>
-                                <TextField.Root
-                                    size="2"
-                                    value={separatedNamePattern}
-                                    onFocus={(event) => {
-                                        setActiveInputKey("separatedNamePattern");
-                                        activeInputRef.current = event.target as HTMLInputElement;
-                                    }}
-                                    onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                                        setSeparatedNamePattern(event.target.value)
-                                    }
-                                    style={{ flex: 1 }}
-                                />
-                            </Flex>
-
-                            <Flex gap="2" wrap="wrap" align="center">
-                                <Text size="1" color="gray">占位符：</Text>
-                                {[
-                                    "<ExportIndex>",
-                                    "<TrackIndex>",
-                                    "<TrackName>",
-                                    "<TrackType>",
-                                    "<TrackId>",
-                                    "<ProjectName>",
-                                    "<ProjectFolder>",
-                                ].map((token) => (
-                                    <Button
-                                        key={token}
-                                        size="1"
-                                        variant="ghost"
-                                        color="gray"
-                                        onClick={() => applyTokenToActiveInput(token)}
-                                    >
-                                        {token}
-                                    </Button>
-                                ))}
-                            </Flex>
-
-                            <div className="rounded border border-qt-border bg-qt-base p-2 max-h-[240px] overflow-y-auto">
-                                <Text size="2" className="font-medium">
-                                    {tAny("export_dialog_targets")}
-                                </Text>
-                                <Flex gap="1" mt="2" wrap="wrap">
-                                    <Button size="1" variant="soft" color="gray" onClick={selectAllTargets}>
-                                        {tAny("export_dialog_select_all")}
-                                    </Button>
-                                    <Button
-                                        size="1"
                                         variant="soft"
                                         color="gray"
-                                        onClick={selectExcludeMutedTargets}
+                                        onClick={() => void browseProjectOutputDir()}
                                     >
-                                        {tAny("export_dialog_select_exclude_muted")}
-                                    </Button>
-                                    <Button size="1" variant="soft" color="gray" onClick={clearSelectedTargets}>
-                                        {tAny("export_dialog_select_none")}
-                                    </Button>
-                                    <Button
-                                        size="1"
-                                        variant="soft"
-                                        color="gray"
-                                        onClick={selectAllSubTargets}
-                                        disabled={!allTargets.some((target) => target.kind === "sub")}
-                                    >
-                                        {tAny("export_dialog_select_all_subtracks")}
+                                        {tAny("export_dialog_browse")}
                                     </Button>
                                 </Flex>
-                                <Flex direction="column" gap="2" mt="2">
-                                    {targetGroups.map((group) => (
-                                        <div
-                                            key={group.id}
-                                            className="rounded border border-qt-border bg-qt-window px-2 py-2"
+
+                                <Flex align="center" gap="2">
+                                    <Text size="2" style={{ minWidth: 132 }}>
+                                        {tAny("export_dialog_project_file_name")}
+                                    </Text>
+                                    <TextField.Root
+                                        size="2"
+                                        value={projectFileName}
+                                        onFocus={(event) => {
+                                            setActiveInputKey("projectFileName");
+                                            activeInputRef.current =
+                                                event.target as HTMLInputElement;
+                                        }}
+                                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                            setProjectFileName(event.target.value)
+                                        }
+                                        style={{ flex: 1 }}
+                                    />
+                                </Flex>
+
+                                <Flex gap="2" wrap="wrap" align="center">
+                                    <Text size="1" color="gray">
+                                        占位符：
+                                    </Text>
+                                    {(["<ProjectName>", "<ProjectFolder>"] as const).map(
+                                        (token) => (
+                                            <Button
+                                                key={token}
+                                                size="1"
+                                                variant="ghost"
+                                                color="gray"
+                                                onClick={() => applyTokenToActiveInput(token)}
+                                            >
+                                                {token}
+                                            </Button>
+                                        ),
+                                    )}
+                                </Flex>
+                            </>
+                        ) : (
+                            <>
+                                <Flex align="center" gap="2">
+                                    <Text size="2" style={{ minWidth: 132 }}>
+                                        {tAny("export_dialog_output_dir")}
+                                    </Text>
+                                    <TextField.Root
+                                        size="2"
+                                        value={separatedOutputDir}
+                                        onFocus={(event) => {
+                                            setActiveInputKey("separatedOutputDir");
+                                            activeInputRef.current =
+                                                event.target as HTMLInputElement;
+                                        }}
+                                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                            setSeparatedOutputDir(event.target.value)
+                                        }
+                                        style={{ flex: 1 }}
+                                    />
+                                    <Button
+                                        variant="soft"
+                                        color="gray"
+                                        onClick={() => void browseSeparatedOutputDir()}
+                                    >
+                                        {tAny("export_dialog_browse")}
+                                    </Button>
+                                </Flex>
+
+                                <Flex align="center" gap="2">
+                                    <Text size="2" style={{ minWidth: 132 }}>
+                                        {tAny("export_dialog_name_pattern")}
+                                    </Text>
+                                    <TextField.Root
+                                        size="2"
+                                        value={separatedNamePattern}
+                                        onFocus={(event) => {
+                                            setActiveInputKey("separatedNamePattern");
+                                            activeInputRef.current =
+                                                event.target as HTMLInputElement;
+                                        }}
+                                        onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                                            setSeparatedNamePattern(event.target.value)
+                                        }
+                                        style={{ flex: 1 }}
+                                    />
+                                </Flex>
+
+                                <Flex gap="2" wrap="wrap" align="center">
+                                    <Text size="1" color="gray">
+                                        占位符：
+                                    </Text>
+                                    {[
+                                        "<ExportIndex>",
+                                        "<TrackIndex>",
+                                        "<TrackName>",
+                                        "<TrackType>",
+                                        "<TrackId>",
+                                        "<ProjectName>",
+                                        "<ProjectFolder>",
+                                    ].map((token) => (
+                                        <Button
+                                            key={token}
+                                            size="1"
+                                            variant="ghost"
+                                            color="gray"
+                                            onClick={() => applyTokenToActiveInput(token)}
                                         >
-                                            <Text size="1" color="gray">
-                                                {group.title}
-                                            </Text>
-                                            <Flex direction="column" gap="1" mt="1">
-                                                {group.options.map((target) => (
-                                                    <label
-                                                        key={target.id}
-                                                        className="flex items-center gap-2 text-xs text-qt-text cursor-pointer"
-                                                    >
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={selectedTargetIds.includes(target.id)}
-                                                            onChange={() => toggleTarget(target.id)}
-                                                        />
-                                                        <span>{target.label}</span>
-                                                    </label>
-                                                ))}
-                                            </Flex>
-                                        </div>
+                                            {token}
+                                        </Button>
                                     ))}
                                 </Flex>
+
+                                <div className="rounded border border-qt-border bg-qt-base p-2 max-h-[240px] overflow-y-auto">
+                                    <Text size="2" className="font-medium">
+                                        {tAny("export_dialog_targets")}
+                                    </Text>
+                                    <Flex gap="1" mt="2" wrap="wrap">
+                                        <Button
+                                            size="1"
+                                            variant="soft"
+                                            color="gray"
+                                            onClick={selectAllTargets}
+                                        >
+                                            {tAny("export_dialog_select_all")}
+                                        </Button>
+                                        <Button
+                                            size="1"
+                                            variant="soft"
+                                            color="gray"
+                                            onClick={selectExcludeMutedTargets}
+                                        >
+                                            {tAny("export_dialog_select_exclude_muted")}
+                                        </Button>
+                                        <Button
+                                            size="1"
+                                            variant="soft"
+                                            color="gray"
+                                            onClick={clearSelectedTargets}
+                                        >
+                                            {tAny("export_dialog_select_none")}
+                                        </Button>
+                                        <Button
+                                            size="1"
+                                            variant="soft"
+                                            color="gray"
+                                            onClick={selectAllSubTargets}
+                                            disabled={
+                                                !allTargets.some((target) => target.kind === "sub")
+                                            }
+                                        >
+                                            {tAny("export_dialog_select_all_subtracks")}
+                                        </Button>
+                                    </Flex>
+                                    <Flex direction="column" gap="2" mt="2">
+                                        {targetGroups.map((group) => (
+                                            <div
+                                                key={group.id}
+                                                className="rounded border border-qt-border bg-qt-window px-2 py-2"
+                                            >
+                                                <Text size="1" color="gray">
+                                                    {group.title}
+                                                </Text>
+                                                <Flex direction="column" gap="1" mt="1">
+                                                    {group.options.map((target) => (
+                                                        <label
+                                                            key={target.id}
+                                                            className="flex items-center gap-2 text-xs text-qt-text cursor-pointer"
+                                                        >
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={selectedTargetIds.includes(
+                                                                    target.id,
+                                                                )}
+                                                                onChange={() =>
+                                                                    toggleTarget(target.id)
+                                                                }
+                                                            />
+                                                            <span>{target.label}</span>
+                                                        </label>
+                                                    ))}
+                                                </Flex>
+                                            </div>
+                                        ))}
+                                    </Flex>
+                                </div>
+                            </>
+                        )}
+
+                        {errorText ? (
+                            <Text size="2" color="red">
+                                {errorText}
+                            </Text>
+                        ) : null}
+
+                        {shouldShowProgress ? (
+                            <div className="rounded border border-qt-border bg-qt-window p-2">
+                                <ProgressBar
+                                    percentage={displayProgress}
+                                    label={progressLabel}
+                                    completed={exportCompleted}
+                                />
                             </div>
-                        </>
-                    )}
+                        ) : null}
+                    </Flex>
 
-                    {errorText ? (
-                        <Text size="2" color="red">
-                            {errorText}
-                        </Text>
-                    ) : null}
-
-                    {shouldShowProgress ? (
-                        <div className="rounded border border-qt-border bg-qt-window p-2">
-                            <ProgressBar
-                                percentage={displayProgress}
-                                label={progressLabel}
-                                completed={exportCompleted}
-                            />
-                        </div>
-                    ) : null}
-                </Flex>
-
-                <Flex justify="end" gap="2" mt="4">
-                    <Button variant="soft" color="gray" onClick={() => void handleCancel()}>
-                        {tAny("cancel")}
-                    </Button>
-                    <Button
-                        onClick={() => {
-                            void submitExport();
-                        }}
-                        disabled={session.busy || submitting}
-                    >
-                        {tAny("menu_export_audio")}
-                    </Button>
-                </Flex>
-            </Dialog.Content>
-        </Dialog.Root>
-        <Dialog.Root open={conflictDialog.open} onOpenChange={(open) => {
-            if (!open) {
-                const resolver = conflictResolverRef.current;
-                conflictResolverRef.current = null;
-                setConflictDialog((prev) => ({ ...prev, open: false }));
-                resolver?.({ choice: "cancel", applyAll: false });
-            }
-        }}>
-            <Dialog.Content style={{ maxWidth: 620 }}>
-                <Dialog.Title>导出目标已存在</Dialog.Title>
-                <Dialog.Description style={{ userSelect: "text", wordBreak: "break-all" }}>
-                    {conflictDialog.path}
-                </Dialog.Description>
-                <label className="flex items-center gap-2 text-sm mt-3">
-                    <input
-                        type="checkbox"
-                        checked={conflictDialog.applyAll}
-                        onChange={(event) =>
-                            setConflictDialog((prev) => ({ ...prev, applyAll: event.target.checked }))
-                        }
-                    />
-                    <span>对之后所有已存在的文件进行相同操作</span>
-                </label>
-                <Flex justify="end" gap="2" mt="4">
-                    <Button
-                        variant="soft"
-                        color="gray"
-                        onClick={() => {
-                            const resolver = conflictResolverRef.current;
-                            conflictResolverRef.current = null;
-                            setConflictDialog((prev) => ({ ...prev, open: false }));
-                            resolver?.({ choice: "skip", applyAll: conflictDialog.applyAll });
-                        }}
-                    >
-                        跳过
-                    </Button>
-                    <Button
-                        variant="soft"
-                        color="red"
-                        onClick={() => {
-                            const resolver = conflictResolverRef.current;
-                            conflictResolverRef.current = null;
-                            setConflictDialog((prev) => ({ ...prev, open: false }));
-                            resolver?.({ choice: "cancel", applyAll: false });
-                        }}
-                    >
-                        取消导出
-                    </Button>
-                    <Button
-                        onClick={() => {
-                            const resolver = conflictResolverRef.current;
-                            conflictResolverRef.current = null;
-                            setConflictDialog((prev) => ({ ...prev, open: false }));
-                            resolver?.({ choice: "overwrite", applyAll: conflictDialog.applyAll });
-                        }}
-                    >
-                        覆盖
-                    </Button>
-                </Flex>
-            </Dialog.Content>
-        </Dialog.Root>
+                    <Flex justify="end" gap="2" mt="4">
+                        <Button variant="soft" color="gray" onClick={() => void handleCancel()}>
+                            {tAny("cancel")}
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                void submitExport();
+                            }}
+                            disabled={session.busy || submitting}
+                        >
+                            {tAny("menu_export_audio")}
+                        </Button>
+                    </Flex>
+                </Dialog.Content>
+            </Dialog.Root>
+            <Dialog.Root
+                open={conflictDialog.open}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        const resolver = conflictResolverRef.current;
+                        conflictResolverRef.current = null;
+                        setConflictDialog((prev) => ({ ...prev, open: false }));
+                        resolver?.({ choice: "cancel", applyAll: false });
+                    }
+                }}
+            >
+                <Dialog.Content style={{ maxWidth: 620 }}>
+                    <Dialog.Title>导出目标已存在</Dialog.Title>
+                    <Dialog.Description style={{ userSelect: "text", wordBreak: "break-all" }}>
+                        {conflictDialog.path}
+                    </Dialog.Description>
+                    <label className="flex items-center gap-2 text-sm mt-3">
+                        <input
+                            type="checkbox"
+                            checked={conflictDialog.applyAll}
+                            onChange={(event) =>
+                                setConflictDialog((prev) => ({
+                                    ...prev,
+                                    applyAll: event.target.checked,
+                                }))
+                            }
+                        />
+                        <span>对之后所有已存在的文件进行相同操作</span>
+                    </label>
+                    <Flex justify="end" gap="2" mt="4">
+                        <Button
+                            variant="soft"
+                            color="gray"
+                            onClick={() => {
+                                const resolver = conflictResolverRef.current;
+                                conflictResolverRef.current = null;
+                                setConflictDialog((prev) => ({ ...prev, open: false }));
+                                resolver?.({ choice: "skip", applyAll: conflictDialog.applyAll });
+                            }}
+                        >
+                            跳过
+                        </Button>
+                        <Button
+                            variant="soft"
+                            color="red"
+                            onClick={() => {
+                                const resolver = conflictResolverRef.current;
+                                conflictResolverRef.current = null;
+                                setConflictDialog((prev) => ({ ...prev, open: false }));
+                                resolver?.({ choice: "cancel", applyAll: false });
+                            }}
+                        >
+                            取消导出
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                const resolver = conflictResolverRef.current;
+                                conflictResolverRef.current = null;
+                                setConflictDialog((prev) => ({ ...prev, open: false }));
+                                resolver?.({
+                                    choice: "overwrite",
+                                    applyAll: conflictDialog.applyAll,
+                                });
+                            }}
+                        >
+                            覆盖
+                        </Button>
+                    </Flex>
+                </Dialog.Content>
+            </Dialog.Root>
         </>
     );
 }

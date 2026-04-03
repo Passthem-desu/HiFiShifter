@@ -3,12 +3,17 @@ export type FadeCurveType = "linear" | "sine" | "exponential" | "logarithmic" | 
 /** 将 t ∈ [0,1] 映射为增益 ∈ [0,1]，根据曲线类型选择不同的插值函数 */
 export function fadeCurveGain(t: number, curve: FadeCurveType): number {
     switch (curve) {
-        case "linear":      return t;
-        case "exponential": return t * t;
-        case "logarithmic": return Math.sqrt(t);
-        case "scurve":      return 3 * t * t - 2 * t * t * t;
+        case "linear":
+            return t;
+        case "exponential":
+            return t * t;
+        case "logarithmic":
+            return Math.sqrt(t);
+        case "scurve":
+            return 3 * t * t - 2 * t * t * t;
         case "sine":
-        default:            return Math.sin((t * Math.PI) / 2);
+        default:
+            return Math.sin((t * Math.PI) / 2);
     }
 }
 

@@ -7,9 +7,7 @@ export function hasFileDrag(dt: DataTransfer): boolean {
     return items.some((it) => it.kind === "file");
 }
 
-export function extractLocalFilePath(
-    dt: DataTransfer,
-): { path: string; name: string } | null {
+export function extractLocalFilePath(dt: DataTransfer): { path: string; name: string } | null {
     type MaybePathFile = File & { path?: string };
 
     const itemFile = Array.from(dt.items ?? [])
@@ -103,9 +101,7 @@ export function detectExternalPathAction(
     return null;
 }
 
-export function findFirstProjectFilePath(
-    paths: Array<string | null | undefined>,
-): string | null {
+export function findFirstProjectFilePath(paths: Array<string | null | undefined>): string | null {
     for (const raw of paths) {
         const normalized = String(raw ?? "").trim();
         if (isProjectFilePath(normalized)) return normalized;

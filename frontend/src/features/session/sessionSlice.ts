@@ -1,9 +1,5 @@
 import { createSlice, current, type PayloadAction } from "@reduxjs/toolkit";
-import type {
-    TimelineClip,
-    TimelineState,
-    TrackSummaryResult,
-} from "../../types/api";
+import type { TimelineClip, TimelineState, TrackSummaryResult } from "../../types/api";
 import type {
     AutomationPoint,
     ClipInfo,
@@ -68,11 +64,7 @@ import {
     updateTransportBpm,
 } from "./thunks/transportThunks";
 
-import {
-    clearWaveformCacheRemote,
-    loadUiSettings,
-    refreshRuntime,
-} from "./thunks/runtimeThunks";
+import { clearWaveformCacheRemote, loadUiSettings, refreshRuntime } from "./thunks/runtimeThunks";
 
 import { loadDefaultModel, loadModel } from "./thunks/modelThunks";
 
@@ -100,10 +92,7 @@ import {
     importMultipleAudioFilesAtPosition,
 } from "./thunks/importThunks";
 
-import {
-    removeSelectedClipRemote,
-    setTrackStateRemote,
-} from "./thunks/trackThunks";
+import { removeSelectedClipRemote, setTrackStateRemote } from "./thunks/trackThunks";
 import { markProjectDirty } from "./sessionDirtyState";
 import { resolveTrackIdForClipSelection } from "./selectionFocus";
 
@@ -352,15 +341,12 @@ function normalizeClipColor(color: string | undefined): ClipColor {
  * For each clip in `movedIds`, detect overlaps with same-track clips and set
  * fade in/out to the overlap duration.
  */
-function applyAutoCrossfadeInReducer(
-    state: SessionState,
-    movedIds: string[],
-) {
+function applyAutoCrossfadeInReducer(state: SessionState, movedIds: string[]) {
     if (!state.autoCrossfadeEnabled || movedIds.length === 0) return;
 
     const trackClipsMap: Record<string, ClipInfo[]> = {};
-    const clipMap: Record<string, ClipInfo> = {}; 
-    
+    const clipMap: Record<string, ClipInfo> = {};
+
     // 一次性建立轨道分组和全局 ID 索引，时间复杂度 O(N)
     for (const clip of state.clips) {
         clipMap[clip.id] = clip;
@@ -373,14 +359,12 @@ function applyAutoCrossfadeInReducer(
 
     for (const id of movedIds) {
         // O(1) 直接获取，消除多余的 find 遍历
-        const clip = clipMap[id]; 
+        const clip = clipMap[id];
         if (!clip) continue;
         const clipStart = Number(clip.startSec);
         const clipEnd = clipStart + Number(clip.lengthSec);
 
-        const sameTrack = (trackClipsMap[clip.trackId] || []).filter(
-            (c) => c.id !== id,
-        );
+        const sameTrack = (trackClipsMap[clip.trackId] || []).filter((c) => c.id !== id);
 
         for (const other of sameTrack) {
             const otherStart = Number(other.startSec);
@@ -395,20 +379,19 @@ function applyAutoCrossfadeInReducer(
                 fadeInOverlaps.set(other.id, Math.max(fadeInOverlaps.get(other.id) ?? 0, overlap));
             } else {
                 fadeInOverlaps.set(id, Math.max(fadeInOverlaps.get(id) ?? 0, overlap));
-                fadeOutOverlaps.set(other.id, Math.max(fadeOutOverlaps.get(other.id) ?? 0, overlap));
+                fadeOutOverlaps.set(
+                    other.id,
+                    Math.max(fadeOutOverlaps.get(other.id) ?? 0, overlap),
+                );
             }
         }
     }
 
-    const allClipIds = new Set([
-        ...fadeInOverlaps.keys(),
-        ...fadeOutOverlaps.keys(),
-        ...movedIds,
-    ]);
-    
+    const allClipIds = new Set([...fadeInOverlaps.keys(), ...fadeOutOverlaps.keys(), ...movedIds]);
+
     for (const clipId of allClipIds) {
         // O(1) 直接获取，消除多余的 find 遍历
-        const clip = clipMap[clipId]; 
+        const clip = clipMap[clipId];
         if (!clip) continue;
 
         const hasOverlapIn = fadeInOverlaps.has(clipId);
@@ -453,9 +436,7 @@ function applyTimelineState(
         volume: clamp(Number(track.volume ?? 1), 0, MAX_TRACK_VOLUME),
 
         composeEnabled: Boolean(track.compose_enabled),
-        pitchAnalysisAlgo: String(
-            track.pitch_analysis_algo ?? "nsf_hifigan_onnx",
-        ),
+        pitchAnalysisAlgo: String(track.pitch_analysis_algo ?? "nsf_hifigan_onnx"),
         color: track.color || undefined,
     }));
 
@@ -480,8 +461,7 @@ function applyTimelineState(
                 // 旧项目兼容：source_end_sec == 0 曾表示"到源文件末尾"，修正为实际时长
                 if (raw === 0) {
                     return (
-                        Number(clip.duration_sec ?? 0) ||
-                        Math.max(0, Number(clip.length_sec ?? 1))
+                        Number(clip.duration_sec ?? 0) || Math.max(0, Number(clip.length_sec ?? 1))
                     );
                 }
                 return raw;
@@ -501,10 +481,7 @@ function applyTimelineState(
     state.selectedClipId = timeline.selected_clip_id;
     state.bpm = clamp(Number(timeline.bpm ?? state.bpm), 10, 300);
     state.playheadSec = Math.max(0, Number(timeline.playhead_sec ?? 0));
-    state.projectSec = Math.max(
-        4,
-        Number(timeline.project_sec ?? state.projectSec),
-    );
+    state.projectSec = Math.max(4, Number(timeline.project_sec ?? state.projectSec));
 
     const project = (timeline as any).project as
         | {
@@ -524,12 +501,8 @@ function applyTimelineState(
           }
         | undefined;
     if (project) {
-        const nextBaseScaleRaw = String(
-            project.base_scale ?? state.project.baseScale,
-        );
-        const nextBaseScale = (SCALE_KEYS as readonly string[]).includes(
-            nextBaseScaleRaw,
-        )
+        const nextBaseScaleRaw = String(project.base_scale ?? state.project.baseScale);
+        const nextBaseScale = (SCALE_KEYS as readonly string[]).includes(nextBaseScaleRaw)
             ? (nextBaseScaleRaw as typeof state.project.baseScale)
             : "C";
         const nextBeatsPerBar = clamp(
@@ -537,14 +510,30 @@ function applyTimelineState(
             1,
             32,
         );
-        const nextGridSizeRaw = String(
-            project.grid_size ?? state.project.gridSize,
-        );
+        const nextGridSizeRaw = String(project.grid_size ?? state.project.gridSize);
         const nextGridSize = (
             [
-                "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
-                "1/1d", "1/2d", "1/4d", "1/8d", "1/16d", "1/32d", "1/64d",
-                "1/1t", "1/2t", "1/4t", "1/8t", "1/16t", "1/32t", "1/64t",
+                "1/1",
+                "1/2",
+                "1/4",
+                "1/8",
+                "1/16",
+                "1/32",
+                "1/64",
+                "1/1d",
+                "1/2d",
+                "1/4d",
+                "1/8d",
+                "1/16d",
+                "1/32d",
+                "1/64d",
+                "1/1t",
+                "1/2t",
+                "1/4t",
+                "1/8t",
+                "1/16t",
+                "1/32t",
+                "1/64t",
             ] as const
         ).includes(nextGridSizeRaw as any)
             ? (nextGridSizeRaw as GridSize)
@@ -552,14 +541,9 @@ function applyTimelineState(
 
         state.project = {
             name: String(project.name ?? state.project.name ?? "Untitled"),
-            path:
-                project.path === undefined
-                    ? state.project.path
-                    : ((project.path as any) ?? null),
+            path: project.path === undefined ? state.project.path : ((project.path as any) ?? null),
             dirty: Boolean(project.dirty),
-            recent: Array.isArray(project.recent)
-                ? project.recent
-                : state.project.recent,
+            recent: Array.isArray(project.recent) ? project.recent : state.project.recent,
             baseScale: nextBaseScale,
             useCustomScale: Boolean(project.use_custom_scale),
             customScale: project.custom_scale
@@ -586,8 +570,8 @@ function applyTimelineState(
     }
     // 清理已删除 clip 的多选 ID，避免删除轨道组后残留无效的 clip 引用
     if (state.multiSelectedClipIds.length > 0) {
-        state.multiSelectedClipIds = state.multiSelectedClipIds.filter(
-            (id) => availableClipIds.has(id),
+        state.multiSelectedClipIds = state.multiSelectedClipIds.filter((id) =>
+            availableClipIds.has(id),
         );
     }
 
@@ -595,8 +579,7 @@ function applyTimelineState(
     const nextPitchRanges: Record<string, { min: number; max: number }> = {};
     for (const clip of timeline.clips) {
         const clipId = clip.id;
-        nextWaveforms[clipId] = (clip.waveform_preview ??
-            []) as WaveformPreview;
+        nextWaveforms[clipId] = (clip.waveform_preview ?? []) as WaveformPreview;
         nextPitchRanges[clipId] = clip.pitch_range ?? { min: -24, max: 24 };
         ensureClipAutomation(state, clipId);
     }
@@ -834,10 +817,7 @@ export {
     selectClipRemote,
 } from "./thunks/timelineThunks";
 
-export {
-    setTrackStateRemote,
-    removeSelectedClipRemote,
-} from "./thunks/trackThunks";
+export { setTrackStateRemote, removeSelectedClipRemote } from "./thunks/trackThunks";
 
 export {
     refreshRuntime,
@@ -887,21 +867,13 @@ const sessionSlice = createSlice({
             state._interactionLockCount = Math.max(0, state._interactionLockCount - 1);
         },
         /** 乐观更新轨道名称（立即反映到 UI，不等后端响应） */
-        setTrackName(
-            state,
-            action: PayloadAction<{ trackId: string; name: string }>,
-        ) {
-            const track = state.tracks.find(
-                (entry) => entry.id === action.payload.trackId,
-            );
+        setTrackName(state, action: PayloadAction<{ trackId: string; name: string }>) {
+            const track = state.tracks.find((entry) => entry.id === action.payload.trackId);
             if (track) {
                 track.name = action.payload.name;
             }
         },
-        setTrackMeters(
-            state,
-            action: PayloadAction<Record<string, TrackMeterInfo>>,
-        ) {
+        setTrackMeters(state, action: PayloadAction<Record<string, TrackMeterInfo>>) {
             state.trackMeters = action.payload;
         },
         clearTrackMeters(state) {
@@ -957,20 +929,12 @@ const sessionSlice = createSlice({
         setPitchSnapToleranceCents(state, action: PayloadAction<number>) {
             state.pitchSnapToleranceCents = clamp(action.payload, 0, 1000);
         },
-        setScaleHighlightMode(
-            state,
-            action: PayloadAction<"always" | "off">,
-        ) {
+        setScaleHighlightMode(state, action: PayloadAction<"always" | "off">) {
             state.scaleHighlightMode = action.payload;
         },
-        upsertCustomScalePreset(
-            state,
-            action: PayloadAction<CustomScalePreset>,
-        ) {
+        upsertCustomScalePreset(state, action: PayloadAction<CustomScalePreset>) {
             const incoming = sanitizeCustomScalePreset(action.payload);
-            const idx = state.customScalePresets.findIndex(
-                (preset) => preset.id === incoming.id,
-            );
+            const idx = state.customScalePresets.findIndex((preset) => preset.id === incoming.id);
             if (idx >= 0) {
                 state.customScalePresets[idx] = incoming;
             } else {
@@ -987,8 +951,7 @@ const sessionSlice = createSlice({
             state.autoScrollEnabled = !state.autoScrollEnabled;
         },
         toggleParamEditorSeekPlayhead(state) {
-            state.paramEditorSeekPlayheadEnabled =
-                !state.paramEditorSeekPlayheadEnabled;
+            state.paramEditorSeekPlayheadEnabled = !state.paramEditorSeekPlayheadEnabled;
         },
         toggleClipboardPreview(state) {
             state.showClipboardPreview = !state.showClipboardPreview;
@@ -996,10 +959,7 @@ const sessionSlice = createSlice({
         toggleParamValuePopup(state) {
             state.showParamValuePopup = !state.showParamValuePopup;
         },
-        cycleDragDirection(
-            state,
-            action: PayloadAction<"select" | "draw" | "vibrato">,
-        ) {
+        cycleDragDirection(state, action: PayloadAction<"select" | "draw" | "vibrato">) {
             if (action.payload === "select") {
                 const order: DragDirection[] = ["free", "x-only", "y-only"];
                 const idx = order.indexOf(state.selectDragDirection);
@@ -1085,13 +1045,8 @@ const sessionSlice = createSlice({
         setMultiSelectedClipIds(state, action: PayloadAction<string[]>) {
             state.multiSelectedClipIds = action.payload;
         },
-        moveClipStart(
-            state,
-            action: PayloadAction<{ clipId: string; startSec: number }>,
-        ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+        moveClipStart(state, action: PayloadAction<{ clipId: string; startSec: number }>) {
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (clip) {
                 clip.startSec = Math.max(0, action.payload.startSec);
                 // 拖动超出边界时自动扩展工程时长
@@ -1101,24 +1056,14 @@ const sessionSlice = createSlice({
                 }
             }
         },
-        moveClipTrack(
-            state,
-            action: PayloadAction<{ clipId: string; trackId: string }>,
-        ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+        moveClipTrack(state, action: PayloadAction<{ clipId: string; trackId: string }>) {
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (clip) {
                 clip.trackId = action.payload.trackId;
             }
         },
-        setClipLength(
-            state,
-            action: PayloadAction<{ clipId: string; lengthSec: number }>,
-        ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+        setClipLength(state, action: PayloadAction<{ clipId: string; lengthSec: number }>) {
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (clip) {
                 clip.lengthSec = Math.max(0.0, action.payload.lengthSec);
             }
@@ -1127,9 +1072,7 @@ const sessionSlice = createSlice({
             state,
             action: PayloadAction<{ clipId: string; playbackRate: number }>,
         ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             clip.playbackRate = clamp(action.payload.playbackRate, 0.1, 10);
         },
@@ -1141,13 +1084,10 @@ const sessionSlice = createSlice({
                 sourceEndSec?: number;
             }>,
         ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             if (action.payload.sourceStartSec !== undefined) {
-                clip.sourceStartSec =
-                    Number(action.payload.sourceStartSec) || 0;
+                clip.sourceStartSec = Number(action.payload.sourceStartSec) || 0;
             }
             if (action.payload.sourceEndSec !== undefined) {
                 clip.sourceEndSec = Math.max(0, action.payload.sourceEndSec);
@@ -1163,9 +1103,7 @@ const sessionSlice = createSlice({
                 fadeOutCurve?: FadeCurveType;
             }>,
         ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             if (action.payload.fadeInSec !== undefined) {
                 clip.fadeInSec = Math.max(0, action.payload.fadeInSec);
@@ -1180,23 +1118,13 @@ const sessionSlice = createSlice({
                 clip.fadeOutCurve = action.payload.fadeOutCurve;
             }
         },
-        setClipGain(
-            state,
-            action: PayloadAction<{ clipId: string; gain: number }>,
-        ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+        setClipGain(state, action: PayloadAction<{ clipId: string; gain: number }>) {
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             clip.gain = clamp(Number(action.payload.gain), 0, 4);
         },
-        setClipMuted(
-            state,
-            action: PayloadAction<{ clipId: string; muted: boolean }>,
-        ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+        setClipMuted(state, action: PayloadAction<{ clipId: string; muted: boolean }>) {
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             clip.muted = Boolean(action.payload.muted);
         },
@@ -1205,20 +1133,13 @@ const sessionSlice = createSlice({
             state,
             action: PayloadAction<{ clipId: string; color: ClipColor }>,
         ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             clip.color = normalizeClipColor(action.payload.color);
         },
         /** 回滚 clip 颜色（后端失败时恢复到旧值） */
-        rollbackClipColor(
-            state,
-            action: PayloadAction<{ clipId: string; color: ClipColor }>,
-        ) {
-            const clip = state.clips.find(
-                (entry) => entry.id === action.payload.clipId,
-            );
+        rollbackClipColor(state, action: PayloadAction<{ clipId: string; color: ClipColor }>) {
+            const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             clip.color = normalizeClipColor(action.payload.color);
         },
@@ -1267,28 +1188,19 @@ const sessionSlice = createSlice({
             }
         },
         toggleTrackMute(state, action: PayloadAction<string>) {
-            const track = state.tracks.find(
-                (entry) => entry.id === action.payload,
-            );
+            const track = state.tracks.find((entry) => entry.id === action.payload);
             if (track) {
                 track.muted = !track.muted;
             }
         },
         toggleTrackSolo(state, action: PayloadAction<string>) {
-            const track = state.tracks.find(
-                (entry) => entry.id === action.payload,
-            );
+            const track = state.tracks.find((entry) => entry.id === action.payload);
             if (track) {
                 track.solo = !track.solo;
             }
         },
-        setTrackVolume(
-            state,
-            action: PayloadAction<{ trackId: string; volume: number }>,
-        ) {
-            const track = state.tracks.find(
-                (entry) => entry.id === action.payload.trackId,
-            );
+        setTrackVolume(state, action: PayloadAction<{ trackId: string; volume: number }>) {
+            const track = state.tracks.find((entry) => entry.id === action.payload.trackId);
             if (track) {
                 track.volume = clamp(action.payload.volume, 0, MAX_TRACK_VOLUME);
             }
@@ -1331,9 +1243,7 @@ const sessionSlice = createSlice({
             pushHistory(state);
             ensureClipAutomation(state, clipId);
             const target = state.clipAutomation[clipId][action.payload.param];
-            const point = target.find(
-                (entry) => entry.id === action.payload.pointId,
-            );
+            const point = target.find((entry) => entry.id === action.payload.pointId);
             if (point) {
                 point.beat = Math.max(0, action.payload.beat);
                 point.value = action.payload.value;
@@ -1343,10 +1253,7 @@ const sessionSlice = createSlice({
         setSelectedPoint(state, action: PayloadAction<string | null>) {
             state.selectedPointId = action.payload;
         },
-        removeAutomationPoint(
-            state,
-            action: PayloadAction<{ param: EditParam; pointId: string }>,
-        ) {
+        removeAutomationPoint(state, action: PayloadAction<{ param: EditParam; pointId: string }>) {
             const clipId = state.selectedClipId;
             if (!clipId) {
                 return;
@@ -1371,8 +1278,7 @@ const sessionSlice = createSlice({
                 framePeriodMs: number;
             }>,
         ) {
-            const { clipId, curveStartSec, midiCurve, framePeriodMs } =
-                action.payload;
+            const { clipId, curveStartSec, midiCurve, framePeriodMs } = action.payload;
             state.clipPitchCurves[clipId] = {
                 curveStartSec,
                 midiCurve,
@@ -1410,19 +1316,14 @@ const sessionSlice = createSlice({
             state.status = label;
             state.error = undefined;
         };
-        const setRejected = (
-            state: SessionState,
-            action: { error?: { message?: string } },
-        ) => {
+        const setRejected = (state: SessionState, action: { error?: { message?: string } }) => {
             state.busy = false;
             state.error = action.error?.message ?? "Request failed";
             state.status = "Failed";
         };
 
         builder
-            .addCase(refreshRuntime.pending, (state) =>
-                setPending(state, "Refreshing runtime..."),
-            )
+            .addCase(refreshRuntime.pending, (state) => setPending(state, "Refreshing runtime..."))
             .addCase(refreshRuntime.fulfilled, (state, action) => {
                 state.busy = false;
                 if ((action.payload as { ok?: boolean }).ok) {
@@ -1483,15 +1384,13 @@ const sessionSlice = createSlice({
                 state.pitchSnapEnabled = s.pitchSnap;
                 // Validate pitchSnapUnit
                 const validUnits: PitchSnapUnit[] = ["semitone", "scale"];
-                state.pitchSnapUnit = validUnits.includes(
-                    s.pitchSnapUnit as PitchSnapUnit,
-                )
+                state.pitchSnapUnit = validUnits.includes(s.pitchSnapUnit as PitchSnapUnit)
                     ? (s.pitchSnapUnit as PitchSnapUnit)
                     : "semitone";
                 // Validate pitchSnapScale
-                state.pitchSnapScale = (
-                    SCALE_KEYS as readonly string[]
-                ).includes((s as any).pitchSnapScale)
+                state.pitchSnapScale = (SCALE_KEYS as readonly string[]).includes(
+                    (s as any).pitchSnapScale,
+                )
                     ? ((s as any).pitchSnapScale as typeof state.pitchSnapScale)
                     : "C";
                 // Load pitch snap tolerance (cents) if present in saved settings
@@ -1503,8 +1402,7 @@ const sessionSlice = createSlice({
                     );
                 }
                 state.playheadZoomEnabled = s.playheadZoom;
-                if (s.autoScroll != null)
-                    state.autoScrollEnabled = s.autoScroll;
+                if (s.autoScroll != null) state.autoScrollEnabled = s.autoScroll;
                 if ((s as any).paramEditorSeekPlayhead != null)
                     state.paramEditorSeekPlayheadEnabled = Boolean(
                         (s as any).paramEditorSeekPlayhead,
@@ -1512,15 +1410,11 @@ const sessionSlice = createSlice({
                 if (s.showClipboardPreview != null)
                     state.showClipboardPreview = s.showClipboardPreview;
                 if ((s as any).showParamValuePopup != null)
-                    state.showParamValuePopup = Boolean(
-                        (s as any).showParamValuePopup,
-                    );
+                    state.showParamValuePopup = Boolean((s as any).showParamValuePopup);
                 if (s.scaleHighlightMode != null)
                     state.scaleHighlightMode = s.scaleHighlightMode === "always" ? "always" : "off";
                 if (s.lockParamLines != null)
-                    state.lockParamLinesEnabled = Boolean(
-                        s.lockParamLines,
-                    );
+                    state.lockParamLinesEnabled = Boolean(s.lockParamLines);
                 const selectDir = (s as any).selectDragDirection;
                 if (selectDir != null && ["free", "x-only", "y-only"].includes(selectDir)) {
                     state.selectDragDirection = selectDir as DragDirection;
@@ -1533,21 +1427,15 @@ const sessionSlice = createSlice({
                 if (lineVibratoDir != null && ["free", "x-only"].includes(lineVibratoDir)) {
                     state.lineVibratoDragDirection = lineVibratoDir as DrawDragDirection;
                 }
-                const smoothness =
-                    (s as any).smoothnessPercent ??
-                    (s as any).edgeSmoothnessPercent;
+                const smoothness = (s as any).smoothnessPercent ?? (s as any).edgeSmoothnessPercent;
                 if (smoothness != null) {
-                    state.edgeSmoothnessPercent = clamp(
-                        Number(smoothness) || 0,
-                        0,
-                        100,
-                    );
+                    state.edgeSmoothnessPercent = clamp(Number(smoothness) || 0, 0, 100);
                 }
                 if (Array.isArray((s as any).customScalePresets)) {
-                    state.customScalePresets = (s as any).customScalePresets
-                        .map((preset: unknown) =>
+                    state.customScalePresets = (s as any).customScalePresets.map(
+                        (preset: unknown) =>
                             sanitizeCustomScalePreset(preset as Partial<CustomScalePreset>),
-                        );
+                    );
                 }
             })
 
@@ -1563,9 +1451,7 @@ const sessionSlice = createSlice({
             })
             .addCase(loadDefaultModel.rejected, setRejected)
 
-            .addCase(loadModel.pending, (state) =>
-                setPending(state, "Loading model..."),
-            )
+            .addCase(loadModel.pending, (state) => setPending(state, "Loading model..."))
             .addCase(loadModel.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
@@ -1575,9 +1461,7 @@ const sessionSlice = createSlice({
             })
             .addCase(loadModel.rejected, setRejected)
 
-            .addCase(processAudio.pending, (state) =>
-                setPending(state, "Processing audio..."),
-            )
+            .addCase(processAudio.pending, (state) => setPending(state, "Processing audio..."))
             .addCase(processAudio.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
@@ -1602,9 +1486,7 @@ const sessionSlice = createSlice({
                         });
                     }
                 }
-                state.status = payload.ok
-                    ? "Audio processed"
-                    : "Process audio failed";
+                state.status = payload.ok ? "Audio processed" : "Process audio failed";
             })
             .addCase(processAudio.rejected, setRejected)
 
@@ -1629,9 +1511,7 @@ const sessionSlice = createSlice({
                         applyTimelineState(state, payload.imported, { force: true });
                     }
                 }
-                state.status = payload.imported?.ok
-                    ? "Audio imported"
-                    : "Import audio failed";
+                state.status = payload.imported?.ok ? "Audio imported" : "Import audio failed";
             })
             .addCase(importAudioFromDialog.rejected, setRejected)
 
@@ -1670,11 +1550,7 @@ const sessionSlice = createSlice({
                 };
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "Import done" : "Import failed";
-                if (
-                    ok &&
-                    payload.imported &&
-                    (payload.imported as any).tracks
-                ) {
+                if (ok && payload.imported && (payload.imported as any).tracks) {
                     applyTimelineState(state, payload.imported as any, { force: true });
                     // Apply auto-crossfade for newly imported clips
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
@@ -1697,11 +1573,7 @@ const sessionSlice = createSlice({
                 };
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "Import done" : "Import failed";
-                if (
-                    ok &&
-                    payload.imported &&
-                    (payload.imported as any).tracks
-                ) {
+                if (ok && payload.imported && (payload.imported as any).tracks) {
                     applyTimelineState(state, payload.imported as any, { force: true });
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
@@ -1792,9 +1664,7 @@ const sessionSlice = createSlice({
             })
             .addCase(applyPitchShift.rejected, setRejected)
 
-            .addCase(synthesizeAudio.pending, (state) =>
-                setPending(state, "Synthesizing..."),
-            )
+            .addCase(synthesizeAudio.pending, (state) => setPending(state, "Synthesizing..."))
             .addCase(synthesizeAudio.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
@@ -1804,9 +1674,7 @@ const sessionSlice = createSlice({
             })
             .addCase(synthesizeAudio.rejected, setRejected)
 
-            .addCase(exportAudio.pending, (state) =>
-                setPending(state, "Exporting WAV..."),
-            )
+            .addCase(exportAudio.pending, (state) => setPending(state, "Exporting WAV..."))
             .addCase(exportAudio.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
@@ -1862,9 +1730,7 @@ const sessionSlice = createSlice({
                 };
                 if (!payload.ok) {
                     state.status =
-                        payload.mode === "separated"
-                            ? "Export separated failed"
-                            : "Export failed";
+                        payload.mode === "separated" ? "Export separated failed" : "Export failed";
                     return;
                 }
                 if (payload.mode === "separated") {
@@ -1895,9 +1761,7 @@ const sessionSlice = createSlice({
             .addCase(pasteVocalShifterClipboard.rejected, (state, action) => {
                 state.busy = false;
                 state.error =
-                    (action.payload as string) ??
-                    action.error?.message ??
-                    "Request failed";
+                    (action.payload as string) ?? action.error?.message ?? "Request failed";
                 state.status = "Failed";
             })
 
@@ -1912,9 +1776,7 @@ const sessionSlice = createSlice({
                 }
                 const skippedFiles = payload?.skippedFiles;
                 state.reaperSkippedFilesDialog =
-                    Array.isArray(skippedFiles) && skippedFiles.length > 0
-                        ? skippedFiles
-                        : null;
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
                 state.status = "Pasted Reaper clipboard data";
             })
             .addCase(pasteReaperClipboard.rejected, (state, action) => {
@@ -1926,9 +1788,7 @@ const sessionSlice = createSlice({
                 state.status = "Failed";
             })
 
-            .addCase(playOriginal.pending, (state) =>
-                setPending(state, "Playing original..."),
-            )
+            .addCase(playOriginal.pending, (state) => setPending(state, "Playing original..."))
             .addCase(playOriginal.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
@@ -1948,15 +1808,13 @@ const sessionSlice = createSlice({
             })
             .addCase(playOriginal.rejected, setRejected)
 
-            .addCase(stopAudioPlayback.pending, (state) =>
-                {
-                    setPending(state, "Stopping audio...");
-                    // Pause UI immediately on user stop/pause command; backend sync will
-                    // confirm the final transport state shortly after.
-                    state.runtime.isPlaying = false;
-                    state.runtime.playbackTarget = null;
-                },
-            )
+            .addCase(stopAudioPlayback.pending, (state) => {
+                setPending(state, "Stopping audio...");
+                // Pause UI immediately on user stop/pause command; backend sync will
+                // confirm the final transport state shortly after.
+                state.runtime.isPlaying = false;
+                state.runtime.playbackTarget = null;
+            })
             .addCase(stopAudioPlayback.fulfilled, (state, action) => {
                 state.busy = false;
                 state.lastResult = action.payload;
@@ -1981,9 +1839,7 @@ const sessionSlice = createSlice({
                 state.runtime.playbackDurationSec = 0;
                 state.playbackClipId = null;
                 state.playbackAnchorSec = 0;
-                state.status = payload.ok
-                    ? "Audio stopped"
-                    : "Stop audio failed";
+                state.status = payload.ok ? "Audio stopped" : "Stop audio failed";
             })
             .addCase(stopAudioPlayback.rejected, setRejected)
 
@@ -2017,15 +1873,9 @@ const sessionSlice = createSlice({
                 const shouldUpdatePlaybackFields =
                     nextIsPlaying !== state.runtime.isPlaying ||
                     nextTarget !== state.runtime.playbackTarget ||
-                    Math.abs(
-                        nextPositionSec - state.runtime.playbackPositionSec,
-                    ) > EPS_SEC ||
-                    Math.abs(
-                        nextDurationSec - state.runtime.playbackDurationSec,
-                    ) > EPS_SEC ||
-                    (nextIsPlaying &&
-                        Math.abs(nextplayheadSec - state.playheadSec) >
-                            EPS_SEC);
+                    Math.abs(nextPositionSec - state.runtime.playbackPositionSec) > EPS_SEC ||
+                    Math.abs(nextDurationSec - state.runtime.playbackDurationSec) > EPS_SEC ||
+                    (nextIsPlaying && Math.abs(nextplayheadSec - state.playheadSec) > EPS_SEC);
 
                 if (!shouldUpdatePlaybackFields) {
                     // No state change needed.
@@ -2144,9 +1994,7 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, (payload as any).timeline, { force: true });
                 const skippedFiles = (payload as any).skippedFiles;
                 state.vocalShifterSkippedFilesDialog =
-                    Array.isArray(skippedFiles) && skippedFiles.length > 0
-                        ? skippedFiles
-                        : null;
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
                 state.status = "VocalShifter project imported";
             })
             .addCase(openVocalShifterFromDialog.rejected, (state, action) => {
@@ -2178,9 +2026,7 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, (payload as any).timeline, { force: true });
                 const skippedFiles = (payload as any).skippedFiles;
                 state.vocalShifterSkippedFilesDialog =
-                    Array.isArray(skippedFiles) && skippedFiles.length > 0
-                        ? skippedFiles
-                        : null;
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
                 state.status = "VocalShifter project imported";
             })
             .addCase(openVocalShifterFromPath.rejected, (state, action) => {
@@ -2212,17 +2058,13 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, (payload as any).timeline, { force: true });
                 const skippedFiles = (payload as any).skippedFiles;
                 state.reaperSkippedFilesDialog =
-                    Array.isArray(skippedFiles) && skippedFiles.length > 0
-                        ? skippedFiles
-                        : null;
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
                 state.status = "Reaper project imported";
             })
             .addCase(openReaperFromDialog.rejected, (state, action) => {
                 state.busy = false;
                 state.error =
-                    (action.payload as string) ??
-                    action.error?.message ??
-                    "Import Reaper failed";
+                    (action.payload as string) ?? action.error?.message ?? "Import Reaper failed";
                 state.status = "Import failed";
             })
 
@@ -2246,17 +2088,13 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, (payload as any).timeline, { force: true });
                 const skippedFiles = (payload as any).skippedFiles;
                 state.reaperSkippedFilesDialog =
-                    Array.isArray(skippedFiles) && skippedFiles.length > 0
-                        ? skippedFiles
-                        : null;
+                    Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
                 state.status = "Reaper project imported";
             })
             .addCase(openReaperFromPath.rejected, (state, action) => {
                 state.busy = false;
                 state.error =
-                    (action.payload as string) ??
-                    action.error?.message ??
-                    "Import Reaper failed";
+                    (action.payload as string) ?? action.error?.message ?? "Import Reaper failed";
                 state.status = "Import failed";
             })
 
@@ -2273,11 +2111,7 @@ const sessionSlice = createSlice({
                 const currentClipPitchCurves = state.clipPitchCurves;
 
                 if (payload?.ok && payload?.timeline?.ok) {
-                    applyTimelineState(
-                        state,
-                        payload.timeline as TimelineState,
-                        { force: true },
-                    );
+                    applyTimelineState(state, payload.timeline as TimelineState, { force: true });
                     state.playheadSec = currentPlayheadSec;
                     state.paramsEpoch = currentParamsEpoch;
                     state.clipPitchCurves = currentClipPitchCurves;
@@ -2316,11 +2150,7 @@ const sessionSlice = createSlice({
                 const currentClipPitchCurves = state.clipPitchCurves;
 
                 if (payload?.ok && payload?.timeline?.ok) {
-                    applyTimelineState(
-                        state,
-                        payload.timeline as TimelineState,
-                        { force: true },
-                    );
+                    applyTimelineState(state, payload.timeline as TimelineState, { force: true });
                     state.playheadSec = currentPlayheadSec;
                     state.paramsEpoch = currentParamsEpoch;
                     state.clipPitchCurves = currentClipPitchCurves;
@@ -2407,46 +2237,55 @@ const sessionSlice = createSlice({
                 }
             })
 
-            .addCase(
-                setProjectTimelineSettingsRemote.fulfilled,
-                (state, action) => {
-                    const payload = action.payload as {
-                        ok?: boolean;
-                        project?: {
-                            beats_per_bar?: number;
-                            grid_size?: string;
-                            dirty?: boolean;
-                        };
+            .addCase(setProjectTimelineSettingsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                    project?: {
+                        beats_per_bar?: number;
+                        grid_size?: string;
+                        dirty?: boolean;
                     };
-                    if (!payload.ok) {
-                        return;
-                    }
-                    const beats = clamp(
-                        Number(payload.project?.beats_per_bar ?? state.beats),
-                        1,
-                        32,
-                    );
-                    const gridRaw = String(
-                        payload.project?.grid_size ?? state.grid,
-                    );
-                    const valid = (
-                        [
-                            "1/1", "1/2", "1/4", "1/8", "1/16", "1/32", "1/64",
-                            "1/1d", "1/2d", "1/4d", "1/8d", "1/16d", "1/32d", "1/64d",
-                            "1/1t", "1/2t", "1/4t", "1/8t", "1/16t", "1/32t", "1/64t",
-                        ] as const
-                    ).includes(gridRaw as any);
-                    const grid = (valid ? gridRaw : "1/4") as GridSize;
+                };
+                if (!payload.ok) {
+                    return;
+                }
+                const beats = clamp(Number(payload.project?.beats_per_bar ?? state.beats), 1, 32);
+                const gridRaw = String(payload.project?.grid_size ?? state.grid);
+                const valid = (
+                    [
+                        "1/1",
+                        "1/2",
+                        "1/4",
+                        "1/8",
+                        "1/16",
+                        "1/32",
+                        "1/64",
+                        "1/1d",
+                        "1/2d",
+                        "1/4d",
+                        "1/8d",
+                        "1/16d",
+                        "1/32d",
+                        "1/64d",
+                        "1/1t",
+                        "1/2t",
+                        "1/4t",
+                        "1/8t",
+                        "1/16t",
+                        "1/32t",
+                        "1/64t",
+                    ] as const
+                ).includes(gridRaw as any);
+                const grid = (valid ? gridRaw : "1/4") as GridSize;
 
-                    state.beats = beats;
-                    state.grid = grid;
-                    state.project.beatsPerBar = beats;
-                    state.project.gridSize = grid;
-                    if (typeof payload.project?.dirty === "boolean") {
-                        state.project.dirty = payload.project.dirty;
-                    }
-                },
-            )
+                state.beats = beats;
+                state.grid = grid;
+                state.project.beatsPerBar = beats;
+                state.project.gridSize = grid;
+                if (typeof payload.project?.dirty === "boolean") {
+                    state.project.dirty = payload.project.dirty;
+                }
+            })
 
             .addCase(addClipOnTrack.fulfilled, (state, action) => {
                 const payload = action.payload as {
@@ -2627,9 +2466,7 @@ const sessionSlice = createSlice({
                 // playhead_sec，因为并发请求时旧响应可能晚于新请求到达，
                 // 用旧值覆盖前端已更新的 playheadSec 会导致光标闪烁。
                 const requestedSec = action.meta.arg as number;
-                const backendSec = Number(
-                    payload.playhead_sec ?? requestedSec,
-                );
+                const backendSec = Number(payload.playhead_sec ?? requestedSec);
                 // 仅在前端 playheadSec 与请求参数一致（未被更新的请求覆盖）
                 // 或后端返回值与请求参数不同时才采纳后端值。
                 const EPS = 0.001;
@@ -2699,9 +2536,7 @@ const sessionSlice = createSlice({
             })
 
             .addCase(fetchSelectedTrackSummary.fulfilled, (state, action) => {
-                const payload = action.payload as
-                    | TrackSummaryResult
-                    | { ok?: false };
+                const payload = action.payload as TrackSummaryResult | { ok?: false };
                 if (!payload.ok) {
                     return;
                 }

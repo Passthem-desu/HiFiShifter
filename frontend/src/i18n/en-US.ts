@@ -36,8 +36,10 @@ export const enUS = {
     export_dialog_select_all_subtracks: "Select All Sub Tracks",
     export_dialog_error_invalid_range: "Invalid time range. End must be greater than start.",
     export_dialog_error_missing_project_path: "Please choose an output file path.",
-    export_dialog_error_missing_project_output_dir: "Please choose an output folder for project export.",
-    export_dialog_error_missing_project_file_name: "Please enter an output file name for project export.",
+    export_dialog_error_missing_project_output_dir:
+        "Please choose an output folder for project export.",
+    export_dialog_error_missing_project_file_name:
+        "Please enter an output file name for project export.",
     export_dialog_error_missing_output_dir: "Please choose an output folder.",
     export_dialog_error_missing_targets: "Please select at least one separated target.",
     export_dialog_error_invalid_sample_rate: "Invalid sample rate.",
@@ -112,8 +114,7 @@ export const enUS = {
     hint_add_point: "Double click in parameter panel to add points",
     hint_drag_point: "Drag points to edit the curve",
     hint_drop_audio: "Drop audio file onto app to import and analyze",
-    hint_alt_drag:
-        "Hold Alt while dragging a clip to Slip-Edit (move content internally; no snap)",
+    hint_alt_drag: "Hold Alt while dragging a clip to Slip-Edit (move content internally; no snap)",
 
     timeline_title: "Timeline",
     tracks: "TRACKS",
@@ -123,12 +124,9 @@ export const enUS = {
     track_remove_selected: "Remove Selected Track",
 
     param_editor: "Parameter Editor",
-    pitch_requires_compose:
-        "Enable Compose (C) on the root track to generate pitch curve",
-    pitch_requires_algo:
-        "Select a non-None pitch algorithm to enable pitch editing",
-    pitch_backend_unavailable:
-        "Pitch backend unavailable (check WORLD DLL / ONNX model)",
+    pitch_requires_compose: "Enable Compose (C) on the root track to generate pitch curve",
+    pitch_requires_algo: "Select a non-None pitch algorithm to enable pitch editing",
+    pitch_backend_unavailable: "Pitch backend unavailable (check WORLD DLL / ONNX model)",
     pitch_edit_not_modified_hint: "No edit yet: curve matches original pitch",
     pitch_status_label: "Pitch",
     pitch_status_off: "Off",
@@ -218,8 +216,7 @@ export const enUS = {
     fade_out: "Fade Out",
     show_secondary_param: "Show secondary parameter overlay",
     hide_secondary_param: "Hide secondary parameter overlay",
-    onnx_compile_required:
-        "ONNX model not compiled. Run: cargo tauri dev --features onnx",
+    onnx_compile_required: "ONNX model not compiled. Run: cargo tauri dev --features onnx",
     onnx_unavailable_label: " (unavailable)",
     solo: "Solo",
     status_analyzing_pitch: "Analyzing pitch",
@@ -272,8 +269,7 @@ export const enUS = {
     fade_curve_logarithmic: "Logarithmic",
     fade_curve_scurve: "S-Curve",
 
-    clip_gain_drag_hint:
-        "Drag up/down to adjust gain / Double-click to enter precise value",
+    clip_gain_drag_hint: "Drag up/down to adjust gain / Double-click to enter precise value",
     track_change_color: "Change track color",
     track_clone: "Clone Track",
     color_blue: "Blue",
@@ -307,8 +303,7 @@ export const enUS = {
     kb_conflict_msg: "This shortcut conflicts with:",
     kb_conflict_override: "Override",
     kb_conflict_cancel: "Cancel",
-    kb_dialog_hint_click:
-        "Left-click to set to None. Right-click to restore default.",
+    kb_dialog_hint_click: "Left-click to set to None. Right-click to restore default.",
     kb_group_playback: "Playback",
     kb_group_edit: "Edit",
     kb_group_project: "Project",
@@ -341,23 +336,18 @@ export const enUS = {
     kb_pianoroll_shift_param_up: "Shift Param Up (clip range)",
     kb_pianoroll_shift_param_down: "Shift Param Down (clip range)",
     kb_pianoroll_shift_param_up_selection: "Shift Param Up (selection range)",
-    kb_pianoroll_shift_param_down_selection:
-        "Shift Param Down (selection range)",
+    kb_pianoroll_shift_param_down_selection: "Shift Param Down (selection range)",
     kb_modifier_slip_edit: "Slip Edit (hold while dragging clip)",
     kb_modifier_stretch: "Time Stretch (hold while dragging edge)",
-    kb_modifier_no_snap:
-        "Toggle grid snap while dragging (hold to invert current grid snap)",
+    kb_modifier_no_snap: "Toggle grid snap while dragging (hold to invert current grid snap)",
     kb_modifier_copy_drag: "Copy Drag (hold while dragging clip)",
     kb_modifier_horizontal_zoom: "Horizontal Zoom (hold + scroll)",
     kb_modifier_pr_vzoom: "Vertical Zoom (hold + scroll)",
     kb_modifier_param_morph: "Param Morph (hold inside param selection)",
     kb_modifier_param_fine_adjust: "Param Fine Adjust (hold)",
-    kb_modifier_vibrato_amplitude_adjust:
-        "Vibrato Amplitude Adjust (hold + wheel)",
-    kb_modifier_vibrato_frequency_adjust:
-        "Vibrato Frequency Adjust (hold + wheel)",
-    kb_modifier_piano_keys_scroll_v:
-        "Piano Keys Vertical Scroll (hold + wheel)",
+    kb_modifier_vibrato_amplitude_adjust: "Vibrato Amplitude Adjust (hold + wheel)",
+    kb_modifier_vibrato_frequency_adjust: "Vibrato Frequency Adjust (hold + wheel)",
+    kb_modifier_piano_keys_scroll_v: "Piano Keys Vertical Scroll (hold + wheel)",
     kb_modifier_piano_keys_zoom_v: "Piano Keys Vertical Zoom (hold + wheel)",
     kb_group_mode: "Mode",
     kb_mode_toggle: "Mode Toggle",
@@ -376,10 +366,8 @@ export const enUS = {
     vs_paste_clipboard_not_found: "VocalShifter clipboard data was not found.",
     vs_paste_clipboard_invalid_format:
         "Clipboard file format is invalid (size is not a multiple of 0x80, or record is corrupted).",
-    vs_paste_clipboard_io_error:
-        "An I/O error occurred while reading VocalShifter clipboard file.",
-    vs_paste_no_pitch_line:
-        "No pitch line is selected. Please select one first.",
+    vs_paste_clipboard_io_error: "An I/O error occurred while reading VocalShifter clipboard file.",
+    vs_paste_no_pitch_line: "No pitch line is selected. Please select one first.",
     vs_import_read_failed: "Failed to read VocalShifter project file.",
     vs_import_parse_failed: "Failed to parse VocalShifter project.",
     vs_import_skipped_header:
@@ -587,8 +575,7 @@ export const enUS = {
     pitch_snap_settings: "Pitch Snap Settings",
 
     // Keybinding hint
-    kb_hint_recording:
-        "Left-click a binding to set it to None. Right-click to reset to default.",
+    kb_hint_recording: "Left-click a binding to set it to None. Right-click to reset to default.",
 
     // Keybinding None
     kb_none: "None",
@@ -649,9 +636,10 @@ export const enUS = {
     appearance_saved_themes: "Saved Themes",
     appearance_theme_name: "Theme Name",
     appearance_custom_theme: "Custom Theme",
-    appearance_no_custom_colors: "No custom color overrides. Click \"New Theme\" to create one.",
+    appearance_no_custom_colors: 'No custom color overrides. Click "New Theme" to create one.',
     appearance_quick_colors: "Quick Color Adjustments",
-    appearance_quick_colors_hint: "Adjust frequently used colors here. For all color tokens, switch to the Colors tab.",
+    appearance_quick_colors_hint:
+        "Adjust frequently used colors here. For all color tokens, switch to the Colors tab.",
     appearance_theme_management: "Theme Management",
     appearance_modified_count: "{count} color(s) modified",
     appearance_waveform_colors: "Waveform Colors",

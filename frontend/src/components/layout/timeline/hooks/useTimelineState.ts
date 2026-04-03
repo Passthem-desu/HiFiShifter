@@ -14,22 +14,13 @@
  * - bars / clipsByTrackId / contentWidth/Height 派生计算
  * - Mipmap 预加载
  */
-import React, {
-    useEffect,
-    useLayoutEffect,
-    useMemo,
-    useRef,
-    useState,
-} from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch, useAppSelector } from "../../../../app/hooks";
 import type { RootState } from "../../../../app/store";
 import { timelineViewportBus } from "../../../../utils/timelineViewportBus";
 
 import { waveformMipmapStore } from "../../../../utils/waveformMipmapStore";
-import {
-    seekPlayhead,
-    setplayheadSec,
-} from "../../../../features/session/sessionSlice";
+import { seekPlayhead, setplayheadSec } from "../../../../features/session/sessionSlice";
 import { selectKeybinding } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { getDynamicProjectSec } from "../../../../features/session/projectBoundary";
@@ -83,14 +74,10 @@ export interface TimelineStateResult {
     setRowHeight: React.Dispatch<React.SetStateAction<number>>;
     altPressed: boolean;
     trackVolumeUi: Record<string, number>;
-    setTrackVolumeUi: React.Dispatch<
-        React.SetStateAction<Record<string, number>>
-    >;
+    setTrackVolumeUi: React.Dispatch<React.SetStateAction<Record<string, number>>>;
     sameSourceConfirmOpen: boolean;
     setSameSourceConfirmOpen: React.Dispatch<React.SetStateAction<boolean>>;
-    sameSourceConfirmResolverRef: React.MutableRefObject<
-        ((confirmed: boolean) => void) | null
-    >;
+    sameSourceConfirmResolverRef: React.MutableRefObject<((confirmed: boolean) => void) | null>;
 
     // Derived
     secPerBeat: number;
@@ -138,16 +125,8 @@ export interface TimelineStateResult {
     // Functions
     syncScrollLeft: (next: number) => void;
     setScrollLeftAction: React.Dispatch<React.SetStateAction<number>>;
-    secFromClientX: (
-        clientX: number,
-        bounds: DOMRect,
-        xScroll: number,
-    ) => number;
-    beatFromClientX: (
-        clientX: number,
-        bounds: DOMRect,
-        xScroll: number,
-    ) => number;
+    secFromClientX: (clientX: number, bounds: DOMRect, xScroll: number) => number;
+    beatFromClientX: (clientX: number, bounds: DOMRect, xScroll: number) => number;
     trackIdFromClientY: (clientY: number) => string | null;
     rowTopForTrackId: (trackId: string | null) => number;
     ensureDropPreviewDuration: (path: string) => void;
@@ -228,13 +207,20 @@ export function useTimelineState(): TimelineStateResult {
     }, [viewportWidth]);
 
     const [sameSourceConfirmOpen, setSameSourceConfirmOpen] = useState(false);
-    const sameSourceConfirmResolverRef = useRef<
-        ((confirmed: boolean) => void) | null
-    >(null);
+    const sameSourceConfirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
 
     useEffect(() => {
         scrollLeftRef.current = scrollLeft;
     }, [scrollLeft]);
+
+    useEffect(() => {
+        return () => {
+            if (scrollStateRafRef.current != null) {
+                cancelAnimationFrame(scrollStateRafRef.current);
+                scrollStateRafRef.current = null;
+            }
+        };
+    }, []);
 
     // ── ResizeObserver → viewportWidth ────────────────────────
     useEffect(() => {
@@ -271,18 +257,16 @@ export function useTimelineState(): TimelineStateResult {
         }
         // ★ 立即广播视口变化 → WaveformTrackCanvas 直接 invalidate（绕过 React）
         timelineViewportBus.emit(next, pxPerSecRef.current, viewportWidthRef.current);
-        // 50ms setTimeout 降频 React state 更新
+        // 用 rAF 合并状态更新，保证自动滚屏可达 60Hz 且避免同步抖动
         if (scrollStateRafRef.current == null) {
-            scrollStateRafRef.current = setTimeout(() => {
+            scrollStateRafRef.current = requestAnimationFrame(() => {
                 scrollStateRafRef.current = null;
                 setScrollLeft(scrollLeftRef.current);
-            }, 50) as unknown as number;
+            });
         }
     }
 
-    const setScrollLeftAction: React.Dispatch<React.SetStateAction<number>> = (
-        action,
-    ) => {
+    const setScrollLeftAction: React.Dispatch<React.SetStateAction<number>> = (action) => {
         const next =
             typeof action === "function"
                 ? (action as (prev: number) => number)(scrollLeftRef.current)
@@ -329,9 +313,7 @@ export function useTimelineState(): TimelineStateResult {
     } | null>(null);
 
     // ── trackVolumeUi ────────────────────────────────────────
-    const [trackVolumeUi, setTrackVolumeUi] = useState<
-        Record<string, number>
-    >({});
+    const [trackVolumeUi, setTrackVolumeUi] = useState<Record<string, number>>({});
 
     // ── dropPreview ──────────────────────────────────────────
     const [dropPreview, setDropPreview] = useState<{
@@ -347,18 +329,10 @@ export function useTimelineState(): TimelineStateResult {
     const [altPressed, setAltPressed] = useState(false);
 
     // ── Keybindings ──────────────────────────────────────────
-    const stretchKb = useAppSelector((state) =>
-        selectKeybinding(state, "modifier.clipStretch"),
-    );
-    const slipEditKb = useAppSelector((state) =>
-        selectKeybinding(state, "modifier.clipSlipEdit"),
-    );
-    const noSnapKb = useAppSelector((state) =>
-        selectKeybinding(state, "modifier.clipNoSnap"),
-    );
-    const copyDragKb = useAppSelector((state) =>
-        selectKeybinding(state, "modifier.clipCopyDrag"),
-    );
+    const stretchKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipStretch"));
+    const slipEditKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipSlipEdit"));
+    const noSnapKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipNoSnap"));
+    const copyDragKb = useAppSelector((state) => selectKeybinding(state, "modifier.clipCopyDrag"));
     const scrollHorizontalKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.scrollHorizontal"),
     );
@@ -380,8 +354,7 @@ export function useTimelineState(): TimelineStateResult {
     useEffect(() => {
         function isStretchModifier(e: KeyboardEvent): boolean {
             const kb = stretchKbRef.current;
-            if (kb.ctrl && (e.key === "Control" || e.ctrlKey || e.metaKey))
-                return true;
+            if (kb.ctrl && (e.key === "Control" || e.ctrlKey || e.metaKey)) return true;
             if (kb.alt && (e.key === "Alt" || e.altKey)) return true;
             if (kb.shift && (e.key === "Shift" || e.shiftKey)) return true;
             return false;
@@ -413,10 +386,7 @@ export function useTimelineState(): TimelineStateResult {
     }, []);
 
     // ── dynamicProjectSec / contentWidth / contentHeight ─────
-    const dynamicProjectSec = useMemo(
-        () => getDynamicProjectSec(s.clips),
-        [s.clips],
-    );
+    const dynamicProjectSec = useMemo(() => getDynamicProjectSec(s.clips), [s.clips]);
 
     const contentWidth = useMemo(
         () => Math.max(1, Math.ceil(dynamicProjectSec * pxPerSec)),
@@ -424,19 +394,14 @@ export function useTimelineState(): TimelineStateResult {
     );
 
     const dropExtraRows =
-        (dropPreview && !dropPreview.trackId ? 1 : 0) +
-        (clipDropNewTrack ? 1 : 0);
-    const contentHeight =
-        (s.tracks.length + dropExtraRows) * rowHeight + TRACK_ADD_ROW_HEIGHT;
+        (dropPreview && !dropPreview.trackId ? 1 : 0) + (clipDropNewTrack ? 1 : 0);
+    const contentHeight = (s.tracks.length + dropExtraRows) * rowHeight + TRACK_ADD_ROW_HEIGHT;
 
     // ── bars ─────────────────────────────────────────────────
     const bars = useMemo(() => {
         const beatsPerBar = Math.max(1, Math.round(s.beats || 4));
         const secPerBeatLocal = 60 / Math.max(1, s.bpm);
-        const totalBeats = Math.max(
-            1,
-            Math.ceil(dynamicProjectSec / secPerBeatLocal),
-        );
+        const totalBeats = Math.max(1, Math.ceil(dynamicProjectSec / secPerBeatLocal));
         const totalBars = Math.max(1, Math.ceil(totalBeats / beatsPerBar));
 
         let startBarIndex = 0;
@@ -451,22 +416,12 @@ export function useTimelineState(): TimelineStateResult {
             const leftBeat = leftPx / beatPx;
             const rightBeat = rightPx / beatPx;
 
-            startBarIndex = Math.max(
-                0,
-                Math.floor(leftBeat / beatsPerBar) - 1,
-            );
-            endBarIndex = Math.min(
-                totalBars,
-                Math.ceil(rightBeat / beatsPerBar) + 1,
-            );
+            startBarIndex = Math.max(0, Math.floor(leftBeat / beatsPerBar) - 1);
+            endBarIndex = Math.min(totalBars, Math.ceil(rightBeat / beatsPerBar) + 1);
         }
 
         const result: Array<{ beat: number; label: string }> = [];
-        for (
-            let barIndex = startBarIndex;
-            barIndex <= endBarIndex;
-            barIndex += 1
-        ) {
+        for (let barIndex = startBarIndex; barIndex <= endBarIndex; barIndex += 1) {
             const beat = barIndex * beatsPerBar;
             if (beat > totalBeats) break;
             result.push({ beat, label: `${barIndex + 1}.1` });
@@ -572,19 +527,12 @@ export function useTimelineState(): TimelineStateResult {
     }
 
     function getDropPreviewWidthPx(durationSec: number) {
-        return durationSec > 0
-            ? Math.max(1, pxPerSecRef.current * durationSec)
-            : 80;
+        return durationSec > 0 ? Math.max(1, pxPerSecRef.current * durationSec) : 80;
     }
 
     // ── Playhead helpers ─────────────────────────────────────
     const setPlayheadFromClientX = React.useCallback(
-        (
-            clientX: number,
-            bounds: DOMRect,
-            xScroll: number,
-            commit: boolean,
-        ) => {
+        (clientX: number, bounds: DOMRect, xScroll: number, commit: boolean) => {
             const beat = beatFromClientX(clientX, bounds, xScroll);
 
             if (commit) {
@@ -610,20 +558,14 @@ export function useTimelineState(): TimelineStateResult {
             getBounds: () => DOMRect | null;
             getScrollLeft: () => number;
         }) => {
-            const { startClientX, startClientY, getBounds, getScrollLeft } =
-                args;
+            const { startClientX, startClientY, getBounds, getScrollLeft } = args;
             let moved = false;
             let lastSec = 0;
 
             const updateAt = (clientX: number, commit: boolean) => {
                 const bounds = getBounds();
                 if (!bounds) return null;
-                const sec = setPlayheadFromClientX(
-                    clientX,
-                    bounds,
-                    getScrollLeft(),
-                    commit,
-                );
+                const sec = setPlayheadFromClientX(clientX, bounds, getScrollLeft(), commit);
                 return sec;
             };
 
@@ -690,20 +632,12 @@ export function useTimelineState(): TimelineStateResult {
         clientY: number,
     ): boolean {
         const bounds = scroller.getBoundingClientRect();
-        const horizontalScrollbarHeight =
-            scroller.offsetHeight - scroller.clientHeight;
-        if (
-            horizontalScrollbarHeight > 0 &&
-            clientY > bounds.bottom - horizontalScrollbarHeight
-        ) {
+        const horizontalScrollbarHeight = scroller.offsetHeight - scroller.clientHeight;
+        if (horizontalScrollbarHeight > 0 && clientY > bounds.bottom - horizontalScrollbarHeight) {
             return true;
         }
-        const verticalScrollbarWidth =
-            scroller.offsetWidth - scroller.clientWidth;
-        if (
-            verticalScrollbarWidth > 0 &&
-            clientX > bounds.right - verticalScrollbarWidth
-        ) {
+        const verticalScrollbarWidth = scroller.offsetWidth - scroller.clientWidth;
+        if (verticalScrollbarWidth > 0 && clientX > bounds.right - verticalScrollbarWidth) {
             return true;
         }
         return false;
@@ -762,8 +696,7 @@ export function useTimelineState(): TimelineStateResult {
 
     // ── viewport start/end ───────────────────────────────────
     const viewportStartSec = scrollLeft / Math.max(1e-9, pxPerSec);
-    const viewportEndSec =
-        (scrollLeft + viewportWidth) / Math.max(1e-9, pxPerSec);
+    const viewportEndSec = (scrollLeft + viewportWidth) / Math.max(1e-9, pxPerSec);
 
     // ── Return ───────────────────────────────────────────────
     return {

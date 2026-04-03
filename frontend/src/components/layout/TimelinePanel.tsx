@@ -33,11 +33,7 @@ import {
     setTrackVolume,
 } from "../../features/session/sessionSlice";
 
-
-import {
-    NEW_TRACK_SENTINEL,
-    useClipDrag,
-} from "./timeline/hooks/useClipDrag";
+import { NEW_TRACK_SENTINEL, useClipDrag } from "./timeline/hooks/useClipDrag";
 import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
 import { collectFadeContextClips } from "./timeline/clipFadeContext";
@@ -231,8 +227,7 @@ export const TimelinePanel: React.FC = () => {
         playheadSec: s.playheadSec,
     });
 
-    const isTransportAdvancing =
-        s.runtime.isPlaying && s.runtime.playbackPositionSec > 1e-4;
+    const isTransportAdvancing = s.runtime.isPlaying && s.runtime.playbackPositionSec > 1e-4;
 
     useVisualPlayhead({
         syncedPlayheadSec: s.playheadSec,
@@ -320,9 +315,7 @@ export const TimelinePanel: React.FC = () => {
 
     const newTrackGhostClips = useMemo(() => {
         if (clipDropNewTrack) {
-            const moved = s.clips.filter(
-                (clip) => clip.trackId === NEW_TRACK_SENTINEL,
-            );
+            const moved = s.clips.filter((clip) => clip.trackId === NEW_TRACK_SENTINEL);
             if (moved.length > 0) return moved;
         }
         if (!ghostDrag || ghostDrag.targetTrackId != null) {
@@ -335,13 +328,10 @@ export const TimelinePanel: React.FC = () => {
                 if (!initial || !clip) return null;
                 return {
                     ...clip,
-                    startSec: Math.max(
-                        0,
-                        initial.startSec + ghostDrag.deltaSec,
-                    ),
+                    startSec: Math.max(0, initial.startSec + ghostDrag.deltaSec),
                 };
             })
-            .filter((clip): clip is typeof s.clips[number] => clip != null);
+            .filter((clip): clip is (typeof s.clips)[number] => clip != null);
     }, [clipDropNewTrack, ghostDrag, s.clips]);
 
     const startClipDrag = React.useCallback(
@@ -351,13 +341,7 @@ export const TimelinePanel: React.FC = () => {
             clipstartSec: number,
             altPressedHint?: boolean,
         ) => {
-            _startClipDragInner(
-                e,
-                clipId,
-                clipstartSec,
-                altPressedHint,
-                startSlipDrag,
-            );
+            _startClipDragInner(e, clipId, clipstartSec, altPressedHint, startSlipDrag);
         },
         [_startClipDragInner, startSlipDrag],
     );
@@ -474,19 +458,13 @@ export const TimelinePanel: React.FC = () => {
                 onScrollTopChange={(scrollTop) => {
                     const timelineScroller = scrollRef.current;
                     if (!timelineScroller) return;
-                    if (
-                        Math.abs(timelineScroller.scrollTop - scrollTop) < 0.5
-                    )
-                        return;
+                    if (Math.abs(timelineScroller.scrollTop - scrollTop) < 0.5) return;
                     timelineScroller.scrollTop = scrollTop;
                 }}
             />
 
             {/* Timeline View (Right) */}
-            <Flex
-                direction="column"
-                className="flex-1 relative overflow-hidden bg-qt-graph-bg"
-            >
+            <Flex direction="column" className="flex-1 relative overflow-hidden bg-qt-graph-bg">
                 <TimeRuler
                     contentWidth={contentWidth}
                     scrollLeft={scrollLeft}
@@ -501,15 +479,10 @@ export const TimelinePanel: React.FC = () => {
                     contentRef={rulerContentRef}
                     onMouseDown={(e) => {
                         if (e.button !== 0) return;
-                        document.body.setAttribute(
-                            "data-hs-focus-window",
-                            "timeline",
-                        );
+                        document.body.setAttribute("data-hs-focus-window", "timeline");
                         const scroller = scrollRef.current;
                         if (!scroller) return;
-                        const bounds = (
-                            e.currentTarget as HTMLDivElement
-                        ).getBoundingClientRect();
+                        const bounds = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
                         startDeferredPlayheadSeek({
                             startClientX: e.clientX,
                             startClientY: e.clientY,
@@ -541,13 +514,9 @@ export const TimelinePanel: React.FC = () => {
                         const el = e.currentTarget as HTMLDivElement;
                         if (trackListScrollRef.current) {
                             if (
-                                Math.abs(
-                                    trackListScrollRef.current.scrollTop -
-                                        el.scrollTop,
-                                ) >= 0.5
+                                Math.abs(trackListScrollRef.current.scrollTop - el.scrollTop) >= 0.5
                             ) {
-                                trackListScrollRef.current.scrollTop =
-                                    el.scrollTop;
+                                trackListScrollRef.current.scrollTop = el.scrollTop;
                             }
                         }
                     }}
@@ -566,10 +535,7 @@ export const TimelinePanel: React.FC = () => {
                         setContextMenu(null);
 
                         const target = e.target as HTMLElement | null;
-                        if (
-                            target?.closest?.("[data-hs-context-menu='1']")
-                        )
-                            return;
+                        if (target?.closest?.("[data-hs-context-menu='1']")) return;
 
                         const trackId = trackIdFromClientY(e.clientY);
                         if (!trackId) {
@@ -578,45 +544,26 @@ export const TimelinePanel: React.FC = () => {
                         }
 
                         const scroller = scrollRef.current;
-                        const bounds =
-                            scroller?.getBoundingClientRect() ?? null;
+                        const bounds = scroller?.getBoundingClientRect() ?? null;
                         const timeAtPointer =
                             bounds && scroller
-                                ? beatFromClientX(
-                                      e.clientX,
-                                      bounds,
-                                      scroller.scrollLeft,
-                                  )
+                                ? beatFromClientX(e.clientX, bounds, scroller.scrollLeft)
                                 : null;
 
                         if (timeAtPointer != null) {
                             const clipsHere = sessionRef.current.clips
                                 .filter((c) => c.trackId === trackId)
                                 .filter((c) => {
-                                    const start =
-                                        Number(c.startSec ?? 0) || 0;
-                                    const end =
-                                        start +
-                                        (Number(c.lengthSec ?? 0) || 0);
-                                    return (
-                                        timeAtPointer >= start &&
-                                        timeAtPointer <= end
-                                    );
+                                    const start = Number(c.startSec ?? 0) || 0;
+                                    const end = start + (Number(c.lengthSec ?? 0) || 0);
+                                    return timeAtPointer >= start && timeAtPointer <= end;
                                 })
-                                .sort(
-                                    (a, b) => a.startSec - b.startSec,
-                                );
+                                .sort((a, b) => a.startSec - b.startSec);
 
                             if (clipsHere.length > 0) {
-                                if (
-                                    target?.closest?.(
-                                        "[data-hs-clip-item='1']",
-                                    )
-                                )
-                                    return;
+                                if (target?.closest?.("[data-hs-clip-item='1']")) return;
 
-                                const topClip =
-                                    clipsHere[clipsHere.length - 1];
+                                const topClip = clipsHere[clipsHere.length - 1];
                                 setContextMenu({
                                     x: e.clientX,
                                     y: e.clientY,
@@ -630,9 +577,7 @@ export const TimelinePanel: React.FC = () => {
                             }
                         }
 
-                        if (
-                            sessionRef.current.selectedTrackId !== trackId
-                        ) {
+                        if (sessionRef.current.selectedTrackId !== trackId) {
                             void dispatch(selectTrackRemote(trackId));
                         }
                         setTrackAreaMenu({
@@ -645,47 +590,26 @@ export const TimelinePanel: React.FC = () => {
                     onDragOver={(e) => {
                         const dt = e.dataTransfer;
                         const tauriPath = tauriDraggedPathRef.current;
-                        const hasDomFile = Boolean(
-                            dt?.files && dt.files.length > 0,
-                        );
+                        const hasDomFile = Boolean(dt?.files && dt.files.length > 0);
                         const isTauri = Boolean(
-                            (window as unknown as { __TAURI__?: unknown })
-                                .__TAURI__,
+                            (window as unknown as { __TAURI__?: unknown }).__TAURI__,
                         );
-                        if (
-                            !isTauri &&
-                            !hasFileDrag(dt) &&
-                            !hasDomFile &&
-                            !tauriPath
-                        )
-                            return;
+                        if (!isTauri && !hasFileDrag(dt) && !hasDomFile && !tauriPath) return;
                         e.preventDefault();
                         const info = extractLocalFilePath(dt);
                         const el = e.currentTarget as HTMLDivElement;
                         const bounds = el.getBoundingClientRect();
-                        const beat = beatFromClientX(
-                            e.clientX,
-                            bounds,
-                            el.scrollLeft,
-                        );
+                        const beat = beatFromClientX(e.clientX, bounds, el.scrollLeft);
                         const trackId = trackIdFromClientY(e.clientY);
                         const path = info?.path || tauriPath || "";
                         const fileName =
                             info?.name ||
                             (tauriPath
-                                ? String(
-                                      tauriPath.split(/[\\/]/).pop() ??
-                                          tauriPath,
-                                  )
+                                ? String(tauriPath.split(/[\\/]/).pop() ?? tauriPath)
                                 : hasDomFile
-                                    ? String(
-                                          dt?.files?.[0]?.name ?? "Audio",
-                                      )
-                                    : "Audio");
-                        if (
-                            path &&
-                            detectExternalPathAction(path) !== "importAudio"
-                        ) {
+                                  ? String(dt?.files?.[0]?.name ?? "Audio")
+                                  : "Audio");
+                        if (path && detectExternalPathAction(path) !== "importAudio") {
                             setDropPreview(null);
                             return;
                         }
@@ -702,42 +626,22 @@ export const TimelinePanel: React.FC = () => {
                     }}
                     onDragLeave={(e) => {
                         const related = e.relatedTarget as Node | null;
-                        if (
-                            related &&
-                            (e.currentTarget as HTMLDivElement).contains(
-                                related,
-                            )
-                        )
+                        if (related && (e.currentTarget as HTMLDivElement).contains(related))
                             return;
                         setDropPreview(null);
                     }}
                     onDrop={(e) => {
                         const dt = e.dataTransfer;
                         const tauriPath = tauriDraggedPathRef.current;
-                        const lastTauriDropPath =
-                            tauriLastDropPathRef.current;
-                        const hasDomFile = Boolean(
-                            dt?.files && dt.files.length > 0,
-                        );
+                        const lastTauriDropPath = tauriLastDropPathRef.current;
+                        const hasDomFile = Boolean(dt?.files && dt.files.length > 0);
                         const isTauri = Boolean(
-                            (window as unknown as { __TAURI__?: unknown })
-                                .__TAURI__,
+                            (window as unknown as { __TAURI__?: unknown }).__TAURI__,
                         );
-                        if (
-                            !isTauri &&
-                            !hasFileDrag(dt) &&
-                            !hasDomFile &&
-                            !tauriPath
-                        )
-                            return;
+                        if (!isTauri && !hasFileDrag(dt) && !hasDomFile && !tauriPath) return;
                         e.preventDefault();
 
-                        if (
-                            isTauri &&
-                            Date.now() -
-                                (tauriDropHandledAtRef.current || 0) <
-                                500
-                        ) {
+                        if (isTauri && Date.now() - (tauriDropHandledAtRef.current || 0) < 500) {
                             setDropPreview(null);
                             return;
                         }
@@ -745,28 +649,16 @@ export const TimelinePanel: React.FC = () => {
                         const info = extractLocalFilePath(dt);
                         const el = e.currentTarget as HTMLDivElement;
                         const bounds = el.getBoundingClientRect();
-                        const beat = beatFromClientX(
-                            e.clientX,
-                            bounds,
-                            el.scrollLeft,
-                        );
+                        const beat = beatFromClientX(e.clientX, bounds, el.scrollLeft);
                         const trackId = trackIdFromClientY(e.clientY);
                         setDropPreview(null);
-                        const resolvedPath =
-                            info?.path || lastTauriDropPath || tauriPath;
+                        const resolvedPath = info?.path || lastTauriDropPath || tauriPath;
                         if (resolvedPath) {
                             tauriDraggedPathRef.current = null;
                             tauriLastDropPathRef.current = null;
-                            const actionKind =
-                                detectExternalPathAction(resolvedPath);
-                            if (
-                                actionKind &&
-                                actionKind !== "importAudio"
-                            ) {
-                                emitExternalFileAction(
-                                    actionKind,
-                                    resolvedPath,
-                                );
+                            const actionKind = detectExternalPathAction(resolvedPath);
+                            if (actionKind && actionKind !== "importAudio") {
+                                emitExternalFileAction(actionKind, resolvedPath);
                                 return;
                             }
                             void dispatch(
@@ -782,17 +674,12 @@ export const TimelinePanel: React.FC = () => {
                         if (isTauri) {
                             window.setTimeout(() => {
                                 const p =
-                                    tauriLastDropPathRef.current ||
-                                    tauriDraggedPathRef.current;
+                                    tauriLastDropPathRef.current || tauriDraggedPathRef.current;
                                 if (!p) return;
                                 tauriDraggedPathRef.current = null;
                                 tauriLastDropPathRef.current = null;
-                                const actionKind =
-                                    detectExternalPathAction(p);
-                                if (
-                                    actionKind &&
-                                    actionKind !== "importAudio"
-                                ) {
+                                const actionKind = detectExternalPathAction(p);
+                                if (actionKind && actionKind !== "importAudio") {
                                     emitExternalFileAction(actionKind, p);
                                     return;
                                 }
@@ -818,18 +705,11 @@ export const TimelinePanel: React.FC = () => {
                         }
                     }}
                     onPointerDownCapture={(e) => {
-                        document.body.setAttribute(
-                            "data-hs-focus-window",
-                            "timeline",
-                        );
+                        document.body.setAttribute("data-hs-focus-window", "timeline");
                         const scroller = scrollRef.current;
                         if (
                             scroller &&
-                            isPointerOnNativeScrollbar(
-                                scroller,
-                                e.clientX,
-                                e.clientY,
-                            )
+                            isPointerOnNativeScrollbar(scroller, e.clientX, e.clientY)
                         ) {
                             return;
                         }
@@ -845,20 +725,9 @@ export const TimelinePanel: React.FC = () => {
                         setMultiSelectedClipIds([]);
                         const scroller = scrollRef.current;
                         if (!scroller) return;
-                        if (
-                            isPointerOnNativeScrollbar(
-                                scroller,
-                                e.clientX,
-                                e.clientY,
-                            )
-                        )
-                            return;
+                        if (isPointerOnNativeScrollbar(scroller, e.clientX, e.clientY)) return;
                         const trackId = trackIdFromClientY(e.clientY);
-                        if (
-                            trackId &&
-                            trackId !==
-                                sessionRef.current.selectedTrackId
-                        ) {
+                        if (trackId && trackId !== sessionRef.current.selectedTrackId) {
                             void dispatch(selectTrackRemote(trackId));
                         }
                         startDeferredPlayheadSeek({
@@ -866,15 +735,11 @@ export const TimelinePanel: React.FC = () => {
                             startClientY: e.clientY,
                             getBounds: () => {
                                 const cur = scrollRef.current;
-                                return cur
-                                    ? cur.getBoundingClientRect()
-                                    : null;
+                                return cur ? cur.getBoundingClientRect() : null;
                             },
                             getScrollLeft: () => {
                                 const cur = scrollRef.current;
-                                return cur
-                                    ? cur.scrollLeft
-                                    : scroller.scrollLeft;
+                                return cur ? cur.scrollLeft : scroller.scrollLeft;
                             },
                         });
                     }}
@@ -893,16 +758,8 @@ export const TimelinePanel: React.FC = () => {
                                 style={{
                                     left: selectionRect.x1,
                                     top: selectionRect.y1,
-                                    width: Math.max(
-                                        1,
-                                        selectionRect.x2 -
-                                            selectionRect.x1,
-                                    ),
-                                    height: Math.max(
-                                        1,
-                                        selectionRect.y2 -
-                                            selectionRect.y1,
-                                    ),
+                                    width: Math.max(1, selectionRect.x2 - selectionRect.x1),
+                                    height: Math.max(1, selectionRect.y2 - selectionRect.y1),
                                     border: "1px dashed var(--qt-highlight)",
                                     backgroundColor:
                                         "color-mix(in oklab, var(--qt-highlight) 12%, transparent)",
@@ -915,10 +772,7 @@ export const TimelinePanel: React.FC = () => {
                             contentHeight={contentHeight}
                             pxPerBeat={pxPerBeat}
                             grid={s.grid}
-                            beatsPerBar={Math.max(
-                                1,
-                                Math.round(s.beats || 4),
-                            )}
+                            beatsPerBar={Math.max(1, Math.round(s.beats || 4))}
                         />
 
                         {clipDropNewTrack ? (
@@ -942,14 +796,8 @@ export const TimelinePanel: React.FC = () => {
                                         key={`new-track-ghost-${clip.id}`}
                                         className="absolute opacity-60"
                                         style={{
-                                            left: Math.max(
-                                                0,
-                                                clip.startSec * pxPerSec,
-                                            ),
-                                            width: Math.max(
-                                                1,
-                                                clip.lengthSec * pxPerSec,
-                                            ),
+                                            left: Math.max(0, clip.startSec * pxPerSec),
+                                            width: Math.max(1, clip.lengthSec * pxPerSec),
                                             top: 0,
                                             height: rowHeight - 8,
                                             paddingTop: 8,
@@ -978,8 +826,7 @@ export const TimelinePanel: React.FC = () => {
 
                         {s.tracks.map((track) => {
                             const trackClips =
-                                clipsByTrackId.get(track.id) ??
-                                ([] as typeof s.clips);
+                                clipsByTrackId.get(track.id) ?? ([] as typeof s.clips);
 
                             return (
                                 <TrackLane
@@ -995,46 +842,24 @@ export const TimelinePanel: React.FC = () => {
                                     viewportEndSec={viewportEndSec}
                                     altPressed={altPressed}
                                     selectedClipId={s.selectedClipId}
-                                    multiSelectedClipIds={
-                                        multiSelectedClipIds
-                                    }
+                                    multiSelectedClipIds={multiSelectedClipIds}
                                     multiSelectedSet={multiSelectedSet}
-                                    trackColor={
-                                        track.color || undefined
-                                    }
-                                    ensureSelected={
-                                        ensureTrackLaneSelected
-                                    }
-                                    selectClipRemote={
-                                        selectTrackLaneClipRemote
-                                    }
-                                    onShiftRangeSelect={
-                                        selectClipRangeByRect
-                                    }
-                                    openContextMenu={
-                                        openTrackLaneContextMenu
-                                    }
-                                    seekFromClientX={
-                                        seekFromTrackLaneClientX
-                                    }
+                                    trackColor={track.color || undefined}
+                                    ensureSelected={ensureTrackLaneSelected}
+                                    selectClipRemote={selectTrackLaneClipRemote}
+                                    onShiftRangeSelect={selectClipRangeByRect}
+                                    openContextMenu={openTrackLaneContextMenu}
+                                    seekFromClientX={seekFromTrackLaneClientX}
                                     ghostDrag={ghostDrag}
                                     allClips={s.clips}
                                     startClipDrag={startClipDrag}
                                     startEditDrag={startEditDrag}
-                                    toggleClipMuted={
-                                        toggleTrackLaneClipMuted
-                                    }
+                                    toggleClipMuted={toggleTrackLaneClipMuted}
                                     clearContextMenu={clearContextMenu}
-                                    toggleMultiSelect={
-                                        toggleTrackLaneMultiSelect
-                                    }
+                                    toggleMultiSelect={toggleTrackLaneMultiSelect}
                                     renamingClipId={renamingClipId}
-                                    onRenameCommit={
-                                        commitTrackLaneRename
-                                    }
-                                    onRenameDone={
-                                        handleTrackLaneRenameDone
-                                    }
+                                    onRenameCommit={commitTrackLaneRename}
+                                    onRenameDone={handleTrackLaneRenameDone}
                                     onGainCommit={commitTrackLaneGain}
                                 />
                             );
@@ -1046,10 +871,7 @@ export const TimelinePanel: React.FC = () => {
                                 contentHeight={contentHeight}
                                 pxPerBeat={pxPerBeat}
                                 grid={s.grid}
-                                beatsPerBar={Math.max(
-                                    1,
-                                    Math.round(s.beats || 4),
-                                )}
+                                beatsPerBar={Math.max(1, Math.round(s.beats || 4))}
                                 lineOpacity={0.38}
                                 showBoundary={false}
                             />
@@ -1058,8 +880,7 @@ export const TimelinePanel: React.FC = () => {
                         <div
                             className="absolute left-0 right-0 pointer-events-none z-10"
                             style={{
-                                top:
-                                    contentHeight - TRACK_ADD_ROW_HEIGHT,
+                                top: contentHeight - TRACK_ADD_ROW_HEIGHT,
                                 height: TRACK_ADD_ROW_HEIGHT,
                                 backgroundColor: "var(--qt-graph-bg)",
                             }}
@@ -1071,21 +892,11 @@ export const TimelinePanel: React.FC = () => {
                                 ref={dropPreviewRef}
                                 className="absolute z-30 pointer-events-none"
                                 style={{
-                                    left: Math.max(
-                                        0,
-                                        dropPreview.startSec * pxPerSec,
-                                    ),
-                                    top:
-                                        rowTopForTrackId(
-                                            dropPreview.trackId,
-                                        ) + 8,
+                                    left: Math.max(0, dropPreview.startSec * pxPerSec),
+                                    top: rowTopForTrackId(dropPreview.trackId) + 8,
                                     width:
                                         dropPreview.durationSec > 0
-                                            ? Math.max(
-                                                  1,
-                                                  pxPerSec *
-                                                      dropPreview.durationSec,
-                                              )
+                                            ? Math.max(1, pxPerSec * dropPreview.durationSec)
                                             : 80,
                                     height: rowHeight - 16,
                                 }}
@@ -1113,97 +924,60 @@ export const TimelinePanel: React.FC = () => {
                                 const startX = e.clientX;
                                 const startY = e.clientY;
                                 let moved = false;
-                                const bounds =
-                                    scroller.getBoundingClientRect();
+                                const bounds = scroller.getBoundingClientRect();
                                 const initialSec = s.playheadSec;
                                 playheadDragRef.current = {
                                     pointerId: e.pointerId,
                                     lastBeat: initialSec,
                                 };
-                                (
-                                    e.currentTarget as HTMLDivElement
-                                ).setPointerCapture(e.pointerId);
+                                (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
 
                                 function onPointerMove(ev: PointerEvent) {
-                                    const drag =
-                                        playheadDragRef.current;
-                                    const currentScroller =
-                                        scrollRef.current;
+                                    const drag = playheadDragRef.current;
+                                    const currentScroller = scrollRef.current;
                                     if (
                                         !drag ||
-                                        drag.pointerId !==
-                                            e.pointerId ||
+                                        drag.pointerId !== e.pointerId ||
                                         !currentScroller
                                     ) {
                                         return;
                                     }
                                     const dx = ev.clientX - startX;
                                     const dy = ev.clientY - startY;
-                                    if (
-                                        !moved &&
-                                        dx * dx + dy * dy >= 9
-                                    ) {
+                                    if (!moved && dx * dx + dy * dy >= 9) {
                                         moved = true;
                                     }
                                     if (!moved) return;
-                                    const currentBounds =
-                                        currentScroller.getBoundingClientRect();
-                                    drag.lastBeat =
-                                        setPlayheadFromClientX(
-                                            ev.clientX,
-                                            currentBounds,
-                                            currentScroller.scrollLeft,
-                                            false,
-                                        );
+                                    const currentBounds = currentScroller.getBoundingClientRect();
+                                    drag.lastBeat = setPlayheadFromClientX(
+                                        ev.clientX,
+                                        currentBounds,
+                                        currentScroller.scrollLeft,
+                                        false,
+                                    );
                                 }
 
                                 function endDrag() {
-                                    const drag =
-                                        playheadDragRef.current;
-                                    if (
-                                        !drag ||
-                                        drag.pointerId !== e.pointerId
-                                    )
-                                        return;
+                                    const drag = playheadDragRef.current;
+                                    if (!drag || drag.pointerId !== e.pointerId) return;
                                     playheadDragRef.current = null;
                                     if (!moved) {
-                                        drag.lastBeat =
-                                            setPlayheadFromClientX(
-                                                startX,
-                                                bounds,
-                                                scroller!.scrollLeft,
-                                                false,
-                                            );
+                                        drag.lastBeat = setPlayheadFromClientX(
+                                            startX,
+                                            bounds,
+                                            scroller!.scrollLeft,
+                                            false,
+                                        );
                                     }
-                                    void dispatch(
-                                        seekPlayhead(drag.lastBeat),
-                                    );
-                                    window.removeEventListener(
-                                        "pointermove",
-                                        onPointerMove,
-                                    );
-                                    window.removeEventListener(
-                                        "pointerup",
-                                        endDrag,
-                                    );
-                                    window.removeEventListener(
-                                        "pointercancel",
-                                        endDrag,
-                                    );
+                                    void dispatch(seekPlayhead(drag.lastBeat));
+                                    window.removeEventListener("pointermove", onPointerMove);
+                                    window.removeEventListener("pointerup", endDrag);
+                                    window.removeEventListener("pointercancel", endDrag);
                                 }
 
-                                window.addEventListener(
-                                    "pointermove",
-                                    onPointerMove,
-                                );
-                                window.addEventListener(
-                                    "pointerup",
-                                    endDrag,
-                                );
-                                window.addEventListener(
-                                    "pointercancel",
-                                    endDrag,
-                                );
+                                window.addEventListener("pointermove", onPointerMove);
+                                window.addEventListener("pointerup", endDrag);
+                                window.addEventListener("pointercancel", endDrag);
                             }}
                         />
                     </div>
@@ -1235,24 +1009,19 @@ export const TimelinePanel: React.FC = () => {
                                     if (m.audioPaths.length === 1) {
                                         void dispatch(
                                             importAudioAtPosition({
-                                                audioPath:
-                                                    m.audioPaths[0],
+                                                audioPath: m.audioPaths[0],
                                                 trackId: m.trackId,
                                                 startSec: m.startSec,
                                             }),
                                         );
                                     } else {
                                         void dispatch(
-                                            importMultipleAudioAtPosition(
-                                                {
-                                                    audioPaths:
-                                                        m.audioPaths,
-                                                    mode: "across-time",
-                                                    trackId: m.trackId,
-                                                    startSec:
-                                                        m.startSec,
-                                                },
-                                            ),
+                                            importMultipleAudioAtPosition({
+                                                audioPaths: m.audioPaths,
+                                                mode: "across-time",
+                                                trackId: m.trackId,
+                                                startSec: m.startSec,
+                                            }),
                                         );
                                     }
                                 }}
@@ -1268,24 +1037,19 @@ export const TimelinePanel: React.FC = () => {
                                     if (m.audioPaths.length === 1) {
                                         void dispatch(
                                             importAudioAtPosition({
-                                                audioPath:
-                                                    m.audioPaths[0],
+                                                audioPath: m.audioPaths[0],
                                                 trackId: null,
                                                 startSec: m.startSec,
                                             }),
                                         );
                                     } else {
                                         void dispatch(
-                                            importMultipleAudioAtPosition(
-                                                {
-                                                    audioPaths:
-                                                        m.audioPaths,
-                                                    mode: "across-tracks",
-                                                    trackId: m.trackId,
-                                                    startSec:
-                                                        m.startSec,
-                                                },
-                                            ),
+                                            importMultipleAudioAtPosition({
+                                                audioPaths: m.audioPaths,
+                                                mode: "across-tracks",
+                                                trackId: m.trackId,
+                                                startSec: m.startSec,
+                                            }),
                                         );
                                     }
                                 }}
@@ -1299,224 +1063,175 @@ export const TimelinePanel: React.FC = () => {
 
                 {contextMenu
                     ? (() => {
-                        const ctxClip =
-                            sessionRef.current.clips.find(
-                                (c) => c.id === contextMenu.clipId,
-                            );
-                        if (!ctxClip) return null;
+                          const ctxClip = sessionRef.current.clips.find(
+                              (c) => c.id === contextMenu.clipId,
+                          );
+                          if (!ctxClip) return null;
 
-                        const selectedIds =
-                            multiSelectedClipIds.length >= 2
-                                ? multiSelectedClipIds
-                                : [contextMenu.clipId];
-                        const selectedClips =
-                            sessionRef.current.clips.filter((c) =>
-                                selectedIds.includes(c.id),
-                            );
+                          const selectedIds =
+                              multiSelectedClipIds.length >= 2
+                                  ? multiSelectedClipIds
+                                  : [contextMenu.clipId];
+                          const selectedClips = sessionRef.current.clips.filter((c) =>
+                              selectedIds.includes(c.id),
+                          );
 
-                        const _ctxScroller = scrollRef.current;
-                        const _ctxBounds =
-                            _ctxScroller?.getBoundingClientRect();
-                        const contextTimeSec =
-                            _ctxBounds && _ctxScroller
-                                ? beatFromClientX(
-                                    contextMenu.x,
-                                    _ctxBounds,
-                                    _ctxScroller.scrollLeft,
-                                )
-                                : ctxClip.startSec;
+                          const _ctxScroller = scrollRef.current;
+                          const _ctxBounds = _ctxScroller?.getBoundingClientRect();
+                          const contextTimeSec =
+                              _ctxBounds && _ctxScroller
+                                  ? beatFromClientX(
+                                        contextMenu.x,
+                                        _ctxBounds,
+                                        _ctxScroller.scrollLeft,
+                                    )
+                                  : ctxClip.startSec;
 
-                        const overlappingFadeClips =
-                            collectFadeContextClips({
-                                allClips: sessionRef.current.clips,
-                                contextClip: ctxClip,
-                                contextTimeSec,
-                                explicitOverlappingClipIds:
-                                    contextMenu.overlappingClipIds,
-                            });
+                          const overlappingFadeClips = collectFadeContextClips({
+                              allClips: sessionRef.current.clips,
+                              contextClip: ctxClip,
+                              contextTimeSec,
+                              explicitOverlappingClipIds: contextMenu.overlappingClipIds,
+                          });
 
-                        const currentPlayheadSec =
-                            sessionRef.current.playheadSec;
-                        const playheadInClip =
-                            currentPlayheadSec >=
-                                ctxClip.startSec &&
-                            currentPlayheadSec <=
-                                ctxClip.startSec +
-                                    ctxClip.lengthSec;
+                          const currentPlayheadSec = sessionRef.current.playheadSec;
+                          const playheadInClip =
+                              currentPlayheadSec >= ctxClip.startSec &&
+                              currentPlayheadSec <= ctxClip.startSec + ctxClip.lengthSec;
 
-                        return (
-                            <ClipContextMenu
-                                x={contextMenu.x}
-                                y={contextMenu.y}
-                                clip={ctxClip}
-                                selectedClips={selectedClips}
-                                overlappingClips={
-                                    overlappingFadeClips
-                                }
-                                playheadInClip={playheadInClip}
-                                canSplitSelected={selectedClips.some(
-                                    (c) => {
-                                        const splitSec = Math.max(
-                                            0,
-                                            Number(
-                                                sessionRef.current
-                                                    .playheadSec ??
-                                                    0,
-                                            ) || 0,
-                                        );
-                                        return (
-                                            splitSec >=
-                                                c.startSec &&
-                                            splitSec <=
-                                                c.startSec +
-                                                    c.lengthSec
-                                        );
-                                    },
-                                )}
-                                onClose={() =>
-                                    setContextMenu(null)
-                                }
-                                onDelete={(ids) => {
-                                    setContextMenu(null);
-                                    setMultiSelectedClipIds([]);
-                                    void dispatch(removeClipsRemote(ids));
-                                }}
-                                onMute={(ids, muted) => {
-                                    for (const id of ids) {
-                                        dispatch(
-                                            setClipMuted({
-                                                clipId: id,
-                                                muted,
-                                            }),
-                                        );
-                                        void dispatch(
-                                            setClipStateRemote({
-                                                clipId: id,
-                                                muted,
-                                            }),
-                                        );
-                                    }
-                                }}
-                                onRename={(clipId) => {
-                                    setContextMenu(null);
-                                    clipActions.setRenamingClipId(
-                                        clipId,
-                                    );
-                                }}
-                                onCopy={(ids) => {
-                                    void (async () => {
-                                        const templates =
-                                            await buildClipClipboardTemplates(
-                                                ids,
-                                            );
-                                        if (templates.length > 0) {
-                                            clipClipboardRef.current =
-                                                templates;
-                                            try {
-                                                await writeSystemClipboardObject({
-                                                    version: 1,
-                                                    kind: "clip",
-                                                    templates,
-                                                });
-                                            } catch {
-                                                // ignore clipboard write errors
-                                            }
-                                        }
-                                    })();
-                                }}
-                                onCut={(ids) => {
-                                    void (async () => {
-                                        const templates =
-                                            await buildClipClipboardTemplates(
-                                                ids,
-                                            );
-                                        if (
-                                            templates.length === 0
-                                        )
-                                            return;
-                                        clipClipboardRef.current =
-                                            templates;
-                                        try {
-                                            await writeSystemClipboardObject({
-                                                version: 1,
-                                                kind: "clip",
-                                                templates,
-                                            });
-                                        } catch {
-                                            // ignore clipboard write errors
-                                        }
-                                        setContextMenu(null);
-                                        setMultiSelectedClipIds(
-                                            [],
-                                        );
-                                        void dispatch(removeClipsRemote(ids));
-                                    })();
-                                }}
-                                onReplace={(ids) => {
-                                    void replaceClipSources(ids);
-                                }}
-                                onSplit={(clipIds) => {
-                                    setContextMenu(null);
-                                    splitClipIdsAtPlayhead(clipIds);
-                                }}
-                                onGlue={(ids) => {
-                                    setContextMenu(null);
-                                    if (ids.length >= 2) {
-                                        void dispatch(
-                                            glueClipsRemote(ids),
-                                        );
-                                        setMultiSelectedClipIds(
-                                            [],
-                                        );
-                                    }
-                                }}
-                                onFadeCurveChange={(
-                                    clipId,
-                                    target,
-                                    curve,
-                                ) => {
-                                    dispatch(
-                                        setClipFades({
-                                            clipId,
-                                            ...(target === "in"
-                                                ? {
-                                                    fadeInCurve:
-                                                        curve,
-                                                }
-                                                : {
-                                                    fadeOutCurve:
-                                                        curve,
-                                                }),
-                                        }),
-                                    );
-                                    void dispatch(
-                                        setClipStateRemote({
-                                            clipId,
-                                            ...(target === "in"
-                                                ? {
-                                                    fadeInCurve:
-                                                        curve,
-                                                }
-                                                : {
-                                                    fadeOutCurve:
-                                                        curve,
-                                                }),
-                                        }),
-                                    );
-                                }}
-                                onNormalize={normalizeClips}
-                                onToggleReverse={(ids, reversed) => {
-                                    for (const id of ids) {
-                                        void dispatch(
-                                            setClipStateRemote({
-                                                clipId: id,
-                                                reversed,
-                                            }),
-                                        );
-                                    }
-                                }}
-                            />
-                        );
+                          return (
+                              <ClipContextMenu
+                                  x={contextMenu.x}
+                                  y={contextMenu.y}
+                                  clip={ctxClip}
+                                  selectedClips={selectedClips}
+                                  overlappingClips={overlappingFadeClips}
+                                  playheadInClip={playheadInClip}
+                                  canSplitSelected={selectedClips.some((c) => {
+                                      const splitSec = Math.max(
+                                          0,
+                                          Number(sessionRef.current.playheadSec ?? 0) || 0,
+                                      );
+                                      return (
+                                          splitSec >= c.startSec &&
+                                          splitSec <= c.startSec + c.lengthSec
+                                      );
+                                  })}
+                                  onClose={() => setContextMenu(null)}
+                                  onDelete={(ids) => {
+                                      setContextMenu(null);
+                                      setMultiSelectedClipIds([]);
+                                      void dispatch(removeClipsRemote(ids));
+                                  }}
+                                  onMute={(ids, muted) => {
+                                      for (const id of ids) {
+                                          dispatch(
+                                              setClipMuted({
+                                                  clipId: id,
+                                                  muted,
+                                              }),
+                                          );
+                                          void dispatch(
+                                              setClipStateRemote({
+                                                  clipId: id,
+                                                  muted,
+                                              }),
+                                          );
+                                      }
+                                  }}
+                                  onRename={(clipId) => {
+                                      setContextMenu(null);
+                                      clipActions.setRenamingClipId(clipId);
+                                  }}
+                                  onCopy={(ids) => {
+                                      void (async () => {
+                                          const templates = await buildClipClipboardTemplates(ids);
+                                          if (templates.length > 0) {
+                                              clipClipboardRef.current = templates;
+                                              try {
+                                                  await writeSystemClipboardObject({
+                                                      version: 1,
+                                                      kind: "clip",
+                                                      templates,
+                                                  });
+                                              } catch {
+                                                  // ignore clipboard write errors
+                                              }
+                                          }
+                                      })();
+                                  }}
+                                  onCut={(ids) => {
+                                      void (async () => {
+                                          const templates = await buildClipClipboardTemplates(ids);
+                                          if (templates.length === 0) return;
+                                          clipClipboardRef.current = templates;
+                                          try {
+                                              await writeSystemClipboardObject({
+                                                  version: 1,
+                                                  kind: "clip",
+                                                  templates,
+                                              });
+                                          } catch {
+                                              // ignore clipboard write errors
+                                          }
+                                          setContextMenu(null);
+                                          setMultiSelectedClipIds([]);
+                                          void dispatch(removeClipsRemote(ids));
+                                      })();
+                                  }}
+                                  onReplace={(ids) => {
+                                      void replaceClipSources(ids);
+                                  }}
+                                  onSplit={(clipIds) => {
+                                      setContextMenu(null);
+                                      splitClipIdsAtPlayhead(clipIds);
+                                  }}
+                                  onGlue={(ids) => {
+                                      setContextMenu(null);
+                                      if (ids.length >= 2) {
+                                          void dispatch(glueClipsRemote(ids));
+                                          setMultiSelectedClipIds([]);
+                                      }
+                                  }}
+                                  onFadeCurveChange={(clipId, target, curve) => {
+                                      dispatch(
+                                          setClipFades({
+                                              clipId,
+                                              ...(target === "in"
+                                                  ? {
+                                                        fadeInCurve: curve,
+                                                    }
+                                                  : {
+                                                        fadeOutCurve: curve,
+                                                    }),
+                                          }),
+                                      );
+                                      void dispatch(
+                                          setClipStateRemote({
+                                              clipId,
+                                              ...(target === "in"
+                                                  ? {
+                                                        fadeInCurve: curve,
+                                                    }
+                                                  : {
+                                                        fadeOutCurve: curve,
+                                                    }),
+                                          }),
+                                      );
+                                  }}
+                                  onNormalize={normalizeClips}
+                                  onToggleReverse={(ids, reversed) => {
+                                      for (const id of ids) {
+                                          void dispatch(
+                                              setClipStateRemote({
+                                                  clipId: id,
+                                                  reversed,
+                                              }),
+                                          );
+                                      }
+                                  }}
+                              />
+                          );
                       })()
                     : null}
 
@@ -1531,28 +1246,18 @@ export const TimelinePanel: React.FC = () => {
                         canSplit={(multiSelectedClipIds.length > 0
                             ? multiSelectedClipIds
                             : sessionRef.current.selectedClipId
-                                ? [
-                                      sessionRef.current
-                                          .selectedClipId,
-                                  ]
-                                : []
+                              ? [sessionRef.current.selectedClipId]
+                              : []
                         ).some((id) => {
-                            const clip =
-                                sessionRef.current.clips.find(
-                                    (c) => c.id === id,
-                                );
+                            const clip = sessionRef.current.clips.find((c) => c.id === id);
                             if (!clip) return false;
                             const splitSec = Math.max(
                                 0,
-                                Number(
-                                    sessionRef.current.playheadSec ??
-                                        0,
-                                ) || 0,
+                                Number(sessionRef.current.playheadSec ?? 0) || 0,
                             );
                             return (
                                 splitSec >= clip.startSec &&
-                                splitSec <=
-                                    clip.startSec + clip.lengthSec
+                                splitSec <= clip.startSec + clip.lengthSec
                             );
                         })}
                         onPaste={pasteClipsAtPlayhead}
@@ -1565,28 +1270,16 @@ export const TimelinePanel: React.FC = () => {
                     open={sameSourceConfirmOpen}
                     onOpenChange={(open) => {
                         setSameSourceConfirmOpen(open);
-                        if (
-                            !open &&
-                            sameSourceConfirmResolverRef.current
-                        ) {
-                            sameSourceConfirmResolverRef.current(
-                                false,
-                            );
-                            sameSourceConfirmResolverRef.current =
-                                null;
+                        if (!open && sameSourceConfirmResolverRef.current) {
+                            sameSourceConfirmResolverRef.current(false);
+                            sameSourceConfirmResolverRef.current = null;
                         }
                     }}
                 >
                     <Dialog.Content maxWidth="480px">
-                        <Dialog.Title>
-                            {t("ctx_replace")}
-                        </Dialog.Title>
+                        <Dialog.Title>{t("ctx_replace")}</Dialog.Title>
                         <Dialog.Description>
-                            <Text size="2">
-                                {t(
-                                    "clip_replace_same_source_confirm" as any,
-                                )}
-                            </Text>
+                            <Text size="2">{t("clip_replace_same_source_confirm" as any)}</Text>
                         </Dialog.Description>
                         <Flex justify="end" gap="2" mt="4">
                             <Button
@@ -1594,14 +1287,9 @@ export const TimelinePanel: React.FC = () => {
                                 color="gray"
                                 onClick={() => {
                                     setSameSourceConfirmOpen(false);
-                                    if (
-                                        sameSourceConfirmResolverRef.current
-                                    ) {
-                                        sameSourceConfirmResolverRef.current(
-                                            false,
-                                        );
-                                        sameSourceConfirmResolverRef.current =
-                                            null;
+                                    if (sameSourceConfirmResolverRef.current) {
+                                        sameSourceConfirmResolverRef.current(false);
+                                        sameSourceConfirmResolverRef.current = null;
                                     }
                                 }}
                             >
@@ -1610,14 +1298,9 @@ export const TimelinePanel: React.FC = () => {
                             <Button
                                 onClick={() => {
                                     setSameSourceConfirmOpen(false);
-                                    if (
-                                        sameSourceConfirmResolverRef.current
-                                    ) {
-                                        sameSourceConfirmResolverRef.current(
-                                            true,
-                                        );
-                                        sameSourceConfirmResolverRef.current =
-                                            null;
+                                    if (sameSourceConfirmResolverRef.current) {
+                                        sameSourceConfirmResolverRef.current(true);
+                                        sameSourceConfirmResolverRef.current = null;
                                     }
                                 }}
                             >

@@ -18,7 +18,6 @@ import { fadeInAreaPath, fadeOutAreaPath } from "./paths";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
 
-
 export const ClipItem = React.memo(function ClipItem({
     clip,
     rowHeight,
@@ -100,24 +99,14 @@ export const ClipItem = React.memo(function ClipItem({
 
     const left = Math.max(0, Math.round(clip.startSec * pxPerSec));
     const width = Math.max(1, Math.round(clip.lengthSec * pxPerSec));
-    const bodyHeight = Math.max(
-        1,
-        rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT,
-    );
+    const bodyHeight = Math.max(1, rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT);
 
     const showRepeatMarker = false;
     const repeatMarkerX = 0;
-    const fadeStrokeColor = selected
-        ? "var(--qt-clip-selected-border)"
-        : "var(--qt-clip-border)";
-
-
+    const fadeStrokeColor = selected ? "var(--qt-clip-selected-border)" : "var(--qt-clip-border)";
 
     const startDeferredFadeEditDrag = React.useCallback(
-        (
-            e: React.PointerEvent<HTMLDivElement>,
-            type: "fade_in" | "fade_out",
-        ) => {
+        (e: React.PointerEvent<HTMLDivElement>, type: "fade_in" | "fade_out") => {
             e.preventDefault();
             e.stopPropagation();
             clearContextMenu();
@@ -207,8 +196,7 @@ export const ClipItem = React.memo(function ClipItem({
             onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                const keepExistingMultiSelection =
-                    multiSelectedCount > 1;
+                const keepExistingMultiSelection = multiSelectedCount > 1;
                 if (!keepExistingMultiSelection) {
                     ensureSelected(clip.id);
                     selectClipRemote(clip.id);
@@ -219,9 +207,7 @@ export const ClipItem = React.memo(function ClipItem({
                 if (e.button !== 0) return;
 
                 const alt = Boolean(
-                    altPressed ||
-                    e.altKey ||
-                    e.nativeEvent.getModifierState?.("Alt"),
+                    altPressed || e.altKey || e.nativeEvent.getModifierState?.("Alt"),
                 );
 
                 // Shift+点击范围选择在 pointerup 时处理（避免阻止拖动）
@@ -337,10 +323,7 @@ export const ClipItem = React.memo(function ClipItem({
                         <div
                             className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
                             style={{
-                                width: Math.min(
-                                    width,
-                                    (clip.fadeInSec ?? 0) * pxPerSec,
-                                ),
+                                width: Math.min(width, (clip.fadeInSec ?? 0) * pxPerSec),
                             }}
                             onPointerDown={(e) => {
                                 startDeferredFadeEditDrag(e, "fade_in");
@@ -363,10 +346,7 @@ export const ClipItem = React.memo(function ClipItem({
                         <div
                             className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
                             style={{
-                                width: Math.min(
-                                    width,
-                                    (clip.fadeOutSec ?? 0) * pxPerSec,
-                                ),
+                                width: Math.min(width, (clip.fadeOutSec ?? 0) * pxPerSec),
                             }}
                             onPointerDown={(e) => {
                                 startDeferredFadeEditDrag(e, "fade_out");
@@ -391,10 +371,7 @@ export const ClipItem = React.memo(function ClipItem({
                             <div
                                 className="absolute top-0 bottom-0"
                                 style={{
-                                    left: Math.max(
-                                        0,
-                                        Math.min(width - 1, repeatMarkerX),
-                                    ),
+                                    left: Math.max(0, Math.min(width - 1, repeatMarkerX)),
                                     width: 1,
                                     backgroundColor: "rgba(255,255,255,0.35)",
                                 }}
@@ -404,28 +381,19 @@ export const ClipItem = React.memo(function ClipItem({
                         {clip.fadeInSec > 0 ? (
                             <svg
                                 className="absolute left-0 top-0 h-full"
-                                width={Math.min(
-                                    width,
-                                    clip.fadeInSec * pxPerSec,
-                                )}
+                                width={Math.min(width, clip.fadeInSec * pxPerSec)}
                                 height={bodyHeight}
                                 viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeInSec * pxPerSec))} ${Math.max(1, bodyHeight)}`}
                                 preserveAspectRatio="none"
                             >
                                 <path
                                     d={fadeInAreaPath(
-                                        Math.max(
-                                            1,
-                                            Math.min(
-                                                width,
-                                                clip.fadeInSec * pxPerSec,
-                                            ),
-                                        ),
+                                        Math.max(1, Math.min(width, clip.fadeInSec * pxPerSec)),
                                         Math.max(1, bodyHeight),
                                         24,
                                         clip.fadeInCurve ?? "sine",
                                     )}
-                                    fill="rgba(0,0,0,0.08)"
+                                    fill="rgba(0,0,0,0.30)"
                                     stroke={fadeStrokeColor}
                                     strokeWidth="1"
                                     vectorEffect="non-scaling-stroke"
@@ -435,28 +403,19 @@ export const ClipItem = React.memo(function ClipItem({
                         {clip.fadeOutSec > 0 ? (
                             <svg
                                 className="absolute right-0 top-0 h-full"
-                                width={Math.min(
-                                    width,
-                                    clip.fadeOutSec * pxPerSec,
-                                )}
+                                width={Math.min(width, clip.fadeOutSec * pxPerSec)}
                                 height={bodyHeight}
                                 viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeOutSec * pxPerSec))} ${Math.max(1, bodyHeight)}`}
                                 preserveAspectRatio="none"
                             >
                                 <path
                                     d={fadeOutAreaPath(
-                                        Math.max(
-                                            1,
-                                            Math.min(
-                                                width,
-                                                clip.fadeOutSec * pxPerSec,
-                                            ),
-                                        ),
+                                        Math.max(1, Math.min(width, clip.fadeOutSec * pxPerSec)),
                                         Math.max(1, bodyHeight),
                                         24,
                                         clip.fadeOutCurve ?? "sine",
                                     )}
-                                    fill="rgba(0,0,0,0.08)"
+                                    fill="rgba(0,0,0,0.30)"
                                     stroke={fadeStrokeColor}
                                     strokeWidth="1"
                                     vectorEffect="non-scaling-stroke"
