@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Flex, Select, TextField, Button, IconButton, Separator, Text } from "@radix-ui/themes";
 import { PauseIcon, PlayIcon, StopIcon } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
@@ -147,7 +148,7 @@ export function ActionBar() {
                     }}
                 >
                     <Select.Trigger style={{ backgroundColor: "var(--qt-base)" }} />
-                    <Select.Content>
+                    <Select.Content style={{ maxHeight: "none", overflow: "visible" }}>
                         <Select.Group>
                             <Select.Label>{tAny("grid_note_normal")}</Select.Label>
                             <Select.Item value="1/1">1/1</Select.Item>
@@ -205,7 +206,7 @@ export function ActionBar() {
                     }}
                 >
                     <Select.Trigger style={{ backgroundColor: "var(--qt-base)" }} />
-                    <Select.Content>
+                    <Select.Content style={{ maxHeight: "none", overflow: "visible" }}>
                         <Select.Group>
                             {SCALE_KEYS.map((k) => (
                                 <Select.Item key={k} value={k}>
@@ -545,34 +546,33 @@ function GridSnapContextMenu({
         };
     }, [onClose]);
 
-    // Clamp menu position to viewport edges
     useLayoutEffect(() => {
         const el = menuRef.current;
         if (!el) return;
         const rect = el.getBoundingClientRect();
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        if (rect.right > vw) el.style.left = `${Math.max(0, vw - rect.width)}px`;
-        if (rect.bottom > vh) el.style.top = `${Math.max(0, vh - rect.height)}px`;
+        if (rect.right > vw) el.style.left = `${vw - rect.width}px`;
+        if (rect.bottom > vh) el.style.top = `${vh - rect.height}px`;
     }, [x, y]);
 
-    // Adjust position to fit within viewport
     const style: React.CSSProperties = {
         position: "fixed",
         left: x,
         top: y,
         zIndex: 10000,
         minWidth: 180,
-        maxHeight: "70vh",
-        overflowY: "auto",
         background: "var(--qt-panel)",
         border: "1px solid var(--qt-border)",
         borderRadius: 10,
         padding: "4px 0",
         boxShadow: "0 20px 44px rgba(0,0,0,0.28)",
+        display: "block",
+        height: "auto",
+        overflow: "visible",
     };
 
-    return (
+    return createPortal(
         <div ref={menuRef} style={style}>
             {GRID_SNAP_ITEMS.map((item, i) => {
                 if (item === "separator") {
@@ -616,6 +616,7 @@ function GridSnapContextMenu({
                     </div>
                 );
             })}
-        </div>
+        </div>,
+        document.body,
     );
 }
