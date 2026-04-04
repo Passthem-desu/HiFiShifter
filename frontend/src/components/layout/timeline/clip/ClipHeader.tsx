@@ -43,8 +43,23 @@ export const ClipHeader: React.FC<{
     const clampedGainDb = Math.min(12, Math.max(-12, gainDb));
     const [wheelGainDb, setWheelGainDb] = useState<number | null>(null);
     const wheelTimerRef = useRef<number | null>(null);
+    const pendingGainDbRef = useRef<number | null>(null);
+    const pendingClipIdRef = useRef<string | null>(null);
     const activeGainDb = wheelGainDb !== null ? wheelGainDb : clampedGainDb;
     const gainKnobDeg = (activeGainDb / 12) * 135;
+
+    // 监听 clip.gain 的变化，当 Redux 状态更新为期望值时清除 wheelGainDb
+    // 这样可以避免在 onGainCommit 异步完成和 Redux 更新之间出现闪烁
+    React.useEffect(() => {
+        if (pendingGainDbRef.current !== null && pendingClipIdRef.current === clip.id) {
+            const expectedGain = Math.pow(10, pendingGainDbRef.current / 20);
+            if (Math.abs(clip.gain - expectedGain) < 1e-6) {
+                setWheelGainDb(null);
+                pendingGainDbRef.current = null;
+                pendingClipIdRef.current = null;
+            }
+        }
+    }, [clip.gain, clip.id]);
 
     // 根据 clip 像素宽度决定显示哪些元素（从右往左依次隐藏）
     // >= 120px: 全显示 | 80-120px: 隐藏名称 | 52-80px: 隐藏名称+增益值 | 32-52px: 只留M | < 32px: 全隐藏
@@ -174,12 +189,14 @@ export const ClipHeader: React.FC<{
 
                         // 立即更新本地 UI，但延迟 200ms 才提交给后端
                         setWheelGainDb(nextDb);
+                        pendingGainDbRef.current = nextDb;
+                        pendingClipIdRef.current = clip.id;
                         if (wheelTimerRef.current !== null) {
                             window.clearTimeout(wheelTimerRef.current);
                         }
                         wheelTimerRef.current = window.setTimeout(() => {
                             onGainCommit(clip.id, nextDb);
-                            setWheelGainDb(null);
+                            // 不再立即清除 wheelGainDb，而是通过 useEffect 监听 clip.gain 变化来清除
                             wheelTimerRef.current = null;
                         }, 200);
                     }}

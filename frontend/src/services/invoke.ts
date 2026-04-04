@@ -235,6 +235,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 fadeInCurve: args[12],
                 fadeOutCurve: args[13],
                 color: args[14],
+                checkpoint: args[15],
             };
 
         case "replace_clip_source":

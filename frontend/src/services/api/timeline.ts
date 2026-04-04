@@ -151,6 +151,8 @@ export const timelineApi = {
         fadeInCurve?: string;
         fadeOutCurve?: string;
         color?: string;
+        /** 是否创建 undo checkpoint，默认为 true */
+        checkpoint?: boolean;
     }) =>
         invoke<TimelineResult>(
             "set_clip_state",
@@ -169,6 +171,7 @@ export const timelineApi = {
             payload.fadeInCurve,
             payload.fadeOutCurve,
             payload.color,
+            payload.checkpoint,
         ),
 
     replaceClipSource: (payload: {

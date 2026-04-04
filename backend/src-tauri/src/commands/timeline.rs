@@ -124,7 +124,6 @@ pub(super) fn remove_track(
                 .iter()
                 .filter(|t| t.parent_id.as_deref() == Some(cur.as_str()))
                 .map(|t| t.id.clone())
-                .collect::<Vec<_>>()
             {
                 to_remove.push(child);
             }
@@ -147,7 +146,11 @@ pub(super) fn remove_track(
     // 清理被删除 clip 的全局合成缓存和渲染状态，防止内存泄漏和旧数据残留。
     for clip_id in &clip_ids_to_clean {
         crate::synth_clip_cache::invalidate_clip_all_caches(clip_id);
-        if let Ok(mut mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
+    }
+
+    // 将锁的获取移到循环外部，避免 O(N) 的锁争用开销
+    if let Ok(mut mgr) = crate::clip_rendering_state::global_clip_rendering_state().lock() {
+        for clip_id in &clip_ids_to_clean {
             mgr.remove_state(clip_id);
         }
     }
@@ -393,9 +396,15 @@ pub(super) fn set_clip_state(
     fade_in_curve: Option<String>,
     fade_out_curve: Option<String>,
     color: Option<String>,
+    checkpoint: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
-    state.checkpoint_timeline(&tl);
+    // checkpoint 默认为 true，但可以通过传递 false 来抑制 undo checkpoint
+    // 这在 undo group 内进行多次操作时很有用
+    let do_checkpoint = checkpoint.unwrap_or(true);
+    if do_checkpoint {
+        state.checkpoint_timeline(&tl);
+    }
     tl.patch_clip_state(
         &clip_id,
         crate::state::ClipStatePatch {
