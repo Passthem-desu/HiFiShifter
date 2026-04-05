@@ -26,7 +26,34 @@ const TRACK_METER_MAX_DB = 3;
 const TRACK_GAIN_MIN_DB = -60;
 const TRACK_GAIN_MAX_DB = 12;
 const TRACK_GAIN_WHEEL_STEP_DB = 0.5;
+const TRACK_GAIN_WHEEL_FINE_STEP_DB = 0.1;
 const TRACK_GAIN_WHEEL_COMMIT_DEBOUNCE_MS = 120;
+const TRACK_GAIN_DRAG_DB_PER_PX = 0.2;
+const TRACK_GAIN_DRAG_FINE_SCALE = 0.2;
+const TRACK_GAIN_DRAG_FINE_PULLBACK_RATIO = 0.35;
+
+type FineAxisDragState = {
+    raw: number;
+    adjusted: number;
+    fineActive: boolean;
+};
+
+function advanceFineAxisDrag(
+    state: FineAxisDragState,
+    nextRaw: number,
+    fineActive: boolean,
+): number {
+    const delta = nextRaw - state.raw;
+    if (fineActive && !state.fineActive) {
+        state.adjusted += delta * (1 - TRACK_GAIN_DRAG_FINE_PULLBACK_RATIO);
+    } else {
+        const scale = fineActive ? TRACK_GAIN_DRAG_FINE_SCALE : 1;
+        state.adjusted += delta * scale;
+    }
+    state.raw = nextRaw;
+    state.fineActive = fineActive;
+    return state.adjusted;
+}
 
 function gainToDb(gain: number): number {
     if (!Number.isFinite(gain) || gain <= 1e-4) return TRACK_GAIN_MIN_DB;
@@ -91,6 +118,7 @@ export const TrackList: React.FC<{
     rowHeight: number;
     setRowHeight?: React.Dispatch<React.SetStateAction<number>>;
     verticalZoomKb?: Keybinding;
+    paramFineAdjustKb: Keybinding;
     trackVolumeUi: Record<string, number>;
     onSelectTrack: (trackId: string) => void;
     onRemoveTrack: (trackId: string) => void;
@@ -120,6 +148,7 @@ export const TrackList: React.FC<{
     rowHeight,
     setRowHeight,
     verticalZoomKb,
+    paramFineAdjustKb,
     trackVolumeUi,
     onSelectTrack,
     onRemoveTrack,
@@ -490,12 +519,15 @@ export const TrackList: React.FC<{
                         if (Number.isFinite(rawDelta) && Math.abs(rawDelta) >= 0.01) {
                             const direction = rawDelta < 0 ? 1 : -1;
                             const notches = Math.max(1, Math.round(Math.abs(rawDelta) / 100));
+                            const wheelStepDb = isModifierActive(paramFineAdjustKb, e)
+                                ? TRACK_GAIN_WHEEL_FINE_STEP_DB
+                                : TRACK_GAIN_WHEEL_STEP_DB;
                             const currentDb = gainToDb(currentVolume);
                             const nextDb = Math.max(
                                 TRACK_GAIN_MIN_DB,
                                 Math.min(
                                     TRACK_GAIN_MAX_DB,
-                                    currentDb + direction * TRACK_GAIN_WHEEL_STEP_DB * notches,
+                                    currentDb + direction * wheelStepDb * notches,
                                 ),
                             );
                             const nextVolume = dbToGain(nextDb);
@@ -568,6 +600,7 @@ export const TrackList: React.FC<{
         onScrollTopChange,
         onVolumeCommit,
         onVolumeUiChange,
+        paramFineAdjustKb,
         setRowHeight,
         verticalZoomKb,
     ]);
@@ -621,10 +654,20 @@ export const TrackList: React.FC<{
         const startY = e.clientY;
         const startDb = clampGainDb(gainToDb(volume));
         let lastDb = startDb;
+        const fineAxisState: FineAxisDragState = {
+            raw: startY,
+            adjusted: startY,
+            fineActive: isModifierActive(paramFineAdjustKb, e.nativeEvent),
+        };
 
         const onMove = (ev: PointerEvent) => {
-            const deltaY = startY - ev.clientY;
-            const nextDb = clampGainDb(startDb + deltaY * 0.2);
+            const adjustedY = advanceFineAxisDrag(
+                fineAxisState,
+                ev.clientY,
+                isModifierActive(paramFineAdjustKb, ev),
+            );
+            const deltaY = startY - adjustedY;
+            const nextDb = clampGainDb(startDb + deltaY * TRACK_GAIN_DRAG_DB_PER_PX);
             if (Math.abs(nextDb - lastDb) < 0.01) return;
             lastDb = nextDb;
             onVolumeUiChange(trackId, dbToGain(nextDb));

@@ -108,6 +108,7 @@ export const TimelinePanel: React.FC = () => {
         scrollVerticalKb,
         horizontalZoomKb,
         verticalZoomKb,
+        paramFineAdjustKb,
         slipEditKb,
         noSnapKb,
         copyDragKb,
@@ -362,6 +363,7 @@ export const TimelinePanel: React.FC = () => {
                 rowHeight={rowHeight}
                 setRowHeight={setRowHeight}
                 verticalZoomKb={verticalZoomKb}
+                paramFineAdjustKb={paramFineAdjustKb}
                 trackVolumeUi={trackVolumeUi}
                 listScrollRef={trackListScrollRef}
                 onSelectTrack={(trackId) => {

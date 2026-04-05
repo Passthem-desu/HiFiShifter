@@ -96,6 +96,7 @@ export interface TimelineStateResult {
     scrollVerticalKb: Keybinding;
     horizontalZoomKb: Keybinding;
     verticalZoomKb: Keybinding;
+    paramFineAdjustKb: Keybinding;
     slipEditKb: Keybinding;
     noSnapKb: Keybinding;
     copyDragKb: Keybinding;
@@ -344,6 +345,9 @@ export function useTimelineState(): TimelineStateResult {
     );
     const verticalZoomKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.pianoRollVerticalZoom"),
+    );
+    const paramFineAdjustKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.paramFineAdjust"),
     );
     const stretchKbRef = useRef<Keybinding>(stretchKb);
     useEffect(() => {
@@ -747,6 +751,7 @@ export function useTimelineState(): TimelineStateResult {
         scrollVerticalKb,
         horizontalZoomKb,
         verticalZoomKb,
+        paramFineAdjustKb,
         slipEditKb,
         noSnapKb,
         copyDragKb,
