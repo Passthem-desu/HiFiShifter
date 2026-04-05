@@ -6,6 +6,7 @@ import { isNoneBinding, isModifierActive } from "../../../features/keybindings/k
 import type { Keybinding } from "../../../features/keybindings/types";
 import type { MessageKey } from "../../../i18n/messages";
 import { MAX_ROW_HEIGHT, MIN_ROW_HEIGHT, TRACK_ADD_ROW_HEIGHT } from "./constants";
+import { applySelectWheelChange } from "../../../utils/selectWheel";
 
 /** ??????????? add_track ????? */
 const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
@@ -18,6 +19,7 @@ const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
     { value: "#f08c00", key: "color_yellow" }, // Open Color yellow6
     { value: "#f03e3e", key: "color_red" }, // Open Color red6
 ];
+const PITCH_ANALYSIS_ALGO_OPTIONS = ["world_dll", "nsf_hifigan_onnx", "vslib", "none"] as const;
 
 const TRACK_METER_MIN_DB = -48;
 const TRACK_METER_MAX_DB = 3;
@@ -1109,12 +1111,13 @@ export const TrackList: React.FC<{
                                                     <Select.Root
                                                         size="1"
                                                         value={
-                                                            [
-                                                                "world_dll",
-                                                                "nsf_hifigan_onnx",
-                                                                "vslib",
-                                                                "none",
-                                                            ].includes(track.pitchAnalysisAlgo)
+                                                            PITCH_ANALYSIS_ALGO_OPTIONS.includes(
+                                                                track.pitchAnalysisAlgo as
+                                                                    | "world_dll"
+                                                                    | "nsf_hifigan_onnx"
+                                                                    | "vslib"
+                                                                    | "none",
+                                                            )
                                                                 ? track.pitchAnalysisAlgo
                                                                 : "nsf_hifigan_onnx"
                                                         }
@@ -1125,6 +1128,25 @@ export const TrackList: React.FC<{
                                                         <Select.Trigger
                                                             style={{
                                                                 minWidth: 80,
+                                                            }}
+                                                            onWheel={(event) => {
+                                                                applySelectWheelChange({
+                                                                    event,
+                                                                    currentValue:
+                                                                        PITCH_ANALYSIS_ALGO_OPTIONS.includes(
+                                                                            track.pitchAnalysisAlgo as
+                                                                                | "world_dll"
+                                                                                | "nsf_hifigan_onnx"
+                                                                                | "vslib"
+                                                                                | "none",
+                                                                        )
+                                                                            ? track.pitchAnalysisAlgo
+                                                                            : "nsf_hifigan_onnx",
+                                                                    options: PITCH_ANALYSIS_ALGO_OPTIONS,
+                                                                    onChange: (next) => {
+                                                                        onAlgoChange(track.id, next);
+                                                                    },
+                                                                });
                                                             }}
                                                         />
                                                         <Select.Content>

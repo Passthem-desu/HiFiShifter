@@ -940,6 +940,12 @@ const sessionSlice = createSlice({
                 state.customScalePresets.push(incoming);
             }
         },
+        removeCustomScalePreset(state, action: PayloadAction<string>) {
+            const presetId = action.payload;
+            state.customScalePresets = state.customScalePresets.filter(
+                (preset) => preset.id !== presetId,
+            );
+        },
         togglePlayheadZoom(state) {
             state.playheadZoomEnabled = !state.playheadZoomEnabled;
         },
@@ -2560,6 +2566,7 @@ export const {
     setPitchSnapToleranceCents,
     setScaleHighlightMode,
     upsertCustomScalePreset,
+    removeCustomScalePreset,
     toggleLockParamLines,
     setSelectedClip,
     setSelectedClipPreservingTrack,

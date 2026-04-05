@@ -490,14 +490,16 @@ export function useTimelineState(): TimelineStateResult {
     }
 
     function rowTopForTrackId(trackId: string | null) {
+        const tracks = sessionRef.current.tracks;
+        const rowHeightPx = rowHeightRef.current;
         if (!trackId) {
-            return s.tracks.length * rowHeight;
+            return tracks.length * rowHeightPx;
         }
-        const idx = s.tracks.findIndex((t) => t.id === trackId);
+        const idx = tracks.findIndex((t) => t.id === trackId);
         if (idx < 0) {
-            return s.tracks.length * rowHeight;
+            return tracks.length * rowHeightPx;
         }
-        return idx * rowHeight;
+        return idx * rowHeightPx;
     }
 
     // ── Drop preview helpers ─────────────────────────────────

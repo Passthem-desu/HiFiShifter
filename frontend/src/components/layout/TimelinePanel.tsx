@@ -346,6 +346,8 @@ export const TimelinePanel: React.FC = () => {
         [_startClipDragInner, startSlipDrag],
     );
 
+    const trackGridHeight = Math.max(0, contentHeight - TRACK_ADD_ROW_HEIGHT);
+
     // ═════════════════════════════════════════════════════════
     // JSX 渲染
     // ═════════════════════════════════════════════════════════
@@ -769,7 +771,7 @@ export const TimelinePanel: React.FC = () => {
 
                         <BackgroundGrid
                             contentWidth={contentWidth}
-                            contentHeight={contentHeight}
+                            contentHeight={trackGridHeight}
                             pxPerBeat={pxPerBeat}
                             grid={s.grid}
                             beatsPerBar={Math.max(1, Math.round(s.beats || 4))}
@@ -868,7 +870,7 @@ export const TimelinePanel: React.FC = () => {
                         <div className="absolute inset-0 pointer-events-none z-[12]">
                             <BackgroundGrid
                                 contentWidth={contentWidth}
-                                contentHeight={contentHeight}
+                                contentHeight={trackGridHeight}
                                 pxPerBeat={pxPerBeat}
                                 grid={s.grid}
                                 beatsPerBar={Math.max(1, Math.round(s.beats || 4))}

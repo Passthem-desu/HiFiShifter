@@ -809,7 +809,11 @@ export function usePianoRollInteractions(args: {
             if (!active) {
                 if (!morphDragRef.current) {
                     setMorphOverlay(null);
-                    if (!strokeRef.current && !panRef.current) {
+                    if (
+                        !strokeRef.current &&
+                        !panRef.current &&
+                        !liveEditActiveRef?.current
+                    ) {
                         liveEditOverrideRef.current = null;
                         if (liveEditActiveRef) liveEditActiveRef.current = false;
                     }
@@ -829,7 +833,11 @@ export function usePianoRollInteractions(args: {
             morphModifierDownRef.current = false;
             if (!morphDragRef.current) {
                 setMorphOverlay(null);
-                if (!strokeRef.current && !panRef.current) {
+                if (
+                    !strokeRef.current &&
+                    !panRef.current &&
+                    !liveEditActiveRef?.current
+                ) {
                     liveEditOverrideRef.current = null;
                     if (liveEditActiveRef) liveEditActiveRef.current = false;
                 }
@@ -854,6 +862,7 @@ export function usePianoRollInteractions(args: {
         setMorphOverlay,
         strokeRef,
         toolMode,
+        liveEditActiveRef,
     ]);
 
     useEffect(() => {
@@ -875,9 +884,10 @@ export function usePianoRollInteractions(args: {
         };
 
         const onKeyMod = (e: globalThis.KeyboardEvent) => {
-            // If no active stroke, nothing to refresh here
             const st = strokeRef.current;
-            if (!st) return;
+            const hasActiveStroke = Boolean(st);
+            const hasActiveLiveDrag = Boolean(liveEditActiveRef?.current);
+            if (!hasActiveStroke && !hasActiveLiveDrag) return;
 
             const last = lastPointerPosRef.current;
             if (!last) {
@@ -889,7 +899,7 @@ export function usePianoRollInteractions(args: {
                 const pe = new PointerEvent("pointermove", {
                     clientX: last.clientX,
                     clientY: last.clientY,
-                    pointerId: st.pointerId ?? last.pointerId ?? 1,
+                    pointerId: st?.pointerId ?? last.pointerId ?? 1,
                     buttons: last.buttons ?? 1,
                     bubbles: true,
                     cancelable: true,
@@ -900,7 +910,7 @@ export function usePianoRollInteractions(args: {
                     metaKey: e.metaKey,
                 } as PointerEventInit);
                 window.dispatchEvent(pe);
-            } catch (err) {
+            } catch {
                 // Fallback: force redraw
                 invalidate();
             }
@@ -915,7 +925,7 @@ export function usePianoRollInteractions(args: {
             window.removeEventListener("keydown", onKeyMod);
             window.removeEventListener("keyup", onKeyMod);
         };
-    }, [strokeRef, invalidate]);
+    }, [strokeRef, liveEditActiveRef, invalidate]);
 
     const pointerBeat = useCallback(
         (clientX: number): number => {
