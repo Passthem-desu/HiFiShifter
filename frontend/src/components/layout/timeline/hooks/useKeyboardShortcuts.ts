@@ -8,6 +8,17 @@ import { selectMergedKeybindings } from "../../../../features/keybindings/keybin
 import type { ActionId, Keybinding, KeybindingMap } from "../../../../features/keybindings/types";
 import { writeSystemClipboardObject } from "../../../../utils/systemClipboard";
 
+const IS_MAC =
+    typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
+
+const CLIP_ACTIONS: ActionId[] = [
+    "clip.delete",
+    "clip.copy",
+    "clip.cut",
+    "clip.paste",
+    "clip.split",
+    "clip.normalize",
+];
 /**
  * 判断 KeyboardEvent 是否匹配某个 Keybinding
  */
@@ -17,10 +28,7 @@ function matchesKeybinding(e: KeyboardEvent, kb: Keybinding): boolean {
 
     if (key !== kb.key) return false;
 
-    const isMac =
-        typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
-
-    const modKey = isMac ? e.metaKey : e.ctrlKey;
+    const modKey = IS_MAC ? e.metaKey : e.ctrlKey;
     if (modKey !== Boolean(kb.ctrl)) return false;
     if (e.shiftKey !== Boolean(kb.shift)) return false;
     if (e.altKey !== Boolean(kb.alt)) return false;
@@ -32,22 +40,14 @@ function matchesKeybinding(e: KeyboardEvent, kb: Keybinding): boolean {
  * 只检查 clip.* 操作
  */
 function matchClipAction(e: KeyboardEvent, keybindings: KeybindingMap): ActionId | null {
-    const clipActions: ActionId[] = [
-        "clip.delete",
-        "clip.copy",
-        "clip.cut",
-        "clip.paste",
-        "clip.split",
-        "clip.normalize",
-    ];
     // 优先匹配含修饰键的
-    for (const actionId of clipActions) {
+    for (const actionId of CLIP_ACTIONS) {
         const kb = keybindings[actionId];
         if ((kb.ctrl || kb.shift || kb.alt) && matchesKeybinding(e, kb)) {
             return actionId;
         }
     }
-    for (const actionId of clipActions) {
+    for (const actionId of CLIP_ACTIONS) {
         const kb = keybindings[actionId];
         if (!kb.ctrl && !kb.shift && !kb.alt && matchesKeybinding(e, kb)) {
             return actionId;
@@ -87,10 +87,11 @@ export function useKeyboardShortcuts(deps: {
         function onKeyDown(e: KeyboardEvent) {
             if (e.repeat) return;
             if (isEditableTarget(document.activeElement) || isEditableTarget(e.target)) return;
-
             // 快捷键设置对话框打开时，阻塞所有快捷键
             if (document.body.hasAttribute("data-keybindings-dialog-open")) return;
-
+            // 先拦截 actionId
+            const actionId = matchClipAction(e, keybindings);
+            if (!actionId) return;
             const s = sessionRef.current;
             const selectedIds =
                 multiSelectedClipIds.length > 0
@@ -98,9 +99,6 @@ export function useKeyboardShortcuts(deps: {
                     : s.selectedClipId
                       ? [s.selectedClipId]
                       : [];
-
-            const actionId = matchClipAction(e, keybindings);
-            if (!actionId) return;
 
             // clip.copy / clip.cut / clip.paste: 焦点在 PianoRoll 时优先交给参数编辑器。
             if (actionId === "clip.copy" || actionId === "clip.cut" || actionId === "clip.paste") {

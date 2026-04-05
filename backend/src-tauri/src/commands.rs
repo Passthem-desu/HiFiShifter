@@ -454,6 +454,7 @@ pub fn set_clip_state(
     fade_in_curve: Option<String>,
     fade_out_curve: Option<String>,
     color: Option<String>,
+    checkpoint: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     timeline::set_clip_state(
         state,
@@ -472,6 +473,7 @@ pub fn set_clip_state(
         fade_in_curve,
         fade_out_curve,
         color,
+        checkpoint,
     )
 }
 
