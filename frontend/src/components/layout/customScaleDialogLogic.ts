@@ -1,5 +1,5 @@
-const BUILTIN_TEMPLATE_PREFIX = "builtin:";
-const CUSTOM_TEMPLATE_PREFIX = "custom:";
+export const BUILTIN_TEMPLATE_PREFIX = "builtin:";
+export const CUSTOM_TEMPLATE_PREFIX = "custom:";
 
 export function getSelectedCustomScaleId(
     templateValue: string,

@@ -331,8 +331,57 @@ fn save_project_archive_to_zip_inner(
 
     match write_result {
         Ok(()) => {
-            // 写入成功后，原子性地替换最终 zip 文件。
-            fs::rename(&tmp_path, zip_path).map_err(|e| e.to_string())?;
+            // 写入成功后，用可回滚的方式替换最终 zip 文件，兼容 Windows 上目标已存在时
+            // `fs::rename` 不能直接覆盖的问题。
+            let backup_path = {
+                let file_name = zip_path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("archive.zip");
+                zip_path.with_file_name(format!("{file_name}.replace_backup"))
+            };
+
+            let destination_existed = zip_path.exists();
+            let mut backup_created = false;
+
+            if destination_existed {
+                if backup_path.exists() {
+                    fs::remove_file(&backup_path).map_err(|e| {
+                        format!("Failed to remove stale archive backup {:?}: {}", backup_path, e)
+                    })?;
+                }
+
+                fs::rename(zip_path, &backup_path).map_err(|e| {
+                    format!(
+                        "Failed to move existing archive {:?} to backup {:?}: {}",
+                        zip_path, backup_path, e
+                    )
+                })?;
+                backup_created = true;
+            }
+
+            if let Err(rename_err) = fs::rename(&tmp_path, zip_path) {
+                let _ = fs::remove_file(&tmp_path);
+
+                if backup_created {
+                    let _ = fs::remove_file(zip_path);
+                    let _ = fs::rename(&backup_path, zip_path);
+                }
+
+                return Err(format!(
+                    "Failed to replace archive {:?} with temporary file {:?}: {}",
+                    zip_path, tmp_path, rename_err
+                ));
+            }
+
+            if backup_created {
+                fs::remove_file(&backup_path).map_err(|e| {
+                    format!(
+                        "Archive replaced, but failed to remove backup {:?}: {}",
+                        backup_path, e
+                    )
+                })?;
+            }
         }
         Err(e) => {
             // 写入失败，尝试清理临时文件，然后返回原始错误。
