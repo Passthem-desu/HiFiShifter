@@ -431,9 +431,7 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
 
     function selectExcludeMutedTargets() {
         setSelectedTargetIds(
-            allTargets
-                .filter((target) => !target.excludedByRule)
-                .map((target) => target.id),
+            allTargets.filter((target) => !target.excludedByRule).map((target) => target.id),
         );
     }
 
@@ -1239,7 +1237,11 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                             : tAny("export_conflict_exists_title")}
                     </Dialog.Title>
                     <Dialog.Description
-                        style={{ userSelect: "text", wordBreak: "break-all", whiteSpace: "pre-wrap" }}
+                        style={{
+                            userSelect: "text",
+                            wordBreak: "break-all",
+                            whiteSpace: "pre-wrap",
+                        }}
                     >
                         {conflictDialog.kind === "source-path"
                             ? tAny("export_conflict_source_desc")

@@ -153,8 +153,7 @@ export function CustomScaleDialog({ open, onOpenChange }: Props) {
                                                 (k) => `${BUILTIN_TEMPLATE_PREFIX}${k}`,
                                             ),
                                             ...customPresetOptions.map(
-                                                (preset) =>
-                                                    `${CUSTOM_TEMPLATE_PREFIX}${preset.id}`,
+                                                (preset) => `${CUSTOM_TEMPLATE_PREFIX}${preset.id}`,
                                             ),
                                         ],
                                         onChange: applyTemplate,
@@ -223,7 +222,6 @@ export function CustomScaleDialog({ open, onOpenChange }: Props) {
                             })}
                         </Flex>
                     </Flex>
-
                 </Flex>
 
                 <Flex justify="end" gap="2" mt="4">

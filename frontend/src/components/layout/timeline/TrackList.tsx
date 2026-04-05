@@ -1185,9 +1185,13 @@ export const TrackList: React.FC<{
                                                                         )
                                                                             ? track.pitchAnalysisAlgo
                                                                             : "nsf_hifigan_onnx",
-                                                                    options: PITCH_ANALYSIS_ALGO_OPTIONS,
+                                                                    options:
+                                                                        PITCH_ANALYSIS_ALGO_OPTIONS,
                                                                     onChange: (next) => {
-                                                                        onAlgoChange(track.id, next);
+                                                                        onAlgoChange(
+                                                                            track.id,
+                                                                            next,
+                                                                        );
                                                                     },
                                                                 });
                                                             }}

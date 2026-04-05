@@ -321,10 +321,7 @@ export function usePianoRollInteractions(args: {
     );
 
     const getFineAdjustedPointerPosition = useCallback(
-        (
-            state: FineAdjustedPointerState,
-            ev: FineAdjustedPointerInput,
-        ) => {
+        (state: FineAdjustedPointerState, ev: FineAdjustedPointerInput) => {
             state.adjustedClientX = ev.clientX;
             state.adjustedClientY = ev.clientY;
 
@@ -861,11 +858,7 @@ export function usePianoRollInteractions(args: {
             if (!active) {
                 if (!morphDragRef.current) {
                     setMorphOverlay(null);
-                    if (
-                        !strokeRef.current &&
-                        !panRef.current &&
-                        !liveEditActiveRef?.current
-                    ) {
+                    if (!strokeRef.current && !panRef.current && !liveEditActiveRef?.current) {
                         liveEditOverrideRef.current = null;
                         if (liveEditActiveRef) liveEditActiveRef.current = false;
                     }
@@ -885,11 +878,7 @@ export function usePianoRollInteractions(args: {
             morphModifierDownRef.current = false;
             if (!morphDragRef.current) {
                 setMorphOverlay(null);
-                if (
-                    !strokeRef.current &&
-                    !panRef.current &&
-                    !liveEditActiveRef?.current
-                ) {
+                if (!strokeRef.current && !panRef.current && !liveEditActiveRef?.current) {
                     liveEditOverrideRef.current = null;
                     if (liveEditActiveRef) liveEditActiveRef.current = false;
                 }
@@ -1818,10 +1807,7 @@ export function usePianoRollInteractions(args: {
                             if (!drag || drag.pointerId !== e.pointerId || !overlayNow || !pvNow) {
                                 return;
                             }
-                            const adjusted = getFineAdjustedPointerPosition(
-                                finePointerState,
-                                ev,
-                            );
+                            const adjusted = getFineAdjustedPointerPosition(finePointerState, ev);
 
                             const nextPoints = overlayNow.points.map((pt) => {
                                 if (pt.kind !== drag.pointKind) return pt;

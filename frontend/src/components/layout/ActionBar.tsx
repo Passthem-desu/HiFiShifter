@@ -268,7 +268,9 @@ export function ActionBar() {
                                         return;
                                     }
                                     if (next === "__custom__" && s.project?.customScale) {
-                                        dispatch(setProjectCustomScaleRemote(s.project.customScale));
+                                        dispatch(
+                                            setProjectCustomScaleRemote(s.project.customScale),
+                                        );
                                         return;
                                     }
                                     if ((SCALE_KEYS as readonly string[]).includes(next)) {

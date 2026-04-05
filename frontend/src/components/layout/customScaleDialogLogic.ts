@@ -21,6 +21,7 @@ export function canDeleteSelectedCustomScale(
 }
 
 export function buildCustomScaleTemplateValue(prefix: "builtin" | "custom", value: string): string {
-    const normalizedPrefix = prefix === "builtin" ? BUILTIN_TEMPLATE_PREFIX : CUSTOM_TEMPLATE_PREFIX;
+    const normalizedPrefix =
+        prefix === "builtin" ? BUILTIN_TEMPLATE_PREFIX : CUSTOM_TEMPLATE_PREFIX;
     return `${normalizedPrefix}${value}`;
 }
