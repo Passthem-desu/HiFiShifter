@@ -142,9 +142,8 @@ fn collect_matching_files(dir: &Path, query: &str, results: &mut Vec<FileEntry>,
             let path = entry.path();
             let stem_lower = path
                 .file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_lowercase())
-                .unwrap_or_else(|| "".to_string());
+                .map(|s| s.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
             if stem_lower.contains(query) {
                 let extension = path
                     .extension()
