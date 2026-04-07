@@ -158,7 +158,12 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
                         if (regexEnabled) {
                             try {
                                 const re = new RegExp(q.trim(), "i");
-                                audioResults = audioResults.filter((e) => re.test(e.name));
+                                audioResults = audioResults.filter((e) => {
+                                    const name = e.name || "";
+                                    const dot = name.lastIndexOf(".");
+                                    const stem = dot > 0 ? name.substring(0, dot) : name;
+                                    return re.test(stem);
+                                });
                             } catch {
                                 // 正则无效，返回空结果
                                 audioResults = [];
